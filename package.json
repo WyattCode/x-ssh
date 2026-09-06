@@ -47,7 +47,10 @@
       "allowToChangeInstallationDirectory": true
     },
     "mac": {
-      "icon": "build/icon.png"
+      "icon": "build/icon.png",
+      "extendInfo": {
+        "NSLocalNetworkUsageDescription": "X-SSH 需要访问本地网络,以便连接局域网内的 SSH 服务器。"
+      }
     },
     "linux": {
       "icon": "build/icon.png",

@@ -1560,7 +1560,16 @@ function registerIpc(): void {
     }
   })
 
-  // Drag out (dragstart): download to a temp dir, then startDrag.
+  // Warm the drag-out download the moment a row is pressed (mousedown), so the
+  // file is already on disk (with its icon) by the time the drag starts.
+  ipcMain.on(
+    IPC.sftpPrefetchDrag,
+    (_e, sessionId: string, remotePath: string, name: string, isDir: boolean) => {
+      void prefetchDrag(sessionId, remotePath, name, isDir).catch(() => undefined)
+    }
+  )
+
+  // Drag out (dragstart): start the native drag with the (pre)downloaded file.
   ipcMain.on(
     IPC.sftpStartDrag,
     async (e, sessionId: string, items: DragItem[]) => {
@@ -1926,4 +1935,19 @@ app.on('before-quit', () => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
+})
+
+// Flush pending settings writes (theme toggle, window bounds, …) before the
+// process exits, so a setting changed right before quit isn't lost to an
+// in-flight async write. Capped so a stuck write can never block quit.
+let settingsFlushed = false
+app.on('will-quit', (e) => {
+  if (settingsFlushed) return
+  settingsFlushed = true
+  e.preventDefault()
+  setTimeout(() => {
+    Promise.race([settings.flush(), new Promise((r) => setTimeout(r, 800))]).finally(() =>
+      app.quit()
+    )
+  }, 50)
 })

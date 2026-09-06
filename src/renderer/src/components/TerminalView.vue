@@ -18,6 +18,7 @@ import {
   type RebindableAction
 } from '../lib/shortcuts'
 import { sanitizePasteText } from '../../../shared/fsUtils'
+import { isMac } from '../composables/platform'
 import Icon from './Icon.vue'
 
 const props = withDefaults(
@@ -78,6 +79,7 @@ const el = ref<HTMLDivElement>()
 let term: Terminal | null = null
 let fit: FitAddon | null = null
 let search: SearchAddon | null = null
+let webgl: WebglAddon | null = null
 let ro: ResizeObserver | null = null
 let offData: (() => void) | null = null
 
@@ -266,8 +268,14 @@ onMounted(() => {
   })
 
   try {
-    term.loadAddon(new WebglAddon())
+    webgl = new WebglAddon()
+    term.loadAddon(webgl)
+    webgl.onContextLoss(() => {
+      webgl?.dispose()
+      webgl = null
+    })
   } catch {
+    webgl = null
     /* WebGL unavailable — falls back to canvas/DOM renderer */
   }
 
@@ -293,7 +301,14 @@ onMounted(() => {
   term.attachCustomKeyEventHandler((e) => {
     if (e.type !== 'keydown') return true
     const c = e.code
-    if (e.ctrlKey && e.shiftKey && (c === 'KeyC' || c === 'KeyV')) {
+    // The app-level modifier differs by OS: ⌘ on macOS, which leaves every
+    // Ctrl combo to the shell, and Ctrl on Windows/Linux. otherMod must be
+    // clear too, or Ctrl+⌘+K would count as the app chord on macOS.
+    const mod = isMac ? e.metaKey : e.ctrlKey
+    const otherMod = isMac ? e.ctrlKey : e.metaKey
+    // Ctrl+Shift+C/V is the copy/paste pair on Windows/Linux. macOS uses plain
+    // ⌘C/⌘V below, so leave Ctrl+Shift there alone.
+    if (!isMac && e.ctrlKey && e.shiftKey && (c === 'KeyC' || c === 'KeyV')) {
       if (c === 'KeyC') copySelection()
       else {
         // preventDefault, not just `return false`: returning false only stops
@@ -305,49 +320,62 @@ onMounted(() => {
       return false
     }
     // Split / close-pane belong to the app; don't send them to the shell.
-    // Accept Cmd (macOS) as well as Ctrl so the shortcut bubbles on both.
-    if ((e.ctrlKey || e.metaKey) && e.shiftKey && (c === 'KeyD' || c === 'KeyW')) {
+    // Same modifier the window handler uses, so a chord it ignores (Ctrl+Shift+W
+    // on macOS) is not swallowed here for nothing.
+    if (mod && !otherMod && e.shiftKey && (c === 'KeyD' || c === 'KeyW')) {
       return false
     }
-    if (e.ctrlKey && !e.shiftKey && !e.altKey && c === 'KeyC' && term?.hasSelection()) {
-      copySelection()
-      term.clearSelection()
-      return false
+    if (mod && !otherMod && !e.shiftKey && !e.altKey && c === 'KeyC') {
+      if (term?.hasSelection()) {
+        copySelection()
+        term.clearSelection()
+        return false
+      }
+      // No selection: on Windows/Linux Ctrl+C must still reach the shell as an
+      // interrupt. On macOS ⌘C is not an interrupt (Ctrl+C is, and we never
+      // touch it), so swallow it rather than sending a stray ^C.
+      return !isMac
     }
-    if (e.ctrlKey && !e.shiftKey && !e.altKey && c === 'KeyV') {
+    if (mod && !otherMod && !e.shiftKey && !e.altKey && c === 'KeyV') {
       e.preventDefault() // see above: otherwise the browser pastes a second time
       pasteClipboard()
       return false
     }
-    // Find (Ctrl+F and Ctrl+Shift+F both open the search bar).
-    if (e.ctrlKey && !e.altKey && c === 'KeyF') {
+    // Find (mod+F and mod+Shift+F both open the search bar).
+    if (mod && !otherMod && !e.altKey && c === 'KeyF') {
       openSearch()
       return false
     }
-    // Ctrl +/-/0 is handled globally as page zoom; keep the terminal from
+    // +/-/0 is handled globally as page zoom; keep the terminal from
     // swallowing these keys so the app-level handler runs.
     if (
-      e.ctrlKey &&
+      mod &&
+      !otherMod &&
       !e.altKey &&
       ['Equal', 'NumpadAdd', 'Minus', 'NumpadSubtract', 'Digit0', 'Numpad0'].includes(c)
     ) {
       return false
     }
-    // Reserve app navigation (Ctrl+K palette, Ctrl+T new tab) — let them bubble
-    // to the app rather than going to the shell. Ctrl+W stays with the shell
-    // (werase); the app handler ignores it while the terminal is focused.
-    if (e.ctrlKey && !e.shiftKey && !e.altKey && (c === 'KeyK' || c === 'KeyT')) {
+    // Reserve app navigation (palette, new tab) — let them bubble to the app
+    // rather than going to the shell. On Windows/Linux Ctrl+W stays with the
+    // shell (werase) and the app handler ignores it while a live terminal is
+    // focused; on macOS ⌘W is not werase, so it bubbles and closes the tab.
+    if (mod && !otherMod && !e.shiftKey && !e.altKey && (c === 'KeyK' || c === 'KeyT')) {
       return false
     }
-    // Ctrl+Tab / Ctrl+Shift+Tab cycle tabs. Without this xterm consumes them
-    // (sending a literal tab to the shell) and the app handler never runs.
+    if (isMac && mod && !otherMod && !e.shiftKey && !e.altKey && c === 'KeyW') {
+      return false
+    }
+    // Ctrl+Tab / Ctrl+Shift+Tab cycle tabs on every platform (macOS has no ⌘Tab
+    // to give — that is the system app switcher). Without this xterm consumes
+    // them (sending a literal tab to the shell) and the app handler never runs.
     if (e.ctrlKey && !e.altKey && c === 'Tab') {
       return false
     }
     // More app chords that must reach the window handler. Every one of these
     // was measured to send nothing to the shell today, so nothing is taken
-    // away from remote programs: Ctrl+1..9 (tab N), Ctrl+, (settings),
-    // Ctrl+Shift+E (file drawer), Ctrl+Shift+P (palette), Ctrl+Shift+O
+    // away from remote programs: mod+1..9 (tab N), mod+, (settings),
+    // mod+Shift+E (file drawer), mod+Shift+P (palette), mod+Shift+O
     // (other pane).
     // Matched on e.key, exactly like the window handler — matching on e.code
     // here would let the two disagree: a numpad key with NumLock off reports
@@ -355,13 +383,14 @@ onMounted(() => {
     // the letters elsewhere. Either way the key would be swallowed for
     // nothing, and the shell would lose it.
     if (
-      e.ctrlKey &&
+      mod &&
+      !otherMod &&
       !e.altKey &&
       (e.key === '/' || e.key === '?' || (!e.shiftKey && (e.key === ',' || (e.key >= '1' && e.key <= '9'))))
     ) {
       return false
     }
-    if (e.ctrlKey && e.shiftKey && !e.altKey && ['e', 'p', 'o'].includes(e.key.toLowerCase())) {
+    if (mod && !otherMod && e.shiftKey && !e.altKey && ['e', 'p', 'o'].includes(e.key.toLowerCase())) {
       return false
     }
     // Any user-remapped app chord must also bubble to the window handler.
@@ -431,16 +460,20 @@ watch([() => store.terminalTheme, hostThemeId], () => {
 watch(fontSize, (s) => {
   if (term) {
     term.options.fontSize = s
+    webgl?.clearTextureAtlas()
     doFit()
   }
 })
 
-// Live-apply terminal appearance settings.
+// Live-apply terminal appearance settings. The WebGL renderer caches glyphs in a
+// texture atlas; a font-family change at the same size leaves stale glyphs unless
+// we clear it, so the switch would otherwise appear to do nothing.
 watch(
   () => store.terminalFontFamily,
   (f) => {
     if (term) {
       term.options.fontFamily = fontFamilyFor(hostFontFamily.value || f)
+      webgl?.clearTextureAtlas()
       doFit()
     }
   }
@@ -450,6 +483,7 @@ watch(
   (f) => {
     if (term) {
       term.options.fontFamily = fontFamilyFor(f || store.terminalFontFamily)
+      webgl?.clearTextureAtlas()
       doFit()
     }
   }
@@ -470,6 +504,7 @@ onBeforeUnmount(() => {
   ro?.disconnect()
   term?.dispose()
   term = null
+  webgl = null
 })
 </script>
 

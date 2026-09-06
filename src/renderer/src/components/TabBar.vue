@@ -3,12 +3,20 @@ import { reactive, ref, computed, nextTick } from 'vue'
 import { useSessions, type Tab } from '../stores/sessions'
 import { useTheme } from '../composables/theme'
 import { useI18n } from '../lib/i18n'
+import { isMac } from '../composables/platform'
+import { useZoom } from '../composables/zoom'
 import Icon from './Icon.vue'
 
 const store = useSessions()
 const { mode, toggle } = useTheme()
 const { t } = useI18n()
-const modKey = /mac|iphone|ipad/i.test(navigator.platform || navigator.userAgent) ? '⌘' : 'Ctrl'
+const { factor } = useZoom()
+const modKey = isMac ? '⌘' : 'Ctrl'
+
+// The traffic lights are drawn by the OS at a fixed size, so a zoomed UI would
+// leave the tab bar out of step with them. Counter-scale just the bar so its
+// row stays glued to the lights whatever the app zoom is.
+const barStyle = computed(() => (isMac ? { zoom: 1 / factor.value } : {}))
 /** Layout/split operations need a connected active tab. */
 const canLayout = computed(() => store.activePane?.status === 'connected')
 
@@ -132,7 +140,7 @@ function cancelRename(): void {
 </script>
 
 <template>
-  <div class="tabbar">
+  <div class="tabbar" :class="{ mac: isMac }" :style="barStyle">
     <div class="tabs">
       <div
         v-for="tab in visibleTabs"
@@ -257,6 +265,14 @@ function cancelRename(): void {
   background: var(--bg-elev);
   border-bottom: 1px solid var(--border);
   -webkit-app-region: drag;
+}
+/* Reserve room for the native macOS traffic lights (hiddenInset title bar). */
+.tabbar.mac {
+  padding-left: 72px;
+}
+.tabbar.mac > * {
+  position: relative;
+  top: 1px;
 }
 .tabs {
   display: flex;

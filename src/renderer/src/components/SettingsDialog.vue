@@ -16,6 +16,7 @@ import { useToast } from '../composables/toast'
 import { useConfirm } from '../composables/confirm'
 import type { SettingsTab } from '../stores/sessions'
 import type { KnownHostEntry } from '../../../shared/types'
+import { isMac } from '../composables/platform'
 
 const store = useSessions()
 const { lang, setLang, t } = useI18n()
@@ -30,7 +31,6 @@ const TABS: { id: SettingsTab; label: string; icon: string }[] = [
   { id: 'keys', label: '', icon: 'keyboard' }
 ]
 
-const isMac = /mac|iphone|ipad/i.test(navigator.platform || navigator.userAgent)
 const modKey = isMac ? '⌘' : 'Ctrl'
 const withMod = (t: string): string => t.split('Mod').join(modKey)
 
@@ -628,7 +628,6 @@ async function resetMasterLock(): Promise<void> {
     toast(t('lock.wrong'), 'error')
   }
 }
-
 
 </script>
 

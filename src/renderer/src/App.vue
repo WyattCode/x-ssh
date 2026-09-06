@@ -10,6 +10,8 @@ import {
   defineAsyncComponent
 } from 'vue'
 import { useSessions } from './stores/sessions'
+import { appMod, isMac } from './composables/platform'
+import { useZoom } from './composables/zoom'
 import TabBar from './components/TabBar.vue'
 import CommandPalette from './components/CommandPalette.vue'
 import HostEditor from './components/HostEditor.vue'
@@ -50,8 +52,7 @@ const SftpDrawer = defineAsyncComponent(() => import('./components/SftpDrawer.vu
 const store = useSessions()
 const { t } = useI18n()
 
-// Show the platform's real modifier key in hints (⌘ on macOS, Ctrl elsewhere).
-const isMac = /mac|iphone|ipad/i.test(navigator.platform || navigator.userAgent)
+// Modifier symbol shown in hints (⌘ on macOS, Ctrl elsewhere).
 const modKey = isMac ? '⌘' : 'Ctrl'
 
 // Saved hosts for the welcome quick-connect, most-recently-used first.
@@ -159,23 +160,12 @@ function openEditHost(h: Host): void {
   editorOpen.value = true
 }
 
-let zoomSaveTimer: ReturnType<typeof setTimeout> | null = null
-function setZoom(level: number): void {
-  const clamped = Math.max(-3, Math.min(5, level))
-  window.api.zoom.set(clamped)
-  // Apply immediately but debounce the persist: a Ctrl+wheel gesture fires many
-  // notches, and each write is a full re-read+rewrite of settings.json that a
-  // second instance could be reading at the same moment.
-  if (zoomSaveTimer) clearTimeout(zoomSaveTimer)
-  zoomSaveTimer = setTimeout(() => void window.api.settings.set('zoom', clamped), 300)
-}
-function bumpZoom(delta: number): void {
-  setZoom(window.api.zoom.get() + delta)
-}
+const { bump: bumpZoom, reset: resetZoom, apply: applyZoom } = useZoom()
 
 function onWheel(e: WheelEvent): void {
-  if (!(e.ctrlKey || e.metaKey)) return
-  // Ctrl + wheel zooms the whole UI; intercept before the terminal scrolls.
+  // ⌘ (macOS) / Ctrl (elsewhere) + wheel zooms the whole UI. On macOS we require
+  // ⌘ specifically so Ctrl+wheel stays free for macOS's system screen zoom.
+  if (!appMod(e)) return
   e.preventDefault()
   e.stopPropagation()
   bumpZoom(e.deltaY < 0 ? 0.5 : -0.5)
@@ -198,7 +188,8 @@ function onGlobalKey(e: KeyboardEvent): void {
   if (inEditable) return
 
   // Number-jump and terminal copy/paste are hard-wired (not rebindable).
-  const mod = e.ctrlKey || e.metaKey
+  // ⌘ on macOS, Ctrl elsewhere — leaves Ctrl+1..9 free for the shell on macOS.
+  const mod = appMod(e)
   if (mod && !e.shiftKey && e.key >= '1' && e.key <= '9') {
     e.preventDefault()
     const n = Number(e.key)
@@ -245,7 +236,7 @@ function onGlobalKey(e: KeyboardEvent): void {
     shortcuts: () => store.toggleSettings(true, 'keys'),
     zoomIn: () => bumpZoom(0.5),
     zoomOut: () => bumpZoom(-0.5),
-    zoomReset: () => setZoom(0)
+    zoomReset: () => resetZoom()
   }
   for (const id of REBINDABLE_ACTIONS) {
     if (chordMatches(e, effective(id))) {
@@ -287,8 +278,7 @@ watch(
 )
 
 onMounted(async () => {
-  const savedZoom = Number(window.api.prefs.zoom)
-  if (!Number.isNaN(savedZoom) && savedZoom !== 0) window.api.zoom.set(savedZoom)
+  applyZoom() // push the restored zoom level to webFrame
   await Promise.all([
     store.loadHosts(),
     store.loadSettings(),

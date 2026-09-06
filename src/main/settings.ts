@@ -1,6 +1,6 @@
 import { app } from 'electron'
 import { join } from 'node:path'
-import { readFile, writeFile, mkdir } from 'node:fs/promises'
+import { readFile, writeFile, mkdir, rename } from 'node:fs/promises'
 
 /** Tiny key-value settings store persisted to settings.json. */
 export class SettingsStore {
@@ -55,6 +55,12 @@ export class SettingsStore {
     return this.writes
   }
 
+  /** Wait for all queued writes to hit disk. Call on quit so a just-changed
+   *  setting (e.g. the theme toggle) isn't lost when the process exits. */
+  async flush(): Promise<void> {
+    await this.writes.catch(() => undefined)
+  }
+
   private async write(key: string, value: unknown): Promise<void> {
     // Instances run side by side and share this file, so re-read it first: a
     // stale in-memory copy would silently revert whatever another instance
@@ -66,14 +72,18 @@ export class SettingsStore {
     if (value === undefined || value === null || value === '') delete this.data[key]
     else this.data[key] = value
     await mkdir(this.dir, { recursive: true })
-    // Plain writeFile, deliberately not write-temp-then-rename: on Windows a
-    // rename-replace fails with EPERM whenever another instance has the file
-    // momentarily open (measured ~97% of the time under contention), and set()
-    // swallows errors, so that would silently drop writes. writeFile opens
-    // shared and never throws here; a reader catching the brief truncation
-    // window is handled by readData()'s retry. Two processes writing different
-    // keys at the same instant is still last-writer-wins, but these are
-    // low-frequency UI prefs, so that's acceptable.
-    await writeFile(this.file, JSON.stringify(this.data, null, 2), 'utf8')
+    const json = JSON.stringify(this.data, null, 2)
+    if (process.platform === 'win32') {
+      // Windows: rename-replace EPERMs under multi-instance contention and set()
+      // swallows errors, so write in place; readData()'s retry tolerates the
+      // brief truncation window a concurrent reader may see.
+      await writeFile(this.file, json, 'utf8')
+    } else {
+      // macOS/Linux: temp file + atomic rename, so a crash/quit mid-write can
+      // never leave settings.json empty/truncated (blanking every setting).
+      const tmp = `${this.file}.${process.pid}.tmp`
+      await writeFile(tmp, json, 'utf8')
+      await rename(tmp, this.file)
+    }
   }
 }
