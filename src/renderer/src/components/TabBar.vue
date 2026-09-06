@@ -178,7 +178,7 @@ function hostColor(tab: Tab): string | undefined {
   opacity: 0.5;
 }
 .tab[draggable='true'] {
-  cursor: grab;
+  cursor: default;
 }
 .dot {
   width: 7px;
