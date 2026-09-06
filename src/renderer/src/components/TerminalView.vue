@@ -73,9 +73,13 @@ async function copySelection(): Promise<void> {
 async function pasteClipboard(): Promise<void> {
   const text = window.api.clipboard.readText()
   if (!text || !term) return
+  // Strip terminal control characters that could act on the shell beyond what
+  // was copied (e.g. bracketed-paste markers, OSC sequences, other C0 controls
+  // beyond tab/newline). Guarded by the sanitizePaste setting.
+  const clean = store.sanitizePaste ? sanitizePasteText(text) : text
   // Multi-line paste into a shell can be destructive (a command runs per line
   // without waiting) — confirm before sending anything more than one line.
-  const lineCount = text.split('\n').length
+  const lineCount = clean.split('\n').length
   if (lineCount > 1 && store.confirmPaste) {
     const ok = await confirm(
       t('term.pasteConfirm', { n: lineCount }),
@@ -86,8 +90,15 @@ async function pasteClipboard(): Promise<void> {
       return
     }
   }
-  term.paste(text)
+  term.paste(clean)
   term.focus()
+}
+
+// Keep printable text and whitespace; drop any C0/C1 control sequence (ESC,
+// bracketed-paste ESC[200~/201~, OSC, and other non-printing bytes). Tabs and
+// newlines are legitimately part of a multi-line paste.
+function sanitizePasteText(text: string): string {
+  return text.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, '')
 }
 function selectAll(): void {
   term?.selectAll()
@@ -235,8 +246,8 @@ onMounted(() => {
       pasteClipboard()
       return false
     }
-    // Find
-    if (e.ctrlKey && !e.shiftKey && !e.altKey && c === 'KeyF') {
+    // Find (Ctrl+F and Ctrl+Shift+F both open the search bar).
+    if (e.ctrlKey && !e.altKey && c === 'KeyF') {
       openSearch()
       return false
     }

@@ -17,7 +17,7 @@
 
 ## 架构要点
 - **密码/密钥永不离开主进程**:SSH 在主进程(`src/main/ssh.ts`),渲染层经 IPC(preload `src/preload/index.ts`)调用。
-- i18n:`src/renderer/src/lib/i18n.ts`,定义 `zh` 与 `en` 两个字典。**两个键集合必须一致**(现 367/367,`npm.cmd run lint:i18n` 校验)。
+- i18n:`src/renderer/src/lib/i18n.ts`,定义 `zh` 与 `en` 两个字典。**两个键集合必须一致**(现 369/369,`npm.cmd run lint:i18n` 校验)。
   - 动态键模式: `tab.*` / `group.*` / `sck.*` / `sck.*Hint`(缺失 hint 回退 `''`)。
   - 主题名(Nord/Dracula 等)为专有名词 **不翻译**,不建键。
 - 产品理念: 极简、键盘优先、密码/密钥不出主进程。

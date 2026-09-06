@@ -115,6 +115,8 @@ interface State {
   autoReconnect: boolean
   notifications: boolean
   confirmPaste: boolean
+  /** Strip non-printing control characters from pasted text (default on). */
+  sanitizePaste: boolean
 }
 
 export const useSessions = defineStore('sessions', {
@@ -146,7 +148,8 @@ export const useSessions = defineStore('sessions', {
     restoreTabs: true,
     autoReconnect: true,
     notifications: true,
-    confirmPaste: true
+    confirmPaste: true,
+    sanitizePaste: true
   }),
 
   getters: {
@@ -180,7 +183,7 @@ export const useSessions = defineStore('sessions', {
     },
 
     async loadSettings(): Promise<void> {
-      const [editor, ka, ct, cr, tc, si, ff, cur, thm, rt, ar, nt, cp, tq, tfh] = await Promise.all([
+      const [editor, ka, ct, cr, tc, si, ff, cur, thm, rt, ar, nt, cp, sp, tq, tfh] = await Promise.all([
         window.api.settings.get<string>('externalEditor'),
         window.api.settings.get<number>('keepaliveSec'),
         window.api.settings.get<number>('connectTimeoutSec'),
@@ -194,6 +197,7 @@ export const useSessions = defineStore('sessions', {
         window.api.settings.get<boolean>('autoReconnect'),
         window.api.settings.get<boolean>('notifications'),
         window.api.settings.get<boolean>('confirmPaste'),
+        window.api.settings.get<boolean>('sanitizePaste'),
         window.api.settings.get<TransferOp[]>('transferQueue'),
         window.api.settings.get<TransferHistoryItem[]>('sftpTransferHistory')
       ])
@@ -212,6 +216,7 @@ export const useSessions = defineStore('sessions', {
       this.autoReconnect = ar !== false
       this.notifications = nt !== false
       this.confirmPaste = cp !== false
+      this.sanitizePaste = sp !== false
     },
 
     async loadSnippets(): Promise<void> {

@@ -113,6 +113,10 @@ function toggleConfirmPaste(): void {
   store.confirmPaste = !store.confirmPaste
   void store.saveSetting('confirmPaste', store.confirmPaste)
 }
+function toggleSanitizePaste(): void {
+  store.sanitizePaste = !store.sanitizePaste
+  void store.saveSetting('sanitizePaste', store.sanitizePaste)
+}
 function onKeepalive(e: Event): void {
   const n = Math.max(0, Math.min(600, parseInt((e.target as HTMLInputElement).value, 10) || 0))
   store.keepaliveSec = n
@@ -333,6 +337,13 @@ async function importHostsJson(): Promise<void> {
                   <span class="sub">{{ t('set.term.confirmPasteDesc') }}</span>
                 </span>
                 <span class="switch" :class="{ on: store.confirmPaste }"><i /></span>
+              </label>
+              <label class="toggle-row" @click="toggleSanitizePaste">
+                <span>
+                  <span class="fname">{{ t('set.term.sanitizePaste') }}</span>
+                  <span class="sub">{{ t('set.term.sanitizePasteDesc') }}</span>
+                </span>
+                <span class="switch" :class="{ on: store.sanitizePaste }"><i /></span>
               </label>
             </div>
             <div class="section">

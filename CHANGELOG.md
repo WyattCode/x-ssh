@@ -5,6 +5,7 @@
 
 ## [Unreleased]
 
+- ✨ 终端粘贴增强: 新增「清理粘贴中的控制字符」开关, 默认开启, 去除 OSC/转义等终端控制序列; 搜索亦支持 `Ctrl+Shift+F`。
 - ✨ 传输/历史 UI 打磨: 历史条目支持点击定位源目录; 本地面板列头排序接线。
 - ✨ 新增 `npm run lint:i18n`, 自动校验 zh/en 键对称与占位符一致性, 并扫描源码中缺失的静态键。
 - ✅ 新增 Vitest 单元测试(16 用例)与 GitHub Actions CI(typecheck → lint:i18n → test → build)。
