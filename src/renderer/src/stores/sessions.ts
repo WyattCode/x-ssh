@@ -3,6 +3,7 @@ import { toRaw } from 'vue'
 import { useI18n } from '../lib/i18n'
 import { useToast } from '../composables/toast'
 import { useConfirm } from '../composables/confirm'
+import { clampConcurrency } from '../../../shared/fsUtils'
 import type {
   ConnectParams,
   Host,
@@ -205,7 +206,7 @@ export const useSessions = defineStore('sessions', {
       this.keepaliveSec = typeof ka === 'number' ? ka : 20
       this.connectTimeoutSec = typeof ct === 'number' && ct > 0 ? ct : 20
       this.connectRetries = typeof cr === 'number' && cr >= 0 ? cr : 6
-      this.transferConcurrency = typeof tc === 'number' && tc >= 1 ? Math.min(32, tc) : 4
+      this.transferConcurrency = clampConcurrency(typeof tc === 'number' ? tc : 4, 4)
       this.shellIntegration = si !== false
       this.transferQueue = tq ?? []
       this.transferHistory = tfh ?? []

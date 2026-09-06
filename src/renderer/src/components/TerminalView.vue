@@ -11,6 +11,7 @@ import { useConfirm } from '../composables/confirm'
 import { themeFor } from '../lib/terminalThemes'
 import { useI18n } from '../lib/i18n'
 import { useSessions } from '../stores/sessions'
+import { sanitizePasteText } from '../../../shared/fsUtils'
 import Icon from './Icon.vue'
 
 const props = withDefaults(
@@ -97,9 +98,6 @@ async function pasteClipboard(): Promise<void> {
 // Keep printable text and whitespace; drop any C0/C1 control sequence (ESC,
 // bracketed-paste ESC[200~/201~, OSC, and other non-printing bytes). Tabs and
 // newlines are legitimately part of a multi-line paste.
-function sanitizePasteText(text: string): string {
-  return text.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, '')
-}
 function selectAll(): void {
   term?.selectAll()
 }

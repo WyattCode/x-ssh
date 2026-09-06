@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import type { FileEntry, LocalEntry, SftpProgress, TransferHistoryItem } from '../../../shared/types'
+import { posixJoin, parentOf } from '../../../shared/fsUtils'
 import { useConfirm } from '../composables/confirm'
 import { useI18n } from '../lib/i18n'
 import { useToast } from '../composables/toast'
@@ -75,9 +76,12 @@ function localGoUp(): void {
   void refreshLocal(localParent(localPath.value))
 }
 function localDragStart(e: DragEvent, entry: LocalEntry): void {
-  const p = localJoin(localPath.value, entry.name)
-  e.dataTransfer?.setData('application/x-ssh-local', JSON.stringify([p]))
-  e.dataTransfer?.setData('text/plain', p)
+  // If the dragged row is part of a multi-selection, carry them all so the
+  // remote pane can accept them all as upload targets.
+  const names = localSelSet.value.has(entry.name) ? Array.from(localSelSet.value) : [entry.name]
+  const paths = names.map((n) => localJoin(localPath.value, n))
+  e.dataTransfer?.setData('application/x-ssh-local', JSON.stringify(paths))
+  e.dataTransfer?.setData('text/plain', paths.join('\n'))
 }
 async function onLocalDrop(e: DragEvent): Promise<void> {
   const custom = e.dataTransfer?.getData('application/x-ssh-remote')
@@ -97,12 +101,44 @@ async function onLocalDrop(e: DragEvent): Promise<void> {
 // ---- local pane: selection, create / rename / delete ----
 const localMenu = reactive({ open: false, x: 0, y: 0, target: null as LocalEntry | null })
 const localModal = reactive({ open: false, kind: 'file' as 'file' | 'folder', action: 'new' as 'new' | 'rename', value: '', error: '', target: null as LocalEntry | null })
-const localSel = ref<string | null>(null)
-function localSelect(entry: LocalEntry): void {
-  localSel.value = entry.name
+const localSelSet = ref<Set<string>>(new Set())
+const localAnchor = ref<string | null>(null)
+function localSelected(): LocalEntry[] {
+  return localSorted.value.filter((e) => localSelSet.value.has(e.name))
+}
+function localSelectAll(): void {
+  localSelSet.value = new Set(localSorted.value.map((e) => e.name))
+}
+const localSelCount = computed(() => localSelSet.value.size)
+function localSelect(entry: LocalEntry, e?: MouseEvent): void {
+  if (e?.ctrlKey || e?.metaKey) {
+    const s = new Set(localSelSet.value)
+    if (s.has(entry.name)) s.delete(entry.name)
+    else s.add(entry.name)
+    localSelSet.value = s
+    localAnchor.value = entry.name
+    return
+  }
+  if (e?.shiftKey && localAnchor.value) {
+    const names = localSorted.value.map((x) => x.name)
+    const a = names.indexOf(localAnchor.value)
+    const b = names.indexOf(entry.name)
+    if (a >= 0 && b >= 0) {
+      const [lo, hi] = a < b ? [a, b] : [b, a]
+      const s = new Set(localSelSet.value)
+      for (let i = lo; i <= hi; i++) s.add(names[i])
+      localSelSet.value = s
+      return
+    }
+  }
+  localSelSet.value = new Set([entry.name])
+  localAnchor.value = entry.name
 }
 function localMenuOpen(e: MouseEvent, entry: LocalEntry): void {
-  localSel.value = entry.name
+  if (!localSelSet.value.has(entry.name)) {
+    localSelSet.value = new Set([entry.name])
+    localAnchor.value = entry.name
+  }
   localMenu.target = entry
   localMenu.x = Math.max(8, Math.min(e.clientX, window.innerWidth - 180))
   localMenu.y = Math.max(8, Math.min(e.clientY, window.innerHeight - 120))
@@ -253,14 +289,6 @@ let offProgress: (() => void) | null = null
 // entries (for the current session) are merged in as they complete.
 type HistItem = TransferHistoryItem
 const historyMenu = reactive({ open: false, x: 0, y: 0 })
-
-const posixJoin = (dir: string, name: string): string =>
-  `${dir.replace(/\/+$/, '')}/${name}`
-const parentOf = (p: string): string => {
-  const t = p.replace(/\/+$/, '')
-  const i = t.lastIndexOf('/')
-  return i <= 0 ? '/' : t.slice(0, i)
-}
 
 const crumbs = computed(() => {
   const parts = path.value.split('/').filter(Boolean)
@@ -1144,6 +1172,8 @@ const pct = (t: SftpProgress): number =>
       <div class="pathbar">
         <button class="up" :title="tt('sfp.upLevel')" :disabled="localLoading" @click="localGoUp"><Icon name="arrow-up" :size="15" /></button>
         <span class="local-path" :title="localPath">{{ localPath }}</span>
+        <span v-if="localSelCount" class="loc-selcount">{{ tt('sfp.selected', { n: localSelCount }) }}</span>
+        <button class="mini new" :title="tt('sfp.selectAll')" @click="localSelectAll"><Icon name="check-all" :size="14" /></button>
         <button class="mini new" :title="tt('sfp.newFile')" @click="localNew('file')"><Icon name="plus" :size="14" /></button>
         <button class="mini new" :title="tt('sfp.newFolder')" @click="localNew('folder')"><Icon name="folder-plus" :size="14" /></button>
         <button class="up" :title="tt('sfp.refresh')" :disabled="localLoading" @click="refreshLocal()"><Icon name="refresh" :size="14" /></button>
@@ -1162,10 +1192,10 @@ const pct = (t: SftpProgress): number =>
             v-for="entry in localSorted"
             :key="entry.name"
             class="row"
-            :class="{ dir: entry.isDir, sel: localSel === entry.name }"
+            :class="{ dir: entry.isDir, sel: localSelSet.has(entry.name) }"
             draggable="true"
             @dragstart="localDragStart($event, entry)"
-            @click.stop="localSelect(entry)"
+            @click.stop="localSelect(entry, $event)"
             @contextmenu.stop.prevent="localMenuOpen($event, entry)"
             @dblclick="localEnter(entry)"
           >
@@ -1658,6 +1688,16 @@ const pct = (t: SftpProgress): number =>
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.loc-selcount {
+  flex: none;
+  margin: 0 6px;
+  padding: 1px 7px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-radius: 999px;
 }
 .loc-head {
   display: flex;

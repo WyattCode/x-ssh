@@ -19,6 +19,7 @@ import type {
 } from '../shared/types'
 import { KnownHosts } from './knownHosts'
 import { friendlyError } from './friendlyError'
+import { posixJoin, parentOf, clampConcurrency, buildPackCommand, buildExtractCommand } from '../shared/fsUtils'
 
 interface Session {
   id: string
@@ -621,14 +622,12 @@ export class SshManager {
   }
 
   private posixJoin(dir: string, name: string): string {
-    return `${dir.replace(/\/+$/, '')}/${name}`
+    return posixJoin(dir, name)
   }
 
   /** Parent directory of a remote POSIX path. */
   private parentOf(p: string): string {
-    const t = p.replace(/\/+$/, '')
-    const i = t.lastIndexOf('/')
-    return i <= 0 ? '/' : t.slice(0, i)
+    return parentOf(p)
   }
 
   /** Joins a remote-supplied name into localBase, rejecting path traversal. */
@@ -776,7 +775,7 @@ export class SshManager {
       this.jobSession.delete(jobId)
       throw e
     })
-    const conc = Math.max(1, Math.min(32, concurrency ?? SshManager.CONCURRENCY))
+    const conc = clampConcurrency(concurrency ?? SshManager.CONCURRENCY, SshManager.CONCURRENCY)
     const label = items.length === 1 ? items[0].name : `${items.length} 项`
     let bytesDone = 0
     let filesDone = 0
@@ -925,7 +924,7 @@ export class SshManager {
     concurrency?: number
   ): Promise<void> {
     this.jobSession.set(jobId, sessionId)
-    const conc = Math.max(1, Math.min(32, concurrency ?? SshManager.CONCURRENCY))
+    const conc = clampConcurrency(concurrency ?? SshManager.CONCURRENCY, SshManager.CONCURRENCY)
     const label = localPaths.length === 1 ? basename(localPaths[0]) : `${localPaths.length} 项`
     let bytesDone = 0
     let filesDone = 0
@@ -1311,10 +1310,8 @@ export class SshManager {
     const parent = this.parentOf(items[0].path)
     const tmp = `/tmp/xssh-${randomUUID().slice(0, 8)}.tar.gz`
     const names = items.map((i) => i.name)
-    const quoted = names.map((n) => `'${n.replace(/'/g, "'\\''")}'`).join(' ')
-    const cd = `cd ${JSON.stringify(parent)}`
     // tar czf <tmp> --force-local -C <parent> <names>
-    await this.execRemote(sessionId, `${cd} && tar czf "${tmp}" ${quoted}`)
+    await this.execRemote(sessionId, buildPackCommand(parent, tmp, names))
     const name = archiveName || (items.length === 1 ? items[0].name : 'archive') + '.tar.gz'
     const outPath = resolve(localDir, name).replace(/\.tar\.gz$/, '.tar.gz')
     try {
@@ -1335,10 +1332,7 @@ export class SshManager {
     archiveFileName: string
   ): Promise<{ ok: boolean; error?: string }> {
     const base = this.posixJoin(remoteDir, archiveFileName)
-    const lower = archiveFileName.toLowerCase()
-    let cmd: string
-    if (lower.endsWith('.zip')) cmd = `cd ${JSON.stringify(remoteDir)} && unzip -o "${archiveFileName}"`
-    else cmd = `cd ${JSON.stringify(remoteDir)} && tar xzf "${archiveFileName}"`
+    const cmd = buildExtractCommand(remoteDir, archiveFileName)
     const { code, out } = await this.execRemote(sessionId, cmd).catch((e) => ({
       code: -1,
       out: (e as Error).message
