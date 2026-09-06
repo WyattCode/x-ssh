@@ -13,7 +13,7 @@ const props = defineProps<{
   path: string
   name: string
 }>()
-const emit = defineEmits<{ (e: 'close'): void }>()
+const emit = defineEmits<{ (e: 'close'): void; (e: 'saved'): void }>()
 
 // Platform modifier key for the save hint (⌘ on macOS, Ctrl elsewhere).
 const modKey = /mac|iphone|ipad/i.test(navigator.platform || navigator.userAgent) ? '⌘' : 'Ctrl'
@@ -52,8 +52,10 @@ async function save(): Promise<void> {
   error.value = ''
   const r = await window.api.sftp.writeText(props.sessionId, props.path, content.value)
   saving.value = false
-  if (r.ok) original.value = content.value
-  else error.value = r.error ?? t('ed.saveFail')
+  if (r.ok) {
+    original.value = content.value
+    emit('saved')
+  } else error.value = r.error ?? t('ed.saveFail')
 }
 
 async function close(): Promise<void> {

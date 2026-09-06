@@ -66,10 +66,16 @@ const editorOpen = ref(false)
 const editingHost = ref<Host | null>(null)
 const editorFileOpen = ref(false)
 const editFilePayload = ref<{ path: string; name: string }>({ path: '', name: '' })
+const sftpReloadKey = ref(0)
 
 function onEditFile(p: { path: string; name: string }): void {
   editFilePayload.value = p
   editorFileOpen.value = true
+}
+function onEditorSaved(): void {
+  // The file was rewritten remotely — refresh the SFTP listing so the drawer
+  // reflects the new size / mtime.
+  sftpReloadKey.value++
 }
 async function onEditExternal(p: { path: string; name: string }): Promise<void> {
   const sid = store.activePane?.sshSessionId
@@ -426,6 +432,7 @@ onBeforeUnmount(() => {
         :session-id="store.activePane?.sshSessionId"
         :open="store.sftpOpen"
         :terminal-cwd="activeCwd"
+        :reload-key="sftpReloadKey"
         @close="store.toggleSftp(false)"
         @edit-file="onEditFile"
         @edit-external="onEditExternal"
@@ -444,6 +451,7 @@ onBeforeUnmount(() => {
       :path="editFilePayload.path"
       :name="editFilePayload.name"
       @close="editorFileOpen = false"
+      @saved="onEditorSaved"
     />
     <SettingsDialog />
     <ConfirmDialog />

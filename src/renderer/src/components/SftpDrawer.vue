@@ -12,7 +12,7 @@ const { t: tt } = useI18n()
 const { toast } = useToast()
 const store = useSessions()
 
-const props = defineProps<{ sessionId?: string; open: boolean; terminalCwd?: string }>()
+const props = defineProps<{ sessionId?: string; open: boolean; terminalCwd?: string; reloadKey?: number }>()
 const emit = defineEmits<{
   (e: 'close'): void
   (e: 'edit-file', payload: { path: string; name: string }): void
@@ -350,6 +350,14 @@ watch(
 
 const cleanupTimers = new Set<number>()
 let uploadReloadTimer: number | null = null
+// A saved internal editor write should refresh the current listing (size/mtime
+// may have changed), so App.bump reloadKey.
+watch(
+  () => props.reloadKey,
+  (k, old) => {
+    if (k && k !== old && props.sessionId) void load(path.value)
+  }
+)
 watch(
   () => localModal.open,
   (open) => {
