@@ -1,0 +1,202 @@
+:root {
+  /* Dark is the default surface for a terminal app. */
+  --bg: #0e0f12;
+  --bg-elev: #16181d;
+  --bg-elev-2: #1d2027;
+  --border: #262a33;
+  --border-strong: #333844;
+  --text: #e6e8ec;
+  --text-dim: #9aa1ad;
+  --text-faint: #656b78;
+  --accent: #6ea8fe;
+  --accent-soft: rgba(110, 168, 254, 0.14);
+  --row-sel: rgba(110, 168, 254, 0.2);
+  --row-sel-ring: rgba(110, 168, 254, 0.32);
+  --danger: #ff6b6b;
+  --ok: #51cf66;
+  --warn: #ffd43b;
+  /* Scrim that recedes an unfocused split pane (darkens on the dark surface). */
+  --scrim: rgba(0, 0, 0, 0.3);
+  --radius: 10px;
+  --radius-sm: 7px;
+  --shadow: 0 18px 50px -12px rgba(0, 0, 0, 0.6);
+  --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica,
+    Arial, sans-serif;
+  --font-mono: 'SFMono-Regular', 'Cascadia Code', 'JetBrains Mono', Menlo,
+    Consolas, monospace;
+}
+
+/* Light palette, shared by an explicit toggle and (as a fallback before JS
+   runs) the OS preference. The renderer always stamps data-theme, so the
+   media query only matters for the very first paint. */
+:root[data-theme='light'] {
+  --bg: #f7f8fa;
+  --bg-elev: #ffffff;
+  --bg-elev-2: #f0f2f5;
+  --border: #e3e6eb;
+  --border-strong: #d3d7df;
+  --text: #1a1d23;
+  --text-dim: #5c636e;
+  --text-faint: #98a0ab;
+  --accent: #2f6fed;
+  --accent-soft: rgba(47, 111, 237, 0.1);
+  --row-sel: rgba(47, 111, 237, 0.13);
+  --row-sel-ring: rgba(47, 111, 237, 0.26);
+  --shadow: 0 18px 50px -12px rgba(20, 30, 60, 0.18);
+  --scrim: rgba(20, 24, 32, 0.055);
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    --bg: #f7f8fa;
+    --bg-elev: #ffffff;
+    --bg-elev-2: #f0f2f5;
+    --border: #e3e6eb;
+    --border-strong: #d3d7df;
+    --text: #1a1d23;
+    --text-dim: #5c636e;
+    --text-faint: #98a0ab;
+    --accent: #2f6fed;
+    --accent-soft: rgba(47, 111, 237, 0.1);
+    --row-sel: rgba(47, 111, 237, 0.13);
+    --row-sel-ring: rgba(47, 111, 237, 0.26);
+    --shadow: 0 18px 50px -12px rgba(20, 30, 60, 0.18);
+    --scrim: rgba(20, 24, 32, 0.055);
+  }
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: var(--font-ui);
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  font-size: 13px;
+  user-select: none;
+}
+
+button {
+  font-family: inherit;
+  color: inherit;
+  cursor: pointer;
+  border: none;
+  background: none;
+}
+
+/* Keyboard focus needs to be visible — :focus-visible keeps it off mouse
+   clicks, so this costs nothing visually for pointer users. Text inputs are
+   left alone: they already mark focus with an accent border. */
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+input,
+textarea,
+select {
+  font-family: inherit;
+  color: inherit;
+}
+
+/* Consistent, legible placeholders across both themes & DPI scales. */
+::placeholder {
+  color: var(--text-faint);
+  opacity: 1;
+}
+input::placeholder,
+textarea::placeholder {
+  transition: color 0.12s;
+}
+input:focus::placeholder,
+textarea:focus::placeholder {
+  color: var(--text-dim);
+}
+
+/* Keyboard focus for non-button form controls (checkbox/toggles use this too). */
+select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 6px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-faint);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+}
+
+/* Floating surfaces (menus, dialogs, palette) get a slight frosted lift on
+   HiDPI: translucent fill + backdrop blur so the window reads through faintly.
+   Kept high-opacity so labels stay readable. */
+.glass {
+  background-color: color-mix(in srgb, var(--bg-elev) 86%, transparent);
+  backdrop-filter: blur(16px) saturate(1.15);
+  -webkit-backdrop-filter: blur(16px) saturate(1.15);
+}
+.glass-strong {
+  background-color: color-mix(in srgb, var(--bg-elev) 70%, transparent);
+}
+
+/* Gentle entrance for floating surfaces / scrims (60fps, transform+opacity only). */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes pop-in {
+  from { opacity: 0; transform: scale(0.985) translateY(2px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+@keyframes slide-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Respect the OS motion preference — collapse animations & transitions. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

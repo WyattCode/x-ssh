@@ -1,0 +1,210 @@
+/**
+ * Types shared between the main process, preload bridge, and renderer.
+ * Keep this dependency-free so it can be imported from any layer.
+ */
+
+export type AuthMethod = 'password' | 'key' | 'agent'
+
+/** How a port-forward rule is established. */
+export type ForwardMode = 'local' | 'remote' | 'dynamic'
+
+/** A single port-forward rule attached to a connection. */
+export interface HostForward {
+  /** For 'local'/'dynamic': local listen port. For 'remote': listen port on the server. */
+  localPort: number
+  /** For 'local': remote host as seen from the server (empty = the server itself).
+   *  For 'remote': destination host on this machine. Unused for 'dynamic'. */
+  remoteHost: string
+  /** For 'local': remote port. For 'remote': destination port on this machine. */
+  remotePort: number
+  /** Defaults to 'local'. 'dynamic' = SOCKS5 proxy; 'remote' = server-side listen. */
+  mode?: ForwardMode
+}
+
+/** A saved connection profile. Secrets are never stored here in plaintext. */
+export interface Host {
+  id: string
+  label: string
+  host: string
+  port: number
+  username: string
+  auth: AuthMethod
+  /** Absolute path to a private key file, when auth === 'key'. */
+  keyPath?: string
+  /** Optional grouping label for the palette & welcome list. */
+  group?: string
+  /** Id of another saved Host to tunnel through (ProxyJump). */
+  jumpHostId?: string
+  /** Local port-forward rules opened once connected. */
+  portForwards?: HostForward[]
+  /** Forward the local ssh-agent to the remote (-A) so remote hosts see it. */
+  agentForward?: boolean
+  /** Optional command to send to the shell right after connecting. */
+  onConnect?: string
+  /** Optional last-used timestamp (ms) for sorting the palette. */
+  lastUsedAt?: number
+  color?: string
+  /** Runtime-only flag (not persisted): whether an encrypted password exists. */
+  hasSavedPassword?: boolean
+  /** Runtime-only flag: whether an encrypted key passphrase exists. */
+  hasSavedPassphrase?: boolean
+}
+
+/** A directory entry in the local filesystem browser. */
+export interface LocalEntry {
+  name: string
+  isDir: boolean
+  /** File size in bytes (0 for directories). */
+  size?: number
+  /** Last-modified time in ms. */
+  mtime?: number
+}
+
+/** A finished transfer logged to the persistent history (survives restart). */
+export interface TransferHistoryItem {
+  id: string
+  sessionId?: string
+  name: string
+  direction: 'up' | 'down'
+  bytes: number
+  count?: number
+  status: 'done' | 'error' | 'cancelled'
+  error?: string
+  at: number
+}
+
+/** A reusable command snippet shown in the command palette. */
+export interface Snippet {
+  id: string
+  title: string
+  /** Raw text sent to the focused terminal (may contain \n). */
+  text: string
+  /** Ask for confirmation before sending (guards destructive commands). */
+  confirm?: boolean
+}
+
+/** A known-host entry surfaced to the settings page. */
+export interface KnownHostEntry {
+  host: string
+  port: number
+  fingerprint: string
+}
+
+/** A remote file/directory entry from SFTP. */
+export interface FileEntry {
+  name: string
+  isDir: boolean
+  size: number
+  mtime: number
+  /** Permission bits (low 12 bits: rwx + setuid/setgid/sticky). */
+  mode?: number
+}
+
+export interface SftpList {
+  path: string
+  entries: FileEntry[]
+}
+
+/** Live transfer progress pushed from main → renderer. One id per transfer job
+ *  (a job may span many files); transferred/total are aggregate bytes. */
+export interface SftpProgress {
+  id: string
+  /** Session the transfer belongs to, so the drawer can ignore other panes'. */
+  sessionId?: string
+  /** Current file name, or the job label at start/finish. */
+  name: string
+  direction: 'up' | 'down'
+  transferred: number
+  total: number
+  /** Total files in the job (>1 shows an "i/N" counter). */
+  count?: number
+  /** 1-based index of the file currently transferring. */
+  index?: number
+  done?: boolean
+  error?: string
+}
+
+/** Fully-resolved (secrets included) connection spec for a ProxyJump hop. */
+export interface JumpConfig {
+  host: string
+  port: number
+  username: string
+  auth: AuthMethod
+  keyPath?: string
+  password?: string
+  passphrase?: string
+}
+
+/** Parameters used to open a live SSH session. */
+export interface ConnectParams {
+  host: string
+  port: number
+  username: string
+  auth: AuthMethod
+  password?: string
+  passphrase?: string
+  keyPath?: string
+  /** Optional reference back to the saved Host this came from. */
+  hostId?: string
+  cols?: number
+  rows?: number
+  /** Keepalive ping interval in ms (0 disables). Defaults applied in main. */
+  keepaliveMs?: number
+  /** Inject a PROMPT_COMMAND that emits OSC 7 so the file panel can follow cwd. */
+  shellIntegration?: boolean
+  /** Local port-forward rules to open once connected. */
+  portForwards?: HostForward[]
+  /** Tunnel through this jump host (its own saved Host id) before reaching target. */
+  jumpHostId?: string
+  /** Resolved jump connection spec; main fills this from the saved Host. */
+  jump?: JumpConfig
+  /** Lifecycle params forwarded from the saved Host on connect. */
+  agentForward?: boolean
+  onConnect?: string
+  /** Connect timeout in ms (default 20000). Kept global in the store. */
+  readyTimeoutMs?: number
+}
+
+/** Terminal resize payload. */
+export interface ResizePayload {
+  sessionId: string
+  cols: number
+  rows: number
+}
+
+export type SessionStatus =
+  | 'connecting'
+  | 'connected'
+  | 'closed'
+  | 'error'
+
+/** Events pushed from main → renderer for a given session. */
+export interface SessionEvent {
+  sessionId: string
+  status: SessionStatus
+  /** Human-readable message for 'error'/'closed' states. */
+  message?: string
+}
+
+export interface ConnectResult {
+  ok: boolean
+  sessionId?: string
+  error?: string
+  /** Machine-readable failure code, e.g. 'host_key_changed'. */
+  code?: string
+}
+
+/**
+ * UI preferences handed to the renderer as a launch argument, so first paint
+ * needs neither an async round-trip nor Chromium-backed storage. localStorage
+ * is deliberately unused: its backing store is locked to one process, so a
+ * second instance sharing the profile stalls ~6s on its first access.
+ */
+export interface UiPrefs {
+  theme?: 'light' | 'dark'
+  fontSize?: number
+  zoom?: number
+  sftpShowHidden?: boolean
+  sftpWidth?: number
+  lang?: 'zh' | 'en'
+}

@@ -1,0 +1,72 @@
+{
+  "name": "x-ssh",
+  "version": "0.1.1",
+  "description": "A keyboard-first, command-palette-driven SSH client.",
+  "main": "./out/main/index.js",
+  "author": "X-SSH",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "start": "electron-vite preview",
+    "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
+    "typecheck:web": "vue-tsc --noEmit -p tsconfig.web.json --composite false",
+    "typecheck": "npm run typecheck:node && npm run typecheck:web",
+    "package": "electron-vite build && electron-builder --dir",
+    "dist": "electron-vite build && electron-builder"
+  },
+  "build": {
+    "appId": "com.x-ssh.app",
+    "productName": "X-SSH",
+    "npmRebuild": false,
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "out/**/*",
+      "build/icon.ico",
+      "build/icon.png"
+    ],
+    "win": {
+      "icon": "build/icon.ico",
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "mac": {
+      "icon": "build/icon.png"
+    },
+    "linux": {
+      "icon": "build/icon.png",
+      "category": "Utility"
+    }
+  },
+  "dependencies": {
+    "@xterm/addon-search": "^0.15.0",
+    "ssh2": "^1.16.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/ssh2": "^1.15.1",
+    "@vitejs/plugin-vue": "^5.2.1",
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/addon-web-links": "^0.11.0",
+    "@xterm/addon-webgl": "^0.18.0",
+    "@xterm/xterm": "^5.5.0",
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8",
+    "electron-vite": "^2.3.0",
+    "pinia": "^2.3.0",
+    "png-to-ico": "^3.0.2",
+    "sharp": "^0.35.3",
+    "typescript": "^5.7.2",
+    "vite": "^5.4.11",
+    "vue": "^3.5.13",
+    "vue-tsc": "^2.1.10"
+  }
+}
