@@ -102,6 +102,7 @@ npm run dev        # electron-vite 开发模式（HMR）
 ```bash
 npm run typecheck  # tsc（主进程）+ vue-tsc（渲染层）
 npm run build      # 打包到 ./out
+npm run lint:i18n  # 校验 zh/en 键对称、占位符与缺失静态键
 npm start          # 预览生产构建
 ```
 

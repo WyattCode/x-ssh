@@ -624,6 +624,13 @@ export class SshManager {
     return `${dir.replace(/\/+$/, '')}/${name}`
   }
 
+  /** Parent directory of a remote POSIX path. */
+  private parentOf(p: string): string {
+    const t = p.replace(/\/+$/, '')
+    const i = t.lastIndexOf('/')
+    return i <= 0 ? '/' : t.slice(0, i)
+  }
+
   /** Joins a remote-supplied name into localBase, rejecting path traversal. */
   private safeLocalJoin(localBase: string, name: string): string {
     const base = resolve(localBase)
@@ -781,7 +788,7 @@ export class SshManager {
     const queue: { remote: string; local: string; name: string }[] = []
     let walkDone = false
     const emit = (name: string, done?: boolean, error?: string): void =>
-      this.emitProgress({ id: jobId, name, direction: 'down', transferred: bytesDone, total: knownTotal, count: discovered, index: filesDone, done, error })
+      this.emitProgress({ id: jobId, name, direction: 'down', transferred: bytesDone, total: knownTotal, count: discovered, index: filesDone, remoteDir: items[0]?.path ? this.parentOf(items[0].path) : undefined, done, error })
 
     const walk = async (remote: string, base: string, name: string, isDir: boolean, depth: number): Promise<void> => {
       if (this.cancelledJobs.has(jobId) || depth > 64) return
@@ -930,7 +937,7 @@ export class SshManager {
     const queue: { local: string; remote: string; name: string }[] = []
     let walkDone = false
     const emit = (name: string, done?: boolean, error?: string): void =>
-      this.emitProgress({ id: jobId, name, direction: 'up', transferred: bytesDone, total: knownTotal, count: discovered, index: filesDone, done, error })
+      this.emitProgress({ id: jobId, name, direction: 'up', transferred: bytesDone, total: knownTotal, count: discovered, index: filesDone, remoteDir, done, error })
 
     // finally guarantees cleanup even if getSftp throws before any event.
     try {

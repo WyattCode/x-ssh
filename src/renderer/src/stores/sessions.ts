@@ -226,7 +226,7 @@ export const useSessions = defineStore('sessions', {
       if (!sid) return
       if (snippet.confirm) {
         const ok = await confirm(
-          t('terms.confirmSnippet', { title: snippet.title })
+          t('snip.confirm', { title: snippet.title })
         )
         if (!ok) return
       }

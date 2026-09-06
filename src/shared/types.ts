@@ -70,6 +70,8 @@ export interface TransferHistoryItem {
   count?: number
   status: 'done' | 'error' | 'cancelled'
   error?: string
+  /** Remote directory of the transfer, for "locate"/navigate. */
+  remoteDir?: string
   at: number
 }
 
@@ -120,6 +122,8 @@ export interface SftpProgress {
   count?: number
   /** 1-based index of the file currently transferring. */
   index?: number
+  /** The remote directory this job targets (used to "locate" a transfer in history). */
+  remoteDir?: string
   done?: boolean
   error?: string
 }

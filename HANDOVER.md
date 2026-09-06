@@ -3,22 +3,35 @@
 ## 项目概述
 - 极简、键盘优先的 SSH 客户端。Electron + Vue 3 (Vite) + TypeScript。
 - 平台: Windows (`win32`)。目录: `D:\Documents\Claude Code\X-SSH`。
-- **不是 git 仓库**(无 `.git`)。不要用 git diff/status。
-- 版本: `package.json` 当前为 **0.1.1**。
+- **git 仓库**(`main` 分支),远程: `https://github.com/WyattCode/x-ssh`(私有)。
+- 版本: `package.json` 当前为 **0.1.1**;有 `CHANGELOG.md`(Keep a Changelog + 语义化)。
 
 ## 常用命令(Windows/PowerShell)
 - 必须用 `npm.cmd`(直接 `npm` 会因执行策略失败)。
 - 校验: `npm.cmd run typecheck`、`npm.cmd run build`
+- **i18n 键对称校验**: `npm.cmd run lint:i18n`(脚本 `scripts/lint-i18n.mjs`,扫 zh/en 键集合、占位符与源码中缺失的静态键)。
 - 打包: `npm.cmd run dist` → `release\X-SSH Setup 0.1.1.exe`(NSIS)+ `release\win-unpacked\X-SSH.exe` + `.blockmap`。
 - 无代码签名,SmartScreen 可能提示(正常)。
 
 ## 架构要点
 - **密码/密钥永不离开主进程**:SSH 在主进程(`src/main/ssh.ts`),渲染层经 IPC(preload `src/preload/index.ts`)调用。
-- i18n:`src/renderer/src/lib/i18n.ts`,定义 `zh` 与 `en` 两个字典。**两个键集合必须一致**(现 334/334)。
+- i18n:`src/renderer/src/lib/i18n.ts`,定义 `zh` 与 `en` 两个字典。**两个键集合必须一致**(现 352/352,`npm.cmd run lint:i18n` 校验)。
   - 动态键模式: `tab.*` / `group.*` / `sck.*` / `sck.*Hint`(缺失 hint 回退 `''`)。
   - 主题名(Nord/Dracula 等)为专有名词 **不翻译**,不建键。
 - 产品理念: 极简、键盘优先、密码/密钥不出主进程。
 - 更新功能(在线检查更新)按用户要求**已移除**。
+
+## 已知限制 / 注意
+- **shell 集成 + `onConnect` 同时开启**: `onConnect` 命令仍会执行,但其输出可能被 shell 集成首屏的屏清序列吞掉(边缘组合)。
+- **双面板远程→本机** 仍走系统原生「拖出到桌面」(原生拖拽一次仅一个文件,多选并行拖出非 Electron 支持)。
+- **上传续传注意**: 每个文件上传前都做 `statSize` 与本地 `stat`,大目录批量上传会增加往返延迟(为正确性而做)。
+- 快照/标签恢复保存的 pane 参数已剥离 `password`/`passphrase`,恢复后为**断开状态**,需用户重新连并重新输入凭据。
+- **背对玻璃拟态**: `backdrop-filter` 在低核/弱 iGPU 机器上开销大,`renderer/src/main.ts` 启动时探测 `hardwareConcurrency`/`deviceMemory`,命中则给 `<html>` 加 `.perf-no-blur` 全局关闭模糊(仅保留半透明)。
+
+## 下一步(如果继续)
+- 按用户截图式 UI 反馈继续修复。
+- 如版本号增加,改 `package.json` + 更新 `CHANGELOG.md` 后 `npm.cmd run dist` 重打包。
+- 大规模改动前先跑 `npm.cmd run typecheck && npm.cmd run build` 与 `npm.cmd run lint:i18n` 保证通过。
 
 ## 本会话已完成
 ### A. 既有功能(第 1~3 轮,已完成并打包)
@@ -52,15 +65,3 @@
 - `src/renderer/src/components/HostEditor.vue`: agentForward/onConnect 表单项(本轮已还原 `initial`)。
 - `src/renderer/src/App.vue`: 移除欢迎页快速连接输入及配套逻辑/CSS (本轮);`loadSnapshots` 挂载。
 - `src/renderer/src/lib/i18n.ts`: 新增/删除多个键,保持 zh/en 一致。
-
-## 已知限制 / 注意
-- **shell 集成 + `onConnect` 同时开启**: `onConnect` 命令仍会执行,但其输出可能被 shell 集成首屏的屏清序列吞掉(边缘组合)。
-- **双面板远程→本机** 仍走系统原生「拖出到桌面」(原生拖拽一次仅一个文件,多选并行拖出非 Electron 支持)。
-- **上传续传注意**: 每个文件上传前都做 `statSize` 与本地 `stat`,大目录批量上传会增加往返延迟(为正确性而做)。
-- 快照/标签恢复保存的 pane 参数已剥离 `password`/`passphrase`,恢复后为**断开状态**,需用户重新连并重新输入凭据。
-- 双面板本机浏览只为展示目录/文件名,不含文件大小修改时间;本机侧暂未做重命名/新建/删除。
-
-## 下一步(如果继续)
-- 按用户截图式 UI 反馈继续修复。
-- 如版本号需增加,改 `package.json` 后 `npm.cmd run dist` 重打包。
-- 大规模改动前先跑 `npm.cmd run typecheck && npm.cmd run build` 保证通过。

@@ -193,6 +193,33 @@ function onDragLeave(): void {
 
 const sort = reactive({ key: 'name' as 'name' | 'size' | 'mtime', asc: true })
 
+// ---- local pane sorting (size / mtime columns) ----
+const localSort = reactive({ key: 'name' as 'name' | 'size' | 'mtime', asc: true })
+const localSorted = computed(() => {
+  const arr = [...localEntries.value]
+  const dir = localSort.asc ? 1 : -1
+  arr.sort((a, b) => {
+    if (a.isDir !== b.isDir) return a.isDir ? -1 : 1
+    let r = 0
+    if (localSort.key === 'name') r = a.name.localeCompare(b.name)
+    else if (localSort.key === 'size') r = (a.size ?? 0) - (b.size ?? 0)
+    else r = (a.mtime ?? 0) - (b.mtime ?? 0)
+    return r * dir
+  })
+  return arr
+})
+function setLocalSort(key: 'name' | 'size' | 'mtime'): void {
+  if (localSort.key === key) localSort.asc = !localSort.asc
+  else {
+    localSort.key = key
+    localSort.asc = true
+  }
+}
+function caret(key: 'name' | 'size' | 'mtime'): string {
+  if (localSort.key !== key) return ''
+  return localSort.asc ? ' ▴' : ' ▾'
+}
+
 const menu = reactive({ open: false, x: 0, y: 0, target: null as FileEntry | null })
 const renamingName = ref<string | null>(null)
 const renameInput = ref('')
@@ -387,6 +414,7 @@ onMounted(() => {
         count: p.count,
         status: isCancelled(p) ? 'cancelled' : p.error ? 'error' : 'done',
         error: p.error && !isCancelled(p) ? p.error : undefined,
+        remoteDir: p.remoteDir,
         at: Date.now()
       })
       const id = p.id
@@ -804,6 +832,11 @@ function clearHistory(): void {
   void store.clearTransferHistory()
   historyMenu.open = false
 }
+function locateHistory(h: TransferHistoryItem): void {
+  if (!h.remoteDir || !props.sessionId) return
+  historyMenu.open = false
+  load(h.remoteDir)
+}
 
 // ---- bookmarks ----
 const bookmarksMenu = reactive({ open: false, x: 0, y: 0 })
@@ -1051,11 +1084,12 @@ const pct = (t: SftpProgress): number =>
         <div v-if="!activeHistory.length" class="hist-empty">{{ tt('sfp.histEmpty') }}</div>
         <div v-for="h in activeHistory" :key="h.id" class="hist-row">
           <Icon :name="h.direction === 'up' ? 'upload' : 'download'" :size="13" class="hist-dir" :class="h.status" />
-          <span class="hist-name">{{ h.name }}</span>
+          <span class="hist-name" :title="h.name">{{ h.name }}</span>
           <span class="hist-meta" :class="h.status">
             {{ h.status === 'done' ? fmtSize(h.bytes) : h.status === 'cancelled' ? tt('sfp.cancelled') : (h.error || tt('sfp.failed')) }}
           </span>
           <span class="hist-time">{{ fmtAgo(h.at) }}</span>
+          <button v-if="h.remoteDir && props.sessionId" class="hist-locate" :title="tt('sfp.locate')" @click.stop="locateHistory(h)"><Icon name="folder" :size="12" /></button>
         </div>
       </div>
     </div>
@@ -1076,16 +1110,16 @@ const pct = (t: SftpProgress): number =>
       </div>
       <div class="loc-head">
         <span class="ic-sp"></span>
-        <span class="lc-name">{{ tt('sfp.name') }}</span>
-        <span class="lc-size">{{ tt('sfp.size') }}</span>
-        <span class="lc-time">{{ tt('sfp.mtime') }}</span>
+        <span class="lc-name" @click="setLocalSort('name')">{{ tt('sfp.name') }}{{ caret('name') }}</span>
+        <span class="lc-size" @click="setLocalSort('size')">{{ tt('sfp.size') }}{{ caret('size') }}</span>
+        <span class="lc-time" @click="setLocalSort('mtime')">{{ tt('sfp.mtime') }}{{ caret('mtime') }}</span>
       </div>
       <div class="body localbody">
         <div v-if="localError" class="msg err">{{ localError }}</div>
         <div v-else-if="localLoading" class="msg">{{ tt('sfp.loading') }}</div>
         <template v-else>
           <div
-            v-for="entry in localEntries"
+            v-for="entry in localSorted"
             :key="entry.name"
             class="row"
             :class="{ dir: entry.isDir, sel: localSel === entry.name }"
@@ -1498,6 +1532,23 @@ const pct = (t: SftpProgress): number =>
   font-size: 10.5px;
   color: var(--text-faint);
 }
+.hist-locate {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  color: var(--text-faint);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+.hist-locate:hover {
+  background: var(--bg-elev-2);
+  color: var(--accent);
+}
 .icon-btn {
   display: inline-flex;
   align-items: center;
@@ -1571,6 +1622,24 @@ const pct = (t: SftpProgress): number =>
 .loc-head .ic-sp {
   flex: none;
   width: 16px;
+}
+.loc-head .lc-name,
+.loc-head .lc-size,
+.loc-head .lc-time {
+  cursor: pointer;
+  user-select: none;
+}
+.loc-head .lc-name {
+  text-align: left;
+}
+.loc-head .lc-size,
+.loc-head .lc-time {
+  text-align: right;
+}
+.loc-head .lc-name:hover,
+.loc-head .lc-size:hover,
+.loc-head .lc-time:hover {
+  color: var(--text);
 }
 .loc-head .lc-name,
 .localbody .row .name {
