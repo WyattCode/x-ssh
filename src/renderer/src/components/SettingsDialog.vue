@@ -5,11 +5,15 @@ import Icon from './Icon.vue'
 import { SHORTCUT_GROUPS } from '../lib/shortcuts'
 import { PRESETS } from '../lib/terminalThemes'
 import { useI18n } from '../lib/i18n'
+import { useToast } from '../composables/toast'
+import { useConfirm } from '../composables/confirm'
 import type { SettingsTab } from '../stores/sessions'
 import type { KnownHostEntry } from '../../../shared/types'
 
 const store = useSessions()
 const { lang, setLang, t } = useI18n()
+const { toast } = useToast()
+const { confirm } = useConfirm()
 
 const TABS: { id: SettingsTab; label: string; icon: string }[] = [
   { id: 'general', label: '', icon: 'settings' },
@@ -174,6 +178,21 @@ async function importSshConfig(): Promise<void> {
   await window.api.hosts.importSshConfig()
   await store.loadHosts()
   await store.loadKnownHosts()
+}
+async function exportHostsJson(): Promise<void> {
+  const r = await window.api.hosts.exportJson()
+  if (!r.ok && !r.canceled) toast(r.error ?? t('set.sec.exportFail'), 'error')
+  else if (r.ok) toast(`${t('set.sec.exported')} ${store.hosts.length} ${t('set.sec.hosts')}`, 'success')
+}
+async function importHostsJson(): Promise<void> {
+  const res = await confirm(t('set.sec.importJsonConfirm'))
+  if (!res) return
+  const r = await window.api.hosts.importJson()
+  if (!r.ok && !r.canceled) toast(r.error ?? t('set.sec.importFail'), 'error')
+  else if (r.ok) {
+    await store.loadHosts()
+    toast(`${t('set.sec.imported')} ${r.count ?? 0} ${t('set.sec.hosts')}`, 'success')
+  }
 }
 
 
@@ -427,6 +446,14 @@ async function importSshConfig(): Promise<void> {
               <p class="desc">{{ t('set.sec.sshConfigDesc') }}</p>
               <button class="ghost" @click="importSshConfig">{{ t('set.sec.import') }}</button>
             </div>
+            <div class="section">
+              <div class="label">{{ t('set.sec.backup') }}</div>
+              <p class="desc">{{ t('set.sec.backupDesc') }}</p>
+              <div class="btn-row">
+                <button class="ghost" @click="exportHostsJson">{{ t('set.sec.export') }}</button>
+                <button class="ghost" @click="importHostsJson">{{ t('set.sec.restore') }}</button>
+              </div>
+            </div>
           </template>
 
           <!-- 快捷键 -->
@@ -560,6 +587,10 @@ async function importSshConfig(): Promise<void> {
 .ghost:hover {
   background: var(--bg-elev-2);
   color: var(--text);
+}
+.btn-row {
+  display: flex;
+  gap: 8px;
 }
 .field {
   display: flex;

@@ -96,6 +96,8 @@ interface State {
   snippets: Snippet[]
   knownHosts: KnownHostEntry[]
   sftpBookmarks: string[]
+  /** Recently-visited SFTP remote dirs (MRU, capped), persisted. */
+  sftpRecent: string[]
   snapshots: Snapshot[]
   transferQueue: TransferOp[]
   /** Finished SFTP transfers, persisted across restarts (newest first). */
@@ -129,6 +131,7 @@ export const useSessions = defineStore('sessions', {
     snippets: [],
     knownHosts: [],
     sftpBookmarks: [],
+    sftpRecent: [],
     snapshots: [],
     transferQueue: [],
     transferHistory: [],
@@ -244,6 +247,16 @@ export const useSessions = defineStore('sessions', {
 
     async loadSftpBookmarks(): Promise<void> {
       this.sftpBookmarks = (await window.api.settings.get<string[]>('sftpBookmarks')) ?? []
+    },
+    async loadSftpRecent(): Promise<void> {
+      this.sftpRecent = (await window.api.settings.get<string[]>('sftpRecent')) ?? []
+    },
+    /** Records a visited remote dir into the MRU list (capped at 10). */
+    async addSftpRecent(path: string): Promise<void> {
+      const next = [path, ...this.sftpRecent.filter((p) => p !== path)].slice(0, 10)
+      if (JSON.stringify(next) === JSON.stringify(this.sftpRecent)) return
+      this.sftpRecent = next
+      await window.api.settings.set('sftpRecent', next)
     },
     /** Adds/removes a remote dir from the SFTP bookmarks (capped at 20). */
     async toggleSftpBookmark(path: string): Promise<void> {

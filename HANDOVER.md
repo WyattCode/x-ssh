@@ -4,7 +4,7 @@
 - 极简、键盘优先的 SSH 客户端。Electron + Vue 3 (Vite) + TypeScript。
 - 平台: Windows (`win32`)。目录: `D:\Documents\Claude Code\X-SSH`。
 - **git 仓库**(`main` 分支),远程: `https://github.com/WyattCode/x-ssh`(私有)。
-- 版本: `package.json` 当前为 **0.1.1**;有 `CHANGELOG.md`(Keep a Changelog + 语义化)。
+- 版本: `package.json` 当前为 **0.2.0**;有 `CHANGELOG.md`(Keep a Changelog + 语义化)。
 
 ## 常用命令(Windows/PowerShell)
 - 必须用 `npm.cmd`(直接 `npm` 会因执行策略失败)。
@@ -17,7 +17,7 @@
 
 ## 架构要点
 - **密码/密钥永不离开主进程**:SSH 在主进程(`src/main/ssh.ts`),渲染层经 IPC(preload `src/preload/index.ts`)调用。
-- i18n:`src/renderer/src/lib/i18n.ts`,定义 `zh` 与 `en` 两个字典。**两个键集合必须一致**(现 352/352,`npm.cmd run lint:i18n` 校验)。
+- i18n:`src/renderer/src/lib/i18n.ts`,定义 `zh` 与 `en` 两个字典。**两个键集合必须一致**(现 367/367,`npm.cmd run lint:i18n` 校验)。
   - 动态键模式: `tab.*` / `group.*` / `sck.*` / `sck.*Hint`(缺失 hint 回退 `''`)。
   - 主题名(Nord/Dracula 等)为专有名词 **不翻译**,不建键。
 - 产品理念: 极简、键盘优先、密码/密钥不出主进程。

@@ -45,7 +45,11 @@ const api = {
       ipcRenderer.invoke(IPC.hostsSave, host, password, passphrase),
     delete: (id: string): Promise<Host[]> => ipcRenderer.invoke(IPC.hostsDelete, id),
     importSshConfig: (): Promise<{ ok: boolean; count: number; error?: string }> =>
-      ipcRenderer.invoke(IPC.hostsImportSshConfig)
+      ipcRenderer.invoke(IPC.hostsImportSshConfig),
+    exportJson: (): Promise<{ ok: boolean; count?: number; canceled?: boolean; error?: string }> =>
+      ipcRenderer.invoke(IPC.hostsExportJson),
+    importJson: (): Promise<{ ok: boolean; count?: number; canceled?: boolean; error?: string }> =>
+      ipcRenderer.invoke(IPC.hostsImportJson)
   },
   knownHosts: {
     list: (): Promise<KnownHostEntry[]> => ipcRenderer.invoke(IPC.knownHostsList),
@@ -122,6 +126,16 @@ const api = {
       ipcRenderer.invoke(IPC.sftpUploadDir, sessionId, remoteDir, concurrency),
     uploadPaths: (sessionId: string, remoteDir: string, paths: string[], concurrency?: number): Promise<SftpResult> =>
       ipcRenderer.invoke(IPC.sftpUploadPaths, sessionId, remoteDir, paths, concurrency),
+    packDownload: (
+      sessionId: string,
+      items: { path: string; name: string; isDir: boolean }[],
+      archiveName?: string
+    ): Promise<SftpResult> =>
+      ipcRenderer.invoke(IPC.sftpPackDownload, sessionId, items, archiveName),
+    extract: (sessionId: string, remoteDir: string, archiveFileName: string): Promise<SftpResult> =>
+      ipcRenderer.invoke(IPC.sftpExtract, sessionId, remoteDir, archiveFileName),
+    uploadExtract: (sessionId: string, remoteDir: string, concurrency?: number): Promise<SftpResult> =>
+      ipcRenderer.invoke(IPC.sftpUploadExtract, sessionId, remoteDir, concurrency),
     mkdir: (sessionId: string, path: string): Promise<SftpResult> =>
       ipcRenderer.invoke(IPC.sftpMkdir, sessionId, path),
     createFile: (sessionId: string, path: string): Promise<SftpResult> =>

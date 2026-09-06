@@ -333,6 +333,36 @@ function registerIpc(): void {
   )
   ipcMain.handle(IPC.hostsDelete, (_e, id: string) => store.delete(id))
   ipcMain.handle(IPC.hostsImportSshConfig, () => importSshConfig())
+  ipcMain.handle(IPC.hostsExportJson, async () => {
+    const res = await dialog.showSaveDialog({
+      title: '备份主机到 JSON',
+      defaultPath: 'x-ssh-hosts.json',
+      filters: [{ name: 'JSON', extensions: ['json'] }]
+    })
+    if (res.canceled || !res.filePath) return { ok: false, canceled: true }
+    try {
+      const json = await store.exportJson()
+      await writeFile(res.filePath, json, 'utf8')
+      return { ok: true }
+    } catch (e) {
+      return { ok: false, error: friendlyError((e as Error).message) }
+    }
+  })
+  ipcMain.handle(IPC.hostsImportJson, async () => {
+    const res = await dialog.showOpenDialog({
+      title: '从 JSON 恢复主机',
+      properties: ['openFile'],
+      filters: [{ name: 'JSON', extensions: ['json'] }]
+    })
+    if (res.canceled || !res.filePaths[0]) return { ok: false, canceled: true }
+    try {
+      const json = await readFile(res.filePaths[0], 'utf8')
+      const r = await store.importJson(json)
+      return { ok: true, count: r.count }
+    } catch (e) {
+      return { ok: false, error: friendlyError((e as Error).message) }
+    }
+  })
 
   // ---- Known hosts (settings page) ----
   ipcMain.handle(IPC.knownHostsList, async () => {
@@ -605,6 +635,56 @@ function registerIpc(): void {
         return { ok: true, count: paths.length }
       } catch (e) {
         return { ok: false, error: friendlyError((e as Error).message), count: 0 }
+      }
+    }
+  )
+  ipcMain.handle(
+    IPC.sftpPackDownload,
+    async (
+      _e,
+      sessionId: string,
+      items: { path: string; name: string; isDir: boolean }[],
+      archiveName?: string
+    ) => {
+      if (!sshManager) return { ok: false, error: '窗口未就绪' }
+      const res = await dialog.showOpenDialog({
+        title: '选择保存打包文件的文件夹',
+        properties: ['openDirectory']
+      })
+      if (res.canceled || !res.filePaths[0]) return { ok: false, canceled: true }
+      return sshManager.packAndDownload(sessionId, items, res.filePaths[0], archiveName)
+    }
+  )
+  ipcMain.handle(
+    IPC.sftpExtract,
+    async (_e, sessionId: string, remoteDir: string, archiveFileName: string) => {
+      try {
+        const r = await sshManager!.extractArchive(sessionId, remoteDir, archiveFileName)
+        return r
+      } catch (e) {
+        return { ok: false, error: friendlyError((e as Error).message) }
+      }
+    }
+  )
+  ipcMain.handle(
+    IPC.sftpUploadExtract,
+    async (_e, sessionId: string, remoteDir: string, archiveFileName: string, concurrency?: number) => {
+      if (!sshManager) return { ok: false, error: '窗口未就绪' }
+      const res = await dialog.showOpenDialog({
+        title: '选择要上传并解压的归档文件',
+        properties: ['openFile'],
+        filters: [
+          { name: '归档文件', extensions: ['zip', 'tar', 'gz', 'tgz', 'tar.gz'] }
+        ]
+      })
+      if (res.canceled || !res.filePaths[0]) return { ok: false, canceled: true }
+      try {
+        // Upload the archive into remoteDir, then extract it there.
+        await sshManager.uploadJob(sessionId, res.filePaths, remoteDir, randomUUID(), concurrency)
+        const name = basename(res.filePaths[0])
+        return await sshManager.extractArchive(sessionId, remoteDir, name)
+      } catch (e) {
+        return { ok: false, error: friendlyError((e as Error).message) }
       }
     }
   )

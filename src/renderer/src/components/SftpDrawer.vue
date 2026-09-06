@@ -315,6 +315,7 @@ async function load(p?: string): Promise<void> {
     if (!homePath.value) homePath.value = res.path
     if (props.sessionId) store.setSftpPath(props.sessionId, res.path)
     entries.value = res.entries
+    if (res.path !== '/') void store.addSftpRecent(res.path)
   } catch (e) {
     error.value = (e as Error).message || tt('sfp.readDirFail')
   } finally {
@@ -794,6 +795,35 @@ async function downloadSelected(): Promise<void> {
   const r = await window.api.sftp.downloadMany(props.sessionId, payload, store.transferConcurrency)
   if (!r.ok && !r.canceled) error.value = r.error ?? tt('sfp.downloadFail')
 }
+async function packDownloadSelected(): Promise<void> {
+  if (!props.sessionId) return
+  const items = selectedEntries()
+  if (!items.length) return
+  const payload = items.map((e) => ({
+    path: posixJoin(path.value, e.name),
+    name: e.name,
+    isDir: e.isDir
+  }))
+  busy.value = true
+  try {
+    const r = await window.api.sftp.packDownload(props.sessionId, payload)
+    if (!r.ok && !r.canceled) error.value = r.error ?? tt('sfp.packFail')
+    else if (r.ok) await load(path.value)
+  } finally {
+    busy.value = false
+  }
+}
+async function uploadExtractPick(): Promise<void> {
+  if (!props.sessionId || busy.value) return
+  busy.value = true
+  try {
+    const r = await window.api.sftp.uploadExtract(props.sessionId, path.value, store.transferConcurrency)
+    if (!r.ok && !r.canceled) error.value = r.error ?? tt('sfp.extractFail')
+    else if (r.ok) await load(path.value)
+  } finally {
+    busy.value = false
+  }
+}
 async function delSelected(): Promise<void> {
   if (!props.sessionId) return
   const items = selectedEntries()
@@ -1077,6 +1107,8 @@ const pct = (t: SftpProgress): number =>
         <button @click="runMore(() => startCreate('folder'))"><Icon name="folder" :size="15" /><span>{{ tt('sfp.newFolder') }}</span></button>
         <button @click="runMore(() => startCreate('file'))"><Icon name="file" :size="15" /><span>{{ tt('sfp.newFile') }}</span></button>
         <button @click="runMore(uploadDirPick)"><Icon name="folder-up" :size="15" /><span>{{ tt('sfp.uploadDir') }}</span></button>
+        <button @click="runMore(uploadExtractPick)"><Icon name="zip" :size="15" /><span>{{ tt('sfp.uploadExtract') }}</span></button>
+        <button @click="runMore(packDownloadSelected)"><Icon name="archive" :size="15" /><span>{{ tt('sfp.packDownload') }}</span></button>
         <button @click="runMore(toggleHidden)"><Icon name="eye" :size="15" /><span>{{ showHidden ? tt('sfp.toggleHiddenHide') : tt('sfp.toggleHiddenShow') }}</span></button>
         <button v-if="hasTermCwd" @click="runMore(gotoTerminalDir)"><Icon name="terminal" :size="15" /><span>{{ tt('sfp.gotoTerminal') }}</span></button>
         <button @click="runMore(openHistory)"><Icon name="clock" :size="15" /><span>{{ tt('sfp.history') }}{{ activeHistory.length ? ` (${activeHistory.length})` : '' }}</span></button>
@@ -1211,6 +1243,15 @@ const pct = (t: SftpProgress): number =>
           <span class="bm-path">{{ b }}</span>
           <Icon name="close" :size="12" class="rm" @click.stop="store.toggleSftpBookmark(b)" />
         </button>
+        <template v-if="store.sftpRecent.length">
+          <div class="bm-head recent">
+            <span>{{ tt('sfp.recent') }}</span>
+          </div>
+          <button v-for="b in store.sftpRecent" :key="b" class="bm-item" @click="jumpBookmark(b)">
+            <Icon name="clock" :size="13" />
+            <span class="bm-path">{{ b }}</span>
+          </button>
+        </template>
       </div>
     </div>
 
@@ -2231,6 +2272,12 @@ const pct = (t: SftpProgress): number =>
   font-weight: 600;
   color: var(--text-dim);
   border-bottom: 1px solid var(--border);
+}
+.bm-head.recent {
+  margin-top: 5px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-faint);
 }
 .bm-empty {
   padding: 16px;

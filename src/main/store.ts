@@ -2,7 +2,6 @@ import { app, safeStorage } from 'electron'
 import { join } from 'node:path'
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import type { Host } from '../shared/types'
-
 /**
  * Flat-file host store. Hosts live in hosts.json (non-secret metadata).
  * Passwords, when the user opts to save them, are encrypted per-OS via
@@ -122,5 +121,42 @@ export class HostStore {
       host.lastUsedAt = Date.now()
       await this.persist()
     }
+  }
+
+  /** Exports all hosts + their saved secrets to a portable JSON blob. Secrets
+   *  are included in plaintext so a backup can be restored on another machine
+   *  (safeStorage/DPAPI is per-machine, so re-encrypting happens on import). */
+  async exportJson(): Promise<string> {
+    await this.ensureLoaded()
+    const hosts = this.hosts.map((h) => ({
+      ...h,
+      password: this.secrets[h.id] ?? '',
+      passphrase: this.secrets[this.ppKey(h.id)] ?? ''
+    }))
+    return JSON.stringify({ app: 'x-ssh', version: 1, exportedAt: Date.now(), hosts }, null, 2)
+  }
+
+  /** Replaces the host list (and their secrets) from an exported JSON blob.
+   *  Returns the number of imported hosts. Existing hosts are replaced. */
+  async importJson(json: string): Promise<{ count: number }> {
+    await this.ensureLoaded()
+    const data = JSON.parse(json)
+    if (!data || !Array.isArray(data.hosts)) throw new Error('无效的备份文件')
+    const imported: Host[] = []
+    const newSecrets: Record<string, string> = {}
+    for (const h of data.hosts) {
+      if (!h || typeof h.id !== 'string' || typeof h.host !== 'string') continue
+      const { password, passphrase, hasSavedPassword: _p, hasSavedPassphrase: _pp, ...clean } = h
+      void _p
+      void _pp
+      imported.push(clean as Host)
+      if (password) newSecrets[h.id as string] = password
+      if (passphrase) newSecrets[this.ppKey(h.id as string)] = passphrase
+    }
+    this.hosts = imported
+    this.secrets = newSecrets
+    this.secretsLoadFailed = false
+    await this.persist()
+    return { count: imported.length }
   }
 }

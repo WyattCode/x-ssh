@@ -1282,6 +1282,71 @@ export class SshManager {
     )
   }
 
+  /** Runs a remote command on the shell, resolving with its combined output. */
+  private execRemote(sessionId: string, command: string): Promise<{ code: number; out: string }> {
+    const session = this.sessions.get(sessionId)
+    if (!session) return Promise.reject(new Error('会话已断开'))
+    return new Promise((resolve, reject) => {
+      session.client.exec(command, (err, channel) => {
+        if (err) return reject(err)
+        let out = ''
+        channel.on('data', (d: Buffer) => (out += d.toString('utf8')))
+        channel.stderr.on('data', (d: Buffer) => (out += d.toString('utf8')))
+        channel.on('close', (code: number) => resolve({ code, out }))
+        channel.on('error', reject)
+      })
+    })
+  }
+
+  /** Packs selected remote items into an archive on the remote host, then
+   *  downloads it as a single file into localDir. Returns the local archive path.
+   *  Uses `tar` (universal on Unix) — zip would need `zip` installed elsewhere. */
+  async packAndDownload(
+    sessionId: string,
+    items: { path: string; name: string; isDir: boolean }[],
+    localDir: string,
+    archiveName?: string
+  ): Promise<{ ok: boolean; localPath?: string; error?: string; canceled?: boolean }> {
+    if (!items.length) return { ok: false, error: '没有可打包的项' }
+    const parent = this.parentOf(items[0].path)
+    const tmp = `/tmp/xssh-${randomUUID().slice(0, 8)}.tar.gz`
+    const names = items.map((i) => i.name)
+    const quoted = names.map((n) => `'${n.replace(/'/g, "'\\''")}'`).join(' ')
+    const cd = `cd ${JSON.stringify(parent)}`
+    // tar czf <tmp> --force-local -C <parent> <names>
+    await this.execRemote(sessionId, `${cd} && tar czf "${tmp}" ${quoted}`)
+    const name = archiveName || (items.length === 1 ? items[0].name : 'archive') + '.tar.gz'
+    const outPath = resolve(localDir, name).replace(/\.tar\.gz$/, '.tar.gz')
+    try {
+      await this.downloadJob(sessionId, [{ path: tmp, name, isDir: false }], localDir, randomUUID(), 1)
+      await this.execRemote(sessionId, `rm -f "${tmp}"`).catch(() => {})
+      return { ok: true, localPath: outPath }
+    } catch (e) {
+      await this.execRemote(sessionId, `rm -f "${tmp}"`).catch(() => {})
+      return { ok: false, error: friendlyError((e as Error).message) }
+    }
+  }
+
+  /** Extracts an archive on the remote host into remoteDir. `format` is picked
+   *  from the archive file extension (tar.gz/tgz → tar, zip → unzip). */
+  async extractArchive(
+    sessionId: string,
+    remoteDir: string,
+    archiveFileName: string
+  ): Promise<{ ok: boolean; error?: string }> {
+    const base = this.posixJoin(remoteDir, archiveFileName)
+    const lower = archiveFileName.toLowerCase()
+    let cmd: string
+    if (lower.endsWith('.zip')) cmd = `cd ${JSON.stringify(remoteDir)} && unzip -o "${archiveFileName}"`
+    else cmd = `cd ${JSON.stringify(remoteDir)} && tar xzf "${archiveFileName}"`
+    const { code, out } = await this.execRemote(sessionId, cmd).catch((e) => ({
+      code: -1,
+      out: (e as Error).message
+    }))
+    if (code !== 0) return { ok: false, error: out.trim() || '解压失败' }
+    return { ok: true }
+  }
+
   disconnect(sessionId: string): void {
     const session = this.sessions.get(sessionId)
     if (!session) return

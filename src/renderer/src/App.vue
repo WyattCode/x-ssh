@@ -256,6 +256,7 @@ onMounted(async () => {
     store.loadSnippets(),
     store.loadKnownHosts(),
     store.loadSftpBookmarks(),
+    store.loadSftpRecent(),
     store.loadSnapshots()
   ])
   await store.restoreSavedTabs()

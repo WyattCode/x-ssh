@@ -5,6 +5,8 @@ export const IPC = {
   hostsSave: 'hosts:save',
   hostsDelete: 'hosts:delete',
   hostsImportSshConfig: 'hosts:importSshConfig',
+  hostsExportJson: 'hosts:exportJson',
+  hostsImportJson: 'hosts:importJson',
 
   // SSH lifecycle (invoke/handle)
   sshConnect: 'ssh:connect',
@@ -48,6 +50,9 @@ export const IPC = {
   sftpEditExternal: 'sftp:editExternal',
   sftpStartDrag: 'sftp:startDrag', // renderer -> main (drag out)
   sftpProgress: 'sftp:progress', // main -> renderer
+  sftpPackDownload: 'sftp:packDownload', // remote tar.zip -> download
+  sftpExtract: 'sftp:extract', // extract uploaded archive on remote
+  sftpUploadExtract: 'sftp:uploadExtract', // upload archive then extract on remote
 
   // SSH data stream (send, no reply)
   sshInput: 'ssh:input', // renderer -> main : keystrokes
