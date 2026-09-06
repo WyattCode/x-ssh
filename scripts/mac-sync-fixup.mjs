@@ -145,7 +145,7 @@ patch('src/renderer/src/App.vue', [
   },
   {
     name: '⌘W closes tab even in terminal on mac',
-    done: 'if (!isMac && inTerminal) return',
+    done: '!isMac && inTerminal',
     from: `    // Ctrl+W is werase in a shell — never close the session tab from within\n    // the terminal.\n    if (inTerminal) return`,
     to: `    // On Windows/Linux Ctrl+W is werase — never close the tab from the terminal.\n    // On macOS ⌘W is unambiguous, so it always closes the tab.\n    if (!isMac && inTerminal) return`
   },
@@ -160,12 +160,6 @@ patch('src/renderer/src/App.vue', [
     done: 'applyZoom()',
     from: `  const savedZoom = Number(window.api.prefs.zoom)\n  if (!Number.isNaN(savedZoom) && savedZoom !== 0) window.api.zoom.set(savedZoom)`,
     to: `  applyZoom() // push the restored zoom level to webFrame`
-  },
-  {
-    name: 'pane close-button tooltip (dynamic modifier)',
-    done: '关闭此面板  (${modKey}⇧W)',
-    from: `              class="pane-x"\n              title="关闭此面板  (Ctrl+Shift+W)"`,
-    to: `              class="pane-x"\n              :title="\`关闭此面板  (\${modKey}⇧W)\`"`
   }
 ])
 
@@ -224,18 +218,6 @@ patch('src/renderer/src/components/TabBar.vue', [
     to: `  <div class="tabbar" :class="{ mac: isMac }" :style="barStyle">`
   },
   {
-    name: 'new-connection title (dynamic modifier)',
-    done: '`新建连接  (${modKey}K)`',
-    from: `    <button class="new" title="新建连接  (Ctrl/Cmd+K)" @click="store.togglePalette(true)">`,
-    to: `    <button class="new" :title="\`新建连接  (\${modKey}K)\`" @click="store.togglePalette(true)">`
-  },
-  {
-    name: 'split title (dynamic modifier)',
-    done: '`分屏  (${modKey}⇧D)`',
-    from: `      title="分屏  (Ctrl+Shift+D)"`,
-    to: `      :title="\`分屏  (\${modKey}⇧D)\`"`
-  },
-  {
     name: 'mac traffic-light CSS',
     done: '.tabbar.mac {',
     from: `.tabbar {\n  display: flex;\n  align-items: center;\n  height: 40px;\n  padding: 0 8px;\n  gap: 6px;\n  background: var(--bg-elev);\n  border-bottom: 1px solid var(--border);\n  -webkit-app-region: drag;\n}`,
@@ -252,22 +234,11 @@ patch('src/renderer/src/components/CommandPalette.vue', [
     done: "e.key === 'Enter' && !e.isComposing",
     from: `  if (pending.value) {\n    if (e.key === 'Escape') {\n      pending.value = null\n      nextTick(() => inputEl.value?.focus())\n    }\n    return\n  }`,
     to: `  if (pending.value) {\n    // Handle Enter at the palette level (not just on the password <input>): the\n    // prompt also has a "remember password" checkbox, and if focus lands there\n    // (or anywhere but the field) Enter must still submit and connect.\n    if (e.key === 'Enter' && !e.isComposing) {\n      e.preventDefault()\n      void submitPassword()\n    } else if (e.key === 'Escape') {\n      pending.value = null\n      nextTick(() => inputEl.value?.focus())\n    }\n    return\n  }`
-  },
-  {
-    name: 'drop field-level Enter handler (avoid double submit)',
-    done: `placeholder="输入密码,回车连接"\n        />`,
-    from: `          placeholder="输入密码,回车连接"\n          @keydown.enter.prevent="submitPassword"\n        />`,
-    to: `          placeholder="输入密码,回车连接"\n        />`
   }
 ])
 
 // main/index.ts: center in the work area (Electron center:true ignores the Dock)
 patch('src/main/index.ts', [{
-  name: 'work-area-aware window centering',
-  done: "Electron's `center: true` ignores",
-  from: `  const { width: sw, height: sh } = screen.getPrimaryDisplay().workAreaSize\n  const useSaved = !!saved && saved.width >= 680 && saved.height >= 440 && boundsOnScreen(saved)\n  const win = new BrowserWindow({\n    width: useSaved ? saved!.width : Math.min(1440, Math.round(sw * 0.66)),\n    height: useSaved ? saved!.height : Math.min(920, Math.round(sh * 0.8)),\n    x: useSaved ? saved!.x : undefined,\n    y: useSaved ? saved!.y : undefined,\n    minWidth: 680,\n    minHeight: 440,\n    center: !useSaved,`,
-  to: `  const display = screen.getPrimaryDisplay()\n  const { width: sw, height: sh } = display.workAreaSize\n  const wa = display.workArea // dock/menu-bar-aware bounds, for true centering\n  const useSaved = !!saved && saved.width >= 680 && saved.height >= 440 && boundsOnScreen(saved)\n  const winW = useSaved ? saved!.width : Math.min(1440, Math.round(sw * 0.66))\n  const winH = useSaved ? saved!.height : Math.min(920, Math.round(sh * 0.8))\n  const win = new BrowserWindow({\n    width: winW,\n    height: winH,\n    // Center in the work area ourselves — Electron's \\\`center: true\\\` ignores the\n    // macOS Dock, opening the window ~half the Dock height too high.\n    x: useSaved ? saved!.x : Math.round(wa.x + (wa.width - winW) / 2),\n    y: useSaved ? saved!.y : Math.round(wa.y + (wa.height - winH) / 2),\n    minWidth: 680,\n    minHeight: 440,`
-}, {
   name: 'flush settings on quit',
   done: "app.on('will-quit'",
   from: `app.on('window-all-closed', () => {\n  if (process.platform !== 'darwin') app.quit()\n})`,
@@ -318,23 +289,6 @@ patch('src/renderer/src/components/HostEditor.vue', [
     done: `@keydown.enter="onEnter"`,
     from: `    <div class="editor" @keydown.esc="emit('close')" @keydown.meta.enter="save" @keydown.ctrl.enter="save">`,
     to: `    <div class="editor" @keydown.esc="emit('close')" @keydown.enter="onEnter">`
-  }
-])
-
-// SftpDrawer.vue: warm the drag-out download on mousedown so startDrag fires
-// promptly (macOS drops the gesture otherwise). Optional-chained for safety.
-patch('src/renderer/src/components/SftpDrawer.vue', [
-  {
-    name: 'onRowMousedown prefetch',
-    done: 'function onRowMousedown(',
-    from: `function onDragStart(e: DragEvent, entry: FileEntry): void {\n  e.preventDefault() // cancel the DOM drag; main starts a native drag instead`,
-    to: `// Warm the drag-out download on mousedown so the file is already on disk when a\n// drag begins — startDrag must fire promptly or macOS drops the gesture.\nfunction onRowMousedown(e: MouseEvent, entry: FileEntry): void {\n  if (e.button !== 0 || !props.sessionId) return\n  window.api.sftp.prefetchDrag?.(\n    props.sessionId,\n    posixJoin(path.value, entry.name),\n    entry.name,\n    entry.isDir\n  )\n}\nfunction onDragStart(e: DragEvent, entry: FileEntry): void {\n  e.preventDefault() // cancel the DOM drag; main starts a native drag instead`
-  },
-  {
-    name: 'row mousedown binding',
-    done: `@mousedown="onRowMousedown($event, entry)"`,
-    from: `          draggable="true"\n          @click="onRowClick(entry, $event)"`,
-    to: `          draggable="true"\n          @mousedown="onRowMousedown($event, entry)"\n          @click="onRowClick(entry, $event)"`
   }
 ])
 
