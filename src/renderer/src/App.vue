@@ -20,6 +20,7 @@ import HistorySearch from './components/HistorySearch.vue'
 import SettingsDialog from './components/SettingsDialog.vue'
 import StatusBar from './components/StatusBar.vue'
 import Icon from './components/Icon.vue'
+import PaneNode from './components/PaneNode.vue'
 import { useI18n } from './lib/i18n'
 import logoUrl from './assets/logo.png'
 import type { Host } from '../../shared/types'
@@ -175,6 +176,12 @@ function onGlobalKey(e: KeyboardEvent): void {
     if (store.active && store.activePane?.status === 'connected') {
       void store.splitPane(store.active.id, 'row')
     }
+  } else if (mod && e.shiftKey && (e.key === '\\' || e.key === '`')) {
+    // Split the active pane stacked (a second session above/below) for a 2×2.
+    e.preventDefault()
+    if (store.active && store.activePane?.status === 'connected') {
+      void store.splitPane(store.active.id, 'col')
+    }
   } else if (mod && e.shiftKey && e.key.toLowerCase() === 'w') {
     // Close just the focused pane (falls back to closing the tab if it's the last).
     e.preventDefault()
@@ -288,92 +295,19 @@ onBeforeUnmount(() => {
 
     <main class="stage">
       <div class="main-area">
-      <!-- Live terminals: kept mounted, shown by visibility. A tab holds one or
-           more panes laid out in a flex split. -->
+      <!-- Live terminals: kept mounted, shown by visibility. A tab holds a
+           nested split tree of panes rendered recursively. -->
       <template v-for="tab in store.tabs" :key="tab.id">
-        <div
+        <PaneNode
           v-show="tab.id === store.activeId"
-          class="pane-grid"
-          :class="[tab.layout, { multi: tab.panes.length > 1 }]"
-        >
-          <div
-            v-for="pane in tab.panes"
-            :key="pane.id"
-            class="pane-cell"
-            :class="{ focused: tab.panes.length > 1 && pane.id === tab.activePaneId }"
-            @mousedown="store.setActivePane(tab.id, pane.id)"
-          >
-            <button
-              v-if="tab.panes.length > 1"
-              class="pane-x"
-              :title="t('app.closePaneTip', { key: `${modKey}+Shift+W` })"
-              @mousedown.stop
-              @click="store.closePane(pane.id)"
-            >
-              <Icon name="close" :size="13" />
-            </button>
-
-            <TerminalView
-              v-if="pane.sshSessionId"
-              :session-id="pane.sshSessionId"
-              :visible="tab.id === store.activeId"
-              :focused="tab.id === store.activeId && pane.id === tab.activePaneId"
-              @cwd="onCwd"
-            />
-
-            <div v-else-if="pane.status === 'connecting'" class="state">
-              <div class="spinner" />
-              <p>{{ pane.reconnectAttempt ? pane.message : t('app.connecting', { title: tab.title }) }}</p>
-            </div>
-
-            <div v-else-if="pane.status === 'error'" class="idle">
-              <div class="idle-card">
-                <div class="idle-title">{{ tab.title }}</div>
-                <div class="idle-status" :class="{ warn: pane.errorCode === 'host_key_changed' }">
-                  {{ pane.errorCode === 'host_key_changed' ? t('app.keyChanged') : t('app.connectFail') }}
-                </div>
-                <p class="idle-msg">{{ pane.message }}</p>
-                <button
-                  class="idle-connect"
-                  @click.stop="
-                    pane.errorCode === 'host_key_changed'
-                      ? store.trustAndReconnect(pane.id)
-                      : store.reconnect(pane.id)
-                  "
-                >
-                  <Icon name="refresh" :size="15" />
-                  <span>{{ pane.errorCode === 'host_key_changed' ? t('app.trustReconnect') : t('app.reconnect') }}</span>
-                </button>
-                <button
-                  class="idle-close"
-                  @click.stop="tab.panes.length > 1 ? store.closePane(pane.id) : store.closeTab(tab.id)"
-                >
-                  {{ tab.panes.length > 1 ? t('app.closePane') : t('app.closeTab') }}
-                </button>
-              </div>
-            </div>
-
-            <!-- Restored-from-last-session tab, not yet connected. -->
-            <div v-else-if="pane.status === 'closed'" class="idle">
-              <div class="idle-card">
-                <div class="idle-icon"><Icon name="server" :size="24" /></div>
-                <div class="idle-title">{{ tab.title }}</div>
-                <div class="idle-sub">
-                  {{ pane.params.username }}@{{ pane.params.host }}<template v-if="pane.params.port !== 22">:{{ pane.params.port }}</template>
-                </div>
-                <button class="idle-connect" @click.stop="store.reconnect(pane.id)">
-                  <Icon name="terminal" :size="15" /><span>{{ t('app.connect') }}</span>
-                </button>
-                <button
-                  class="idle-close"
-                  @click.stop="tab.panes.length > 1 ? store.closePane(pane.id) : store.closeTab(tab.id)"
-                >
-                  {{ tab.panes.length > 1 ? t('app.closePane') : t('app.closeTab') }}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+          :node="tab.layout"
+          :tab="tab"
+          :root="true"
+          :path="[]"
+          :tab-active="tab.id === store.activeId"
+          :mod-key="modKey"
+          @cwd="onCwd"
+        />
       </template>
 
       <!-- Empty state -->

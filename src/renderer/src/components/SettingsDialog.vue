@@ -3,6 +3,7 @@ import { ref, computed, watch, nextTick, reactive } from 'vue'
 import { useSessions } from '../stores/sessions'
 import Icon from './Icon.vue'
 import { SHORTCUT_GROUPS } from '../lib/shortcuts'
+import { splitShortcutChips } from '../lib/shortcutChips'
 import { PRESETS } from '../lib/terminalThemes'
 import { useI18n } from '../lib/i18n'
 import { useToast } from '../composables/toast'
@@ -30,14 +31,11 @@ const withMod = (t: string): string => t.split('Mod').join(modKey)
 /** Splits a spec into chip groups and the separators between them:
  *  "Mod+1 … Mod+8" renders as [Ctrl][1] … [Ctrl][8]. */
 function parts(keys: string): { chord?: string[]; sep?: string }[] {
-  return keys
-    .split(/s+([/…])s+/)
-    .filter((piece) => piece !== '')
-    .map((piece) =>
-      piece === '/' || piece === '…'
-        ? { sep: piece === '/' ? t('kbd.or') : '…' }
-        : { chord: piece.split('+').map(withMod) }
-    )
+  return splitShortcutChips(keys).map((piece) =>
+    'sep' in piece
+      ? { sep: piece.sep === 'or' ? t('kbd.or') : '…' }
+      : { chord: piece.chord.map(withMod) }
+  )
 }
 
 const groups = SHORTCUT_GROUPS

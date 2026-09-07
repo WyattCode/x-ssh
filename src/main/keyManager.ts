@@ -16,9 +16,13 @@ const execFileAsync = promisify(execFile)
  */
 export class KeyManager {
   private readonly keysDir: string
+  private readonly labelsPath: string
 
   constructor(dir: string) {
     this.keysDir = join(dir, 'keys')
+    // Sidecar of friendly key labels (id → label) so displayed names aren't the
+    // auto-generated ids. A dotfile, so KeyManager.list() ignores it.
+    this.labelsPath = join(this.keysDir, '.labels.json')
   }
 
   private async ensureDir(): Promise<string> {
@@ -29,6 +33,7 @@ export class KeyManager {
   async list(): Promise<ManagedKey[]> {
     await this.ensureDir()
     const names = await readdir(this.keysDir)
+    const labels = await this.readLabels()
     // Concurrently describe every candidate (skipping .pub / hidden / scratch
     // files) instead of spawning ssh-keygen serially, which made the host
     // editor slow once a user had several keys.
@@ -43,7 +48,7 @@ export class KeyManager {
           } catch {
             return null
           }
-          return this.describe(p, n)
+          return this.describe(p, n, labels[n])
         })()
       )
     }
@@ -52,48 +57,51 @@ export class KeyManager {
     return out.sort((a, b) => (b.mtime ?? 0) - (a.mtime ?? 0))
   }
 
-  private async describe(p: string, name: string): Promise<ManagedKey> {
+  private async describe(p: string, id: string, label?: string): Promise<ManagedKey> {
     const s = await stat(p)
     const key: ManagedKey = {
-      id: name,
-      name,
+      id,
+      name: label || id,
       path: p,
       mtime: s.mtimeMs
     }
-    // Run the fingerprint and passphrase probes concurrently (they're two
-    // independent ssh-keygen invocations) so a key takes one round-trip, not
-    // two serial ones.
-    const [fingerprint, type, passphraseProtected] = await Promise.all([
-      this.safeFingerprint(p),
-      this.safeType(p),
+    // One `ssh-keygen -lf` yields both the fingerprint and the algorithm, so
+    // run it together with the passphrase probe (two child processes total
+    // instead of three) and parse the line once for both fields.
+    const [info, passphraseProtected] = await Promise.all([
+      this.describeKey(p),
       this.isPassphraseProtected(p)
     ])
-    key.fingerprint = fingerprint
-    key.type = type
+    key.fingerprint = info?.fingerprint
+    key.type = info?.type
     key.passphraseProtected = passphraseProtected
     return key
   }
 
-  /** Best-effort fingerprint from `ssh-keygen -lf`, or undefined on failure. */
-  private async safeFingerprint(p: string): Promise<string | undefined> {
+  /** Best-effort { fingerprint, type } from one `ssh-keygen -lf` invocation. */
+  private async describeKey(p: string): Promise<{ fingerprint?: string; type?: string } | undefined> {
     try {
       const { stdout } = await this.sshKeygen(['-lf', p])
       const m = stdout.trim().match(/^(\d+) (\S+) (\S+)/)
-      return m ? m[2] : undefined
+      return m ? { fingerprint: m[2], type: m[3] } : undefined
     } catch {
       return undefined
     }
   }
 
-  /** Best-effort key algorithm from `ssh-keygen -lf`, or undefined on failure. */
-  private async safeType(p: string): Promise<string | undefined> {
+  /** Reads the id → friendly-label sidecar (absent when none have been set). */
+  private async readLabels(): Promise<Record<string, string>> {
     try {
-      const { stdout } = await this.sshKeygen(['-lf', p])
-      const m = stdout.trim().match(/^(\d+) (\S+) (\S+)/)
-      return m ? m[3] : undefined
+      const txt = await readFile(this.labelsPath, 'utf8')
+      const parsed = JSON.parse(txt)
+      return parsed && typeof parsed === 'object' ? parsed as Record<string, string> : {}
     } catch {
-      return undefined
+      return {}
     }
+  }
+
+  private async writeLabels(labels: Record<string, string>): Promise<void> {
+    await writeFile(this.labelsPath, JSON.stringify(labels), { mode: 0o600 }).catch(() => undefined)
   }
 
   private async sshKeygen(args: string[]): Promise<{ stdout: string }> {
@@ -144,7 +152,11 @@ export class KeyManager {
     } catch {
       /* ignore */
     }
-    return this.describe(priv, id).then((k) => {
+    // Remember the friendly label so the UI never shows the auto-generated id.
+    const labels = await this.readLabels()
+    labels[id] = opts.name
+    await this.writeLabels(labels)
+    return this.describe(priv, id, opts.name).then((k) => {
       k.type = typeOut ?? k.type
       k.fingerprint = fp ?? k.fingerprint
       return k
@@ -172,7 +184,11 @@ export class KeyManager {
       await rm(`${priv}.pub`, { force: true }).catch(() => {})
       throw new Error('所选文件不是有效的私钥')
     }
-    return this.describe(priv, id)
+    const label = basename(srcPath).replace(/\.(pem|key|pub)$/i, '')
+    const labels = await this.readLabels()
+    labels[id] = label
+    await this.writeLabels(labels)
+    return this.describe(priv, id, label)
   }
 
   async remove(id: string): Promise<void> {
@@ -183,5 +199,10 @@ export class KeyManager {
     const priv = join(this.keysDir, id)
     await rm(priv, { force: true })
     await rm(`${priv}.pub`, { force: true })
+    const labels = await this.readLabels()
+    if (id in labels) {
+      delete labels[id]
+      await this.writeLabels(labels)
+    }
   }
 }

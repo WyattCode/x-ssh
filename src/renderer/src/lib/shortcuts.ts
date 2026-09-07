@@ -37,6 +37,7 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
     id: 'split',
     items: [
       { keys: 'Mod+Shift+D', key: 'split' },
+      { keys: 'Mod+Shift+\\', key: 'splitCol' },
       { keys: 'Mod+Shift+O', key: 'focus' },
       { keys: 'Mod+Shift+W', key: 'closePane' }
     ]

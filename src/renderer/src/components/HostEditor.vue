@@ -107,6 +107,14 @@ const keyModal = reactive({ open: false, name: '', type: 'ed25519', passphrase: 
 async function loadKeys(): Promise<void> {
   managedKeys.value = await window.api.keys.list()
 }
+// Dropdown text identifies a key: friendly label + algorithm (and a short SHA
+// fingerprint when present), so several keys aren't confused by name alone.
+function keyOptionLabel(k: ManagedKey): string {
+  let label = k.name
+  if (k.type) label += ` (${k.type})`
+  if (k.fingerprint) label += ` · ${k.fingerprint.replace(/^SHA256:/, '').slice(0, 12)}`
+  return label
+}
 watch(
   () => props.open,
   (open) => {
@@ -355,7 +363,7 @@ async function remove(): Promise<void> {
           <div v-if="managedKeys.length" class="keyrow">
             <select class="keyselect" :value="form.keyPath || ''" @change="useKey(($event.target as HTMLSelectElement).value)">
               <option value="">{{ t('host.noKey') }}</option>
-              <option v-for="k in managedKeys" :key="k.id" :value="k.path">{{ k.name }}</option>
+              <option v-for="k in managedKeys" :key="k.id" :value="k.path">{{ keyOptionLabel(k) }}</option>
             </select>
             <button class="ghost" @click="openGenerate">{{ t('host.generateKey') }}</button>
             <button class="ghost" @click="importKey">{{ t('host.importKey') }}</button>

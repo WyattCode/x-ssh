@@ -4,6 +4,14 @@ import { useI18n } from '../lib/i18n'
 import { useToast } from '../composables/toast'
 import { useConfirm } from '../composables/confirm'
 import { clampConcurrency } from '../../../shared/fsUtils'
+import {
+  buildFlatTree,
+  collectPaneIds,
+  splitLeaf,
+  removePane,
+  setPaneRatio
+} from '../lib/paneLayout'
+import type { LayoutNode, SplitDir } from '../lib/paneLayout'
 import type {
   ConnectParams,
   Host,
@@ -48,8 +56,8 @@ export interface Tab {
   id: string
   title: string
   hostId?: string
-  /** Split direction of the panes. */
-  layout: 'row' | 'col'
+  /** Split layout tree of the panes (leaves are panes, branches are splits). */
+  layout: LayoutNode
   panes: Pane[]
   activePaneId: string
 }
@@ -59,7 +67,10 @@ export type CursorStyle = 'bar' | 'block' | 'underline'
 /** A serializable tab layout (secrets stripped) used for persistence/snapshots. */
 export interface PersistedTab {
   title: string
-  layout: 'row' | 'col'
+  /** Legacy flat direction (pre-nested builds). Superseded by `tree`. */
+  layout?: 'row' | 'col'
+  /** Nested split tree referencing pane indices (in the same DFS order as panes). */
+  tree?: LayoutNode
   activeIndex: number
   panes: { params: ConnectParams; cwd?: string }[]
   /** Back-compat for pre-layout builds that stored a single pane's params. */
@@ -300,34 +311,33 @@ export const useSessions = defineStore('sessions', {
     /** Persists every tab (layout + panes, minus secrets) so it can be restored. */
     persistTabs(): void {
       if (!this.restoreTabs) return
-      const list = this.tabs.map((t) => ({
-        title: t.title,
-        layout: t.layout,
-        activeIndex: Math.max(0, t.panes.findIndex((p) => p.id === t.activePaneId)),
-        panes: t.panes.map((p) => {
-          const params = { ...toRaw(p.params) }
-          delete params.password
-          delete params.passphrase
-          return { params, cwd: p.lastSftpPath }
-        })
-      }))
+      const list = this.tabs.map((t) => {
+        // Persist panes in the layout's depth-first order so the tree's indices
+        // line up exactly with the panes column on restore.
+        const ids = collectPaneIds(t.layout)
+        const byId = new Map(t.panes.map((p) => [p.id, p]))
+        const ordered = ids.map((id) => byId.get(id)).filter((p) => !!p)
+        return {
+          title: t.title,
+          tree: t.layout,
+          activeIndex: Math.max(0, ordered.findIndex((p) => p!.id === t.activePaneId)),
+          panes: ordered.map((p) => {
+            const params = { ...toRaw(p!.params) }
+            delete params.password
+            delete params.passphrase
+            return { params, cwd: p!.lastSftpPath }
+          })
+        }
+      })
       void window.api.settings.set('openTabs', list)
     },
 
     /** Recreates last session's tabs (layout + splits) in a disconnected state. */
     async restoreSavedTabs(): Promise<void> {
       if (!this.restoreTabs) return
-      const list = await window.api.settings.get<
-        {
-          title: string
-          layout: 'row' | 'col'
-          activeIndex: number
-          panes: { params: ConnectParams; cwd?: string }[]
-          params?: ConnectParams
-        }[]
-      >('openTabs')
+      const list = await window.api.settings.get<PersistedTab[]>('openTabs')
       if (!list?.length) return
-      this.restoreTabsFrom(list as PersistedTab[])
+      this.restoreTabsFrom(list)
     },
 
     /** Builds tabs from a persisted layout (used by restore & openSnapshot). */
@@ -340,24 +350,37 @@ export const useSessions = defineStore('sessions', {
           : item.params
             ? [{ params: item.params }]
             : []
-        const panes = panesList.map((p) => {
-          const paneId = uid('pane')
-          return {
-            id: paneId,
-            status: 'closed' as const,
-            params: p.params,
-            lastSftpPath: p.cwd
-          }
-        })
-        if (!panes.length) continue
+        if (!panesList.length) continue
         const tabId = uid('tab')
+        // Fresh ids for every pane. A nested tree's leaves (in DFS order) map to
+        // the persisted panes column one-for-one; a legacy flat layout lays all
+        // panes in one direction.
+        const paneIds = panesList.map(() => uid('pane'))
+        let layout: LayoutNode
+        if (item.tree && collectPaneIds(item.tree).length === paneIds.length) {
+          let i = 0
+          const reassign = (n: LayoutNode): LayoutNode =>
+            n.kind === 'leaf'
+              ? { kind: 'leaf', paneId: paneIds[i++] }
+              : { ...n, children: n.children.map(reassign) }
+          layout = reassign(item.tree)
+        } else {
+          const dir: SplitDir = item.layout === 'col' ? 'col' : 'row'
+          layout = buildFlatTree(paneIds, dir)
+        }
+        const panes = panesList.map((p, i) => ({
+          id: paneIds[i],
+          status: 'closed' as const,
+          params: p.params,
+          lastSftpPath: p.cwd
+        }))
         this.tabs.push({
           id: tabId,
           title: item.title,
           hostId: item.panes?.[0]?.params.hostId ?? panes[0].params.hostId,
-          layout: item.layout ?? 'row',
+          layout,
           panes,
-          activePaneId: panes[item.activeIndex ?? 0]?.id ?? panes[0].id
+          activePaneId: paneIds[item.activeIndex ?? 0] ?? paneIds[0]
         })
       }
       this.activeId = this.tabs[0]?.id ?? null
@@ -407,17 +430,22 @@ export const useSessions = defineStore('sessions', {
       await window.api.settings.set('sftpTransferHistory', this.transferHistory)
     },    /** Captures the current tab layout (minus secrets) as a named snapshot. */
     async saveSnapshot(name: string): Promise<void> {
-      const list = this.tabs.map((t) => ({
-        title: t.title,
-        layout: t.layout,
-        activeIndex: Math.max(0, t.panes.findIndex((p) => p.id === t.activePaneId)),
-        panes: t.panes.map((p) => {
-          const params = { ...toRaw(p.params) }
-          delete params.password
-          delete params.passphrase
-          return { params, cwd: p.lastSftpPath }
-        })
-      })) as PersistedTab[]
+      const list = this.tabs.map((t) => {
+        const ids = collectPaneIds(t.layout)
+        const byId = new Map(t.panes.map((p) => [p.id, p]))
+        const ordered = ids.map((id) => byId.get(id)).filter((p) => !!p)
+        return {
+          title: t.title,
+          tree: t.layout,
+          activeIndex: Math.max(0, ordered.findIndex((p) => p!.id === t.activePaneId)),
+          panes: ordered.map((p) => {
+            const params = { ...toRaw(p!.params) }
+            delete params.password
+            delete params.passphrase
+            return { params, cwd: p!.lastSftpPath }
+          })
+        }
+      }) as PersistedTab[]
       const snap: Snapshot = { id: uid('snap'), name, savedAt: Date.now(), tabs: list }
       this.snapshots = [snap, ...this.snapshots].slice(0, 30)
       await window.api.settings.set('snapshots', this.snapshots)
@@ -484,7 +512,7 @@ export const useSessions = defineStore('sessions', {
         id: uid('tab'),
         title,
         hostId: params.hostId,
-        layout: 'row',
+        layout: buildFlatTree([paneId], 'row'),
         panes: [{ id: paneId, status: 'connecting', params }],
         activePaneId: paneId
       }
@@ -496,13 +524,21 @@ export const useSessions = defineStore('sessions', {
       return tab.id
     },
 
-    /** Splits the active tab: opens another pane to the same target. */
-    async splitPane(tabId: string, dir: 'row' | 'col'): Promise<void> {
+    /** Sets the split ratio between two adjacent panes while dragging a divider. */
+    resizePane(tabId: string, path: number[], i: number, ratio: number): void {
       const tab = this.tabs.find((t) => t.id === tabId)
-      if (!tab || tab.panes.length >= 4) return
+      if (!tab) return
+      tab.layout = setPaneRatio(tab.layout, path, i, ratio)
+    },
+
+    /** Splits the active tab's focused pane, opening a new pane to the same
+     *  target beside it. Splitting a pane repeatedly yields a 2×2 grid. */
+    async splitPane(tabId: string, dir: SplitDir): Promise<void> {
+      const tab = this.tabs.find((t) => t.id === tabId)
+      if (!tab || tab.panes.length >= 8) return
       const src = tab.panes.find((p) => p.id === tab.activePaneId) ?? tab.panes[0]
-      tab.layout = dir
       const paneId = uid('pane')
+      tab.layout = splitLeaf(tab.layout, src.id, dir, paneId)
       tab.panes.push({ id: paneId, status: 'connecting', params: { ...toRaw(src.params) } })
       // Keep focus (and SFTP/editor binding) on the source pane while the new
       // one connects; hand focus over only once it's live.
@@ -690,11 +726,13 @@ export const useSessions = defineStore('sessions', {
         this.closeTab(tab.id)
         return
       }
+      // Prune the pane from the layout tree, collapsing any single-child branch.
+      const pruned = removePane(tab.layout, paneId)
+      tab.layout = pruned ?? buildFlatTree(tab.panes.map((p) => p.id), 'row')
       if (tab.activePaneId === paneId) {
         tab.activePaneId = (tab.panes[idx] ?? tab.panes[idx - 1]).id
       }
-      // The persisted tab tracks its first pane; refresh if that one changed.
-      if (idx === 0) this.persistTabs()
+      this.persistTabs()
     },
 
     closeTab(id: string): void {

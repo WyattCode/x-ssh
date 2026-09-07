@@ -98,6 +98,14 @@ function hostColor(tab: Tab): string | undefined {
     <button
       v-if="store.activePane?.status === 'connected'"
       class="tool"
+      :title="t('tabbar.splitCol', { key: `${modKey}+Shift+\\` })"
+      @click="store.active && store.splitPane(store.active.id, 'col')"
+    >
+      <Icon name="rows" :size="16" />
+    </button>
+    <button
+      v-if="store.activePane?.status === 'connected'"
+      class="tool"
       :class="{ on: store.sftpOpen }"
       :title="t('tabbar.sftp')"
       @click="store.toggleSftp()"

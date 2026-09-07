@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, toRaw, watch } from 'vue'
 import { useSessions } from '../stores/sessions'
-import { fuzzyScore } from '../lib/fuzzy'
+import { fuzzyScore, fuzzyMatch } from '../lib/fuzzy'
 import { parseTarget } from '../lib/target'
 import { useI18n } from '../lib/i18n'
 import Icon from './Icon.vue'
@@ -31,6 +31,28 @@ const remember = ref(true)
 const pwEl = ref<HTMLInputElement>()
 
 const oneLine = (s: string): string => s.replace(/\s+/g, ' ').trim().slice(0, 60)
+
+// Splits text into highlight/non-highlight segments for the query's fuzzy
+// match, so the palette can <mark> the matched characters.
+function highlight(text: string, query: string): { text: string; hit: boolean }[] {
+  if (!query) return [{ text, hit: false }]
+  const idx = fuzzyMatch(query, text)
+  if (!idx.length) return [{ text, hit: false }]
+  const set = new Set(idx)
+  const segs: { text: string; hit: boolean }[] = []
+  let pos = 0
+  for (let i = 0; i < text.length; i++) {
+    if (!set.has(i)) continue
+    if (i > pos) segs.push({ text: text.slice(pos, i), hit: false })
+    let j = i
+    while (j + 1 < text.length && set.has(j + 1)) j++
+    segs.push({ text: text.slice(i, j + 1), hit: true })
+    pos = j + 1
+    i = j
+  }
+  if (pos < text.length) segs.push({ text: text.slice(pos), hit: false })
+  return segs
+}
 
 const sections = computed<{ id: string; title: string; items: Item[] }[]>(() => {
   const q = query.value.trim()
@@ -337,9 +359,17 @@ function onKey(e: KeyboardEvent): void {
               </span>
               <span class="text">
                 <span class="title">
-                  {{ item.title }}
+                  <template v-for="(seg, sk) in highlight(item.title, query)" :key="'t' + sk">
+                    <mark v-if="seg.hit" class="match">{{ seg.text }}</mark>
+                    <template v-else>{{ seg.text }}</template>
+                  </template>
                 </span>
-                <span class="sub">{{ item.sub }}</span>
+                <span class="sub">
+                  <template v-for="(seg, sk) in highlight(item.sub, query)" :key="'s' + sk">
+                    <mark v-if="seg.hit" class="match">{{ seg.text }}</mark>
+                    <template v-else>{{ seg.text }}</template>
+                  </template>
+                </span>
               </span>
               <span
                 v-if="item.kind === 'host'"
@@ -470,6 +500,11 @@ function onKey(e: KeyboardEvent): void {
   font-size: 11.5px;
   color: var(--text-faint);
   font-family: var(--font-mono);
+}
+.match {
+  background: transparent;
+  color: var(--accent);
+  font-weight: 600;
 }
 .edit {
   display: inline-flex;

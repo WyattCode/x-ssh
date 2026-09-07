@@ -45,6 +45,9 @@ interface Session {
   label?: string
   /** Recent raw output, capped, for cross-session history search. */
   history?: string
+  /** Set once the shell channel closes normally (e.g. the user typed `exit`),
+   *  so a subsequent client close is classified as intentional, not a drop. */
+  shellExit?: boolean
 }
 
 /**
@@ -507,7 +510,11 @@ export class SshManager {
             stream.on('data', (data: Buffer) => this.emitData(id, data.toString('utf8')))
             stream.stderr.on('data', (data: Buffer) => this.sendData(id, data.toString('utf8')))
             stream.on('close', () => {
-              this.emit({ sessionId: id, status: 'closed' })
+              // Mark a clean shell close (the remote shell ended) so the client
+              // 'close' that follows is treated as an intentional exit. The
+              // actual status is emitted once, from client 'close', based on it.
+              const sess = this.sessions.get(id)
+              if (sess) sess.shellExit = true
               client.end()
             })
 
@@ -566,7 +573,14 @@ export class SshManager {
       })
 
       client.on('close', () => {
-        this.emit({ sessionId: id, status: 'closed' })
+        // Distinguish an intentional exit (shell closed first) from an
+        // unexpected network drop. A drop is surfaced as `error` so the
+        // renderer's auto-reconnect triggers; a clean exit stays `closed`.
+        const session = this.sessions.get(id)
+        if (session) {
+          if (session.shellExit) this.emit({ sessionId: id, status: 'closed' })
+          else this.emit({ sessionId: id, status: 'error', message: '连接已断开' })
+        }
         if (jumpClient) jumpClient.end()
         this.sessions.delete(id)
       })
@@ -1355,6 +1369,8 @@ export class SshManager {
   disposeAll(): void {
     for (const session of this.sessions.values()) {
       if (session.suppressTimer) clearTimeout(session.suppressTimer)
+      // Mark a clean close so a late client 'close' isn't misread as a drop.
+      session.shellExit = true
       session.client.end()
     }
     this.sessions.clear()
