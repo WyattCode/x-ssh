@@ -390,7 +390,7 @@ async function remove(): Promise<void> {
       </div>
 
       <div v-if="keyModal.open" class="overlay key-modal" @mousedown.self="keyModal.open = false">
-        <div class="editor keygen" @keydown.esc="keyModal.open = false" @keydown.enter="generateKey">
+        <div class="editor keygen" @keydown.esc.stop="keyModal.open = false" @keydown.enter.stop="generateKey">
           <div class="head">{{ t('host.generateKey') }}</div>
           <label class="field">
             <span>{{ t('host.keyName') }}</span>

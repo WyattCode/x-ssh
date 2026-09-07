@@ -116,6 +116,7 @@ export class KeyManager {
     // Reject a copy without a valid key marker (matches PEM / OpenSSH private keys).
     if (!isPrivateKey(buf)) {
       await rm(priv, { force: true }).catch(() => {})
+      await rm(`${priv}.pub`, { force: true }).catch(() => {})
       throw new Error('所选文件不是有效的私钥')
     }
     return this.describe(priv, id)
@@ -123,6 +124,9 @@ export class KeyManager {
 
   async remove(id: string): Promise<void> {
     await this.ensureDir()
+    // Only ever operate inside the key dir: refuse path traversal in the id,
+    // since it arrives over IPC from the renderer.
+    if (basename(id) !== id) throw new Error('非法密钥标识')
     const priv = join(this.keysDir, id)
     await rm(priv, { force: true })
     await rm(`${priv}.pub`, { force: true })

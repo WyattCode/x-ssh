@@ -683,7 +683,7 @@ function goUp(): void {
 
 // ---- keyboard (file-manager shortcuts) ----
 function onKeydown(e: KeyboardEvent): void {
-  if (renamingName.value || creatingKind.value || localModal.open || localMenu.open) return
+  if (renamingName.value || creatingKind.value) return
   // Ignore keys bubbling up from the rename/create inputs — commitRename/
   // commitCreate clear the editing flag synchronously before the event reaches
   // here, so the guard above can be stale on Enter/Esc.
@@ -708,7 +708,9 @@ function onKeydown(e: KeyboardEvent): void {
       localGoUp()
     } else if (e.key === 'Escape') {
       e.preventDefault()
-      if (localSelSet.value.size) {
+      if (localMenu.open) {
+        localMenu.open = false
+      } else if (localSelSet.value.size) {
         localSelSet.value = new Set()
         localAnchor.value = null
       }
