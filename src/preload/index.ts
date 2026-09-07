@@ -162,10 +162,10 @@ const api = {
       ipcRenderer.invoke(IPC.sftpWriteText, sessionId, path, content),
     editExternal: (sessionId: string, path: string, name: string): Promise<SftpResult> =>
       ipcRenderer.invoke(IPC.sftpEditExternal, sessionId, path, name),
-    startDrag: (sessionId: string, remotePath: string, name: string, isDir: boolean): void =>
-      ipcRenderer.send(IPC.sftpStartDrag, sessionId, remotePath, name, isDir),
-    prefetchDrag: (sessionId: string, remotePath: string, name: string, isDir: boolean): void =>
-      ipcRenderer.send(IPC.sftpPrefetchDrag, sessionId, remotePath, name, isDir),
+    startDrag: (sessionId: string, items: { remotePath: string; name: string; isDir: boolean }[]): void =>
+      ipcRenderer.send(IPC.sftpStartDrag, sessionId, items),
+    prefetchDrag: (sessionId: string, items: { remotePath: string; name: string; isDir: boolean }[]): void =>
+      ipcRenderer.send(IPC.sftpPrefetchDrag, sessionId, items),
     cancel: (id: string): void => ipcRenderer.send(IPC.sftpCancel, id),
     onProgress: (cb: (p: SftpProgress) => void): (() => void) => {
       const listener = (_e: unknown, p: SftpProgress): void => cb(p)

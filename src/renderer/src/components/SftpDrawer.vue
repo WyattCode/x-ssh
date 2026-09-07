@@ -781,22 +781,22 @@ function onRemoteMouseDown(e: MouseEvent, entry: FileEntry): void {
   // actually drive the native OS drag gesture instead of missing it.
   if (!props.sessionId || !e.altKey) return
   const sel = selected.value.has(entry.name) ? selectedEntries() : [entry]
-  if (sel.length !== 1) return
-  window.api.sftp.prefetchDrag(props.sessionId, posixJoin(path.value, sel[0].name), sel[0].name, sel[0].isDir)
+  const items = sel.map((x) => ({ remotePath: posixJoin(path.value, x.name), name: x.name, isDir: x.isDir }))
+  window.api.sftp.prefetchDrag(props.sessionId, items)
 }
 function onDragStart(e: DragEvent, entry: FileEntry): void {
   if (!props.sessionId) return
-  // Alt+drag a single remote item to initiate a native OS drag-out (to the
-  // desktop / Explorer). Native drag-out only supports one item, so this path
-  // is limited to a single selection; multi-select still drops into the local
-  // pane below. Regular drag keeps carrying the in-app MIME for the dual-pane.
+  // Alt+drag initiates a native OS drag-out (to the desktop / Explorer).
+  // If the dragged row is part of a multi-selection, all selected items are
+  // carried; the main process downloads them (a single file drags out as that
+  // file, multiple items / folders into a temp directory) and startDrags it.
+  // Regular drag keeps carrying the in-app MIME for the dual-pane drop.
   if (e.altKey) {
     const sel = selected.value.has(entry.name) ? selectedEntries() : [entry]
-    if (sel.length === 1) {
-      e.preventDefault()
-      window.api.sftp.startDrag(props.sessionId, posixJoin(path.value, sel[0].name), sel[0].name, sel[0].isDir)
-      return
-    }
+    e.preventDefault()
+    const items = sel.map((x) => ({ remotePath: posixJoin(path.value, x.name), name: x.name, isDir: x.isDir }))
+    window.api.sftp.startDrag(props.sessionId, items)
+    return
   }
   // In-app drag (dual-panel): carry the remote path(s) so the local pane can
   // accept them as a drop target and download into its current directory.

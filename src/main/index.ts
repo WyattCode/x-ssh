@@ -19,23 +19,31 @@ const knownHosts = new KnownHosts()
 const settings = new SettingsStore()
 const keyManager = new KeyManager(app.getPath('userData'))
 const activeEdits = new Set<string>()
-// Cache of drag-out downloads keyed by session:remotePath, so a file prefetched
-// on mousedown is ready by the time the drag gesture reaches startDrag.
+// Cache of drag-out downloads keyed by session:paths, so files prefetched on
+// mousedown are ready by the time the drag gesture reaches startDrag.
 const dragCache = new Map<string, Promise<{ dir: string; local: string }>>()
 let sshManager: SshManager | null = null
 
-function prefetchDrag(
-  sessionId: string,
-  remotePath: string,
-  name: string,
+export interface DragItem {
+  remotePath: string
+  name: string
   isDir: boolean
-): Promise<{ dir: string; local: string }> {
-  const key = `${sessionId}:${remotePath}`
+}
+
+function prefetchDrag(sessionId: string, items: DragItem[]): Promise<{ dir: string; local: string }> {
+  const key = `${sessionId}:${items.map((i) => i.remotePath).join('|')}`
   let p = dragCache.get(key)
   if (!p) {
     p = (async () => {
       const dir = await mkdtemp(join(tmpdir(), 'xssh-drag-'))
-      const local = await sshManager!.downloadTree(sessionId, remotePath, dir, name, isDir)
+      for (const it of items) {
+        await sshManager!.downloadTree(sessionId, it.remotePath, dir, it.name, it.isDir)
+      }
+      // A single file drags out as that file; multiple items (or a folder)
+      // land in a temporary directory, which Explorer accepts as a drop.
+      const local = items.length === 1 && !items[0].isDir
+        ? join(dir, items[0].name)
+        : dir
       return { dir, local }
     })()
     dragCache.set(key, p)
@@ -812,15 +820,9 @@ function registerIpc(): void {
   // Drag out (dragstart): download to a temp dir, then startDrag.
   ipcMain.on(
     IPC.sftpStartDrag,
-    async (
-      e,
-      sessionId: string,
-      remotePath: string,
-      name: string,
-      isDir: boolean
-    ) => {
+    async (e, sessionId: string, items: DragItem[]) => {
       try {
-        const { local } = await prefetchDrag(sessionId, remotePath, name, isDir)
+        const { local } = await prefetchDrag(sessionId, items)
         let icon = DRAG_ICON
         try {
           icon = await app.getFileIcon(local, { size: 'normal' })
@@ -840,9 +842,9 @@ function registerIpc(): void {
   // warming the cache here is what makes Alt+drag reliable for larger files.
   ipcMain.on(
     IPC.sftpPrefetchDrag,
-    async (_e, sessionId: string, remotePath: string, name: string, isDir: boolean) => {
+    async (_e, sessionId: string, items: DragItem[]) => {
       try {
-        await prefetchDrag(sessionId, remotePath, name, isDir)
+        await prefetchDrag(sessionId, items)
       } catch {
         /* download will just re-attempt at startDrag time */
       }
