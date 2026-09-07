@@ -38,7 +38,8 @@
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "runAfterFinish": false
     },
     "mac": {
       "icon": "build/icon.png"
