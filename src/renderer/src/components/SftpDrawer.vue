@@ -45,8 +45,14 @@ function localParent(p: string): string {
   return idx > 0 ? norm.slice(0, idx) : norm
 }
 async function refreshLocal(dir?: string): Promise<void> {
+  const prev = localPath.value
   if (dir) localPath.value = dir
   if (!localPath.value) return
+  // Navigating to a different local directory invalidates the selection.
+  if (dir && dir !== prev) {
+    localSelSet.value = new Set()
+    localAnchor.value = null
+  }
   localLoading.value = true
   localError.value = ''
   try {
@@ -103,9 +109,6 @@ const localMenu = reactive({ open: false, x: 0, y: 0, target: null as LocalEntry
 const localModal = reactive({ open: false, kind: 'file' as 'file' | 'folder', action: 'new' as 'new' | 'rename', value: '', error: '', target: null as LocalEntry | null })
 const localSelSet = ref<Set<string>>(new Set())
 const localAnchor = ref<string | null>(null)
-function localSelected(): LocalEntry[] {
-  return localSorted.value.filter((e) => localSelSet.value.has(e.name))
-}
 function localSelectAll(): void {
   localSelSet.value = new Set(localSorted.value.map((e) => e.name))
 }

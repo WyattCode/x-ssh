@@ -27,9 +27,9 @@ export function shellQuoteName(name: string): string {
   return `'${name.replace(/'/g, "'\\''")}'`
 }
 
-/** Builds the remote `tar czf` command that archives `names` from `parent`.
- *  Uses `--force-local` so newer GNU tar won't misinterpret a leading dash in
- *  an archive path as a remote host. */
+/** Builds the remote `tar czf` command that archives `names` (relative to
+ *  `parent`) into `tmpArchive`. Runs `cd <parent>` first so names aren't
+ *  given as absolute paths. */
 export function buildPackCommand(parent: string, tmpArchive: string, names: string[]): string {
   const cd = `cd ${JSON.stringify(parent)}`
   const quoted = names.map(shellQuoteName).join(' ')

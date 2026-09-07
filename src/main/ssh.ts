@@ -1310,7 +1310,7 @@ export class SshManager {
     const parent = this.parentOf(items[0].path)
     const tmp = `/tmp/xssh-${randomUUID().slice(0, 8)}.tar.gz`
     const names = items.map((i) => i.name)
-    // tar czf <tmp> --force-local -C <parent> <names>
+    // `cd <parent> && tar czf <tmp> <relative names>` — see buildPackCommand.
     await this.execRemote(sessionId, buildPackCommand(parent, tmp, names))
     const name = archiveName || (items.length === 1 ? items[0].name : 'archive') + '.tar.gz'
     const outPath = resolve(localDir, name).replace(/\.tar\.gz$/, '.tar.gz')
