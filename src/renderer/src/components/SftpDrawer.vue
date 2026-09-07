@@ -250,15 +250,24 @@ const showResume = ref(false)
 async function resumePending(): Promise<void> {
   if (!props.sessionId) return
   const ops = [...store.transferQueue]
+  let failed = 0
+  let lastErr = ''
   for (const op of ops) {
     const r = await window.api.sftp.uploadPaths(props.sessionId, op.remoteDir, op.localPaths, store.transferConcurrency)
     if (!r.ok && !r.canceled) {
-      error.value = r.error ?? tt('sfp.uploadFail')
-      return
+      // Don't abort the whole resume on the first failure — skip this op and
+      // keep trying the remaining queued uploads.
+      failed++
+      lastErr = r.error ?? tt('sfp.uploadFail')
+      continue
     }
   }
   await store.clearTransferQueue()
   showResume.value = false
+  if (failed > 0) {
+    error.value = tt('sfp.resumePartial', { n: failed })
+    if (lastErr) toast(lastErr, 'error')
+  }
 }
 // dragenter/leave bubble from child rows; count depth so the drop highlight
 // doesn't flicker off while the pointer crosses children.

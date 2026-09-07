@@ -29,13 +29,25 @@ export class KeyManager {
   async list(): Promise<ManagedKey[]> {
     await this.ensureDir()
     const names = await readdir(this.keysDir)
-    const out: ManagedKey[] = []
+    // Concurrently describe every candidate (skipping .pub / hidden / scratch
+    // files) instead of spawning ssh-keygen serially, which made the host
+    // editor slow once a user had several keys.
+    const jobs: Promise<ManagedKey | null>[] = []
     for (const n of names) {
       if (shouldSkipKeyFile(n)) continue
-      const p = join(this.keysDir, n)
-      if (!(await stat(p)).isFile()) continue
-      out.push(await this.describe(p, n))
+      jobs.push(
+        (async (): Promise<ManagedKey | null> => {
+          const p = join(this.keysDir, n)
+          try {
+            if (!(await stat(p)).isFile()) return null
+          } catch {
+            return null
+          }
+          return this.describe(p, n)
+        })()
+      )
     }
+    const out = (await Promise.all(jobs)).filter((k): k is ManagedKey => k != null)
     // Newest first when types/names are identical; keep insertion order stable.
     return out.sort((a, b) => (b.mtime ?? 0) - (a.mtime ?? 0))
   }
@@ -46,22 +58,42 @@ export class KeyManager {
       id: name,
       name,
       path: p,
-      mtime: s.mtimeMs,
-      passphraseProtected: await this.isPassphraseProtected(p)
+      mtime: s.mtimeMs
     }
-    // Best-effort fingerprint / algorithm from `ssh-keygen -lf`. Skipped if not
-    // installed or the file isn't a key, so a stale/malformed key won't error out.
+    // Run the fingerprint and passphrase probes concurrently (they're two
+    // independent ssh-keygen invocations) so a key takes one round-trip, not
+    // two serial ones.
+    const [fingerprint, type, passphraseProtected] = await Promise.all([
+      this.safeFingerprint(p),
+      this.safeType(p),
+      this.isPassphraseProtected(p)
+    ])
+    key.fingerprint = fingerprint
+    key.type = type
+    key.passphraseProtected = passphraseProtected
+    return key
+  }
+
+  /** Best-effort fingerprint from `ssh-keygen -lf`, or undefined on failure. */
+  private async safeFingerprint(p: string): Promise<string | undefined> {
     try {
       const { stdout } = await this.sshKeygen(['-lf', p])
       const m = stdout.trim().match(/^(\d+) (\S+) (\S+)/)
-      if (m) {
-        key.fingerprint = m[2]
-        key.type = m[3]
-      }
+      return m ? m[2] : undefined
     } catch {
-      /* ignore — key still usable for connect */
+      return undefined
     }
-    return key
+  }
+
+  /** Best-effort key algorithm from `ssh-keygen -lf`, or undefined on failure. */
+  private async safeType(p: string): Promise<string | undefined> {
+    try {
+      const { stdout } = await this.sshKeygen(['-lf', p])
+      const m = stdout.trim().match(/^(\d+) (\S+) (\S+)/)
+      return m ? m[3] : undefined
+    } catch {
+      return undefined
+    }
   }
 
   private async sshKeygen(args: string[]): Promise<{ stdout: string }> {
