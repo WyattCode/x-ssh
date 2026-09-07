@@ -77,24 +77,35 @@ describe('shellQuoteName', () => {
 describe('buildPackCommand', () => {
   it('builds a tar czf command with quoted names', () => {
     const cmd = buildPackCommand('/home/u', '/tmp/xssh-abc.tar.gz', ['a.txt', 'b.txt'])
-    expect(cmd).toBe(`cd "/home/u" && tar czf "/tmp/xssh-abc.tar.gz" 'a.txt' 'b.txt'`)
+    expect(cmd).toBe(`cd '/home/u' && tar czf '/tmp/xssh-abc.tar.gz' 'a.txt' 'b.txt'`)
   })
 
   it('quotes special characters in names and parent', () => {
     const cmd = buildPackCommand('/home/it/here', 't', ["it's"])
-    expect(cmd).toBe(`cd "/home/it/here" && tar czf "t" 'it'\\''s'`)
+    expect(cmd).toBe(`cd '/home/it/here' && tar czf 't' 'it'\\''s'`)
+  })
+
+  it('does not shell-expand $ or backticks in parent and archive paths', () => {
+    // Regression: JSON.stringify() only escaped quotes, leaving $/backticks to be
+    // expanded by the remote shell. Single-quote wrapping must prevent that.
+    const cmd = buildPackCommand('/home/$USER/$(pwd)', '/tmp/`id`.tar.gz', ['a.txt'])
+    expect(cmd).toBe("cd '/home/$USER/$(pwd)' && tar czf '/tmp/`id`.tar.gz' 'a.txt'")
   })
 })
 
 describe('buildExtractCommand', () => {
   it('uses unzip for .zip archives', () => {
-    expect(buildExtractCommand('/home/u', 'bundle.zip')).toBe('cd "/home/u" && unzip -o "bundle.zip"')
-    expect(buildExtractCommand('/home/u', 'bundle.ZIP')).toBe('cd "/home/u" && unzip -o "bundle.ZIP"')
+    expect(buildExtractCommand('/home/u', 'bundle.zip')).toBe("cd '/home/u' && unzip -o 'bundle.zip'")
+    expect(buildExtractCommand('/home/u', 'bundle.ZIP')).toBe("cd '/home/u' && unzip -o 'bundle.ZIP'")
   })
 
   it('uses tar for tgz and tar.gz archives', () => {
-    expect(buildExtractCommand('/home/u', 'a.tar.gz')).toBe('cd "/home/u" && tar xzf "a.tar.gz"')
-    expect(buildExtractCommand('/home/u', 'a.tgz')).toBe('cd "/home/u" && tar xzf "a.tgz"')
+    expect(buildExtractCommand('/home/u', 'a.tar.gz')).toBe("cd '/home/u' && tar xzf 'a.tar.gz'")
+    expect(buildExtractCommand('/home/u', 'a.tgz')).toBe("cd '/home/u' && tar xzf 'a.tgz'")
+  })
+
+  it('does not shell-expand $ or backticks in archive names', () => {
+    expect(buildExtractCommand('/home/u', '$(pwd).zip')).toBe("cd '/home/u' && unzip -o '$(pwd).zip'")
   })
 })
 
@@ -132,8 +143,16 @@ describe('isPrivateKey', () => {
 describe('sanitizeKeyName', () => {
   it('replaces unsafe characters and falls back to a default', () => {
     expect(sanitizeKeyName('my-aws key')).toBe('my-aws_key')
-    expect(sanitizeKeyName('../evil')).toBe('.._evil')
+    expect(sanitizeKeyName('../evil')).toBe('_evil')
     expect(sanitizeKeyName('')).toBe('id')
     expect(sanitizeKeyName(undefined as unknown as string)).toBe('id')
+  })
+
+  it('strips leading dots so ids are never treated as hidden/ignored files', () => {
+    expect(sanitizeKeyName('.hidden')).toBe('hidden')
+    expect(sanitizeKeyName('...dots')).toBe('dots')
+    expect(sanitizeKeyName('.')).toBe('id')
+    expect(sanitizeKeyName('..')).toBe('id')
+    expect(sanitizeKeyName('id_rsa')).toBe('id_rsa')
   })
 })

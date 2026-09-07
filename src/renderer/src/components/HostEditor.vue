@@ -161,6 +161,8 @@ async function deleteKey(k: ManagedKey): Promise<void> {
   if (r.ok) {
     if (form.keyPath === k.path) form.keyPath = ''
     await loadKeys()
+  } else if (r.error) {
+    toast(r.error, 'error')
   }
 }
 
@@ -390,11 +392,11 @@ async function remove(): Promise<void> {
       </div>
 
       <div v-if="keyModal.open" class="overlay key-modal" @mousedown.self="keyModal.open = false">
-        <div class="editor keygen" @keydown.esc.stop="keyModal.open = false" @keydown.enter.stop="generateKey">
+        <div class="editor keygen" @keydown.esc.stop="keyModal.open = false">
           <div class="head">{{ t('host.generateKey') }}</div>
           <label class="field">
             <span>{{ t('host.keyName') }}</span>
-            <input v-model="keyModal.name" :placeholder="t('host.keyNamePh')" autofocus />
+            <input v-model="keyModal.name" :placeholder="t('host.keyNamePh')" autofocus @keydown.enter.stop.prevent="generateKey" />
           </label>
           <div class="field">
             <span>{{ t('host.keyType') }}</span>
@@ -404,7 +406,7 @@ async function remove(): Promise<void> {
           </div>
           <label class="field">
             <span>{{ t('host.passphrase') }}</span>
-            <input v-model="keyModal.passphrase" type="password" :placeholder="t('host.passphraseAsk')" />
+            <input v-model="keyModal.passphrase" type="password" :placeholder="t('host.passphraseAsk')" @keydown.enter.stop.prevent="generateKey" />
           </label>
           <p v-if="keyModal.error" class="err">{{ keyModal.error }}</p>
           <div class="actions">

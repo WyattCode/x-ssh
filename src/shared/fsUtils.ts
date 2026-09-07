@@ -31,16 +31,16 @@ export function shellQuoteName(name: string): string {
  *  `parent`) into `tmpArchive`. Runs `cd <parent>` first so names aren't
  *  given as absolute paths. */
 export function buildPackCommand(parent: string, tmpArchive: string, names: string[]): string {
-  const cd = `cd ${JSON.stringify(parent)}`
+  const cd = `cd ${shellQuoteName(parent)}`
   const quoted = names.map(shellQuoteName).join(' ')
-  return `${cd} && ${quoted ? `tar czf "${tmpArchive}" ${quoted}` : ''}`.replace(/&&\s*$/, '')
+  return `${cd} && ${quoted ? `tar czf ${shellQuoteName(tmpArchive)} ${quoted}` : ''}`.replace(/&&\s*$/, '')
 }
 
 /** Picks the remote extraction command for an archive file (zip → unzip, else tar). */
 export function buildExtractCommand(remoteDir: string, archiveFileName: string): string {
   const lower = archiveFileName.toLowerCase()
-  if (lower.endsWith('.zip')) return `cd ${JSON.stringify(remoteDir)} && unzip -o "${archiveFileName}"`
-  return `cd ${JSON.stringify(remoteDir)} && tar xzf "${archiveFileName}"`
+  if (lower.endsWith('.zip')) return `cd ${shellQuoteName(remoteDir)} && unzip -o ${shellQuoteName(archiveFileName)}`
+  return `cd ${shellQuoteName(remoteDir)} && tar xzf ${shellQuoteName(archiveFileName)}`
 }
 
 /** Removes terminal C0/C1 control characters from pasted text so a pasted blob
@@ -59,8 +59,12 @@ export function isPrivateKey(contents: string | Buffer): boolean {
   return PRIVATE_KEY_RE.test(typeof contents === 'string' ? contents : contents.toString('utf8'))
 }
 
-/** Sanitizes a user-supplied key name into a safe filename fragment. */
+/** Sanitizes a user-supplied key name into a safe filename fragment. Guarantees
+ *  a non-empty result that is not "." or ".." and doesn't start with a dot, so
+ *  generated/imported key ids are never mistaken for hidden/ignored files. */
 export function sanitizeKeyName(name: string): string {
-  const safe = (name || 'id').replace(/[^\w.-]/g, '_')
-  return safe || 'id'
+  let safe = (name || 'id').replace(/[^\w.-]/g, '_')
+  safe = safe.replace(/^\.+/, '')
+  if (safe === '' || safe === '.' || safe === '..') safe = 'id'
+  return safe
 }

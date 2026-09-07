@@ -192,7 +192,7 @@ const api = {
       ipcRenderer.invoke(IPC.keysGenerate, opts),
     import: (): Promise<{ ok: boolean; key?: ManagedKey; error?: string; canceled?: boolean }> =>
       ipcRenderer.invoke(IPC.keysImport),
-    del: (id: string): Promise<{ ok: boolean }> => ipcRenderer.invoke(IPC.keysDelete, id)
+    del: (id: string): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke(IPC.keysDelete, id)
   },
   /** Resolve a dropped File's absolute path (File.path was removed in Electron 32+). */
   getPathForFile: (file: File): string => webUtils.getPathForFile(file),

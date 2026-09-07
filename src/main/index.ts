@@ -670,7 +670,7 @@ function registerIpc(): void {
   )
   ipcMain.handle(
     IPC.sftpUploadExtract,
-    async (_e, sessionId: string, remoteDir: string, archiveFileName: string, concurrency?: number) => {
+    async (_e, sessionId: string, remoteDir: string, concurrency?: number) => {
       if (!sshManager) return { ok: false, error: '窗口未就绪' }
       const res = await dialog.showOpenDialog({
         title: '选择要上传并解压的归档文件',
@@ -902,8 +902,12 @@ function registerIpc(): void {
     }
   })
   ipcMain.handle(IPC.keysDelete, async (_e, id: string) => {
-    await keyManager.remove(id)
-    return { ok: true }
+    try {
+      await keyManager.remove(id)
+      return { ok: true }
+    } catch (e) {
+      return { ok: false, error: friendlyError((e as Error).message) }
+    }
   })
 }
 

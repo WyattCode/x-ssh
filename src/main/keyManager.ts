@@ -31,7 +31,10 @@ export class KeyManager {
     const names = await readdir(this.keysDir)
     const out: ManagedKey[] = []
     for (const n of names) {
-      if (n.startsWith('.') || n.startsWith('id_')) continue
+      // Skip hidden files and bare `id_*` scratch files ssh-keygen may leave
+      // around, but keep our generated/imported keys (always suffixed with a
+      // short uuid) even when the user named them "id_rsa" or similar.
+      if (n.startsWith('.') || (n.startsWith('id_') && !/-[0-9a-f]{8}$/.test(n))) continue
       const p = join(this.keysDir, n)
       if (!(await stat(p)).isFile()) continue
       out.push(await this.describe(p, n))

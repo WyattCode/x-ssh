@@ -146,6 +146,7 @@ function localMenuOpen(e: MouseEvent, entry: LocalEntry): void {
     localSelSet.value = new Set([entry.name])
     localAnchor.value = entry.name
   }
+  localActive.value = true
   localMenu.target = entry
   localMenu.x = Math.max(8, Math.min(e.clientX, window.innerWidth - 180))
   localMenu.y = Math.max(8, Math.min(e.clientY, window.innerHeight - 120))
