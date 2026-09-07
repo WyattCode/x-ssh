@@ -54,6 +54,7 @@ export const IPC = {
   sftpReadText: 'sftp:readText',
   sftpWriteText: 'sftp:writeText',
   sftpEditExternal: 'sftp:editExternal',
+  sftpRevealLocal: 'sftp:revealLocal', // show a finished download in the OS file manager
   sftpStartDrag: 'sftp:startDrag', // renderer -> main (drag out)
   sftpPrefetchDrag: 'sftp:prefetchDrag', // renderer -> main : pre-fetch for drag-out
   sftpProgress: 'sftp:progress', // main -> renderer

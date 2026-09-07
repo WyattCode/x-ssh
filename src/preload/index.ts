@@ -121,6 +121,8 @@ const api = {
       concurrency?: number
     ): Promise<SftpResult> =>
       ipcRenderer.invoke(IPC.sftpDownloadTo, sessionId, items, targetDir, concurrency),
+    revealLocal: (target: string): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke(IPC.sftpRevealLocal, target),
     upload: (sessionId: string, remoteDir: string, concurrency?: number): Promise<SftpResult> =>
       ipcRenderer.invoke(IPC.sftpUpload, sessionId, remoteDir, concurrency),
     uploadDir: (sessionId: string, remoteDir: string, concurrency?: number): Promise<SftpResult> =>

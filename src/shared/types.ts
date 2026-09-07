@@ -90,7 +90,24 @@ export interface TransferHistoryItem {
   error?: string
   /** Remote directory of the transfer, for "locate"/navigate. */
   remoteDir?: string
+  /** Local destination directory for a download, so a failed download can be retried. */
+  localDir?: string
+  /** Whether this single-item download was a folder (so a retry restores isDir). */
+  isDir?: boolean
+  /** Exact remote path of a single-item download, so a retry survives a Save-As rename. */
+  remotePath?: string
+  /** The download job's entries, so a failed folder/multi download can be re-run. */
+  items?: DownloadItem[]
+  /** Local source paths of an upload, so a finished upload can be located locally. */
+  localPaths?: string[]
   at: number
+}
+
+/** One entry of a download job (remote path + target name), for re-running it. */
+export interface DownloadItem {
+  path: string
+  name: string
+  isDir: boolean
 }
 
 /** A reusable command snippet shown in the command palette. */
@@ -142,6 +159,16 @@ export interface SftpProgress {
   index?: number
   /** The remote directory this job targets (used to "locate" a transfer in history). */
   remoteDir?: string
+  /** Local destination directory for a download (used to retry a failed download). */
+  localDir?: string
+  /** Whether this single-item download was a folder (drives the retry button). */
+  isDir?: boolean
+  /** Exact remote path of a single-item download (so a retry survives a Save-As rename). */
+  remotePath?: string
+  /** The download job's entries, so a failed folder/multi download can be re-run. */
+  items?: DownloadItem[]
+  /** Local source paths of an upload, so a finished upload can be located locally. */
+  localPaths?: string[]
   done?: boolean
   error?: string
 }

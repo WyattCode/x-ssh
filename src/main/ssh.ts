@@ -786,8 +786,8 @@ export class SshManager {
     // parallel — streaming (downloads start as files are found) AND concurrent.
     const queue: { remote: string; local: string; name: string }[] = []
     let walkDone = false
-    const emit = (name: string, done?: boolean, error?: string): void =>
-      this.emitProgress({ id: jobId, name, direction: 'down', transferred: bytesDone, total: knownTotal, count: discovered, index: filesDone, remoteDir: items[0]?.path ? this.parentOf(items[0].path) : undefined, done, error })
+    const emit = (name: string, done?: boolean, error?: string, withItems = false): void =>
+      this.emitProgress({ id: jobId, name, direction: 'down', transferred: bytesDone, total: knownTotal, count: discovered, index: filesDone, remoteDir: items[0]?.path ? this.parentOf(items[0].path) : undefined, localDir: localBase, isDir: items.length === 1 ? items[0].isDir : undefined, remotePath: items.length === 1 ? items[0].path : undefined, items: withItems ? items : undefined, done, error })
 
     const walk = async (remote: string, base: string, name: string, isDir: boolean, depth: number): Promise<void> => {
       if (this.cancelledJobs.has(jobId) || depth > 64) return
@@ -896,9 +896,9 @@ export class SshManager {
       if (this.cancelledJobs.has(jobId)) {
         emit(label, false, '已取消')
       } else if (walkError) {
-        emit(label, false, friendlyError((walkError as Error).message))
+        emit(label, false, friendlyError((walkError as Error).message), true)
       } else if (failures.length) {
-        emit(label, false, `${failures.length} 个文件失败`)
+        emit(label, false, `${failures.length} 个文件失败`, true)
       } else {
         const t = bytesDone || 1
         this.emitProgress({ id: jobId, name: label, direction: 'down', transferred: t, total: t, count: discovered, done: true })
@@ -935,8 +935,8 @@ export class SshManager {
     let failures = 0
     const queue: { local: string; remote: string; name: string }[] = []
     let walkDone = false
-    const emit = (name: string, done?: boolean, error?: string): void =>
-      this.emitProgress({ id: jobId, name, direction: 'up', transferred: bytesDone, total: knownTotal, count: discovered, index: filesDone, remoteDir, done, error })
+    const emit = (name: string, done?: boolean, error?: string, withPaths = false): void =>
+      this.emitProgress({ id: jobId, name, direction: 'up', transferred: bytesDone, total: knownTotal, count: discovered, index: filesDone, remoteDir, localPaths: withPaths ? localPaths : undefined, done, error })
 
     // finally guarantees cleanup even if getSftp throws before any event.
     try {
@@ -1066,12 +1066,12 @@ export class SshManager {
         if (this.cancelledJobs.has(jobId)) {
           emit(label, false, '已取消')
         } else if (walkError) {
-          emit(label, false, friendlyError((walkError as Error).message))
+          emit(label, false, friendlyError((walkError as Error).message), true)
         } else if (failures) {
-          emit(label, false, `${failures} 个文件失败`)
+          emit(label, false, `${failures} 个文件失败`, true)
         } else {
           const t = bytesDone || 1
-          this.emitProgress({ id: jobId, name: label, direction: 'up', transferred: t, total: t, count: discovered, done: true })
+          this.emitProgress({ id: jobId, name: label, direction: 'up', transferred: t, total: t, count: discovered, localPaths, done: true })
         }
       } finally {
         this.cancelledJobs.delete(jobId)

@@ -1,5 +1,5 @@
 import { app, shell, BrowserWindow, ipcMain, dialog, nativeImage, screen, Menu, Notification } from 'electron'
-import { join, dirname, basename } from 'node:path'
+import { join, dirname, basename, isAbsolute } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { tmpdir, homedir } from 'node:os'
 import { mkdtemp, rm, readFile, stat, readdir, mkdir, unlink, rename, writeFile } from 'node:fs/promises'
@@ -594,6 +594,19 @@ function registerIpc(): void {
       try {
         await sshManager.downloadJob(sessionId, items, res.filePaths[0], randomUUID(), concurrency)
         return { ok: true, count: items.length }
+      } catch (e) {
+        return { ok: false, error: friendlyError((e as Error).message) }
+      }
+    }
+  )
+  // Reveal a finished transfer's local path in the OS file manager.
+  ipcMain.handle(
+    IPC.sftpRevealLocal,
+    (_e, target: string) => {
+      try {
+        if (!target || !isAbsolute(target)) return { ok: false, error: '路径不合法' }
+        shell.showItemInFolder(target)
+        return { ok: true }
       } catch (e) {
         return { ok: false, error: friendlyError((e as Error).message) }
       }

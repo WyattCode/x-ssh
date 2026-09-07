@@ -10,7 +10,8 @@ import type {
   KnownHostEntry,
   SessionStatus,
   Snippet,
-  TransferHistoryItem
+  TransferHistoryItem,
+  DownloadItem
 } from '../../../shared/types'
 
 const { t } = useI18n()
@@ -81,6 +82,15 @@ export interface TransferOp {
   at: number
 }
 
+/** An interrupted download waiting to be resumed (fixed local destination). */
+export interface DownloadQueueOp {
+  id: string
+  sessionId: string
+  items: DownloadItem[]
+  localDir: string
+  at: number
+}
+
 export type SettingsTab = 'general' | 'terminal' | 'connection' | 'keys' | 'security'
 
 interface State {
@@ -101,6 +111,8 @@ interface State {
   sftpRecent: string[]
   snapshots: Snapshot[]
   transferQueue: TransferOp[]
+  /** Interrupted downloads waiting to be resumed into a fixed local dir. */
+  downloadQueue: DownloadQueueOp[]
   /** Finished SFTP transfers, persisted across restarts (newest first). */
   transferHistory: TransferHistoryItem[]
   // Preferences (persisted in settings.json).
@@ -137,6 +149,7 @@ export const useSessions = defineStore('sessions', {
     sftpRecent: [],
     snapshots: [],
     transferQueue: [],
+    downloadQueue: [],
     transferHistory: [],
     keepaliveSec: 20,
     connectTimeoutSec: 20,
@@ -184,7 +197,7 @@ export const useSessions = defineStore('sessions', {
     },
 
     async loadSettings(): Promise<void> {
-      const [editor, ka, ct, cr, tc, si, ff, cur, thm, rt, ar, nt, cp, sp, tq, tfh] = await Promise.all([
+      const [editor, ka, ct, cr, tc, si, ff, cur, thm, rt, ar, nt, cp, sp, tq, dq, tfh] = await Promise.all([
         window.api.settings.get<string>('externalEditor'),
         window.api.settings.get<number>('keepaliveSec'),
         window.api.settings.get<number>('connectTimeoutSec'),
@@ -200,6 +213,7 @@ export const useSessions = defineStore('sessions', {
         window.api.settings.get<boolean>('confirmPaste'),
         window.api.settings.get<boolean>('sanitizePaste'),
         window.api.settings.get<TransferOp[]>('transferQueue'),
+        window.api.settings.get<DownloadQueueOp[]>('downloadQueue'),
         window.api.settings.get<TransferHistoryItem[]>('sftpTransferHistory')
       ])
       this.externalEditor = editor ?? null
@@ -209,6 +223,7 @@ export const useSessions = defineStore('sessions', {
       this.transferConcurrency = clampConcurrency(typeof tc === 'number' ? tc : 4, 4)
       this.shellIntegration = si !== false
       this.transferQueue = tq ?? []
+      this.downloadQueue = dq ?? []
       this.transferHistory = tfh ?? []
       this.terminalFontFamily = ff ?? ''
       this.terminalCursor = cur ?? 'block'
@@ -364,6 +379,19 @@ export const useSessions = defineStore('sessions', {
       this.transferQueue = []
       await window.api.settings.set('transferQueue', this.transferQueue)
     },
+    /** Records an interrupted download so it can be resumed into its local dir. */
+    async queueDownload(sessionId: string, items: DownloadItem[], localDir: string): Promise<void> {
+      if (!items.length || !localDir) return
+      this.downloadQueue = [
+        { id: uid('xfer'), sessionId, items, localDir, at: Date.now() },
+        ...this.downloadQueue
+      ].slice(0, 20)
+      await window.api.settings.set('downloadQueue', this.downloadQueue)
+    },
+    async clearDownloadQueue(): Promise<void> {
+      this.downloadQueue = []
+      await window.api.settings.set('downloadQueue', this.downloadQueue)
+    },
     /** Records a finished transfer into the persisted history (newest first). */
     async pushTransferHistory(item: TransferHistoryItem): Promise<void> {
       this.transferHistory = [item, ...this.transferHistory].slice(0, 100)
@@ -371,6 +399,11 @@ export const useSessions = defineStore('sessions', {
     },
     async clearTransferHistory(): Promise<void> {
       this.transferHistory = []
+      await window.api.settings.set('sftpTransferHistory', this.transferHistory)
+    },
+    /** Removes a single transfer entry from the persisted history. */
+    async removeTransferHistory(id: string): Promise<void> {
+      this.transferHistory = this.transferHistory.filter((h) => h.id !== id)
       await window.api.settings.set('sftpTransferHistory', this.transferHistory)
     },    /** Captures the current tab layout (minus secrets) as a named snapshot. */
     async saveSnapshot(name: string): Promise<void> {

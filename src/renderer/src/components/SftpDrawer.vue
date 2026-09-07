@@ -2,6 +2,7 @@
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import type { FileEntry, LocalEntry, SftpProgress, TransferHistoryItem } from '../../../shared/types'
 import { posixJoin, parentOf } from '../../../shared/fsUtils'
+import { canRetryHistory, buildRetryItems, canRevealHistory } from '../lib/transferHistory'
 import { useConfirm } from '../composables/confirm'
 import { useI18n } from '../lib/i18n'
 import { useToast } from '../composables/toast'
@@ -263,11 +264,25 @@ async function resumePending(): Promise<void> {
     }
   }
   await store.clearTransferQueue()
-  showResume.value = false
+  showResume.value = store.downloadQueue.length > 0
   if (failed > 0) {
     error.value = tt('sfp.resumePartial', { n: failed })
     if (lastErr) toast(lastErr, 'error')
   }
+}
+async function resumeDownloads(): Promise<void> {
+  if (!props.sessionId) return
+  const ops = [...store.downloadQueue]
+  let failed = 0
+  for (const op of ops) {
+    // Resumes into the recorded local directory; partial files are picked up by
+    // downloadJob. A per-op failure is skipped, not fatal to the rest.
+    const r = await window.api.sftp.downloadTo(op.sessionId, op.items, op.localDir, store.transferConcurrency)
+    if (!r.ok && !r.canceled) failed++
+  }
+  await store.clearDownloadQueue()
+  showResume.value = store.transferQueue.length > 0
+  if (failed > 0) toast(tt('sfp.resumeDownloadPartial', { n: failed }), 'error')
 }
 // dragenter/leave bubble from child rows; count depth so the drop highlight
 // doesn't flicker off while the pointer crosses children.
@@ -448,7 +463,7 @@ watch(
   }
 )
 onMounted(() => {
-  showResume.value = store.transferQueue.length > 0
+  showResume.value = store.transferQueue.length > 0 || store.downloadQueue.length > 0
   offProgress = window.api.sftp.onProgress((p) => {
     // Record every session's events (rows/history are filtered to the active
     // pane at render); this way a transfer that completes while its pane is
@@ -481,6 +496,19 @@ onMounted(() => {
       void store.queueUpload(runningUpload.value.remoteDir, runningUpload.value.localPaths)
       runningUpload.value = null
     }
+    // A failed download (session drop / network error) is queued so it can be
+    // batch-resumed into the same local destination once the link returns.
+    if (
+      p.error &&
+      !isCancelled(p) &&
+      p.direction === 'down' &&
+      p.items?.length &&
+      props.sessionId &&
+      p.sessionId === props.sessionId
+    ) {
+      void store.queueDownload(props.sessionId, p.items, p.localDir ?? '')
+      showResume.value = true
+    }
     if (p.done && p.direction === 'up' && (!p.sessionId || p.sessionId === props.sessionId)) {
       runningUpload.value = null
     }
@@ -506,6 +534,11 @@ onMounted(() => {
         status: isCancelled(p) ? 'cancelled' : p.error ? 'error' : 'done',
         error: p.error && !isCancelled(p) ? p.error : undefined,
         remoteDir: p.remoteDir,
+        localDir: p.localDir,
+        isDir: p.isDir,
+        remotePath: p.remotePath,
+        items: p.items,
+        localPaths: p.localPaths,
         at: Date.now()
       })
       const id = p.id
@@ -1007,6 +1040,43 @@ function locateHistory(h: TransferHistoryItem): void {
   historyMenu.open = false
   load(h.remoteDir)
 }
+// A failed download (single item, folder, or multi-select) can be retried
+// straight into its original local destination; partial files are resumed by
+// downloadJob. The recorded item list is used when available so the exact
+// remote paths (and any Save-As rename) survive a retry.
+async function retryHistory(h: TransferHistoryItem): Promise<void> {
+  if (!props.sessionId || !h.localDir || h.direction !== 'down') return
+  historyMenu.open = false
+  const r = await window.api.sftp.downloadTo(
+    props.sessionId,
+    buildRetryItems(h),
+    h.localDir,
+    store.transferConcurrency
+  )
+  if (!r.ok && !r.canceled) toast(r.error ?? tt('sfp.retryFail'), 'error')
+}
+// Open a finished transfer in the OS file manager: a download reveals its local
+// destination, an upload reveals its local source file.
+async function revealHistory(h: TransferHistoryItem): Promise<void> {
+  const target =
+    h.direction === 'up'
+      ? h.localPaths?.[0]
+      : h.localDir
+        ? localJoin(h.localDir, h.name)
+        : undefined
+  if (!target) return
+  historyMenu.open = false
+  const r = await window.api.sftp.revealLocal(target)
+  if (!r.ok) toast(r.error ?? tt('sfp.revealFail'), 'error')
+}
+// Finished downloads reveal their dest; finished uploads reveal their source.
+function canReveal(h: TransferHistoryItem): boolean {
+  return canRevealHistory(h)
+}
+async function removeHistory(h: TransferHistoryItem): Promise<void> {
+  historyMenu.open = false
+  await store.removeTransferHistory(h.id)
+}
 
 // ---- bookmarks ----
 const bookmarksMenu = reactive({ open: false, x: 0, y: 0 })
@@ -1071,6 +1141,9 @@ function permTitle(entry: FileEntry): string {
 // ---- transfer cancel ----
 function cancelTransfer(id: string): void {
   window.api.sftp.cancel(id)
+}
+function canRetry(h: TransferHistoryItem): boolean {
+  return canRetryHistory(h) && !!props.sessionId
 }
 function isCancelled(t: SftpProgress): boolean {
   return t.error === '已取消'
@@ -1262,14 +1335,24 @@ const pct = (t: SftpProgress): number =>
           </span>
           <span class="hist-time">{{ fmtAgo(h.at) }}</span>
           <button v-if="h.remoteDir && props.sessionId" class="hist-locate" :title="tt('sfp.locate')" @click.stop="locateHistory(h)"><Icon name="folder" :size="12" /></button>
+          <button v-if="canReveal(h)" class="hist-locate" :title="tt('sfp.reveal')" @click.stop="revealHistory(h)"><Icon name="folder-open" :size="12" /></button>
+          <button v-if="canRetry(h)" class="hist-locate hist-retry" :title="tt('sfp.retry')" @click.stop="retryHistory(h)"><Icon name="refresh" :size="12" /></button>
+          <button class="hist-locate hist-del" :title="tt('sfp.delHistory')" @click.stop="removeHistory(h)"><Icon name="trash" :size="12" /></button>
         </div>
       </div>
     </div>
 
-    <div v-if="showResume && store.transferQueue.length" class="resume-bar">
-      <span>{{ tt('sfp.resumeHint', { n: store.transferQueue.length }) }}</span>
-      <button class="mini primary" @click="resumePending">{{ tt('sfp.resume') }}</button>
-      <button class="mini" @click="store.clearTransferQueue(); showResume = false">{{ tt('sfp.discard') }}</button>
+    <div v-if="showResume && (store.transferQueue.length || store.downloadQueue.length)" class="resume-bar">
+      <template v-if="store.transferQueue.length">
+        <span>{{ tt('sfp.resumeHint', { n: store.transferQueue.length }) }}</span>
+        <button class="mini primary" @click="resumePending">{{ tt('sfp.resume') }}</button>
+        <button class="mini" @click="store.clearTransferQueue(); showResume = store.downloadQueue.length > 0">{{ tt('sfp.discard') }}</button>
+      </template>
+      <template v-if="store.downloadQueue.length">
+        <span>{{ tt('sfp.resumeDownloadHint', { n: store.downloadQueue.length }) }}</span>
+        <button class="mini primary" @click="resumeDownloads">{{ tt('sfp.resumeDownload') }}</button>
+        <button class="mini" @click="store.clearDownloadQueue(); showResume = store.transferQueue.length > 0">{{ tt('sfp.discard') }}</button>
+      </template>
     </div>
 
     <div v-if="localOpen" class="localpane" @click="localActive = true" @dragover.prevent @drop.prevent.stop="onLocalDrop">
@@ -1732,6 +1815,15 @@ const pct = (t: SftpProgress): number =>
 .hist-locate:hover {
   background: var(--bg-elev-2);
   color: var(--accent);
+}
+.hist-retry {
+  color: var(--accent);
+}
+.hist-del {
+  color: var(--text-faint);
+}
+.hist-del:hover {
+  color: var(--danger);
 }
 .icon-btn {
   display: inline-flex;
