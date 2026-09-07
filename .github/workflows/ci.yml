@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
     branches: [main]
 
@@ -31,3 +32,45 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  # Build a distributable Windows installer on every push to main and auto-publish
+  # a GitHub Release when a version tag (v*) is pushed. The app is not code-signed,
+  # so SmartScreen may warn — that's expected.
+  release:
+    if: github.event_name == 'push'
+    runs-on: windows-latest
+    needs: test-build
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build installer
+        run: npm run dist
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: x-ssh-installer
+          path: |
+            release/*.exe
+            release/*.blockmap
+          if-no-files-found: error
+
+      - name: Publish GitHub Release (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          files: |
+            release/*.exe
+            release/*.blockmap
+          fail_on_unmatched_files: false

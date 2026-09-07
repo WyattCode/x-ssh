@@ -143,6 +143,7 @@ async function generateKey(): Promise<void> {
   keyModal.open = false
   form.keyPath = r.key.path
   await loadKeys()
+  if (!r.key.passphraseProtected) toast(t('host.keyUnprotected'), 'info')
 }
 async function importKey(): Promise<void> {
   const r = await window.api.keys.import()
@@ -153,6 +154,7 @@ async function importKey(): Promise<void> {
   }
   form.keyPath = r.key.path
   await loadKeys()
+  if (!r.key.passphraseProtected) toast(t('host.keyUnprotected'), 'info')
 }
 async function deleteKey(k: ManagedKey): Promise<void> {
   const res = await confirm(t('host.keyDeleteConfirm', { name: k.name }))

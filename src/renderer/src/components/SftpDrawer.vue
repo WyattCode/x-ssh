@@ -768,7 +768,19 @@ function editFile(entry: FileEntry, external: boolean): void {
 }
 function onDragStart(e: DragEvent, entry: FileEntry): void {
   if (!props.sessionId) return
-  // In-app drag (dua-panel): carry the remote path(s) so the local pane can
+  // Alt+drag a single remote item to initiate a native OS drag-out (to the
+  // desktop / Explorer). Native drag-out only supports one item, so this path
+  // is limited to a single selection; multi-select still drops into the local
+  // pane below. Regular drag keeps carrying the in-app MIME for the dual-pane.
+  if (e.altKey) {
+    const sel = selected.value.has(entry.name) ? selectedEntries() : [entry]
+    if (sel.length === 1) {
+      e.preventDefault()
+      window.api.sftp.startDrag(props.sessionId, posixJoin(path.value, sel[0].name), sel[0].name, sel[0].isDir)
+      return
+    }
+  }
+  // In-app drag (dual-panel): carry the remote path(s) so the local pane can
   // accept them as a drop target and download into its current directory.
   // If the dragged row is part of a multi-selection, drag them all.
   const items = (selected.value.has(entry.name) ? selectedEntries() : [entry]).map((x) => ({

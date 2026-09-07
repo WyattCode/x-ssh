@@ -8,7 +8,8 @@ import {
   buildExtractCommand,
   sanitizePasteText,
   isPrivateKey,
-  sanitizeKeyName
+  sanitizeKeyName,
+  shouldSkipKeyFile
 } from './fsUtils'
 
 describe('posixJoin', () => {
@@ -154,5 +155,20 @@ describe('sanitizeKeyName', () => {
     expect(sanitizeKeyName('.')).toBe('id')
     expect(sanitizeKeyName('..')).toBe('id')
     expect(sanitizeKeyName('id_rsa')).toBe('id_rsa')
+  })
+})
+
+describe('shouldSkipKeyFile', () => {
+  it('keeps generated/imported keys (id with short-uuid suffix) and plain names', () => {
+    expect(shouldSkipKeyFile('id_rsa-1a2b3c4d')).toBe(false)
+    expect(shouldSkipKeyFile('prod-key-01234567')).toBe(false)
+    expect(shouldSkipKeyFile('my-key')).toBe(false)
+  })
+
+  it('skips hidden dotfiles and bare id_* scratch files', () => {
+    expect(shouldSkipKeyFile('.hidden')).toBe(true)
+    expect(shouldSkipKeyFile('id_rsa')).toBe(true)
+    expect(shouldSkipKeyFile('id_ed25519')).toBe(true)
+    expect(shouldSkipKeyFile('id_rsa-nouuid')).toBe(true)
   })
 })

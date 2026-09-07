@@ -4,7 +4,7 @@ import { basename, join } from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import type { ManagedKey } from '../shared/types'
-import { isPrivateKey, sanitizeKeyName } from '../shared/fsUtils'
+import { isPrivateKey, sanitizeKeyName, shouldSkipKeyFile } from '../shared/fsUtils'
 
 const execFileAsync = promisify(execFile)
 
@@ -31,10 +31,7 @@ export class KeyManager {
     const names = await readdir(this.keysDir)
     const out: ManagedKey[] = []
     for (const n of names) {
-      // Skip hidden files and bare `id_*` scratch files ssh-keygen may leave
-      // around, but keep our generated/imported keys (always suffixed with a
-      // short uuid) even when the user named them "id_rsa" or similar.
-      if (n.startsWith('.') || (n.startsWith('id_') && !/-[0-9a-f]{8}$/.test(n))) continue
+      if (shouldSkipKeyFile(n)) continue
       const p = join(this.keysDir, n)
       if (!(await stat(p)).isFile()) continue
       out.push(await this.describe(p, n))
@@ -49,7 +46,8 @@ export class KeyManager {
       id: name,
       name,
       path: p,
-      mtime: s.mtimeMs
+      mtime: s.mtimeMs,
+      passphraseProtected: await this.isPassphraseProtected(p)
     }
     // Best-effort fingerprint / algorithm from `ssh-keygen -lf`. Skipped if not
     // installed or the file isn't a key, so a stale/malformed key won't error out.
@@ -68,6 +66,19 @@ export class KeyManager {
 
   private async sshKeygen(args: string[]): Promise<{ stdout: string }> {
     return execFileAsync('ssh-keygen', args, { windowsHide: true, maxBuffer: 8 * 1024 * 1024 }) as unknown as { stdout: string }
+  }
+
+  /** Best-effort check whether the private key at `p` is passphrase-protected.
+   *  A key that opens with an empty passphrase is unprotected; a key that
+   *  refuses an empty passphrase (or fails to parse) is treated as protected.
+   *  Only used to surface a security hint in the UI, never to restrict usage. */
+  private async isPassphraseProtected(p: string): Promise<boolean> {
+    try {
+      await this.sshKeygen(['-y', '-P', '', '-f', p])
+      return false
+    } catch {
+      return true
+    }
   }
 
   /** Generates a new key pair. `type` is the algorithm (default ed25519); a
