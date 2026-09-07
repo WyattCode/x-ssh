@@ -9,15 +9,16 @@
 ## 常用命令(Windows/PowerShell)
 - 必须用 `npm.cmd`(直接 `npm` 会因执行策略失败)。
 - 校验: `npm.cmd run typecheck`、`npm.cmd run build`
-- **单元测试**: `npm.cmd run test`(Vitest 2,与 Vite 5 兼容;纯逻辑模块 `src/shared/fsUtils.test.ts` 与 `src/renderer/src/lib/*.test.ts`,共 35 用例)。
-- **i18n 键对称校验**: `npm.cmd run lint:i18n`(脚本 `scripts/lint-i18n.mjs`,扫 zh/en 键集合、占位符与源码中缺失的静态键;现 370/370 全对称)。
+- **单元测试**: `npm.cmd run test`(Vitest 2,与 Vite 5 兼容;纯逻辑模块 `src/shared/fsUtils.test.ts` 与 `src/renderer/src/lib/*.test.ts`,共 38 用例)。
+- **i18n 键对称校验**: `npm.cmd run lint:i18n`(脚本 `scripts/lint-i18n.mjs`,扫 zh/en 键集合、占位符与源码中缺失的静态键;现 380/380 全对称)。
 - 打包: `npm.cmd run dist` → `release\X-SSH Setup 0.1.1.exe`(NSIS)+ `release\win-unpacked\X-SSH.exe` + `.blockmap`。
 - 无代码签名,SmartScreen 可能提示(正常)。
 - **CI**: `.github/workflows/ci.yml`,push/PR 到 main 时在 `windows-latest` 跑 typecheck → lint:i18n → unit test → build(NOTE: 仅 build,不跑 electron-builder,因无代码签名配置)。
 
 ## 架构要点
 - **密码/密钥永不离开主进程**:SSH 在主进程(`src/main/ssh.ts`),渲染层经 IPC(preload `src/preload/index.ts`)调用。
-- **共享纯函数**: `src/shared/fsUtils.ts`(POSIX 路径 `posixJoin`/`parentOf`、并发钳制 `clampConcurrency`、归档命令构造 `buildPackCommand`/`buildExtractCommand`、粘贴清理 `sanitizePasteText`),由主进程(`ssh.ts`)与渲染层(store/组件)共用并配套单元测试。**新增通用纯逻辑请放这里**。
+- **共享纯函数**: `src/shared/fsUtils.ts`(POSIX 路径 `posixJoin`/`parentOf`、并发钳制 `clampConcurrency`、归档命令构造 `buildPackCommand`/`buildExtractCommand`、粘贴清理 `sanitizePasteText`、私钥识别 `isPrivateKey`/`sanitizeKeyName`),由主进程(`ssh.ts`)与渲染层(store/组件)共用并配套单元测试。**新增通用纯逻辑请放这里**。
+- **SSH 密钥库**: `src/main/keyManager.ts` 管理用户密钥到 `<userData>/keys/`(每个密钥一个 id 文件 + `.pub`);`ssh-keygen` 生成/`-lf` 指纹。IPC `keys:list/generate/import/delete` → preload `api.keys.*`。**只存私钥文件不存 passphrase**;主机编辑器(认证为 key 时)从密钥库下拉选择、生成、导入、删除。
 - i18n:`src/renderer/src/lib/i18n.ts`,定义 `zh` 与 `en` 两个字典。**两个键集合必须一致**(现 370/370,`npm.cmd run lint:i18n` 校验)。
   - 动态键模式: `tab.*` / `group.*` / `sck.*` / `sck.*Hint`(缺失 hint 回退 `''`)。
   - 主题名(Nord/Dracula 等)为专有名词 **不翻译**,不建键。

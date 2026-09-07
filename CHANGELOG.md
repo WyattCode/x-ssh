@@ -5,12 +5,13 @@
 
 ## [Unreleased]
 
-- ✨ SFTP 本地面板多选拖拽: 支持 Ctrl/Shift 多选, 拖拽时上传全部选中项; 路径栏新增选中计数与全选按钮。
+- ✨ **SSH 密钥库**: 应用内用 `ssh-keygen` 生成 ed25519/rsa/ecdsa 密钥对, 或导入现有私钥; 密钥存入独立的 `keys/` 目录, 在主机编辑器中以下拉列表选择、复用与删除。
+- ✨ SFTP 本地面板多选拖拽: 支持 Ctrl/Shift 多选, 拖拽时上传全部选中项; 路径栏新增选中计数与全选按钮; 本地面板补齐键盘快捷键(Ctrl+A/Delete/F2/Enter/Backspace/Escape)。
 - ✨ 终端粘贴增强: 新增「清理粘贴中的控制字符」开关, 默认开启, 去除 OSC/转义等终端控制序列; 搜索亦支持 `Ctrl+Shift+F`。
 - ✨ 传输/历史 UI 打磨: 历史条目支持点击定位源目录; 本地面板列头排序接线。
 - ✨ 新增 `npm run lint:i18n`, 自动校验 zh/en 键对称与占位符一致性, 并扫描源码中缺失的静态键。
-- ✅ 新增 Vitest 单元测试(35 用例)与 GitHub Actions CI(typecheck → lint:i18n → test → build)。
-- 🔧 抽取共享纯函数模块 `shared/fsUtils.ts`(POSIX 路径、并发钳制、归档命令构造、粘贴清理), 主/渲染进程共用并配套测试。
+- ✅ 新增 Vitest 单元测试(38 用例)与 GitHub Actions CI(typecheck → lint:i18n → test → build)。
+- 🔧 抽取共享纯函数模块 `shared/fsUtils.ts`(POSIX 路径、并发钳制、归档命令构造、粘贴清理、私钥识别), 主/渲染进程共用并配套测试。
 - 🔧 修复片段确认对话框引用了不存在的 i18n 键(已更正为 `snip.confirm`)。
 - 🔧 编辑器保存远程文件后自动刷新 SFTP 目录列表。
 - 🔧 标签可拖拽时不再显示抓取手形光标。

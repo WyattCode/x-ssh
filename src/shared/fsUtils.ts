@@ -48,3 +48,19 @@ export function buildExtractCommand(remoteDir: string, archiveFileName: string):
 export function sanitizePasteText(text: string): string {
   return text.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, '')
 }
+
+/** A PRIVATE KEY marker that lets us reject a non-key file before copying it
+ *  into the key library. Covers OpenSSH / PEM (RSA, EC, DSA) and PKCS#8. */
+const PRIVATE_KEY_RE =
+  /-----BEGIN (?:(?:OPENSSH|RSA|EC|DSA|ENCRYPTED) )?PRIVATE KEY-----/
+
+/** True if a file's contents look like an SSH/PEM private key. */
+export function isPrivateKey(contents: string | Buffer): boolean {
+  return PRIVATE_KEY_RE.test(typeof contents === 'string' ? contents : contents.toString('utf8'))
+}
+
+/** Sanitizes a user-supplied key name into a safe filename fragment. */
+export function sanitizeKeyName(name: string): string {
+  const safe = (name || 'id').replace(/[^\w.-]/g, '_')
+  return safe || 'id'
+}

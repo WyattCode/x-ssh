@@ -50,6 +50,24 @@ export interface Host {
   hasSavedPassphrase?: boolean
 }
 
+/** A user-managed SSH key pair stored in the app's key library dir. */
+export interface ManagedKey {
+  /** Stable id (also used in the key's filename on disk). */
+  id: string
+  /** User-facing label, defaults to the basename. */
+  name: string
+  /** Type from the key (e.g. 'ssh-ed25519', 'ssh-rsa', ...). */
+  type?: string
+  /** Fingerprint (SHA256) if computable. */
+  fingerprint?: string
+  /** Absolute path to the private key file. */
+  path: string
+  /** Whether the key is passphrase-protected. */
+  passphraseProtected?: boolean
+  /** Unix mtime of the key file, for sorting / display. */
+  mtime?: number
+}
+
 /** A directory entry in the local filesystem browser. */
 export interface LocalEntry {
   name: string

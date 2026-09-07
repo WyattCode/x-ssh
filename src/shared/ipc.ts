@@ -8,6 +8,12 @@ export const IPC = {
   hostsExportJson: 'hosts:exportJson',
   hostsImportJson: 'hosts:importJson',
 
+  // SSH key library (invoke/handle)
+  keysList: 'keys:list',
+  keysGenerate: 'keys:generate',
+  keysImport: 'keys:import',
+  keysDelete: 'keys:delete',
+
   // SSH lifecycle (invoke/handle)
   sshConnect: 'ssh:connect',
   sshDisconnect: 'ssh:disconnect',

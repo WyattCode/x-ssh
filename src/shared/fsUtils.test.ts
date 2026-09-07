@@ -6,7 +6,9 @@ import {
   shellQuoteName,
   buildPackCommand,
   buildExtractCommand,
-  sanitizePasteText
+  sanitizePasteText,
+  isPrivateKey,
+  sanitizeKeyName
 } from './fsUtils'
 
 describe('posixJoin', () => {
@@ -109,5 +111,29 @@ describe('sanitizePasteText', () => {
   it('leaves plain text untouched', () => {
     const s = 'echo hello world'
     expect(sanitizePasteText(s)).toBe(s)
+  })
+})
+
+describe('isPrivateKey', () => {
+  it('accepts OpenSSH / PEM private keys and Buffer input', () => {
+    expect(isPrivateKey('-----BEGIN OPENSSH PRIVATE KEY-----\n...')).toBe(true)
+    expect(isPrivateKey('-----BEGIN RSA PRIVATE KEY-----')).toBe(true)
+    expect(isPrivateKey('-----BEGIN PRIVATE KEY-----')).toBe(true)
+    expect(isPrivateKey(Buffer.from('-----BEGIN EC PRIVATE KEY-----'))).toBe(true)
+  })
+
+  it('rejects non-key text', () => {
+    expect(isPrivateKey('hello world')).toBe(false)
+    expect(isPrivateKey('ssh-ed25519 AAAAC...')).toBe(false)
+    expect(isPrivateKey('')).toBe(false)
+  })
+})
+
+describe('sanitizeKeyName', () => {
+  it('replaces unsafe characters and falls back to a default', () => {
+    expect(sanitizeKeyName('my-aws key')).toBe('my-aws_key')
+    expect(sanitizeKeyName('../evil')).toBe('.._evil')
+    expect(sanitizeKeyName('')).toBe('id')
+    expect(sanitizeKeyName(undefined as unknown as string)).toBe('id')
   })
 })

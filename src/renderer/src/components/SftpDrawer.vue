@@ -107,6 +107,9 @@ async function onLocalDrop(e: DragEvent): Promise<void> {
 // ---- local pane: selection, create / rename / delete ----
 const localMenu = reactive({ open: false, x: 0, y: 0, target: null as LocalEntry | null })
 const localModal = reactive({ open: false, kind: 'file' as 'file' | 'folder', action: 'new' as 'new' | 'rename', value: '', error: '', target: null as LocalEntry | null })
+// Whether the last interaction was in the local pane, so keyboard shortcuts
+// route there (Ctrl+A / Delete / F2 / Enter / Backspace / Escape).
+const localActive = ref(false)
 const localSelSet = ref<Set<string>>(new Set())
 const localAnchor = ref<string | null>(null)
 function localSelectAll(): void {
@@ -114,6 +117,7 @@ function localSelectAll(): void {
 }
 const localSelCount = computed(() => localSelSet.value.size)
 function localSelect(entry: LocalEntry, e?: MouseEvent): void {
+  localActive.value = true
   if (e?.ctrlKey || e?.metaKey) {
     const s = new Set(localSelSet.value)
     if (s.has(entry.name)) s.delete(entry.name)
@@ -155,7 +159,9 @@ function localNew(kind: 'file' | 'folder'): void {
   localModal.open = true
 }
 function localRename(): void {
-  const t = localMenu.target
+  localRenameTarget(localMenu.target)
+}
+function localRenameTarget(t: LocalEntry | null): void {
   if (!t) return
   localModal.kind = t.isDir ? 'folder' : 'file'
   localModal.action = 'rename'
@@ -174,6 +180,41 @@ async function localDelete(): Promise<void> {
   const r = await window.api.local.del(localPath.value, t.name, t.isDir)
   if (!r.ok) toast(r.error ?? tt('sfp.delFail'), 'error')
   else await refreshLocal()
+}
+async function localDelSelected(): Promise<void> {
+  if (!localSelSet.value.size || !localPath.value) return
+  const entries = localSorted.value.filter((e) => localSelSet.value.has(e.name))
+  if (!entries.length) return
+  const ok = await confirm(tt('sfp.delMany', { n: entries.length }))
+  if (!ok) return
+  let failed = false
+  for (const e of entries) {
+    const r = await window.api.local.del(localPath.value, e.name, e.isDir)
+    if (!r.ok) {
+      failed = true
+      toast(r.error ?? tt('sfp.delFail'), 'error')
+    }
+  }
+  localSelSet.value = new Set()
+  localAnchor.value = null
+  await refreshLocal()
+  if (failed) toast(tt('sfp.delFail'), 'error')
+}
+// Keyboard helpers: act on the single currently-selected local entry.
+function localSelectedSingle(): LocalEntry | null {
+  if (localSelSet.value.size !== 1) return null
+  const n = Array.from(localSelSet.value)[0]
+  return localSorted.value.find((e) => e.name === n) ?? null
+}
+function localRenameSelection(): void {
+  const t = localSelectedSingle()
+  if (!t) return
+  localRenameTarget(t)
+}
+function localEnterSelection(): void {
+  const t = localSelectedSingle()
+  if (!t) return
+  if (t.isDir) void refreshLocal(localJoin(localPath.value, t.name))
 }
 async function localSubmit(): Promise<void> {
   const name = localModal.value.trim()
@@ -622,6 +663,7 @@ function onWindowResize(): void {
 
 function onRowClick(entry: FileEntry, e: MouseEvent): void {
   if (renamingName.value) return
+  localActive.value = false
   if (e.ctrlKey || e.metaKey) toggleSel(entry.name)
   else if (e.shiftKey && anchor.value) selectRange(entry.name)
   else selectOne(entry.name)
@@ -641,12 +683,38 @@ function goUp(): void {
 
 // ---- keyboard (file-manager shortcuts) ----
 function onKeydown(e: KeyboardEvent): void {
-  if (renamingName.value || creatingKind.value) return
+  if (renamingName.value || creatingKind.value || localModal.open || localMenu.open) return
   // Ignore keys bubbling up from the rename/create inputs — commitRename/
   // commitCreate clear the editing flag synchronously before the event reaches
   // here, so the guard above can be stale on Enter/Esc.
   if ((e.target as HTMLElement | null)?.closest('input')) return
   const mod = e.ctrlKey || e.metaKey
+  if (localActive.value) {
+    // Filter to local-pane file-manager shortcuts.
+    if (mod && e.key.toLowerCase() === 'a') {
+      e.preventDefault()
+      localSelectAll()
+    } else if (e.key === 'Delete') {
+      e.preventDefault()
+      void localDelSelected()
+    } else if (e.key === 'F2') {
+      e.preventDefault()
+      localRenameSelection()
+    } else if (e.key === 'Enter') {
+      e.preventDefault()
+      localEnterSelection()
+    } else if (e.key === 'Backspace') {
+      e.preventDefault()
+      localGoUp()
+    } else if (e.key === 'Escape') {
+      e.preventDefault()
+      if (localSelSet.value.size) {
+        localSelSet.value = new Set()
+        localAnchor.value = null
+      }
+    }
+    return
+  }
   if (mod && e.key.toLowerCase() === 'a') {
     e.preventDefault()
     selectAll()
@@ -1171,8 +1239,8 @@ const pct = (t: SftpProgress): number =>
       <button class="mini" @click="store.clearTransferQueue(); showResume = false">{{ tt('sfp.discard') }}</button>
     </div>
 
-    <div v-if="localOpen" class="localpane" @dragover.prevent @drop.prevent.stop="onLocalDrop">
-      <div class="pathbar">
+    <div v-if="localOpen" class="localpane" @click="localActive = true" @dragover.prevent @drop.prevent.stop="onLocalDrop">
+    <div class="pathbar" @click="localActive = false">
         <button class="up" :title="tt('sfp.upLevel')" :disabled="localLoading" @click="localGoUp"><Icon name="arrow-up" :size="15" /></button>
         <span class="local-path" :title="localPath">{{ localPath }}</span>
         <span v-if="localSelCount" class="loc-selcount">{{ tt('sfp.selected', { n: localSelCount }) }}</span>

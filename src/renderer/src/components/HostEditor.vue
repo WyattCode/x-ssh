@@ -2,13 +2,17 @@
 import { reactive, ref, watch, nextTick, computed } from 'vue'
 import { useSessions } from '../stores/sessions'
 import { useI18n } from '../lib/i18n'
+import { useToast } from '../composables/toast'
+import { useConfirm } from '../composables/confirm'
 import Icon from './Icon.vue'
-import type { AuthMethod, ForwardMode, Host } from '../../../shared/types'
+import type { AuthMethod, ForwardMode, Host, ManagedKey } from '../../../shared/types'
 
 const props = defineProps<{ open: boolean; host: Host | null }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
 const store = useSessions()
 const { t } = useI18n()
+const { toast } = useToast()
+const { confirm } = useConfirm()
 
 const uid = (): string =>
   `host-${Date.now()}-${Math.floor(Math.random() * 1e6)}`
@@ -95,6 +99,69 @@ function removeForward(i: number): void {
 async function pickKey(): Promise<void> {
   const path = await window.api.pickKeyFile()
   if (path) form.keyPath = path
+}
+
+// ---- SSH key library ----
+const managedKeys = ref<ManagedKey[]>([])
+const keyModal = reactive({ open: false, name: '', type: 'ed25519', passphrase: '', error: '' })
+async function loadKeys(): Promise<void> {
+  managedKeys.value = await window.api.keys.list()
+}
+watch(
+  () => props.open,
+  (open) => {
+    if (open) void loadKeys()
+  },
+  { immediate: true }
+)
+function useKey(path: string): void {
+  form.keyPath = path
+}
+function openGenerate(): void {
+  keyModal.open = true
+  keyModal.name = ''
+  keyModal.type = 'ed25519'
+  keyModal.passphrase = ''
+  keyModal.error = ''
+}
+async function generateKey(): Promise<void> {
+  keyModal.error = ''
+  const name = keyModal.name.trim()
+  if (!name) {
+    keyModal.error = t('host.keyNameReq')
+    return
+  }
+  const r = await window.api.keys.generate({
+    name,
+    type: keyModal.type,
+    passphrase: keyModal.passphrase || undefined
+  })
+  if (!r.ok || !r.key) {
+    keyModal.error = r.error ?? t('host.keyGenFail')
+    return
+  }
+  keyModal.open = false
+  form.keyPath = r.key.path
+  await loadKeys()
+}
+async function importKey(): Promise<void> {
+  const r = await window.api.keys.import()
+  if (r.canceled) return
+  if (!r.ok || !r.key) {
+    toast(r.error ?? t('host.keyImportFail'), 'error')
+    return
+  }
+  form.keyPath = r.key.path
+  await loadKeys()
+}
+async function deleteKey(k: ManagedKey): Promise<void> {
+  const res = await confirm(t('host.keyDeleteConfirm', { name: k.name }))
+  if (!res) return
+  const r = await window.api.keys.del(k.id)
+  if (r.ok) {
+    if (form.keyPath === k.path) form.keyPath = ''
+    await loadKeys()
+  }
 }
 
 const canSave = (): boolean => !!form.host && !!form.username
@@ -281,9 +348,19 @@ async function remove(): Promise<void> {
       <template v-else-if="form.auth === 'key'">
         <div class="field">
           <span>{{ t('host.privateKey') }}</span>
-          <div class="keyrow">
+          <div v-if="managedKeys.length" class="keyrow">
+            <select class="keyselect" :value="form.keyPath || ''" @change="useKey(($event.target as HTMLSelectElement).value)">
+              <option value="">{{ t('host.noKey') }}</option>
+              <option v-for="k in managedKeys" :key="k.id" :value="k.path">{{ k.name }}</option>
+            </select>
+            <button class="ghost" @click="openGenerate">{{ t('host.generateKey') }}</button>
+            <button class="ghost" @click="importKey">{{ t('host.importKey') }}</button>
+          </div>
+          <div v-else class="keyrow">
             <input :value="form.keyPath" :placeholder="t('host.noKey')" readonly />
             <button class="ghost" @click="pickKey">{{ t('host.browse') }}</button>
+            <button class="ghost" @click="openGenerate">{{ t('host.generateKey') }}</button>
+            <button class="ghost" @click="importKey">{{ t('host.importKey') }}</button>
           </div>
         </div>
         <label class="field">
@@ -294,6 +371,13 @@ async function remove(): Promise<void> {
             :placeholder="host?.hasSavedPassphrase ? t('host.passphraseSaved') : t('host.passphraseAsk')"
           />
         </label>
+        <div v-if="managedKeys.length" class="keylist">
+          <div v-for="k in managedKeys" :key="k.id" class="keyitem">
+            <span class="keyname" :title="k.fingerprint">{{ k.name }}</span>
+            <span v-if="k.type" class="keytype">{{ k.type }}</span>
+            <button class="ghost del" :title="t('host.deleteKey')" @click="deleteKey(k)">{{ t('host.delete') }}</button>
+          </div>
+        </div>
       </template>
 
       <p v-else class="agent-note">{{ t('host.agentNote') }}</p>
@@ -303,6 +387,32 @@ async function remove(): Promise<void> {
         <div class="spacer" />
         <button class="ghost" @click="emit('close')">{{ t('host.cancel') }}</button>
         <button class="primary" :disabled="!canSave()" @click="save">{{ t('host.save') }}</button>
+      </div>
+
+      <div v-if="keyModal.open" class="overlay key-modal" @mousedown.self="keyModal.open = false">
+        <div class="editor keygen" @keydown.esc="keyModal.open = false" @keydown.enter="generateKey">
+          <div class="head">{{ t('host.generateKey') }}</div>
+          <label class="field">
+            <span>{{ t('host.keyName') }}</span>
+            <input v-model="keyModal.name" :placeholder="t('host.keyNamePh')" autofocus />
+          </label>
+          <div class="field">
+            <span>{{ t('host.keyType') }}</span>
+            <div class="authseg">
+              <button v-for="ty in ['ed25519', 'rsa', 'ecdsa']" :key="ty" :class="{ on: keyModal.type === ty }" @click="keyModal.type = ty">{{ ty }}</button>
+            </div>
+          </div>
+          <label class="field">
+            <span>{{ t('host.passphrase') }}</span>
+            <input v-model="keyModal.passphrase" type="password" :placeholder="t('host.passphraseAsk')" />
+          </label>
+          <p v-if="keyModal.error" class="err">{{ keyModal.error }}</p>
+          <div class="actions">
+            <div class="spacer" />
+            <button class="ghost" @click="keyModal.open = false">{{ t('host.cancel') }}</button>
+            <button class="primary" @click="generateKey">{{ t('host.save') }}</button>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -485,6 +595,73 @@ async function remove(): Promise<void> {
   flex: 1;
   font-family: var(--font-mono);
   font-size: 11.5px;
+}
+.keyselect {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  background: var(--bg-2, #17191e);
+  color: var(--text);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+.keylist {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+  max-height: 120px;
+  overflow: auto;
+}
+.keyitem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+}
+.keyname {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+.keytype {
+  color: var(--text-dim);
+}
+.keyitem .del {
+  font-size: 11px;
+  padding: 2px 6px;
+}
+.key-modal {
+  align-items: center;
+  backdrop-filter: blur(3px);
+}
+.keygen .field {
+  margin-top: 8px;
+}
+.authseg {
+  display: flex;
+  gap: 6px;
+}
+.authseg button {
+  flex: 1;
+  padding: 6px 4px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.authseg button.on {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.err {
+  color: var(--danger, #ff6b6b);
+  font-size: 11px;
+  margin: 4px 0;
 }
 .agent-note {
   font-size: 12px;

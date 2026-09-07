@@ -6,6 +6,7 @@ import type {
   Host,
   HostForward,
   KnownHostEntry,
+  ManagedKey,
   SessionEvent,
   SftpList,
   SftpProgress,
@@ -185,6 +186,14 @@ const api = {
   pickKeyFile: (): Promise<string | undefined> => ipcRenderer.invoke(IPC.pickKeyFile),
   pickExecutable: (): Promise<string | undefined> =>
     ipcRenderer.invoke(IPC.pickExecutable),
+  keys: {
+    list: (): Promise<ManagedKey[]> => ipcRenderer.invoke(IPC.keysList),
+    generate: (opts: { name: string; type?: string; passphrase?: string; bits?: number }): Promise<{ ok: boolean; key?: ManagedKey; error?: string }> =>
+      ipcRenderer.invoke(IPC.keysGenerate, opts),
+    import: (): Promise<{ ok: boolean; key?: ManagedKey; error?: string; canceled?: boolean }> =>
+      ipcRenderer.invoke(IPC.keysImport),
+    del: (id: string): Promise<{ ok: boolean }> => ipcRenderer.invoke(IPC.keysDelete, id)
+  },
   /** Resolve a dropped File's absolute path (File.path was removed in Electron 32+). */
   getPathForFile: (file: File): string => webUtils.getPathForFile(file),
   zoom: {

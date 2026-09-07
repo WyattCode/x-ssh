@@ -12,10 +12,12 @@ import { HostStore } from './store'
 import { KnownHosts } from './knownHosts'
 import { SettingsStore } from './settings'
 import { friendlyError } from './friendlyError'
+import { KeyManager } from './keyManager'
 
 const store = new HostStore()
 const knownHosts = new KnownHosts()
 const settings = new SettingsStore()
+const keyManager = new KeyManager(app.getPath('userData'))
 const activeEdits = new Set<string>()
 // Cache of drag-out downloads keyed by session:remotePath, so a file prefetched
 // on mousedown is ready by the time the drag gesture reaches startDrag.
@@ -874,6 +876,34 @@ function registerIpc(): void {
       properties: ['openFile', 'showHiddenFiles']
     })
     return res.canceled ? undefined : res.filePaths[0]
+  })
+  // ---- SSH key library ----
+  ipcMain.handle(IPC.keysList, () => keyManager.list())
+  ipcMain.handle(
+    IPC.keysGenerate,
+    async (_e, opts: { name: string; type?: string; passphrase?: string; bits?: number }) => {
+      try {
+        return { ok: true, key: await keyManager.generate(opts) }
+      } catch (e) {
+        return { ok: false, error: friendlyError((e as Error).message) }
+      }
+    }
+  )
+  ipcMain.handle(IPC.keysImport, async () => {
+    const res = await dialog.showOpenDialog({
+      title: '导入私钥',
+      properties: ['openFile', 'showHiddenFiles']
+    })
+    if (res.canceled || !res.filePaths[0]) return { ok: false, canceled: true }
+    try {
+      return { ok: true, key: await keyManager.import(res.filePaths[0]) }
+    } catch (e) {
+      return { ok: false, error: friendlyError((e as Error).message) }
+    }
+  })
+  ipcMain.handle(IPC.keysDelete, async (_e, id: string) => {
+    await keyManager.remove(id)
+    return { ok: true }
   })
 }
 
