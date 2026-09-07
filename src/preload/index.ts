@@ -164,6 +164,8 @@ const api = {
       ipcRenderer.invoke(IPC.sftpEditExternal, sessionId, path, name),
     startDrag: (sessionId: string, remotePath: string, name: string, isDir: boolean): void =>
       ipcRenderer.send(IPC.sftpStartDrag, sessionId, remotePath, name, isDir),
+    prefetchDrag: (sessionId: string, remotePath: string, name: string, isDir: boolean): void =>
+      ipcRenderer.send(IPC.sftpPrefetchDrag, sessionId, remotePath, name, isDir),
     cancel: (id: string): void => ipcRenderer.send(IPC.sftpCancel, id),
     onProgress: (cb: (p: SftpProgress) => void): (() => void) => {
       const listener = (_e: unknown, p: SftpProgress): void => cb(p)

@@ -834,6 +834,21 @@ function registerIpc(): void {
     }
   )
 
+  // Pre-fetch the drag-out download on mousedown so the (mostly asynchronous,
+  // network-bound) download is ready by the time the drag gesture reaches
+  // sftpStartDrag. startDrag must effectively run during the drag gesture, so
+  // warming the cache here is what makes Alt+drag reliable for larger files.
+  ipcMain.on(
+    IPC.sftpPrefetchDrag,
+    async (_e, sessionId: string, remotePath: string, name: string, isDir: boolean) => {
+      try {
+        await prefetchDrag(sessionId, remotePath, name, isDir)
+      } catch {
+        /* download will just re-attempt at startDrag time */
+      }
+    }
+  )
+
   // ---- Settings ----
   ipcMain.handle(IPC.settingsGet, (_e, key: string) => settings.get(key))
   ipcMain.handle(IPC.settingsSet, (_e, key: string, value: unknown) =>

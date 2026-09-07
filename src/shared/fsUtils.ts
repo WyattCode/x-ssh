@@ -69,10 +69,12 @@ export function sanitizeKeyName(name: string): string {
   return safe
 }
 
-/** True if a key-library entry name should be skipped when listing. Hidden
- *  dotfiles and bare `id_*` scratch files (no short-uuid suffix) are not user
- *  keys; generated/imported keys always carry a short-uuid suffix. */
+/** True if a key-library entry name should be skipped when listing. Skips
+ *  companion `.pub` files, hidden dotfiles and bare `id_*` scratch files (no
+ *  short-uuid suffix); generated/imported keys always carry a short-uuid
+ *  suffix and have no `.pub` extension. */
 export function shouldSkipKeyFile(name: string): boolean {
+  if (name.endsWith('.pub')) return true
   if (name.startsWith('.')) return true
   return name.startsWith('id_') && !/-[0-9a-f]{8}$/.test(name)
 }

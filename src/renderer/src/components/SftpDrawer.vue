@@ -766,6 +766,15 @@ function editFile(entry: FileEntry, external: boolean): void {
   if (external) emit('edit-external', payload)
   else emit('edit-file', payload)
 }
+function onRemoteMouseDown(e: MouseEvent, entry: FileEntry): void {
+  // Alt+mousedown pre-fetches the drag-out download into the main-process cache
+  // so that startDrag (called from onDragStart) can complete near-instantly and
+  // actually drive the native OS drag gesture instead of missing it.
+  if (!props.sessionId || !e.altKey) return
+  const sel = selected.value.has(entry.name) ? selectedEntries() : [entry]
+  if (sel.length !== 1) return
+  window.api.sftp.prefetchDrag(props.sessionId, posixJoin(path.value, sel[0].name), sel[0].name, sel[0].isDir)
+}
 function onDragStart(e: DragEvent, entry: FileEntry): void {
   if (!props.sessionId) return
   // Alt+drag a single remote item to initiate a native OS drag-out (to the
@@ -1407,6 +1416,7 @@ const pct = (t: SftpProgress): number =>
           :data-name="entry.name"
           :title="permTitle(entry)"
           draggable="true"
+          @mousedown="onRemoteMouseDown($event, entry)"
           @click="onRowClick(entry, $event)"
           @dblclick="onRowDblClick(entry)"
           @contextmenu="openMenu($event, entry)"

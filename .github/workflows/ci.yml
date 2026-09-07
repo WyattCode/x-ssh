@@ -74,3 +74,4 @@ jobs:
             release/*.exe
             release/*.blockmap
           fail_on_unmatched_files: false
+          skip_if_release_exists: true

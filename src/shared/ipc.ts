@@ -55,6 +55,7 @@ export const IPC = {
   sftpWriteText: 'sftp:writeText',
   sftpEditExternal: 'sftp:editExternal',
   sftpStartDrag: 'sftp:startDrag', // renderer -> main (drag out)
+  sftpPrefetchDrag: 'sftp:prefetchDrag', // renderer -> main : pre-fetch for drag-out
   sftpProgress: 'sftp:progress', // main -> renderer
   sftpPackDownload: 'sftp:packDownload', // remote tar.zip -> download
   sftpExtract: 'sftp:extract', // extract uploaded archive on remote

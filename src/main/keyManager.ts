@@ -69,14 +69,21 @@ export class KeyManager {
   }
 
   /** Best-effort check whether the private key at `p` is passphrase-protected.
-   *  A key that opens with an empty passphrase is unprotected; a key that
-   *  refuses an empty passphrase (or fails to parse) is treated as protected.
+   *  `false` = opens with an empty passphrase (unprotected); `true` = refused
+   *  an empty passphrase (likely encrypted); `undefined` = couldn't determine
+   *  (e.g. ssh-keygen unavailable or a read error), so callers don't assume.
    *  Only used to surface a security hint in the UI, never to restrict usage. */
-  private async isPassphraseProtected(p: string): Promise<boolean> {
+  private async isPassphraseProtected(p: string): Promise<boolean | undefined> {
     try {
       await this.sshKeygen(['-y', '-P', '', '-f', p])
+      // Successfully printed the public key with an empty passphrase → unprotected.
       return false
-    } catch {
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code
+      // A numeric exit code means ssh-keygen actually ran and refused the key,
+      // i.e. it is passphrase-protected. ENOENT/EACCES/etc. mean we couldn't
+      // even run it, so the protection state is unknown.
+      if (code === 'ENOENT' || code === 'EACCES') return undefined
       return true
     }
   }

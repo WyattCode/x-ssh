@@ -171,4 +171,11 @@ describe('shouldSkipKeyFile', () => {
     expect(shouldSkipKeyFile('id_ed25519')).toBe(true)
     expect(shouldSkipKeyFile('id_rsa-nouuid')).toBe(true)
   })
+
+  it('skips companion .pub files so they are not listed as keys', () => {
+    expect(shouldSkipKeyFile('my-key.pub')).toBe(true)
+    expect(shouldSkipKeyFile('prod-key-01234567.pub')).toBe(true)
+    expect(shouldSkipKeyFile('id_rsa-1a2b3c4d.pub')).toBe(true)
+    expect(shouldSkipKeyFile('my-key-01234567.pub')).toBe(true)
+  })
 })
