@@ -32,6 +32,20 @@ const { confirm } = useConfirm()
 let counter = 0
 const uid = (p: string): string => `${p}-${Date.now()}-${counter++}`
 
+/** Recursively unwraps Vue reactive proxies into a plain, cloneable object.
+ *  Pinia wraps store arrays/objects (snapshots, transfer history, queues) in
+ *  Proxies; Electron's IPC structured-clone rejects them with "An object could
+ *  not be cloned", so they must be stripped before `settings.set`. */
+function toPlain<T>(value: T): T {
+  const raw = toRaw(value)
+  if (raw === null || typeof raw !== 'object') return raw as T
+  if (raw instanceof Date) return raw as T
+  if (Array.isArray(raw)) return raw.map((v) => toPlain(v)) as unknown as T
+  const out: Record<string, unknown> = {}
+  for (const key of Object.keys(raw)) out[key] = toPlain((raw as Record<string, unknown>)[key])
+  return out as T
+}
+
 // Panes with a connect currently in flight. Guards against overlapping connects
 // (double-clicked "reconnect", a manual retry racing a scheduled one) which
 // would otherwise orphan a live SSH session by overwriting its id.
@@ -338,7 +352,7 @@ export const useSessions = defineStore('sessions', {
     },
 
     async saveSetting(key: string, value: unknown): Promise<void> {
-      await window.api.settings.set(key, value)
+      await window.api.settings.set(key, toPlain(value))
     },
 
     /** Persists every tab (layout + panes, minus secrets) so it can be restored. */
@@ -441,11 +455,11 @@ export const useSessions = defineStore('sessions', {
         { id: uid('xfer'), remoteDir, localPaths, at: Date.now() },
         ...this.transferQueue
       ].slice(0, 20)
-      await window.api.settings.set('transferQueue', this.transferQueue)
+      await window.api.settings.set('transferQueue', toPlain(this.transferQueue))
     },
     async clearTransferQueue(): Promise<void> {
       this.transferQueue = []
-      await window.api.settings.set('transferQueue', this.transferQueue)
+      await window.api.settings.set('transferQueue', toPlain(this.transferQueue))
     },
     /** Records an interrupted download so it can be resumed into its local dir. */
     async queueDownload(sessionId: string, items: DownloadItem[], localDir: string): Promise<void> {
@@ -454,25 +468,25 @@ export const useSessions = defineStore('sessions', {
         { id: uid('xfer'), sessionId, items, localDir, at: Date.now() },
         ...this.downloadQueue
       ].slice(0, 20)
-      await window.api.settings.set('downloadQueue', this.downloadQueue)
+      await window.api.settings.set('downloadQueue', toPlain(this.downloadQueue))
     },
     async clearDownloadQueue(): Promise<void> {
       this.downloadQueue = []
-      await window.api.settings.set('downloadQueue', this.downloadQueue)
+      await window.api.settings.set('downloadQueue', toPlain(this.downloadQueue))
     },
     /** Records a finished transfer into the persisted history (newest first). */
     async pushTransferHistory(item: TransferHistoryItem): Promise<void> {
       this.transferHistory = [item, ...this.transferHistory].slice(0, 100)
-      await window.api.settings.set('sftpTransferHistory', this.transferHistory)
+      await window.api.settings.set('sftpTransferHistory', toPlain(this.transferHistory))
     },
     async clearTransferHistory(): Promise<void> {
       this.transferHistory = []
-      await window.api.settings.set('sftpTransferHistory', this.transferHistory)
+      await window.api.settings.set('sftpTransferHistory', toPlain(this.transferHistory))
     },
     /** Removes a single transfer entry from the persisted history. */
     async removeTransferHistory(id: string): Promise<void> {
       this.transferHistory = this.transferHistory.filter((h) => h.id !== id)
-      await window.api.settings.set('sftpTransferHistory', this.transferHistory)
+      await window.api.settings.set('sftpTransferHistory', toPlain(this.transferHistory))
     },
 
     /** Registers the single global sftp:progress listener. Transfers keep
@@ -577,11 +591,11 @@ export const useSessions = defineStore('sessions', {
       }) as PersistedTab[]
       const snap: Snapshot = { id: uid('snap'), name, savedAt: Date.now(), tabs: list }
       this.snapshots = [snap, ...this.snapshots].slice(0, 30)
-      await window.api.settings.set('snapshots', this.snapshots)
+      await window.api.settings.set('snapshots', toPlain(this.snapshots))
     },
     async deleteSnapshot(id: string): Promise<void> {
       this.snapshots = this.snapshots.filter((s) => s.id !== id)
-      await window.api.settings.set('snapshots', this.snapshots)
+      await window.api.settings.set('snapshots', toPlain(this.snapshots))
     },
     /** Replaces the current tabs with a saved snapshot (disconnected). */
     async openSnapshot(id: string): Promise<void> {
