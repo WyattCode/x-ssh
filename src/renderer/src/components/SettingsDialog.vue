@@ -147,20 +147,48 @@ function toggleAutoReconnect(): void {
   store.autoReconnect = !store.autoReconnect
   void store.saveSetting('autoReconnect', store.autoReconnect)
 }
+function toggleRestoreConnect(): void {
+  store.restoreConnect = !store.restoreConnect
+  void store.saveSetting('restoreConnect', store.restoreConnect)
+}
 function toggleNotifications(): void {
   store.notifications = !store.notifications
   void store.saveSetting('notifications', store.notifications)
 }
 
 // ---- command snippets ----
-const snippetForm = reactive({ open: false, title: '', text: '', confirm: false })
+const snippetForm = reactive({
+  open: false,
+  id: '',
+  title: '',
+  text: '',
+  confirm: false,
+  group: ''
+})
+function startNewSnippet(): void {
+  snippetForm.open = true
+  snippetForm.id = ''
+  snippetForm.title = ''
+  snippetForm.text = ''
+  snippetForm.confirm = false
+  snippetForm.group = ''
+}
+function editSnippet(s: { id: string; title: string; text: string; confirm?: boolean; group?: string }): void {
+  snippetForm.open = true
+  snippetForm.id = s.id
+  snippetForm.title = s.title
+  snippetForm.text = s.text
+  snippetForm.confirm = !!s.confirm
+  snippetForm.group = s.group ?? ''
+}
 async function saveSnippet(): Promise<void> {
   if (!snippetForm.title.trim() || !snippetForm.text.trim()) return
   await store.saveSnippet({
-    id: `snip-${Date.now()}-${Math.floor(Math.random() * 1e6)}`,
+    id: snippetForm.id || `snip-${Date.now()}-${Math.floor(Math.random() * 1e6)}`,
     title: snippetForm.title.trim(),
     text: snippetForm.text,
-    confirm: snippetForm.confirm || undefined
+    confirm: snippetForm.confirm || undefined,
+    group: snippetForm.group.trim() || undefined
   })
   snippetForm.open = false
 }
@@ -253,13 +281,21 @@ async function importHostsJson(): Promise<void> {
                 </span>
                 <span class="switch" :class="{ on: store.restoreTabs }"><i /></span>
               </label>
+              <label class="toggle-row" @click="toggleRestoreConnect">
+                <span>
+                  <span class="fname">{{ t('set.gen.restoreConnect') }}</span>
+                  <span class="sub">{{ t('set.gen.restoreConnectDesc') }}</span>
+                </span>
+                <span class="switch" :class="{ on: store.restoreConnect }"><i /></span>
+              </label>
             </div>
             <div class="section">
               <div class="label">{{ t('set.gen.snippets') }}</div>
               <p class="desc">{{ t('set.gen.snippetsDesc') }}</p>
               <div v-for="s in store.snippets" :key="s.id" class="snip-row">
-                <span class="snip-title">{{ s.title }}</span>
+                <span class="snip-title">{{ s.title }}<template v-if="s.group"> · {{ s.group }}</template></span>
                 <span class="snip-text">{{ oneLine(s.text) }}</span>
+                <button class="ghost" @click="editSnippet(s)">{{ t('set.gen.edit') }}</button>
                 <button class="ghost" @click="deleteSnippet(s.id)">{{ t('set.gen.delete') }}</button>
               </div>
               <div v-if="snippetForm.open" class="snip-form">
@@ -275,6 +311,12 @@ async function importHostsJson(): Promise<void> {
                   :placeholder="t('set.gen.snipPlaceholder')"
                   spellcheck="false"
                 />
+                <input
+                  v-model="snippetForm.group"
+                  class="snip-in"
+                  :placeholder="t('set.gen.snipGroup')"
+                  spellcheck="false"
+                />
                 <label class="field check">
                   <input v-model="snippetForm.confirm" type="checkbox" />
                   <span class="check-label">{{ t('set.gen.snipConfirm') }}</span>
@@ -284,7 +326,7 @@ async function importHostsJson(): Promise<void> {
                   <button class="primary" :disabled="!snippetForm.title.trim() || !snippetForm.text.trim()" @click="saveSnippet">{{ t('set.gen.save') }}</button>
                 </div>
               </div>
-              <button v-else class="ghost" @click="snippetForm.open = true">{{ t('set.gen.newSnippet') }}</button>
+              <button v-else class="ghost" @click="startNewSnippet">{{ t('set.gen.newSnippet') }}</button>
             </div>
           </template>
 

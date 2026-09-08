@@ -55,6 +55,9 @@ const accent = computed(() => {
   const id = tab.value?.hostId
   return id ? store.hosts.find((h) => h.id === id)?.color : undefined
 })
+
+// Running SFTP transfers across all panes (opens the global transfers panel).
+const activeTransfers = computed(() => store.transfers.filter((x) => !x.done && !x.error))
 </script>
 
 <template>
@@ -67,6 +70,17 @@ const accent = computed(() => {
     <span v-else class="seg dim">{{ t('status.none') }}</span>
 
     <span class="grow" />
+
+    <button
+      v-if="activeTransfers.length"
+      class="seg badge xfer"
+      :class="{ on: store.transferPanelOpen }"
+      :title="t('tpanel.title')"
+      @click="store.toggleTransferPanel()"
+    >
+      <Icon name="download" :size="12" />
+      <span>{{ activeTransfers.length }}</span>
+    </button>
 
     <span v-if="hasJump" class="seg badge" :title="t('status.jumpTip')">
       <Icon name="server" :size="12" />
@@ -136,6 +150,12 @@ const accent = computed(() => {
 }
 .badge.warn {
   color: var(--warn);
+}
+.badge.xfer {
+  cursor: pointer;
+}
+.badge.xfer.on {
+  color: var(--accent);
 }
 .grow {
   flex: 1;

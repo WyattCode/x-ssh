@@ -96,10 +96,12 @@ async function listSnippets(): Promise<Snippet[]> {
 async function saveSnippet(snippet: Snippet): Promise<Snippet[]> {
   const all = await listSnippets()
   const i = all.findIndex((s) => s.id === snippet.id)
-  const clean = {
+  const clean: Snippet = {
     id: snippet.id,
     title: snippet.title,
-    text: snippet.text
+    text: snippet.text,
+    confirm: snippet.confirm,
+    ...(snippet.group ? { group: snippet.group } : {})
   }
   if (i >= 0) all[i] = clean
   else all.unshift(clean)

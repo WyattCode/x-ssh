@@ -347,11 +347,9 @@ function focusEdit(): void {
   })
 }
 
-const transfers = ref<SftpProgress[]>([])
-// Smoothed transfer speed (bytes/sec) per job id, for a live "x MB/s" readout.
-const speeds = reactive<Record<string, number>>({})
-const speedMeta = new Map<string, { bytes: number; time: number }>()
-let offProgress: (() => void) | null = null
+// Live transfer rows are tracked globally in the store (so a transfer that
+// finishes while the drawer is closed is still recorded & notified); the drawer
+// only filters that shared list to the pane it's showing.
 
 // Recent finished transfers (newest first), kept for the history dropdown.
 // The list is persisted through the store so it survives a restart; live
@@ -390,11 +388,11 @@ const sorted = computed(() => {
   return arr
 })
 
-// Progress events for every session flow through one drawer instance; show only
-// the active pane's, but keep the rest so a backgrounded transfer's completion
+// Progress events for every session flow through the store; show only the
+// active pane's, but keep the rest so a backgrounded transfer's completion
 // (and its history entry) is never lost.
 const activeTransfers = computed(() =>
-  transfers.value.filter((t) => !t.sessionId || t.sessionId === props.sessionId)
+  store.transfers.filter((t) => !t.done && !t.error && (!t.sessionId || t.sessionId === props.sessionId))
 )
 const activeHistory = computed(() => store.transferHistory)
 
@@ -446,8 +444,9 @@ watch(
   { immediate: true }
 )
 
-const cleanupTimers = new Set<number>()
 let uploadReloadTimer: number | null = null
+// Upload jobs already acted on by the listing-reload watcher.
+const reloadedDoneIds = new Set<string>()
 // A saved internal editor write should refresh the current listing (size/mtime
 // may have changed), so App.bump reloadKey.
 watch(
@@ -464,105 +463,35 @@ watch(
 )
 onMounted(() => {
   showResume.value = store.transferQueue.length > 0 || store.downloadQueue.length > 0
-  offProgress = window.api.sftp.onProgress((p) => {
-    // Record every session's events (rows/history are filtered to the active
-    // pane at render); this way a transfer that completes while its pane is
-    // backgrounded is still logged instead of silently dropped.
-    const i = transfers.value.findIndex((t) => t.id === p.id)
-    if (i >= 0) transfers.value[i] = { ...transfers.value[i], ...p }
-    else transfers.value.push({ ...p })
-    // Live speed: exponential moving average of instantaneous byte rate.
-    if (!p.done && !p.error) {
-      const now = Date.now()
-      const prev = speedMeta.get(p.id)
-      if (prev && now > prev.time) {
-        const inst = ((p.transferred - prev.bytes) / (now - prev.time)) * 1000
-        speeds[p.id] = speeds[p.id] ? speeds[p.id] * 0.6 + inst * 0.4 : Math.max(0, inst)
-      }
-      speedMeta.set(p.id, { bytes: p.transferred, time: now })
-    } else {
-      delete speeds[p.id]
-      speedMeta.delete(p.id)
-    }
-    // An upload that errored (usually because the session dropped) is queued so
-    // it can be resumed once the connection returns.
-    if (
-      p.error &&
-      !isCancelled(p) &&
-      p.direction === 'up' &&
-      runningUpload.value &&
-      (!p.sessionId || p.sessionId === props.sessionId)
-    ) {
-      void store.queueUpload(runningUpload.value.remoteDir, runningUpload.value.localPaths)
-      runningUpload.value = null
-    }
-    // A failed download (session drop / network error) is queued so it can be
-    // batch-resumed into the same local destination once the link returns.
-    if (
-      p.error &&
-      !isCancelled(p) &&
-      p.direction === 'down' &&
-      p.items?.length &&
-      props.sessionId &&
-      p.sessionId === props.sessionId
-    ) {
-      void store.queueDownload(props.sessionId, p.items, p.localDir ?? '')
-      showResume.value = true
-    }
-    if (p.done && p.direction === 'up' && (!p.sessionId || p.sessionId === props.sessionId)) {
-      runningUpload.value = null
-    }
-    if (p.done || p.error) {
-      window.api.notify(
-        isCancelled(p) ? tt('sfp.notifyCancelled') : p.error ? tt('sfp.notifyError') : tt('sfp.notifyDone'),
-        `${p.name} · ${p.direction === 'up' ? tt('sfp.up') : tt('sfp.down')}${p.error && !isCancelled(p) ? ` · ${p.error}` : ''}`
+  // Tracking/notification/history are handled globally in the store so they run
+  // even when this drawer is closed. Idempotent, so calling it here too is safe.
+  store.initSftpProgress()
+  // Refresh the listing after an upload that finished in this pane, debounced so
+  // a folder of N files triggers one reload instead of N. A backgrounded pane's
+  // upload must not reload the active one.
+  watch(
+    () => store.transfers,
+    (list) => {
+      const doneUp = list.find(
+        (x) =>
+          x.done &&
+          !x.error &&
+          x.direction === 'up' &&
+          (!x.sessionId || x.sessionId === props.sessionId) &&
+          !reloadedDoneIds.has(x.id)
       )
-      if (!isCancelled(p)) {
-        toast(
-          p.error ? `${p.name} · ${tt('sfp.failed')}` : `${p.name} · ${tt('sfp.done')}`,
-          p.error ? 'error' : 'success'
-        )
-      }
-      // Record into the persisted history (newest first, capped in store).
-      void store.pushTransferHistory({
-        id: p.id,
-        sessionId: p.sessionId,
-        name: p.name,
-        direction: p.direction,
-        bytes: p.transferred,
-        count: p.count,
-        status: isCancelled(p) ? 'cancelled' : p.error ? 'error' : 'done',
-        error: p.error && !isCancelled(p) ? p.error : undefined,
-        remoteDir: p.remoteDir,
-        localDir: p.localDir,
-        isDir: p.isDir,
-        remotePath: p.remotePath,
-        items: p.items,
-        localPaths: p.localPaths,
-        at: Date.now()
-      })
-      const id = p.id
-      const tid = window.setTimeout(() => {
-        cleanupTimers.delete(tid)
-        transfers.value = transfers.value.filter((t) => t.id !== id)
-        delete speeds[id]
-      }, p.error ? 4000 : 1200)
-      cleanupTimers.add(tid)
-      // Refresh the listing after uploads, debounced so a folder of N files
-      // triggers one reload instead of N.
-      // Only refresh the listing for an upload that finished in the pane we're
-      // viewing — a backgrounded pane's upload shouldn't reload the active one.
-      if (p.done && p.direction === 'up' && (!p.sessionId || p.sessionId === props.sessionId)) {
+      if (doneUp) {
+        reloadedDoneIds.add(doneUp.id)
+        runningUpload.value = null
         if (uploadReloadTimer) clearTimeout(uploadReloadTimer)
         uploadReloadTimer = window.setTimeout(() => load(path.value), 500)
       }
-    }
-  })
+    },
+    { deep: true }
+  )
   window.addEventListener('resize', onWindowResize)
 })
 onBeforeUnmount(() => {
-  offProgress?.()
-  cleanupTimers.forEach((t) => clearTimeout(t))
   if (uploadReloadTimer) clearTimeout(uploadReloadTimer)
   window.removeEventListener('mousemove', onMarqueeMove)
   window.removeEventListener('mouseup', onMarqueeUp)
@@ -1149,7 +1078,7 @@ function isCancelled(t: SftpProgress): boolean {
   return t.error === '已取消'
 }
 function fmtSpeed(id: string): string {
-  const s = speeds[id]
+  const s = store.transferSpeeds[id]
   return s && s > 0.5 ? `${fmtSize(s)}/s` : ''
 }
 function statusText(t: SftpProgress): string {

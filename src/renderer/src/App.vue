@@ -21,7 +21,10 @@ import SettingsDialog from './components/SettingsDialog.vue'
 import StatusBar from './components/StatusBar.vue'
 import Icon from './components/Icon.vue'
 import PaneNode from './components/PaneNode.vue'
+import TransferPanel from './components/TransferPanel.vue'
+import SnippetVarsDialog from './components/SnippetVarsDialog.vue'
 import { useI18n } from './lib/i18n'
+import { collectPaneIds } from './lib/paneLayout'
 import logoUrl from './assets/logo.png'
 import type { Host } from '../../shared/types'
 
@@ -232,13 +235,15 @@ function onGlobalKey(e: KeyboardEvent): void {
     store.toggleHistory()
   } else if (mod && e.shiftKey && e.key.toLowerCase() === 'o') {
     // Cycle the focused pane of a split. Alt+Arrow would be the usual key,
-    // but the shell needs it for word-wise cursor movement.
+    // but the shell needs it for word-wise cursor movement. Walk the layout in
+    // visual (DFS) order so focus follows the on-screen arrangement.
     e.preventDefault()
     const tab = store.active
-    if (tab && tab.panes.length > 1) {
-      const i = tab.panes.findIndex((p) => p.id === tab.activePaneId)
-      const next = tab.panes[(i + 1) % tab.panes.length]
-      store.setActivePane(tab.id, next.id)
+    const order = tab ? collectPaneIds(tab.layout) : []
+    if (order.length > 1) {
+      const i = order.indexOf(tab!.activePaneId)
+      const next = order[(i + 1) % order.length]
+      store.setActivePane(tab!.id, next)
     }
   } else if (mod && (e.key === '=' || e.key === '+')) {
     e.preventDefault()
@@ -267,6 +272,7 @@ onMounted(async () => {
     store.loadSnapshots()
   ])
   await store.restoreSavedTabs()
+  store.initSftpProgress()
   window.addEventListener('keydown', onGlobalKey)
   window.addEventListener('wheel', onWheel, { passive: false, capture: true })
   offEvent = window.api.ssh.onEvent((ev) => {
@@ -389,6 +395,8 @@ onBeforeUnmount(() => {
       @saved="onEditorSaved"
     />
     <SettingsDialog />
+    <TransferPanel />
+    <SnippetVarsDialog />
     <ConfirmDialog />
     <ToastHost />
     <HistorySearch />
@@ -412,65 +420,6 @@ onBeforeUnmount(() => {
   position: relative;
   flex: 1;
   min-width: 0;
-}
-.pane-grid {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  gap: 1px;
-  background: var(--border);
-}
-.pane-grid.row {
-  flex-direction: row;
-}
-.pane-grid.col {
-  flex-direction: column;
-}
-.pane-cell {
-  position: relative;
-  flex: 1 1 0;
-  min-width: 0;
-  min-height: 0;
-  background: var(--bg);
-  overflow: hidden;
-}
-.pane-cell.focused {
-  box-shadow: inset 0 0 0 1.5px var(--accent);
-  z-index: 1;
-}
-/* Recede every pane except the focused one so the active terminal stands out. */
-.pane-grid.multi .pane-cell:not(.focused)::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  z-index: 3;
-  background: var(--scrim);
-  pointer-events: none;
-  transition: background 0.15s;
-}
-.pane-x {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  z-index: 6;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  border-radius: 5px;
-  color: var(--text-faint);
-  background: var(--bg-elev);
-  opacity: 0;
-  transition: opacity 0.14s, color 0.14s, background 0.14s;
-}
-.pane-cell:hover .pane-x {
-  opacity: 0.9;
-}
-.pane-x:hover {
-  opacity: 1;
-  color: var(--text);
-  background: var(--border-strong);
 }
 .state {
   display: flex;

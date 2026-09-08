@@ -98,16 +98,26 @@ const sections = computed<{ id: string; title: string; items: Item[] }[]>(() => 
   const snips = store.snippets.filter(
     (s) => !q || fuzzyScore(q, s.title) > -1 || fuzzyScore(q, s.text) > -1
   )
-  add(
-    'snippets',
-    t('pal.snippets'),
-    snips.map((s) => ({
+  // Group snippets by their (optional) group, preserving user order; a folder
+  // with no group falls under the plain "snippets" heading.
+  const sniGroups: { label: string; items: Item[] }[] = []
+  for (const s of snips) {
+    const label = s.group?.trim() || ''
+    let grp = sniGroups.find((x) => x.label === label)
+    if (!grp) {
+      grp = { label, items: [] }
+      sniGroups.push(grp)
+    }
+    grp.items.push({
       kind: 'snippet' as const,
       title: s.title,
       sub: oneLine(s.text),
       snippet: s
-    }))
-  )
+    })
+  }
+  for (const grp of sniGroups) {
+    add(`snippets:${grp.label || ''}`, grp.label || t('pal.snippets'), grp.items)
+  }
 
   const actions: Item[] = []
   const matchesAction = (label: string): boolean => !q || fuzzyScore(q, label) > -1

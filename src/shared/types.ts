@@ -118,6 +118,8 @@ export interface Snippet {
   text: string
   /** Ask for confirmation before sending (guards destructive commands). */
   confirm?: boolean
+  /** Optional category, grouped in the command palette. */
+  group?: string
 }
 
 /** A known-host entry surfaced to the settings page. */

@@ -3,6 +3,7 @@ import { toRaw } from 'vue'
 import { useI18n } from '../lib/i18n'
 import { useToast } from '../composables/toast'
 import { useConfirm } from '../composables/confirm'
+import { useSnippetVars } from '../composables/snippetVars'
 import { clampConcurrency } from '../../../shared/fsUtils'
 import {
   buildFlatTree,
@@ -18,6 +19,7 @@ import type {
   KnownHostEntry,
   SessionStatus,
   Snippet,
+  SftpProgress,
   TransferHistoryItem,
   DownloadItem
 } from '../../../shared/types'
@@ -33,6 +35,18 @@ const uid = (p: string): string => `${p}-${Date.now()}-${counter++}`
 // (double-clicked "reconnect", a manual retry racing a scheduled one) which
 // would otherwise orphan a live SSH session by overwriting its id.
 const inFlight = new Set<string>()
+
+/** A job whose transfer has been cancelled in the main process. */
+function isCancelled(t: Pick<SftpProgress, 'error'>): boolean {
+  return t.error === '已取消'
+}
+
+// Guards the global sftp:progress subscription so it's registered exactly once
+// regardless of how many components/actions request it.
+let sftpProgressInit = false
+const sftpSpeedMeta = new Map<string, { bytes: number; time: number }>()
+// Timers that prune finished transfers from the live list.
+const sftpCleanupTimers = new Set<number>()
 
 /** One terminal session. A tab holds one or more panes (split view). */
 export interface Pane {
@@ -126,6 +140,13 @@ interface State {
   downloadQueue: DownloadQueueOp[]
   /** Finished SFTP transfers, persisted across restarts (newest first). */
   transferHistory: TransferHistoryItem[]
+  /** Live SFTP transfers (all sessions), tracked globally so they update and
+   *  notify even when the drawer is closed or the window is minimized. */
+  transfers: SftpProgress[]
+  /** Smoothed transfer speed (bytes/sec) per job id. */
+  transferSpeeds: Record<string, number>
+  /** Whether the global transfers panel (overlays) is open. */
+  transferPanelOpen: boolean
   // Preferences (persisted in settings.json).
   keepaliveSec: number
   connectTimeoutSec: number
@@ -137,6 +158,8 @@ interface State {
   terminalTheme: string
   restoreTabs: boolean
   autoReconnect: boolean
+  /** Auto-reconnect restored tabs on launch (rather than showing them closed). */
+  restoreConnect: boolean
   notifications: boolean
   confirmPaste: boolean
   /** Strip non-printing control characters from pasted text (default on). */
@@ -162,6 +185,9 @@ export const useSessions = defineStore('sessions', {
     transferQueue: [],
     downloadQueue: [],
     transferHistory: [],
+    transfers: [],
+    transferSpeeds: {},
+    transferPanelOpen: false,
     keepaliveSec: 20,
     connectTimeoutSec: 20,
     connectRetries: 6,
@@ -172,6 +198,7 @@ export const useSessions = defineStore('sessions', {
     terminalTheme: '',
     restoreTabs: true,
     autoReconnect: true,
+    restoreConnect: true,
     notifications: true,
     confirmPaste: true,
     sanitizePaste: true
@@ -208,7 +235,7 @@ export const useSessions = defineStore('sessions', {
     },
 
     async loadSettings(): Promise<void> {
-      const [editor, ka, ct, cr, tc, si, ff, cur, thm, rt, ar, nt, cp, sp, tq, dq, tfh] = await Promise.all([
+      const [editor, ka, ct, cr, tc, si, ff, cur, thm, rt, ar, rcn, nt, cp, sp, tq, dq, tfh] = await Promise.all([
         window.api.settings.get<string>('externalEditor'),
         window.api.settings.get<number>('keepaliveSec'),
         window.api.settings.get<number>('connectTimeoutSec'),
@@ -220,6 +247,7 @@ export const useSessions = defineStore('sessions', {
         window.api.settings.get<string>('terminalTheme'),
         window.api.settings.get<boolean>('restoreTabs'),
         window.api.settings.get<boolean>('autoReconnect'),
+        window.api.settings.get<boolean>('restoreConnect'),
         window.api.settings.get<boolean>('notifications'),
         window.api.settings.get<boolean>('confirmPaste'),
         window.api.settings.get<boolean>('sanitizePaste'),
@@ -241,6 +269,7 @@ export const useSessions = defineStore('sessions', {
       this.terminalTheme = thm ?? ''
       this.restoreTabs = rt !== false
       this.autoReconnect = ar !== false
+      this.restoreConnect = rcn !== false
       this.notifications = nt !== false
       this.confirmPaste = cp !== false
       this.sanitizePaste = sp !== false
@@ -255,7 +284,8 @@ export const useSessions = defineStore('sessions', {
     async deleteSnippet(id: string): Promise<void> {
       this.snippets = await window.api.snippets.delete(id)
     },
-    /** Sends a snippet (+ trailing newline) to the focused terminal. */
+    /** Sends a snippet (+ trailing newline) to the focused terminal. If the
+     *  snippet contains `{var}` placeholders, prompts for each before sending. */
     async sendSnippet(snippet: Snippet): Promise<void> {
       const sid = this.activePane?.sshSessionId
       if (!sid) return
@@ -265,8 +295,10 @@ export const useSessions = defineStore('sessions', {
         )
         if (!ok) return
       }
-      const text = snippet.text.endsWith('\n') ? snippet.text : snippet.text + '\n'
-      window.api.ssh.input(sid, text)
+      const text = await useSnippetVars().prompt(snippet)
+      if (text == null) return
+      const send = text.endsWith('\n') ? text : text + '\n'
+      window.api.ssh.input(sid, send)
     },
 
     async loadKnownHosts(): Promise<void> {
@@ -332,12 +364,24 @@ export const useSessions = defineStore('sessions', {
       void window.api.settings.set('openTabs', list)
     },
 
-    /** Recreates last session's tabs (layout + splits) in a disconnected state. */
+    /** Recreates last session's tabs (layout + splits). If `restoreConnect` is
+     *  on, reconnects every restored pane in the background so the previous
+     *  sessions come back to life on launch. */
     async restoreSavedTabs(): Promise<void> {
       if (!this.restoreTabs) return
       const list = await window.api.settings.get<PersistedTab[]>('openTabs')
       if (!list?.length) return
       this.restoreTabsFrom(list)
+      if (this.restoreConnect) {
+        for (const tab of this.tabs) {
+          for (const pane of tab.panes) {
+            // Mark as a background (non-user-initiated) attempt so a restore
+            // failure doesn't spam a toast on launch; retried by auto-reconnect.
+            pane.reconnectAttempt = 1
+            void this.runConnect(pane.id)
+          }
+        }
+      }
     },
 
     /** Builds tabs from a persisted layout (used by restore & openSnapshot). */
@@ -428,6 +472,90 @@ export const useSessions = defineStore('sessions', {
     async removeTransferHistory(id: string): Promise<void> {
       this.transferHistory = this.transferHistory.filter((h) => h.id !== id)
       await window.api.settings.set('sftpTransferHistory', this.transferHistory)
+    },
+
+    /** Registers the single global sftp:progress listener. Transfers keep
+     *  running in the main process regardless of the UI, so this tracks every
+     *  job, notifies on completion, and records history even when the drawer is
+     *  closed or the window is minimized. Idempotent. */
+    initSftpProgress(): void {
+      if (sftpProgressInit) return
+      sftpProgressInit = true
+      window.api.sftp.onProgress((p) => {
+        const i = this.transfers.findIndex((t) => t.id === p.id)
+        if (i >= 0) this.transfers[i] = { ...this.transfers[i], ...p }
+        else this.transfers.push({ ...p })
+        // Live speed: exponential moving average of the instantaneous rate.
+        if (!p.done && !p.error) {
+          const now = Date.now()
+          const prev = sftpSpeedMeta.get(p.id)
+          if (prev && now > prev.time) {
+            const inst = ((p.transferred - prev.bytes) / (now - prev.time)) * 1000
+            this.transferSpeeds[p.id] = this.transferSpeeds[p.id]
+              ? this.transferSpeeds[p.id] * 0.6 + inst * 0.4
+              : Math.max(0, inst)
+          }
+          sftpSpeedMeta.set(p.id, { bytes: p.transferred, time: now })
+        } else {
+          delete this.transferSpeeds[p.id]
+          sftpSpeedMeta.delete(p.id)
+        }
+        const cancelled = isCancelled(p)
+        // An upload that errored (usually a dropped session) is queued for
+        // resume once the link returns.
+        if (p.error && !cancelled && p.direction === 'up' && p.localPaths?.length) {
+          void this.queueUpload(p.remoteDir ?? '', p.localPaths)
+        }
+        // A failed download is queued so it can be batch-resumed into the same
+        // local destination once the link returns.
+        if (p.error && !cancelled && p.direction === 'down' && p.items?.length) {
+          void this.queueDownload(p.sessionId ?? '', p.items, p.localDir ?? '')
+        }
+        if (p.done || p.error) {
+          if (!cancelled) {
+            window.api.notify(
+              p.error ? t('sfp.notifyError') : t('sfp.notifyDone'),
+              `${p.name} · ${p.direction === 'up' ? t('sfp.up') : t('sfp.down')}${p.error ? ` · ${p.error}` : ''}`
+            )
+            toast(
+              p.error ? `${p.name} · ${t('sfp.failed')}` : `${p.name} · ${t('sfp.done')}`,
+              p.error ? 'error' : 'success'
+            )
+          }
+          // Record into the persisted history (newest first, capped in store).
+          void this.pushTransferHistory({
+            id: p.id,
+            sessionId: p.sessionId,
+            name: p.name,
+            direction: p.direction,
+            bytes: p.transferred,
+            count: p.count,
+            status: cancelled ? 'cancelled' : p.error ? 'error' : 'done',
+            error: p.error && !cancelled ? p.error : undefined,
+            remoteDir: p.remoteDir,
+            localDir: p.localDir,
+            isDir: p.isDir,
+            remotePath: p.remotePath,
+            items: p.items,
+            localPaths: p.localPaths,
+            at: Date.now()
+          })
+          const id = p.id
+          const tid = window.setTimeout(() => {
+            sftpCleanupTimers.delete(tid)
+            this.transfers = this.transfers.filter((t) => t.id !== id)
+          }, p.error ? 4000 : 1200)
+          sftpCleanupTimers.add(tid)
+        }
+      })
+    },
+
+    /** Cancels a running transfer by job id (from a panel row `x` button). */
+    cancelTransfer(id: string): void {
+      window.api.sftp.cancel(id)
+    },
+    toggleTransferPanel(open?: boolean): void {
+      this.transferPanelOpen = open ?? !this.transferPanelOpen
     },    /** Captures the current tab layout (minus secrets) as a named snapshot. */
     async saveSnapshot(name: string): Promise<void> {
       const list = this.tabs.map((t) => {
@@ -700,7 +828,10 @@ export const useSessions = defineStore('sessions', {
       pane.reconnectAttempt = attempt
       pane.status = 'connecting'
       pane.message = t('app.reconnecting', { attempt })
-      const delay = Math.min(20000, 1000 * 2 ** (attempt - 1))
+      const base = Math.min(20000, 1000 * 2 ** (attempt - 1))
+      // Add ~±20% jitter so simultaneous dropped sessions don't reconnect in
+      // lockstep (which can hammer the network and stack server-side timeouts).
+      const delay = Math.round(base * (0.8 + Math.random() * 0.4))
       pane.reconnectTimer = window.setTimeout(async () => {
         const cur = this.findPane(paneId)
         if (!cur) return
@@ -720,6 +851,11 @@ export const useSessions = defineStore('sessions', {
       const { tab, pane } = found
       this.cancelReconnect(pane)
       if (pane.sshSessionId) void window.api.ssh.disconnect(pane.sshSessionId)
+      // Nearest pane in visual (layout DFS) order, so closing one focuses its
+      // on-screen neighbour rather than an arbitrary insertion-order one.
+      const order = collectPaneIds(tab.layout)
+      const oi = order.indexOf(paneId)
+      const neighbour = order[oi + 1] ?? order[oi - 1]
       const idx = tab.panes.findIndex((p) => p.id === paneId)
       tab.panes.splice(idx, 1)
       if (tab.panes.length === 0) {
@@ -730,7 +866,7 @@ export const useSessions = defineStore('sessions', {
       const pruned = removePane(tab.layout, paneId)
       tab.layout = pruned ?? buildFlatTree(tab.panes.map((p) => p.id), 'row')
       if (tab.activePaneId === paneId) {
-        tab.activePaneId = (tab.panes[idx] ?? tab.panes[idx - 1]).id
+        tab.activePaneId = neighbour ?? tab.panes[0].id
       }
       this.persistTabs()
     },

@@ -70,7 +70,11 @@ const splitEl = ref<HTMLElement>()
   <div
     v-if="node.kind === 'leaf' && pane"
     class="pane-cell pane-node"
-    :class="{ 'pane-node-root': root, focused: tab.panes.length > 1 && isFocused }"
+    :class="{
+      'pane-node-root': root,
+      multi: tab.panes.length > 1,
+      focused: tab.panes.length > 1 && isFocused
+    }"
     :style="{ flexGrow: '1' }"
     @mousedown="store.setActivePane(tab.id, pane.id)"
   >
