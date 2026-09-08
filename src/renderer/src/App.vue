@@ -265,6 +265,32 @@ function onGlobalKey(e: KeyboardEvent): void {
 }
 
 let offEvent: (() => void) | null = null
+/** Converts a #rrggbb hex color into an rgba() string at the given alpha. */
+function accentSoft(hex: string, alpha = 0.14): string {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex)
+  if (!m) return ''
+  const n = parseInt(m[1], 16)
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`
+}
+// Apply the custom accent (or reset to the theme default) whenever it changes.
+watch(
+  () => store.accentColor,
+  (hex) => {
+    const root = document.documentElement
+    if (hex) {
+      root.style.setProperty('--accent', hex)
+      root.style.setProperty('--accent-soft', accentSoft(hex))
+      root.style.setProperty('--row-sel', accentSoft(hex, 0.18))
+      root.style.setProperty('--row-sel-ring', accentSoft(hex, 0.28))
+    } else {
+      root.style.removeProperty('--accent')
+      root.style.removeProperty('--accent-soft')
+      root.style.removeProperty('--row-sel')
+      root.style.removeProperty('--row-sel-ring')
+    }
+  },
+  { immediate: true }
+)
 
 onMounted(async () => {
   const savedZoom = Number(window.api.prefs.zoom)

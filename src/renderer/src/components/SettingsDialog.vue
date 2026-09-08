@@ -94,6 +94,16 @@ async function removeOpener(ext: string): Promise<void> {
   await window.api.settings.set('fileOpeners', next)
 }
 
+// ---- custom accent color ('' = theme default) ----
+function onAccent(e: Event): void {
+  store.accentColor = (e.target as HTMLInputElement).value
+  void store.saveSetting('accentColor', store.accentColor)
+}
+async function clearAccent(): Promise<void> {
+  store.accentColor = ''
+  void store.saveSetting('accentColor', '')
+}
+
 const cursorOptions = computed(() => [
   { v: 'bar', label: t('set.term.cursorBar') },
   { v: 'block', label: t('set.term.cursorBlock') },
@@ -507,6 +517,13 @@ async function backupNow(): Promise<void> {
                   <Icon name="chevron-down" :size="15" class="select-caret" />
                 </div>
               </div>
+              <div class="field">
+                <span class="fname">{{ t('set.term.accent') }}</span>
+                <div class="accent-row">
+                  <input type="color" class="accent-input" :value="store.accentColor || '#6ea8fe'" @input="onAccent" />
+                  <button v-if="store.accentColor" class="ghost" @click="clearAccent">{{ t('set.term.accentReset') }}</button>
+                </div>
+              </div>
               <p class="desc">{{ t('set.term.fontHint', { keys: `${modKey}+= / ${modKey}+-` }) }}</p>
             </div>
             <div class="section">
@@ -840,6 +857,20 @@ async function backupNow(): Promise<void> {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.accent-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.accent-input {
+  width: 38px;
+  height: 34px;
+  padding: 2px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
 }.path {
   flex: 1;
   min-width: 0;

@@ -186,6 +186,8 @@ interface State {
   autoBackupEveryHours: number
   /** Per-extension default opener program path (ext → executable). */
   fileOpeners: Record<string, string>
+  /** Custom UI accent color ('' = default per theme). */
+  accentColor: string
   confirmPaste: boolean
   /** Strip non-printing control characters from pasted text (default on). */
   sanitizePaste: boolean
@@ -231,6 +233,7 @@ export const useSessions = defineStore('sessions', {
     autoBackupDir: null,
     autoBackupEveryHours: 24,
     fileOpeners: {},
+    accentColor: '',
     confirmPaste: true,
     sanitizePaste: true
   }),
@@ -313,6 +316,7 @@ export const useSessions = defineStore('sessions', {
       this.autoBackupDir = abd ?? null
       this.autoBackupEveryHours = typeof abh === 'number' && abh > 0 ? abh : 24
       this.fileOpeners = (await window.api.settings.get<Record<string, string>>('fileOpeners')) ?? {}
+      this.accentColor = (await window.api.settings.get<string>('accentColor')) ?? ''
       this.confirmPaste = cp !== false
       this.sanitizePaste = sp !== false
     },
