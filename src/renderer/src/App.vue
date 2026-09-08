@@ -206,7 +206,7 @@ function onGlobalKey(e: KeyboardEvent): void {
     newTab: () => store.togglePalette(true),
     closeTab: () => {
       if (inTerminal && store.activePane?.status === 'connected') return
-      if (store.activeId) store.closeTab(store.activeId)
+      if (store.activeId) void store.closeTabSafe(store.activeId)
     },
     nextTab: () => store.nextTab(1),
     prevTab: () => store.nextTab(-1),
@@ -246,6 +246,7 @@ function onGlobalKey(e: KeyboardEvent): void {
 }
 
 let offEvent: (() => void) | null = null
+let offOpenTarget: (() => void) | null = null
 /** Converts a #rrggbb hex color into an rgba() string at the given alpha. */
 function accentSoft(hex: string, alpha = 0.14): string {
   const m = /^#?([0-9a-f]{6})$/i.exec(hex)
@@ -293,6 +294,13 @@ onMounted(async () => {
   offEvent = window.api.ssh.onEvent((ev) => {
     store.applyEvent(ev.sessionId, ev.status, ev.message)
   })
+  // A launch target (CLI `-c user@host` or a x-ssh:// URL) arrives from main:
+  // seed the command palette with it so the existing connect/password flow runs.
+  offOpenTarget = window.api.onOpenTarget((target) => {
+    if (/\s/.test(target)) return
+    store.paletteSeed = target
+    store.togglePalette(true)
+  })
   // Pull the deferred chunks in while the app is idle, so the first connection
   // never waits on them.
   const prefetch = (): void => {
@@ -307,6 +315,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', onGlobalKey)
   window.removeEventListener('wheel', onWheel, { capture: true } as EventListenerOptions)
   offEvent?.()
+  offOpenTarget?.()
 })
 </script>
 

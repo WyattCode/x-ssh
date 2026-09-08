@@ -98,7 +98,7 @@ function cancelRename(): void {
         @dragover.prevent="onDragOver(tab.id)"
         @drop.prevent="onDrop(tab.id)"
         @click="store.setActive(tab.id)"
-        @mousedown.middle.prevent="store.closeTab(tab.id)"
+        @mousedown.middle.prevent="store.closeTabSafe(tab.id)"
         @contextmenu="openTabMenu($event, tab.id)"
       >
         <span
@@ -120,7 +120,7 @@ function cancelRename(): void {
           @blur="commitRename"
         />
         <span v-else class="label">{{ tab.title }}</span>
-        <span class="close" :title="t('tabbar.close')" @click.stop="store.closeTab(tab.id)"><Icon name="close" :size="13" /></span>
+        <span class="close" :title="t('tabbar.close')" @click.stop="store.closeTabSafe(tab.id)"><Icon name="close" :size="13" /></span>
       </div>
     </div>
     <button class="new" :title="t('tabbar.newConn', { key: `${modKey}+K` })" @click="store.togglePalette(true)">
@@ -175,7 +175,7 @@ function cancelRename(): void {
       <button @click="run(store.duplicate)">{{ t('tabbar.duplicate') }}</button>
       <button @click="startRename">{{ t('tabbar.rename') }}</button>
       <div class="sep" />
-      <button @click="run(store.closeTab)">{{ t('tabbar.closeTab') }}</button>
+      <button @click="run(store.closeTabSafe)">{{ t('tabbar.closeTab') }}</button>
       <button :disabled="store.tabs.length < 2" @click="run(store.closeOthers)">{{ t('tabbar.closeOthers') }}</button>
     </div>
   </div>

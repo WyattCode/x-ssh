@@ -196,9 +196,15 @@ interface State {
   lockLocked: boolean
   /** True when tabs were restored while locked, so they reconnect after unlock. */
   restorePendingUnlock: boolean
+  /** Pre-filled palette query (from a launch CLI/URL target), consumed on open. */
+  paletteSeed: string | null
   confirmPaste: boolean
   /** Strip non-printing control characters from pasted text (default on). */
   sanitizePaste: boolean
+  /** Confirm before closing a tab that still has a live session (default on). */
+  confirmClose: boolean
+  /** Default per-transfer rate cap (KiB/s; 0 = unlimited). */
+  transferRateKbps: number
 }
 
 export const useSessions = defineStore('sessions', {
@@ -246,8 +252,11 @@ export const useSessions = defineStore('sessions', {
     lockEnabled: false,
     lockLocked: false,
     restorePendingUnlock: false,
+    paletteSeed: null,
     confirmPaste: true,
-    sanitizePaste: true
+    sanitizePaste: true,
+    confirmClose: true,
+    transferRateKbps: 0
   }),
 
   getters: {
@@ -332,6 +341,9 @@ export const useSessions = defineStore('sessions', {
       this.keybindings = (await window.api.settings.get<Record<string, string>>('keybindings')) ?? {}
       this.confirmPaste = cp !== false
       this.sanitizePaste = sp !== false
+      this.confirmClose = (await window.api.settings.get<boolean>('confirmClose')) !== false
+      this.transferRateKbps =
+        (await window.api.settings.get<number>('transferRateKbps')) ?? 0
     },
 
     async loadSnippets(): Promise<void> {
@@ -858,11 +870,15 @@ export const useSessions = defineStore('sessions', {
         }
       } else {
         live.pane.status = 'error'
-        live.pane.message = result.error ?? t('app.connectFail')
+        const msg =
+          result.code === 'jump_needs_password'
+            ? t('app.jumpNeedsPassword')
+            : (result.error ?? t('app.connectFail'))
+        live.pane.message = msg
         live.pane.errorCode = result.code
         // Avoid stacking toasts during an auto-reconnect storm (each attempt
         // re-enters runConnect); only shout for the first, user-initiated try.
-        if (!live.pane.reconnectAttempt) toast(result.error ?? t('app.connectFail'), 'error')
+        if (!live.pane.reconnectAttempt) toast(msg, 'error')
       }
     },
 
@@ -981,10 +997,21 @@ export const useSessions = defineStore('sessions', {
     },
 
     /** Closes a single pane; closes the whole tab if it was the last pane. */
-    closePane(paneId: string): void {
+    async closePane(paneId: string): Promise<void> {
       const found = this.findPane(paneId)
       if (!found) return
       const { tab, pane } = found
+      // Closing the only pane of a live session is destructive; confirm first.
+      if (tab.panes.length === 1 && this.confirmClose && pane.status === 'connected') {
+        const ok = await confirm(t('app.closePaneConfirm', { title: tab.title }), {
+          title: t('app.closeExitTitle'),
+          confirmText: t('app.closeExitOk'),
+          cancelText: t('confirm.cancel')
+        })
+        if (!ok) return
+        // Let the remote shell wind down gracefully before dropping the link.
+        void window.api.ssh.input(pane.sshSessionId!, 'exit\n')
+      }
       this.cancelReconnect(pane)
       if (pane.sshSessionId) void window.api.ssh.disconnect(pane.sshSessionId)
       // Nearest pane in visual (layout DFS) order, so closing one focuses its
@@ -1023,6 +1050,26 @@ export const useSessions = defineStore('sessions', {
         this.activeId = next?.id ?? null
       }
       this.persistTabs()
+    },
+
+    /** Confirms (when enabled) before closing a tab that has a live session,
+     *  sending `exit` so the remote shell winds down gracefully. */
+    async closeTabSafe(id: string): Promise<void> {
+      const tab = this.tabs.find((t) => t.id === id)
+      if (!tab) return
+      const live = tab.panes.some((p) => p.status === 'connected')
+      if (live && this.confirmClose) {
+        const ok = await confirm(t('app.closeTabConfirm', { title: tab.title }), {
+          title: t('app.closeExitTitle'),
+          confirmText: t('app.closeExitOk'),
+          cancelText: t('confirm.cancel')
+        })
+        if (!ok) return
+        for (const p of tab.panes) {
+          if (p.status === 'connected' && p.sshSessionId) void window.api.ssh.input(p.sshSessionId, 'exit\n')
+        }
+      }
+      this.closeTab(id)
     },
 
     closeOthers(id: string): void {

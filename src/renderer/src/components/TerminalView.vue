@@ -114,11 +114,32 @@ function clearTerm(): void {
 // ---- Right-click context menu ----
 const menu = reactive({ open: false, x: 0, y: 0, hasSel: false })
 
+// ---- Auto-scroll follow ----
+// While the user hasn't scrolled up, new output keeps the view pinned to the
+// bottom. Scrolling up freezes it (so you can read scrollback as it grows), and
+// a "jump to bottom" pill lets you snap back. `followOutput` disables this
+// entirely if the user turns it off in the context menu.
+const followOutput = ref(true)
+const scrolledUp = ref(false)
+function updateScrollState(): void {
+  if (!term) return
+  const buf = term.buffer.active
+  scrolledUp.value = buf.viewportY < buf.baseY
+}
+function scrollToBottom(): void {
+  term?.scrollToBottom()
+  scrolledUp.value = false
+}
+function toggleFollow(): void {
+  followOutput.value = !followOutput.value
+  scrolledUp.value = false
+}
+
 function openMenu(e: MouseEvent): void {
   e.preventDefault()
   menu.hasSel = !!term?.hasSelection()
   const mw = 172
-  const mh = 156
+  const mh = 240
   menu.x = Math.min(e.clientX, window.innerWidth - mw - 8)
   menu.y = Math.min(e.clientY, window.innerHeight - mh - 8)
   menu.open = true
@@ -313,8 +334,13 @@ onMounted(() => {
     if (payload.sessionId === props.sessionId) {
       term?.write(payload.data)
       scanCwd(payload.data)
+      // Keep pinned to the newest output unless the user is reading scrollback.
+      if (followOutput.value && !scrolledUp.value) term?.scrollToBottom()
     }
   })
+  // Track whether the user has scrolled the terminal's scrollback, so follow
+  // can pause while they read (and show a "jump to bottom" pill).
+  term.onScroll(() => updateScrollState())
   // Now that the listener exists, let main release what the shell printed
   // before this component mounted (MOTD, first prompt).
   window.api.ssh.attach(props.sessionId)
@@ -415,6 +441,13 @@ onBeforeUnmount(() => {
       <button class="sb-btn" :title="t('term.closeTip')" @click="closeSearch"><Icon name="close" :size="15" /></button>
     </div>
 
+    <div v-if="scrolledUp" class="follow-bar" @mousedown.stop>
+      <button class="follow-btn" :title="t('term.followTip')" @click="scrollToBottom">
+        <Icon name="arrow-down" :size="13" />
+        <span>{{ t('term.follow') }}</span>
+      </button>
+    </div>
+
     <div v-if="menu.open" class="ctx-overlay" @mousedown="menu.open = false" @contextmenu.prevent="menu.open = false">
       <div class="ctx" :style="{ left: menu.x + 'px', top: menu.y + 'px' }" @mousedown.stop>
         <button :disabled="!menu.hasSel" @click="runMenu(copySelection)">
@@ -426,7 +459,11 @@ onBeforeUnmount(() => {
         <div class="sep" />
         <button @click="runMenu(openSearch)"><span>{{ t('term.find') }}</span><span class="k">Ctrl+F</span></button>
         <button @click="runMenu(selectAll)"><span>{{ t('term.selectAll') }}</span></button>
-        <button @click="runMenu(clearTerm)"><span>{{ t('term.clear') }}</span></button>
+        <button @click="runMenu(scrollToBottom)"><span>{{ t('term.scrollBottom') }}</span></button>
+        <button @click="runMenu(toggleFollow)">
+          <span>{{ t('term.follow') }}</span>
+          <span class="k" :class="followOutput ? 'on' : ''">{{ followOutput ? t('term.on') : t('term.off') }}</span>
+        </button>        <button @click="runMenu(clearTerm)"><span>{{ t('term.clear') }}</span></button>
       </div>
     </div>
   </div>
@@ -528,9 +565,35 @@ onBeforeUnmount(() => {
   font-size: 11px;
   color: var(--text-faint);
 }
+.ctx .k.on {
+  color: var(--accent);
+}
 .ctx .sep {
   height: 1px;
   margin: 5px 4px;
   background: var(--border);
+}
+.follow-bar {
+  position: absolute;
+  bottom: 12px;
+  right: 16px;
+  z-index: 55;
+}
+.follow-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow);
+  color: var(--text-dim);
+  font-size: 12px;
+  transition: background 0.12s, color 0.12s;
+}
+.follow-btn:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 </style>

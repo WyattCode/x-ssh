@@ -7,6 +7,7 @@ import { watchFile, unwatchFile } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { IPC, PREFS_ARG } from '../shared/ipc'
 import type { ConnectParams, Host, HostForward, JumpConfig, LocalEntry, Snippet, UiPrefs } from '../shared/types'
+import { readLaunchTarget, targetFromUrl, PROTOCOL, compareVersions } from '../shared/launchTarget'
 import { SshManager } from './ssh'
 import { HostStore } from './store'
 import { KnownHosts } from './knownHosts'
@@ -25,6 +26,37 @@ const activeEdits = new Set<string>()
 // mousedown are ready by the time the drag gesture reaches startDrag.
 const dragCache = new Map<string, Promise<{ dir: string; local: string }>>()
 let sshManager: SshManager | null = null
+
+// ---- Launch targets (CLI `-c user@host` / `x-ssh://` URL) ----
+// A connection spec the user passed at launch, handed to the renderer once its
+// window is up (or immediately, if a target arrives after startup via the
+// single-instance handler). The main side only parses-plausible targets out of
+// the command line / URL; the renderer re-parses & opens the connection.
+const pendingTargets: string[] = []
+/** True once the current window has been created and the initial targets sent. */
+let launchTargetFetchDone = false
+/** The active window's webContents, used to push late-arriving targets. */
+let targetSender: Electron.WebContents | null = null
+
+/** Name of the CLI switch that carries a launch target (repeatable). */
+
+/** Hand a resolved target to the renderer (queued until the window is up). */
+function pushLaunchTarget(target: string): void {
+  if (launchTargetFetchDone && targetSender && !targetSender.isDestroyed()) {
+    targetSender.send(IPC.appOpenTarget, target)
+  } else {
+    pendingTargets.push(target)
+  }
+}
+
+/** Flushes queued launch targets to the renderer once a window can receive them. */
+function flushLaunchTargets(win: BrowserWindow): void {
+  launchTargetFetchDone = true
+  const targets = pendingTargets.splice(0)
+  for (const t of targets) {
+    if (!win.isDestroyed()) win.webContents.send(IPC.appOpenTarget, t)
+  }
+}
 
 export interface DragItem {
   remotePath: string
@@ -132,6 +164,13 @@ async function notifyEnabled(): Promise<boolean> {
 
 async function notifySoundEnabled(): Promise<boolean> {
   return (await settings.get<boolean>('notifySound')) === true
+}
+
+/** Default per-transfer byte-rate cap (bytes/sec) from the user setting, or 0
+ *  for unlimited. Applied to every new transfer job unless overridden per-job. */
+async function defaultTransferRate(): Promise<number> {
+  const kbps = await settings.get<number>('transferRateKbps')
+  return typeof kbps === 'number' && kbps > 0 ? Math.round(kbps * 1024) : 0
 }
 
 function notify(title: string, body: string, sound = false): void {
@@ -484,6 +523,11 @@ function createWindow(saved?: SavedBounds, prefs: UiPrefs = {}): void {
   })
 
   sshManager = new SshManager(win.webContents, knownHosts)
+  targetSender = win.webContents
+
+  // Flush any launch target (CLI `-c` / `x-ssh://`) once the renderer's listener
+  // is ready — after the page loads and its onOpenTarget handler is registered.
+  win.webContents.on('did-finish-load', () => flushLaunchTargets(win))
 
   if (process.env['ELECTRON_RENDERER_URL']) {
     win.loadURL(process.env['ELECTRON_RENDERER_URL'])
@@ -512,6 +556,7 @@ function createWindow(saved?: SavedBounds, prefs: UiPrefs = {}): void {
     activeEdits.clear()
     sshManager?.disposeAll()
     sshManager = null
+    targetSender = null
   })
 }
 
@@ -769,6 +814,16 @@ function registerIpc(): void {
             if (jh.auth === 'password') jump.password = store.isLocked ? undefined : await store.getPassword(jh.id)
             if (jh.auth === 'key') jump.passphrase = store.isLocked ? undefined : await store.getPassphrase(jh.id)
             params.jump = jump
+            // A password jump host with no usable secret would fail obscurely deep
+            // in the handshake; surface it now with actionable guidance (the jump
+            // host's saved password, or the host's own — set it in the profile).
+            if (jh.auth === 'password' && !jump.password) {
+              return {
+                ok: false,
+                code: 'jump_needs_password',
+                error: `跳板机 ${jh.host} 需要密码,但没有已保存的密码。请在「主机」编辑页为 ${jh.label} 设置密码后重试,或更换认证方式。`
+              }
+            }
           }
         }
       }
@@ -835,7 +890,8 @@ function registerIpc(): void {
           [{ path: remotePath, name: basename(res.filePath), isDir: false }],
           dirname(res.filePath),
           randomUUID(),
-          concurrency
+          concurrency,
+          await defaultTransferRate()
         )
         return { ok: true }
       } catch (e) {
@@ -852,7 +908,7 @@ function registerIpc(): void {
       })
       if (res.canceled) return { ok: false, canceled: true, count: 0 }
       try {
-        await sshManager.uploadJob(sessionId, res.filePaths, remoteDir, randomUUID(), concurrency)
+        await sshManager.uploadJob(sessionId, res.filePaths, remoteDir, randomUUID(), concurrency, await defaultTransferRate())
         return { ok: true, count: res.filePaths.length }
       } catch (e) {
         return { ok: false, error: friendlyError((e as Error).message), count: 0 }
@@ -878,7 +934,7 @@ function registerIpc(): void {
         return { ok: false, canceled: true }
       }
       try {
-        await sshManager.downloadJob(sessionId, items, res.filePaths[0], randomUUID(), concurrency)
+        await sshManager.downloadJob(sessionId, items, res.filePaths[0], randomUUID(), concurrency, await defaultTransferRate())
         return { ok: true, count: items.length }
       } catch (e) {
         return { ok: false, error: friendlyError((e as Error).message) }
@@ -915,7 +971,7 @@ function registerIpc(): void {
         return { ok: false, canceled: true }
       }
       try {
-        await sshManager.downloadJob(sessionId, items, targetDir, randomUUID(), concurrency)
+        await sshManager.downloadJob(sessionId, items, targetDir, randomUUID(), concurrency, await defaultTransferRate())
         return { ok: true, count: items.length }
       } catch (e) {
         return { ok: false, error: friendlyError((e as Error).message) }
@@ -932,7 +988,7 @@ function registerIpc(): void {
       })
       if (res.canceled) return { ok: false, canceled: true, count: 0 }
       try {
-        await sshManager.uploadJob(sessionId, res.filePaths, remoteDir, randomUUID(), concurrency)
+        await sshManager.uploadJob(sessionId, res.filePaths, remoteDir, randomUUID(), concurrency, await defaultTransferRate())
         return { ok: true, count: res.filePaths.length }
       } catch (e) {
         return { ok: false, error: friendlyError((e as Error).message), count: 0 }
@@ -944,7 +1000,7 @@ function registerIpc(): void {
     async (_e, sessionId: string, remoteDir: string, paths: string[], concurrency?: number) => {
       if (!sshManager) return { ok: false, error: '窗口未就绪', count: 0 }
       try {
-        await sshManager.uploadJob(sessionId, paths, remoteDir, randomUUID(), concurrency)
+        await sshManager.uploadJob(sessionId, paths, remoteDir, randomUUID(), concurrency, await defaultTransferRate())
         return { ok: true, count: paths.length }
       } catch (e) {
         return { ok: false, error: friendlyError((e as Error).message), count: 0 }
@@ -993,7 +1049,7 @@ function registerIpc(): void {
       if (res.canceled || !res.filePaths[0]) return { ok: false, canceled: true }
       try {
         // Upload the archive into remoteDir, then extract it there.
-        await sshManager.uploadJob(sessionId, res.filePaths, remoteDir, randomUUID(), concurrency)
+        await sshManager.uploadJob(sessionId, res.filePaths, remoteDir, randomUUID(), concurrency, await defaultTransferRate())
         const name = basename(res.filePaths[0])
         return await sshManager.extractArchive(sessionId, remoteDir, name)
       } catch (e) {
@@ -1059,6 +1115,15 @@ function registerIpc(): void {
   )
   ipcMain.on(IPC.sftpCancel, (_e, id: string) => {
     sshManager?.cancelTransfer(id)
+  })
+  ipcMain.on(IPC.sftpPause, (_e, id: string, paused: boolean) => {
+    sshManager?.pauseTransfer(id, paused)
+  })
+  ipcMain.on(IPC.sftpPauseAll, (_e, paused: boolean) => {
+    sshManager?.pauseAll(paused)
+  })
+  ipcMain.on(IPC.sftpSetRate, (_e, id: string, bytesPerSec: number) => {
+    sshManager?.setTransferRate(id, bytesPerSec)
   })
   ipcMain.handle(IPC.sftpReadText, async (_e, sessionId: string, path: string) => {
     try {
@@ -1300,6 +1365,41 @@ function registerIpc(): void {
       return { ok: false, error: friendlyError((e as Error).message) }
     }
   })
+
+  // ---- Update check vs GitHub releases ----
+  // Compares the running version against the newest published release and
+  // returns the update info (or a "fresh" flag). Best-effort and offline-safe:
+  // any failure (no network, rate limit, no repo) returns ok:false with a
+  // friendly message rather than throwing.
+  ipcMain.handle(IPC.appCheckUpdate, async () => {
+    const current = app.getVersion()
+    try {
+      const res = await fetch('https://api.github.com/repos/WyattCode/x-ssh/releases/latest', {
+        headers: { 'User-Agent': app.getName() }
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const data = (await res.json()) as {
+        tag_name?: string
+        html_url?: string
+        name?: string
+        body?: string
+      }
+      const latest = (data.tag_name ?? '').replace(/^v/i, '')
+      if (!latest) return { ok: false, error: '无法解析最新版本' }
+      const fresh = compareVersions(current, latest) >= 0
+      return {
+        ok: true,
+        fresh,
+        current,
+        latest,
+        url: data.html_url,
+        name: data.name ?? latest,
+        notes: data.body?.slice(0, 1200)
+      }
+    } catch (e) {
+      return { ok: false, error: friendlyError((e as Error).message) }
+    }
+  })
 }
 
 // Several instances may run side by side, so nothing here may touch storage
@@ -1316,6 +1416,28 @@ app.whenReady().then(async () => {
     Menu.setApplicationMenu(null)
   }
   registerIpc()
+  // Register as the handler for x-ssh:// URLs so a link/`start x-ssh:…` can
+  // launch the app straight into a connection. Kept best-effort: registration
+  // needs a packaged exe path and may fail harmlessly in dev.
+  try {
+    if (process.defaultApp) {
+      if (process.argv.length >= 2) {
+        app.setAsDefaultProtocolClient(PROTOCOL, process.execPath, [process.argv[1]])
+      }
+    } else {
+      app.setAsDefaultProtocolClient(PROTOCOL)
+    }
+  } catch {
+    /* protocol registration unsupported here — CLI -c still works */
+  }
+  // macOS delivers protocol URLs via open-url rather than argv.
+  app.on('open-url', (_e, url) => {
+    const t = targetFromUrl(url)
+    if (t) pushLaunchTarget(t)
+  })
+  // macOS relaunches the app with a URL when already running.
+  const initialTarget = readLaunchTarget(process.argv.slice(1))
+  if (initialTarget) pendingTargets.push(initialTarget)
   // Load the master-lock state so a locked app stays locked across restarts;
   // store.setLocked() gates saved-secret discovery immediately.
   await masterLock.load()

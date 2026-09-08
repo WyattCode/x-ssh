@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useSessions } from '../stores/sessions'
 import { useI18n } from '../lib/i18n'
 import { canRevealHistory } from '../lib/transferHistory'
@@ -8,6 +8,22 @@ import Icon from './Icon.vue'
 
 const store = useSessions()
 const { t } = useI18n()
+
+// Paused job ids (in-memory, main-driven). Tracked here so the resume button
+// shows only for paused rows, and a global "resume all" reflects the state.
+const pausedIds = new Set<string>()
+const allPaused = ref(false)
+
+function togglePause(id: string): void {
+  const paused = !pausedIds.has(id)
+  if (paused) pausedIds.add(id)
+  else pausedIds.delete(id)
+  window.api.sftp.pause(id, paused)
+}
+function togglePauseAll(): void {
+  allPaused.value = !allPaused.value
+  window.api.sftp.pauseAll(allPaused.value)
+}
 
 // Live rows (all sessions), kept in arrival order.
 const active = computed(() =>
@@ -77,7 +93,18 @@ function timeAgo(at: number): string {
 
       <div class="tp-body">
         <div class="tp-sec">
-          <div class="tp-label">{{ t('tpanel.active') }}</div>
+          <div class="tp-label">
+            {{ t('tpanel.active') }}
+            <button
+              v-if="active.length"
+              class="tp-pauseall"
+              :title="allPaused ? t('tpanel.resumeAll') : t('tpanel.pauseAll')"
+              @click="togglePauseAll"
+            >
+              <Icon :name="allPaused ? 'play' : 'pause'" :size="13" />
+              <span>{{ allPaused ? t('tpanel.resumeAll') : t('tpanel.pauseAll') }}</span>
+            </button>
+          </div>
           <div v-if="active.length" class="tp-list">
             <div v-for="x in active" :key="x.id" class="tp-row">
               <Icon :name="x.direction === 'up' ? 'upload' : 'download'" :size="14" class="tp-dir" />
@@ -92,6 +119,9 @@ function timeAgo(at: number): string {
                   <span>{{ fmtSpeed(x.id) }}</span>
                 </div>
               </div>
+                <button class="tp-cancel" :title="t('sfp.pause')" @click="togglePause(x.id)">
+                <Icon :name="pausedIds.has(x.id) ? 'play' : 'pause'" :size="14" />
+              </button>
                 <button class="tp-cancel" :title="t('sfp.cancelTransfer')" @click="store.cancelTransfer(x.id)">
                 <Icon name="close" :size="14" />
               </button>
@@ -167,6 +197,20 @@ function timeAgo(at: number): string {
   border-radius: 4px;
   cursor: pointer;
 }
+.tp-pauseall {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.tp-pauseall:hover { background: var(--bg3); color: var(--text); }
 .tp-x:hover, .tp-cancel:hover { background: var(--bg3); color: var(--text); }
 .tp-body { overflow-y: auto; }
 .tp-sec { padding: 8px 12px 12px; }

@@ -207,6 +207,9 @@ const api = {
     prefetchDrag: (sessionId: string, items: { remotePath: string; name: string; isDir: boolean }[]): void =>
       ipcRenderer.send(IPC.sftpPrefetchDrag, sessionId, items),
     cancel: (id: string): void => ipcRenderer.send(IPC.sftpCancel, id),
+    pause: (id: string, paused: boolean): void => ipcRenderer.send(IPC.sftpPause, id, paused),
+    pauseAll: (paused: boolean): void => ipcRenderer.send(IPC.sftpPauseAll, paused),
+    setRate: (id: string, bytesPerSec: number): void => ipcRenderer.send(IPC.sftpSetRate, id, bytesPerSec),
     onProgress: (cb: (p: SftpProgress) => void): (() => void) => {
       const listener = (_e: unknown, p: SftpProgress): void => cb(p)
       ipcRenderer.on(IPC.sftpProgress, listener)
@@ -222,6 +225,22 @@ const api = {
   /** Opens a terminal link in the default browser (http/https only). */
   openExternal: (url: string): Promise<boolean> =>
     ipcRenderer.invoke(IPC.openExternal, url),
+  /** A launch target (CLI `-c` / x-ssh:// URL) from main, to open a connection. */
+  onOpenTarget: (cb: (target: string) => void): (() => void) => {
+    const listener = (_e: unknown, target: string): void => cb(target)
+    ipcRenderer.on(IPC.appOpenTarget, listener)
+    return () => ipcRenderer.removeListener(IPC.appOpenTarget, listener)
+  },
+  checkUpdate: (): Promise<{
+    ok: boolean
+    fresh?: boolean
+    current?: string
+    latest?: string
+    url?: string
+    name?: string
+    notes?: string
+    error?: string
+  }> => ipcRenderer.invoke(IPC.appCheckUpdate),
   /** Shows a native notification (respects the notifications/notifySound settings). */
   notify: (title: string, body: string, sound = false): void =>
     ipcRenderer.send(IPC.notify, title, body, sound),

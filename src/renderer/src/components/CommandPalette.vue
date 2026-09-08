@@ -209,8 +209,12 @@ watch(
   () => store.paletteOpen,
   (open) => {
     if (open) {
-      query.value = ''
-      selected.value = 0
+      // A launch target seeds the query so Enter connects straight away.
+      query.value = store.paletteSeed ?? ''
+      store.paletteSeed = null
+      // If a quick-connect target was seeded, auto-select its "connect to…" item.
+      if (query.value.trim()) selected.value = 0
+      else selected.value = 0
       pending.value = null
       password.value = ''
       remember.value = true

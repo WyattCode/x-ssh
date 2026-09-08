@@ -264,6 +264,11 @@ function onConcurrency(e: Event): void {
   store.transferConcurrency = n
   void store.saveSetting('transferConcurrency', n)
 }
+function onRate(e: Event): void {
+  const n = Math.max(0, Math.min(131072, parseInt((e.target as HTMLInputElement).value, 10) || 0))
+  store.transferRateKbps = n
+  void store.saveSetting('transferRateKbps', n)
+}
 function toggleShell(): void {
   store.shellIntegration = !store.shellIntegration
   void store.saveSetting('shellIntegration', store.shellIntegration)
@@ -291,6 +296,45 @@ function toggleNotifications(): void {
 function toggleNotifySound(): void {
   store.notifySound = !store.notifySound
   void store.saveSetting('notifySound', store.notifySound)
+}
+function toggleConfirmClose(): void {
+  store.confirmClose = !store.confirmClose
+  void store.saveSetting('confirmClose', store.confirmClose)
+}
+
+// ---- Update check (GitHub releases feed) ----
+const updateState = reactive({
+  checking: false,
+  fresh: false,
+  latest: '',
+  url: '',
+  name: '',
+  notes: '',
+  error: ''
+})
+async function checkForUpdates(): Promise<void> {
+  if (updateState.checking) return
+  updateState.checking = true
+  updateState.error = ''
+  const r = await window.api.checkUpdate()
+  updateState.checking = false
+  if (!r.ok) {
+    updateState.error = r.error ?? t('set.gen.updateErr')
+    return
+  }
+  if (r.fresh) {
+    updateState.fresh = true
+    updateState.latest = r.latest ?? ''
+  } else {
+    updateState.fresh = false
+    updateState.latest = r.latest ?? ''
+    updateState.name = r.name ?? ''
+    updateState.url = r.url ?? ''
+    updateState.notes = r.notes ?? ''
+  }
+}
+function openUpdatePage(): void {
+  if (updateState.url) void window.api.openExternal(updateState.url)
 }
 
 // ---- command snippets ----
@@ -667,6 +711,23 @@ async function resetMasterLock(): Promise<void> {
               </div>
               <button v-else class="ghost" @click="startNewSnippet">{{ t('set.gen.newSnippet') }}</button>
             </div>
+            <div class="section">
+              <div class="label">{{ t('set.gen.update') }}</div>
+              <p class="desc">{{ t('set.gen.updateDesc') }}</p>
+              <div class="editor-row">
+                <span class="path" :class="{ dim: !updateState.latest }">
+                  <template v-if="updateState.fresh">{{ t('set.gen.upToDate', { v: updateState.latest }) }}</template>
+                  <template v-else-if="updateState.latest">{{ t('set.gen.updateAvail', { v: updateState.latest }) }}</template>
+                  <template v-else>{{ t('set.gen.updateUnknown') }}</template>
+                </span>
+                <button class="ghost" :disabled="updateState.checking" @click="checkForUpdates">
+                  {{ updateState.checking ? t('set.gen.updateChecking') : t('set.gen.updateCheck') }}
+                </button>
+                <button v-if="updateState.url" class="ghost" @click="openUpdatePage">{{ t('set.gen.updateOpen') }}</button>
+              </div>
+              <p v-if="updateState.error" class="desc err">{{ updateState.error }}</p>
+              <p v-if="updateState.notes && !updateState.fresh" class="desc update-notes">{{ updateState.notes }}</p>
+            </div>
           </template>
 
           <!-- 终端 -->
@@ -805,7 +866,19 @@ async function resetMasterLock(): Promise<void> {
                 />
                 <span class="unit">{{ t('set.conn.files') }}</span>
               </div>
-              <p class="desc">{{ t('set.conn.xferDesc') }}</p>
+              <div class="field">
+                <span class="fname">{{ t('set.conn.xferRate') }}</span>
+                <input
+                  class="num-in"
+                  type="number"
+                  min="0"
+                  max="131072"
+                  :value="store.transferRateKbps"
+                  @input="onRate"
+                />
+                <span class="unit">{{ t('set.conn.kbps') }}</span>
+              </div>
+              <p class="desc">{{ t('set.conn.xferRateDesc') }}</p>
             </div>
             <div class="section">
               <div class="label">{{ t('set.conn.drop') }}</div>
@@ -829,6 +902,13 @@ async function resetMasterLock(): Promise<void> {
                   <span class="sub">{{ t('set.conn.notifySoundDesc') }}</span>
                 </span>
                 <span class="switch" :class="{ on: store.notifySound }"><i /></span>
+              </label>
+              <label class="toggle-row" @click="toggleConfirmClose">
+                <span>
+                  <span class="fname">{{ t('set.conn.confirmClose') }}</span>
+                  <span class="sub">{{ t('set.conn.confirmCloseDesc') }}</span>
+                </span>
+                <span class="switch" :class="{ on: store.confirmClose }"><i /></span>
               </label>
             </div>
           </template>
@@ -1046,6 +1126,17 @@ async function resetMasterLock(): Promise<void> {
   font-size: 12px;
   color: var(--text-faint);
   line-height: 1.5;
+}
+.desc.err {
+  color: var(--danger);
+}
+.update-notes {
+  margin-top: 8px;
+  max-height: 120px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  font-family: var(--font-mono);
+  font-size: 11px;
 }
 .editor-row {
   display: flex;

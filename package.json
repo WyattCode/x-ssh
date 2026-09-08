@@ -32,6 +32,12 @@
       "build/icon.ico",
       "build/icon.png"
     ],
+    "protocols": [
+      {
+        "name": "X-SSH Connection",
+        "schemes": ["x-ssh"]
+      }
+    ],
     "win": {
       "icon": "build/icon.ico",
       "target": "nsis"

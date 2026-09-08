@@ -60,12 +60,43 @@ export class SshManager {
   private jobAborts = new Map<string, Set<() => void>>()
   /** Job ids the user asked to cancel; workers stop between files. */
   private cancelledJobs = new Set<string>()
+  /** Job ids the user asked to pause; their streams are held mid-file. */
+  private pausedJobs = new Set<string>()
+  /** True when the user paused every transfer at once. */
+  private pausedAll = false
+  /** jobId → bytes/sec cap (0 = unlimited), applied via a leaky-bucket. */
+  private jobRate = new Map<string, number>()
   /** jobId → sessionId, so progress events can be tagged for the right pane. */
   private jobSession = new Map<string, string>()
   /** Files transferred concurrently within one job. */
   private static readonly CONCURRENCY = 4
   /** How far a job's tree walk may run ahead of its transfer workers. */
   private static readonly QUEUE_MAX = 2000
+
+  /** Pauses/resumes a single transfer job (held mid-file). */
+  pauseTransfer(id: string, paused: boolean): void {
+    if (paused) this.pausedJobs.add(id)
+    else this.pausedJobs.delete(id)
+  }
+  /** Pauses/resumes every live transfer job at once. */
+  pauseAll(paused: boolean): void {
+    this.pausedAll = paused
+    if (paused) for (const id of this.jobSession.keys()) this.pausedJobs.add(id)
+    else this.pausedJobs.clear()
+  }
+  /** Sets the byte-rate cap (bytes/sec) for a job; 0 removes the cap. */
+  setTransferRate(id: string, bytesPerSec: number): void {
+    if (bytesPerSec > 0) this.jobRate.set(id, bytesPerSec)
+    else this.jobRate.delete(id)
+  }
+  /** True when a job is currently paused (globally or individually). Only live,
+   *  panel-tracked jobs are pausable — silent helper transfers (drag-out,
+   *  editor save-back) use throwaway ids outside jobSession and must never be
+   *  affected by a global pause or a stray pauseAll. */
+  private isPaused(id: string): boolean {
+    if (!this.jobSession.has(id)) return false
+    return this.pausedAll || this.pausedJobs.has(id)
+  }
 
   /** Cancels a transfer job: stops its loop and aborts every in-flight file. */
   cancelTransfer(id: string): void {
@@ -738,7 +769,9 @@ export class SshManager {
   }
 
   /** Pipes readable→writable, reporting byte deltas; abortable via the job id
-   *  (its abort is one of possibly several registered under that job). */
+   *  (its abort is one of possibly several registered under that job). Honors
+   *  pause and a per-job byte rate (leaky bucket) so a transfer can be stopped
+   *  mid-file and resumed, or throttled to keep uplink/downlink sane. */
   private pipeStream(
     jobId: string,
     readable: Readable,
@@ -773,12 +806,53 @@ export class SshManager {
       }
       const abort = (): void => finish(new Error('已取消'))
       set.add(abort)
-      readable.on('data', (c: Buffer) => onDelta(c.length))
-      readable.on('error', (e: Error) => finish(e))
-      writable.on('error', (e: Error) => finish(e))
-      writable.on('finish', () => finish())
-      writable.on('close', () => finish())
-      readable.pipe(writable)
+
+      // Waits (with cancellation) until the job is no longer paused.
+      const waitUnpaused = async (): Promise<void> => {
+        while (!settled && this.isPaused(jobId)) await new Promise((r) => setTimeout(r, 150))
+        if (settled) throw new Error('已取消')
+      }
+      // Leaky-bucket rate budget: allow `rate` bytes/sec with a small burst.
+      const rate = this.jobRate.get(jobId) ?? 0
+      let windowStart = Date.now()
+      let windowBytes = 0
+      const throttle = async (n: number): Promise<void> => {
+        if (rate <= 0) return
+        windowBytes += n
+        const elapsed = Date.now() - windowStart
+        const budget = (rate * elapsed) / 1000
+        if (windowBytes <= budget) return
+        // Sleep just long enough to stay on budget, then re-anchor the window.
+        const wait = Math.min(5000, ((windowBytes - budget) / rate) * 1000 + 10)
+        await new Promise((r) => setTimeout(r, wait))
+        windowStart = Date.now()
+        windowBytes = 0
+      }
+
+      ;(async () => {
+        try {
+          readable.on('error', (e: Error) => finish(e))
+          writable.on('error', (e: Error) => finish(e))
+          writable.on('finish', () => finish())
+          writable.on('close', () => finish())
+          for await (const chunk of readable) {
+            if (settled) return
+            await waitUnpaused()
+            await throttle((chunk as Buffer).length)
+            if (settled) return
+            onDelta((chunk as Buffer).length)
+            if (!writable.write(chunk)) {
+              await new Promise<void>((r) => writable.once('drain', r))
+            }
+          }
+          // The readable ended: signal EOF to the writable so it flushes and
+          // emits 'finish' (which finishes the pipe). Without this the promise
+          // would hang, since 'finish'/'close' never fire on an open stream.
+          if (!settled) writable.end()
+        } catch (e) {
+          if (!settled) finish(e as Error)
+        }
+      })()
     })
   }
 
@@ -792,9 +866,11 @@ export class SshManager {
     items: { path: string; name: string; isDir: boolean }[],
     localBase: string,
     jobId: string,
-    concurrency?: number
+    concurrency?: number,
+    rateBytesPerSec = 0
   ): Promise<void> {
     this.jobSession.set(jobId, sessionId)
+    if (rateBytesPerSec > 0) this.jobRate.set(jobId, rateBytesPerSec)
     // If the SFTP channel can't be opened the job never emits a terminal event,
     // so drop the mapping here to avoid leaking it.
     const sftp = await this.getSftp(sessionId).catch((e) => {
@@ -931,6 +1007,8 @@ export class SshManager {
       }
     } finally {
       this.cancelledJobs.delete(jobId)
+      this.pausedJobs.delete(jobId)
+      this.jobRate.delete(jobId)
       this.jobSession.delete(jobId)
       this.lastProgressAt.delete(jobId)
     }
@@ -947,9 +1025,11 @@ export class SshManager {
     localPaths: string[],
     remoteDir: string,
     jobId: string,
-    concurrency?: number
+    concurrency?: number,
+    rateBytesPerSec = 0
   ): Promise<void> {
     this.jobSession.set(jobId, sessionId)
+    if (rateBytesPerSec > 0) this.jobRate.set(jobId, rateBytesPerSec)
     const conc = clampConcurrency(concurrency ?? SshManager.CONCURRENCY, SshManager.CONCURRENCY)
     const label = localPaths.length === 1 ? basename(localPaths[0]) : `${localPaths.length} 项`
     let bytesDone = 0
@@ -1103,6 +1183,8 @@ export class SshManager {
         this.cancelledJobs.delete(jobId)
       }
     } finally {
+      this.pausedJobs.delete(jobId)
+      this.jobRate.delete(jobId)
       this.jobSession.delete(jobId)
       this.lastProgressAt.delete(jobId)
     }

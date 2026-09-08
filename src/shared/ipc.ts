@@ -58,6 +58,9 @@ export const IPC = {
   sftpDelete: 'sftp:delete',
   sftpChmod: 'sftp:chmod',
   sftpCancel: 'sftp:cancel',
+  sftpPause: 'sftp:pause', // pause/resume one transfer job
+  sftpPauseAll: 'sftp:pauseAll', // pause/resume every live transfer
+  sftpSetRate: 'sftp:setRate', // throttle one job (bytes/sec; 0 = unlimited)
   sftpReadText: 'sftp:readText',
   sftpReadBinary: 'sftp:readBinary', // base64 for inline image preview
   sftpWriteText: 'sftp:writeText',
@@ -99,7 +102,13 @@ export const IPC = {
   pickExecutable: 'dialog:pickExecutable',
   pickDirectory: 'dialog:pickDirectory',
   openExternal: 'shell:openExternal',
-  notify: 'notify'
+  notify: 'notify',
+
+  // Launch target (CLI arg / x-ssh:// protocol) forwarded from main → renderer
+  appOpenTarget: 'app:openTarget',
+
+  // Update check against the GitHub releases feed
+  appCheckUpdate: 'app:checkUpdate'
 } as const
 
 /** Prefix of the launch argument carrying UiPrefs from main to the preload. */
