@@ -11,9 +11,14 @@ const { t } = useI18n()
 const modKey = /mac|iphone|ipad/i.test(navigator.platform || navigator.userAgent) ? '⌘' : 'Ctrl'
 
 const dragging = ref('')
+const dropTarget = ref('')
+function onDragOver(tabId: string): void {
+  if (dragging.value && dragging.value !== tabId) dropTarget.value = tabId
+}
 function onDrop(targetId: string): void {
   if (dragging.value) store.moveTab(dragging.value, targetId)
   dragging.value = ''
+  dropTarget.value = ''
 }
 
 // A tab's dot reflects the most salient pane state (connecting > connected >
@@ -62,11 +67,11 @@ function hostColor(tab: Tab): string | undefined {
         v-for="tab in store.tabs"
         :key="tab.id"
         class="tab"
-        :class="{ active: tab.id === store.activeId, dragging: dragging === tab.id }"
+        :class="{ active: tab.id === store.activeId, dragging: dragging === tab.id, 'drop-target': dropTarget === tab.id }"
         draggable="true"
         @dragstart="dragging = tab.id"
-        @dragend="dragging = ''"
-        @dragover.prevent
+        @dragend="dragging = ''; dropTarget = ''"
+        @dragover.prevent="onDragOver(tab.id)"
         @drop.prevent="onDrop(tab.id)"
         @click="store.setActive(tab.id)"
         @mousedown.middle.prevent="store.closeTab(tab.id)"
@@ -184,6 +189,19 @@ function hostColor(tab: Tab): string | undefined {
 }
 .tab.dragging {
   opacity: 0.5;
+}
+.tab.drop-target {
+  box-shadow: 0 0 0 1px var(--accent) inset;
+}
+.tab.drop-target::after {
+  content: '';
+  position: absolute;
+  inset: 2px;
+  border-radius: var(--radius-sm);
+  border: 1px dashed var(--accent);
+}
+.tab {
+  position: relative;
 }
 .tab[draggable='true'] {
   cursor: default;
