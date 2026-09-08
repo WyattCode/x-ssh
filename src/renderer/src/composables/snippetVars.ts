@@ -45,7 +45,8 @@ export function useSnippetVars(): {
     if (!names.length) return Promise.resolve(snippet.text)
     return new Promise<string | null>((res) => {
       state.snippet = snippet
-      state.vars = names.map((name) => ({ name, value: '' }))
+      const defaults = snippet.defaultVars ?? {}
+      state.vars = names.map((name) => ({ name, value: defaults[name] ?? '' }))
       state.resolve = res
       state.open = true
     })

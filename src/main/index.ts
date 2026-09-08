@@ -156,7 +156,9 @@ async function saveSnippet(snippet: Snippet): Promise<Snippet[]> {
     title: snippet.title,
     text: snippet.text,
     confirm: snippet.confirm,
-    ...(snippet.group ? { group: snippet.group } : {})
+    ...(snippet.group ? { group: snippet.group } : {}),
+    ...(snippet.defaultVars && Object.keys(snippet.defaultVars).length ? { defaultVars: snippet.defaultVars } : {}),
+    ...(snippet.hostId ? { hostId: snippet.hostId } : {})
   }
   if (i >= 0) all[i] = clean
   else all.unshift(clean)

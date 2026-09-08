@@ -14,6 +14,9 @@ const emit = defineEmits<{
   (e: 'edit-host', h: Host): void
 }>()
 
+/** hostId of the currently-focused pane, so host-scoped snippets filter in. */
+const activeHostId = computed(() => store.activePane?.params.hostId ?? null)
+
 type Item =
   | { kind: 'quick'; title: string; sub: string; params: ConnectParams }
   | { kind: 'host'; title: string; sub: string; host: Host; known: boolean }
@@ -95,9 +98,11 @@ const sections = computed<{ id: string; title: string; items: Item[] }[]>(() => 
     }))
   )
 
-  const snips = store.snippets.filter(
-    (s) => !q || fuzzyScore(q, s.title) > -1 || fuzzyScore(q, s.text) > -1
-  )
+  const snips = store.snippets.filter((s) => {
+    // A snippet scoped to a specific host only shows for that connection.
+    if (s.hostId && s.hostId !== activeHostId.value) return false
+    return !q || fuzzyScore(q, s.title) > -1 || fuzzyScore(q, s.text) > -1
+  })
   // Group snippets by their (optional) group, preserving user order; a folder
   // with no group falls under the plain "snippets" heading.
   const sniGroups: { label: string; items: Item[] }[] = []

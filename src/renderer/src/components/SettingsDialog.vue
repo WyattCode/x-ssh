@@ -171,7 +171,9 @@ const snippetForm = reactive({
   title: '',
   text: '',
   confirm: false,
-  group: ''
+  group: '',
+  hostId: '',
+  defaultVars: ''
 })
 function startNewSnippet(): void {
   snippetForm.open = true
@@ -180,14 +182,30 @@ function startNewSnippet(): void {
   snippetForm.text = ''
   snippetForm.confirm = false
   snippetForm.group = ''
+  snippetForm.hostId = ''
+  snippetForm.defaultVars = ''
 }
-function editSnippet(s: { id: string; title: string; text: string; confirm?: boolean; group?: string }): void {
+function editSnippet(s: { id: string; title: string; text: string; confirm?: boolean; group?: string; hostId?: string; defaultVars?: Record<string, string> }): void {
   snippetForm.open = true
   snippetForm.id = s.id
   snippetForm.title = s.title
   snippetForm.text = s.text
   snippetForm.confirm = !!s.confirm
   snippetForm.group = s.group ?? ''
+  snippetForm.hostId = s.hostId ?? ''
+  snippetForm.defaultVars = Object.entries(s.defaultVars ?? {})
+    .map(([k, v]) => `${k}=${v}`)
+    .join('\n')
+}
+function parseDefaultVars(s: string): Record<string, string> | undefined {
+  const out: Record<string, string> = {}
+  for (const line of s.split(/\n/)) {
+    const idx = line.indexOf('=')
+    if (idx < 0) continue
+    const key = line.slice(0, idx).trim()
+    if (key) out[key] = line.slice(idx + 1)
+  }
+  return Object.keys(out).length ? out : undefined
 }
 async function saveSnippet(): Promise<void> {
   if (!snippetForm.title.trim() || !snippetForm.text.trim()) return
@@ -196,7 +214,9 @@ async function saveSnippet(): Promise<void> {
     title: snippetForm.title.trim(),
     text: snippetForm.text,
     confirm: snippetForm.confirm || undefined,
-    group: snippetForm.group.trim() || undefined
+    group: snippetForm.group.trim() || undefined,
+    defaultVars: parseDefaultVars(snippetForm.defaultVars),
+    hostId: snippetForm.hostId || undefined
   })
   snippetForm.open = false
 }
@@ -205,6 +225,9 @@ async function deleteSnippet(id: string): Promise<void> {
 }
 function oneLine(s: string): string {
   return s.replace(/\s+/g, ' ').trim().slice(0, 54)
+}
+function hostLabel(id: string): string {
+  return store.hosts.find((h) => h.id === id)?.label ?? id
 }
 
 // ---- known hosts / SSH config ----
@@ -353,6 +376,7 @@ async function backupNow(): Promise<void> {
               <div v-for="s in store.snippets" :key="s.id" class="snip-row">
                 <span class="snip-title">{{ s.title }}<template v-if="s.group"> · {{ s.group }}</template></span>
                 <span class="snip-text">{{ oneLine(s.text) }}</span>
+                <span v-if="s.hostId" class="snip-host">{{ hostLabel(s.hostId) }}</span>
                 <button class="ghost" @click="editSnippet(s)">{{ t('set.gen.edit') }}</button>
                 <button class="ghost" @click="deleteSnippet(s.id)">{{ t('set.gen.delete') }}</button>
               </div>
@@ -375,6 +399,22 @@ async function backupNow(): Promise<void> {
                   :placeholder="t('set.gen.snipGroup')"
                   spellcheck="false"
                 />
+                <label class="field host-scope">
+                  <span class="snip-lbl">{{ t('set.gen.snipHostScope') }}</span>
+                  <select v-model="snippetForm.hostId" class="snip-in select">
+                    <option value="">{{ t('set.gen.snipHostAll') }}</option>
+                    <option v-for="h in store.hosts" :key="h.id" :value="h.id">{{ h.label }}</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span class="snip-lbl">{{ t('set.gen.snipDefaultVars') }}</span>
+                  <textarea
+                    v-model="snippetForm.defaultVars"
+                    class="snip-in snip-ta snip-vars"
+                    :placeholder="t('set.gen.snipDefaultVarsPh')"
+                    spellcheck="false"
+                  />
+                </label>
                 <label class="field check">
                   <input v-model="snippetForm.confirm" type="checkbox" />
                   <span class="check-label">{{ t('set.gen.snipConfirm') }}</span>
@@ -1044,7 +1084,32 @@ async function backupNow(): Promise<void> {
   font-family: var(--font-mono);
   resize: vertical;
 }
-.snip-actions {
+.snip-vars {
+  height: 54px;
+}
+.snip-lbl {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.host-scope {
+  flex-direction: column;
+  align-items: stretch;
+}
+.host-scope .snip-in.select {
+  height: 32px;
+  appearance: auto;
+  -webkit-appearance: auto;
+  cursor: pointer;
+}
+.snip-host {
+  flex: none;
+  font-size: 11px;
+  color: var(--accent);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 120px;
+}.snip-actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;

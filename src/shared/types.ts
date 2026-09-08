@@ -124,6 +124,11 @@ export interface Snippet {
   confirm?: boolean
   /** Optional category, grouped in the command palette. */
   group?: string
+  /** Pre-filled values keyed by `{var}` name, so placeholders needn't be
+   *  retyped every run (overridden by whatever the user types). */
+  defaultVars?: Record<string, string>
+  /** When set, the snippet only shows for a connection to this saved Host. */
+  hostId?: string
 }
 
 /** A known-host entry surfaced to the settings page. */
