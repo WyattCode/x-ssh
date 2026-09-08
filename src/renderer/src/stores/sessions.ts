@@ -205,6 +205,9 @@ interface State {
   confirmClose: boolean
   /** Default per-transfer rate cap (KiB/s; 0 = unlimited). */
   transferRateKbps: number
+  /** Minimize to the system tray on close (instead of quitting), so transfers
+   *  keep running (default off). */
+  minimizeToTray: boolean
 }
 
 export const useSessions = defineStore('sessions', {
@@ -256,7 +259,8 @@ export const useSessions = defineStore('sessions', {
     confirmPaste: true,
     sanitizePaste: true,
     confirmClose: true,
-    transferRateKbps: 0
+    transferRateKbps: 0,
+    minimizeToTray: false
   }),
 
   getters: {
@@ -344,6 +348,7 @@ export const useSessions = defineStore('sessions', {
       this.confirmClose = (await window.api.settings.get<boolean>('confirmClose')) !== false
       this.transferRateKbps =
         (await window.api.settings.get<number>('transferRateKbps')) ?? 0
+      this.minimizeToTray = (await window.api.settings.get<boolean>('minimizeToTray')) === true
     },
 
     async loadSnippets(): Promise<void> {
@@ -812,6 +817,59 @@ export const useSessions = defineStore('sessions', {
       const t = this.tabs.find((x) => x.id === tabId)
       const p = t?.panes.find((x) => x.id === paneId)
       if (t && p?.status === 'connected') t.activePaneId = paneId
+    },
+
+    /** Sends a single command line to every connected pane across all tabs
+     *  (broadcast). Silently skips panes that aren't live. */
+    broadcastCommand(cmd: string): number {
+      if (!cmd.trim()) return 0
+      const text = cmd.endsWith('\n') ? cmd : cmd + '\n'
+      let sent = 0
+      for (const tab of this.tabs) {
+        for (const pane of tab.panes) {
+          if (pane.status === 'connected' && pane.sshSessionId) {
+            window.api.ssh.input(pane.sshSessionId, text)
+            sent++
+          }
+        }
+      }
+      return sent
+    },
+
+    /** Resets the active tab to a clean N-pane grid (`dir` = split axis) of the
+     *  same target. Extra panes beyond the source are closed first, then new
+     *  panes are opened to fill the grid — all identical to the focused pane. */
+    async applyLayoutPreset(dir: SplitDir, cells: number): Promise<void> {
+      const tab = this.tabs.find((t) => t.id === this.activeId)
+      if (!tab) return
+      const src = tab.panes.find((p) => p.id === tab.activePaneId) ?? tab.panes[0]
+      if (!src) return
+      const want = Math.min(cells, 8)
+      if (want <= 0) return
+      // Close every pane except the source so the grid is clean.
+      const keep = src.id
+      for (const pane of [...tab.panes]) {
+        if (pane.id === keep) continue
+        if (pane.sshSessionId) void window.api.ssh.disconnect(pane.sshSessionId)
+      }
+      tab.panes = tab.panes.filter((p) => p.id === keep)
+      // Open the remaining panes to fill the grid.
+      const fills = [keep]
+      while (fills.length < want) {
+        const paneId = uid('pane')
+        fills.push(paneId)
+        tab.panes.push({ id: paneId, status: 'connecting', params: { ...toRaw(src.params) } })
+      }
+      tab.layout = buildFlatTree(fills, dir)
+      tab.activePaneId = keep
+      // Connect the new panes; keep source focus until each goes live.
+      for (let i = 1; i < fills.length; i++) {
+        await this.runConnect(fills[i])
+        const t = this.tabs.find((x) => x.id === tab.id)
+        const p = t?.panes.find((x) => x.id === fills[i])
+        if (t && p?.status === 'connected') t.activePaneId = p.id
+      }
+      this.persistTabs()
     },
 
     /** (Re)connects a pane using its stored params. */

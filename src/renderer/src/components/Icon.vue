@@ -56,7 +56,9 @@ const P: Record<string, string> = {
   lock: 'M5 11h14a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1z M8 11V7a4 4 0 0 1 8 0v4 M12 15v3',
   unlock: 'M5 11h14a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1z M8 11V7a4 4 0 0 1 7.9-1 M12 15v3',
   play: 'M7 5l12 7-12 7z',
-  pause: 'M8 5v14 M16 5v14'
+  pause: 'M8 5v14 M16 5v14',
+  send: 'M22 2 11 13 M22 2 15 22 11 13 2 9z',
+  grid: 'M4 4h7v7H4z M13 4h7v7h-7z M4 13h7v7H4z M13 13h7v7h-7z'
 }
 </script>
 

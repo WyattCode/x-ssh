@@ -301,6 +301,10 @@ function toggleConfirmClose(): void {
   store.confirmClose = !store.confirmClose
   void store.saveSetting('confirmClose', store.confirmClose)
 }
+function toggleMinimizeToTray(): void {
+  store.minimizeToTray = !store.minimizeToTray
+  void store.saveSetting('minimizeToTray', store.minimizeToTray)
+}
 
 // ---- Update check (GitHub releases feed) ----
 const updateState = reactive({
@@ -653,6 +657,13 @@ async function resetMasterLock(): Promise<void> {
                   <span class="sub">{{ t('set.gen.restoreCwdDesc') }}</span>
                 </span>
                 <span class="switch" :class="{ on: store.restoreCwd }"><i /></span>
+              </label>
+              <label class="toggle-row" @click="toggleMinimizeToTray">
+                <span>
+                  <span class="fname">{{ t('set.gen.minimizeToTray') }}</span>
+                  <span class="sub">{{ t('set.gen.minimizeToTrayDesc') }}</span>
+                </span>
+                <span class="switch" :class="{ on: store.minimizeToTray }"><i /></span>
               </label>
             </div>
             <div class="section">

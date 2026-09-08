@@ -2,6 +2,7 @@
 import { ref, computed, watch } from 'vue'
 import { useConfirm } from '../composables/confirm'
 import { useI18n } from '../lib/i18n'
+import { highlight, langFromName } from '../lib/highlight'
 import Icon from './Icon.vue'
 
 const { confirm } = useConfirm()
@@ -24,8 +25,23 @@ const loading = ref(false)
 const saving = ref(false)
 const error = ref('')
 const taEl = ref<HTMLTextAreaElement>()
+const preEl = ref<HTMLPreElement>()
+const highlightOn = ref(true)
 
 const dirty = computed(() => content.value !== original.value)
+
+// The language is derived from the file name; a trailing newline/slot keeps the
+// highlight layer's last line height matching the textarea's.
+const lang = computed(() => langFromName(props.name))
+const highlighted = computed(() =>
+  content.value.length ? highlight(content.value + ' ', lang.value) : ''
+)
+
+function syncScroll(): void {
+  if (!taEl.value || !preEl.value) return
+  preEl.value.scrollTop = taEl.value.scrollTop
+  preEl.value.scrollLeft = taEl.value.scrollLeft
+}
 
 watch(
   () => props.open,
@@ -35,7 +51,11 @@ watch(
     error.value = ''
     content.value = ''
     original.value = ''
-    const r = await window.api.sftp.readText(props.sessionId, props.path)
+    const [hl, r] = await Promise.all([
+      window.api.settings.get<boolean>('syntaxHighlight'),
+      window.api.sftp.readText(props.sessionId, props.path)
+    ])
+    highlightOn.value = hl !== false
     loading.value = false
     if (r.ok) {
       content.value = r.content ?? ''
@@ -108,15 +128,19 @@ function onKeydown(e: KeyboardEvent): void {
 
       <div v-if="loading" class="state">{{ t('ed.loading') }}</div>
       <div v-else-if="error" class="state err">{{ error }}</div>
-      <textarea
-        v-else
-        ref="taEl"
-        v-model="content"
-        class="area"
-        spellcheck="false"
-        autocomplete="off"
-        wrap="off"
-      />
+      <div v-else class="area-wrap">
+        <pre v-show="highlightOn" ref="preEl" class="area highlight" aria-hidden="true" v-html="highlighted"></pre>
+        <textarea
+          ref="taEl"
+          v-model="content"
+          class="area input"
+          :class="{ 'hl-on': highlightOn }"
+          spellcheck="false"
+          autocomplete="off"
+          wrap="off"
+          @scroll="syncScroll"
+        />
+      </div>
 
       <div class="foot">
         <span>{{ t('ed.chars', { n: content.length }) }}</span>
@@ -211,20 +235,56 @@ function onKeydown(e: KeyboardEvent): void {
   background: var(--bg-elev-2);
   color: var(--text);
 }
-.area {
+.area-wrap {
+  position: relative;
   flex: 1;
-  width: 100%;
-  padding: 14px;
+  min-height: 0;
+  overflow: hidden;
   background: var(--bg);
+}
+.area {
+  margin: 0;
+  padding: 14px;
+  background: transparent;
   border: none;
   outline: none;
   resize: none;
   font-family: var(--font-mono);
   font-size: 13px;
   line-height: 1.55;
-  color: var(--text);
   white-space: pre;
   tab-size: 2;
+  overflow: auto;
+  box-sizing: border-box;
+}
+.area.highlight {
+  position: absolute;
+  inset: 0;
+  color: var(--text);
+  pointer-events: none;
+  overflow: hidden;
+}
+.area.highlight .k { color: #c678dd; }
+.area.highlight .s { color: #98c379; }
+.area.highlight .c { color: var(--text-faint); font-style: italic; }
+.area.highlight .n { color: #d19a66; }
+.area.highlight .b { color: #61afef; }
+.area.highlight .m { color: #e5c07b; }
+.area.highlight .p { color: var(--text-faint); }
+.area.input {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  color: var(--text);
+}
+.area.input.hl-on {
+  color: transparent;
+  caret-color: var(--text);
+  background: transparent;
+  -webkit-text-fill-color: transparent;
+}
+.area.input.hl-on::selection {
+  color: transparent;
 }
 .state {
   flex: 1;

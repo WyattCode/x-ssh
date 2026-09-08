@@ -4,11 +4,13 @@ import { useSessions } from '../stores/sessions'
 import { fuzzyScore, fuzzyMatch } from '../lib/fuzzy'
 import { parseTarget } from '../lib/target'
 import { useI18n } from '../lib/i18n'
+import { useToast } from '../composables/toast'
 import Icon from './Icon.vue'
 import type { ConnectParams, Host, Snippet } from '../../../shared/types'
 
 const store = useSessions()
 const { t } = useI18n()
+const { toast } = useToast()
 const emit = defineEmits<{
   (e: 'new-host'): void
   (e: 'edit-host', h: Host): void
@@ -32,6 +34,11 @@ const pending = ref<{ params: ConnectParams; title: string } | null>(null)
 const password = ref('')
 const remember = ref(true)
 const pwEl = ref<HTMLInputElement>()
+
+// Inline broadcast-command prompt state.
+const broadcastOpen = ref(false)
+const broadcastCmd = ref('')
+const broadcastEl = ref<HTMLInputElement>()
 
 const oneLine = (s: string): string => s.replace(/\s+/g, ' ').trim().slice(0, 60)
 
@@ -152,6 +159,36 @@ const sections = computed<{ id: string; title: string; items: Item[] }[]>(() => 
       icon: 'search',
       run: () => store.toggleHistory(true)
     })
+  }
+  if (matchesAction('广播 broadcast command 所有 send all')) {
+    actions.push({
+      kind: 'action',
+      title: t('pal.broadcast'),
+      sub: t('pal.broadcastDesc'),
+      icon: 'send',
+      run: openBroadcast
+    })
+  }
+  // Split-layout presets: reset the active tab to a grid of the same target.
+  if (matchesAction('分屏布局 preset split grid columns rows')) {
+    const layouts: { label: string; dir: 'row' | 'col'; cells: number }[] = [
+      { label: '2', dir: 'row', cells: 2 },
+      { label: '3', dir: 'row', cells: 3 },
+      { label: '4', dir: 'row', cells: 4 },
+      { label: '2×2', dir: 'col', cells: 2 }
+    ]
+    for (const l of layouts) {
+      actions.push({
+        kind: 'action',
+        title: t('pal.layoutPreset', { n: l.label }),
+        sub: t('pal.layoutPresetDesc', { n: l.label }),
+        icon: 'grid',
+        run: () => {
+          store.togglePalette(false)
+          void store.applyLayoutPreset(l.dir, l.cells)
+        }
+      })
+    }
   }
   add('actions', t('pal.actions'), actions)
 
@@ -286,11 +323,34 @@ async function submitPassword(): Promise<void> {
   connect({ ...params, password: password.value }, title)
 }
 
+function openBroadcast(): void {
+  broadcastCmd.value = ''
+  broadcastOpen.value = true
+  nextTick(() => broadcastEl.value?.focus())
+}
+function submitBroadcast(): void {
+  const cmd = broadcastCmd.value
+  broadcastOpen.value = false
+  store.togglePalette(false)
+  const sent = store.broadcastCommand(cmd)
+  toast(sent ? t('pal.broadcastSent', { n: sent }) : t('pal.broadcastNone'), sent ? 'success' : 'error')
+}
+
 function onKey(e: KeyboardEvent): void {
   // While an IME is composing, Enter/arrows/Esc are the candidate list's, not
   // ours — searching a Chinese host label would otherwise connect on the Enter
   // that just picks the word.
   if (e.isComposing || e.keyCode === 229) return
+  if (broadcastOpen.value) {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      submitBroadcast()
+    } else if (e.key === 'Escape') {
+      broadcastOpen.value = false
+      nextTick(() => inputEl.value?.focus())
+    }
+    return
+  }
   if (pending.value) {
     if (e.key === 'Escape') {
       pending.value = null
@@ -318,8 +378,27 @@ function onKey(e: KeyboardEvent): void {
 <template>
   <div v-if="store.paletteOpen" class="overlay" @mousedown.self="store.togglePalette(false)">
     <div class="palette" @keydown="onKey">
+      <!-- Broadcast command prompt -->
+      <template v-if="broadcastOpen">
+        <div class="pw-head">
+          <span class="pw-title">{{ t('pal.broadcast') }}</span>
+        </div>
+        <input
+          ref="broadcastEl"
+          v-model="broadcastCmd"
+          class="search"
+          :placeholder="t('pal.broadcastPlaceholder')"
+          spellcheck="false"
+          autocomplete="off"
+          @keydown.enter.prevent="submitBroadcast"
+        />
+        <div class="hint">
+          <span><span class="kbd">Enter</span> {{ t('pal.broadcastSend') }}</span>
+          <span><span class="kbd">Esc</span> {{ t('pal.back') }}</span>
+        </div>
+      </template>
       <!-- Password prompt -->
-      <template v-if="pending">
+      <template v-else-if="pending">
         <div class="pw-head">
           <span class="pw-title">{{ t('pal.pwTitle', { user: pending.params.username, host: pending.params.host }) }}</span>
         </div>

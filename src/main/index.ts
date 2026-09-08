@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain, dialog, nativeImage, screen, Menu, Notification } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, dialog, nativeImage, screen, Menu, Notification, Tray } from 'electron'
 import { join, dirname, basename, isAbsolute } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { tmpdir, homedir } from 'node:os'
@@ -26,6 +26,71 @@ const activeEdits = new Set<string>()
 // mousedown are ready by the time the drag gesture reaches startDrag.
 const dragCache = new Map<string, Promise<{ dir: string; local: string }>>()
 let sshManager: SshManager | null = null
+
+// ---- System tray ----
+// A minimized/closed window can be tucked into the tray instead of quitting, so
+// long-running transfers keep running. Controlled by the `minimizeToTray`
+// setting and the tray's context menu. The menu is localized from the `lang`
+// setting and rebuilt when it opens, so a language change takes effect live.
+let tray: Tray | null = null
+let quitting = false
+/** Cached copy of the `minimizeToTray` setting, kept in sync by the setter. */
+let minimizeToTray = false
+async function minimizeToTrayEnabled(): Promise<boolean> {
+  return (await settings.get<boolean>('minimizeToTray')) === true
+}
+async function buildTrayMenu(win: BrowserWindow): Promise<Electron.Menu> {
+  const lang = await settings.get<'zh' | 'en'>('lang')
+  const en = lang === 'en'
+  return Menu.buildFromTemplate([
+    {
+      label: en ? 'Show X-SSH' : '显示 X-SSH',
+      click: () => {
+        win.show()
+        win.focus()
+      }
+    },
+    {
+      label: en ? 'Hide' : '隐藏',
+      click: () => win.hide()
+    },
+    { type: 'separator' },
+    {
+      label: en ? 'Open command palette' : '打开命令栏',
+      click: () => {
+        if (win.isMinimized()) win.restore()
+        win.show()
+        win.focus()
+        win.webContents.send(IPC.appOpenTarget, '')
+      }
+    },
+    { type: 'separator' },
+    {
+      label: en ? 'Quit' : '退出',
+      click: () => {
+        quitting = true
+        app.quit()
+      }
+    }
+  ])
+}
+async function setupTray(win: BrowserWindow): Promise<void> {
+  if (tray) return
+  let image = nativeImage.createFromPath(join(__dirname, '../../build/icon.png'))
+  if (image.isEmpty()) image = nativeImage.createFromDataURL(DRAG_ICON.toDataURL())
+  tray = new Tray(image)
+  tray.setToolTip('X-SSH')
+  tray.setContextMenu(await buildTrayMenu(win))
+  tray.on('click', () => {
+    if (win.isVisible() && win.isFocused()) win.hide()
+    else {
+      win.show()
+      win.focus()
+    }
+  })
+  // Re-localize the context menu right before it's shown.
+  tray.on('right-click', () => void buildTrayMenu(win).then((m) => tray?.setContextMenu(m)))
+}
 
 // ---- Launch targets (CLI `-c user@host` / `x-ssh://` URL) ----
 // A connection spec the user passed at launch, handed to the renderer once its
@@ -503,6 +568,18 @@ function createWindow(saved?: SavedBounds, prefs: UiPrefs = {}): void {
   win.on('close', persistBounds)
 
   win.on('ready-to-show', () => win.show())
+
+  // Tuck a "minimized to tray" window away instead of letting it quit: with the
+  // setting on, closing the window hides it (transfers keep running) rather
+  // than exiting; the tray menu's Quit (or the platform's normal close path
+  // when the setting is off) still exits for real.
+  win.on('close', (e) => {
+    if (quitting || minimizeToTray === false) return
+    e.preventDefault()
+    win.hide()
+  })
+
+  void setupTray(win).catch(() => undefined)
 
   // Recover from a one-off renderer/GPU process crash instead of showing a
   // blank window (can happen under RDP or with flaky GPU drivers).
@@ -1243,9 +1320,10 @@ function registerIpc(): void {
 
   // ---- Settings ----
   ipcMain.handle(IPC.settingsGet, (_e, key: string) => settings.get(key))
-  ipcMain.handle(IPC.settingsSet, (_e, key: string, value: unknown) =>
-    settings.set(key, value)
-  )
+  ipcMain.handle(IPC.settingsSet, async (_e, key: string, value: unknown) => {
+    if (key === 'minimizeToTray') minimizeToTray = Boolean(value)
+    return settings.set(key, value)
+  })
   ipcMain.handle(IPC.connLogList, async () => (await settings.get<ConnLogEntry[]>('connectionLog')) ?? [])
   ipcMain.handle(IPC.connLogClear, async () => {
     await settings.set('connectionLog', [])
@@ -1442,6 +1520,7 @@ app.whenReady().then(async () => {
   // store.setLocked() gates saved-secret discovery immediately.
   await masterLock.load()
   store.setLocked(masterLock.locked)
+  minimizeToTray = (await settings.get<boolean>('minimizeToTray')) === true
   // Warm the hosts cache while the window is still being built, so the
   // renderer's first list() call answers from memory instead of the disk.
   void store.list().catch(() => undefined)
@@ -1458,6 +1537,10 @@ app.whenReady().then(async () => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow(saved, prefs)
   })
+})
+
+app.on('before-quit', () => {
+  quitting = true
 })
 
 app.on('window-all-closed', () => {
