@@ -190,6 +190,12 @@ interface State {
   accentColor: string
   /** User overrides for rebindable app shortcuts (action → chord). */
   keybindings: Record<string, string>
+  /** Whether a master-lock passphrase has been configured. */
+  lockEnabled: boolean
+  /** Whether the app is currently locked (secrets gated until unlocked). */
+  lockLocked: boolean
+  /** True when tabs were restored while locked, so they reconnect after unlock. */
+  restorePendingUnlock: boolean
   confirmPaste: boolean
   /** Strip non-printing control characters from pasted text (default on). */
   sanitizePaste: boolean
@@ -237,6 +243,9 @@ export const useSessions = defineStore('sessions', {
     fileOpeners: {},
     accentColor: '',
     keybindings: {},
+    lockEnabled: false,
+    lockLocked: false,
+    restorePendingUnlock: false,
     confirmPaste: true,
     sanitizePaste: true
   }),
@@ -395,6 +404,41 @@ export const useSessions = defineStore('sessions', {
       await window.api.data.rescheduleBackup()
     },
 
+    // ---- App master-lock ----
+    async loadLockStatus(): Promise<void> {
+      const s = await window.api.lock.status()
+      this.lockEnabled = s.enabled
+      this.lockLocked = s.locked
+    },
+    async setMasterPassphrase(passphrase: string): Promise<{ ok: boolean; error?: string }> {
+      const r = await window.api.lock.setPassphrase(passphrase)
+      this.lockEnabled = r.enabled
+      this.lockLocked = r.locked
+      return { ok: r.ok, error: r.error }
+    },
+    async unlockApp(passphrase: string): Promise<boolean> {
+      const r = await window.api.lock.unlock(passphrase)
+      this.lockLocked = r.locked
+      return r.ok
+    },
+    async disableMasterLock(passphrase: string): Promise<boolean> {
+      const r = await window.api.lock.disable(passphrase)
+      this.lockEnabled = r.enabled
+      this.lockLocked = r.locked
+      return r.ok
+    },
+    async lockNow(): Promise<void> {
+      const r = await window.api.lock.lockNow()
+      this.lockLocked = r.locked
+      // Hide the hasSavedPassword flags in the in-memory host list while locked.
+      if (this.lockLocked) await this.loadHosts()
+    },
+    async resetMasterLock(): Promise<void> {
+      const r = await window.api.lock.reset()
+      this.lockEnabled = r.enabled
+      this.lockLocked = r.locked
+    },
+
     /** Persists every tab (layout + panes, minus secrets) so it can be restored. */
     persistTabs(): void {
       if (!this.restoreTabs) return
@@ -428,6 +472,12 @@ export const useSessions = defineStore('sessions', {
       if (!list?.length) return
       this.restoreTabsFrom(list)
       if (this.restoreConnect) {
+        // While the app is locked, don't reconnect (saved secrets are gated and
+        // every attempt fails with code 'locked'). Defer to after unlock.
+        if (this.lockLocked) {
+          this.restorePendingUnlock = true
+          return
+        }
         for (const tab of this.tabs) {
           for (const pane of tab.panes) {
             // Mark as a background (non-user-initiated) attempt so a restore
@@ -435,6 +485,19 @@ export const useSessions = defineStore('sessions', {
             pane.reconnectAttempt = 1
             void this.runConnect(pane.id)
           }
+        }
+      }
+    },
+
+    /** After unlocking, reconnect any tabs that were deferred while locked. */
+    connectPendingAfterUnlock(): void {
+      if (!this.restorePendingUnlock) return
+      this.restorePendingUnlock = false
+      if (!this.restoreConnect) return
+      for (const tab of this.tabs) {
+        for (const pane of tab.panes) {
+          pane.reconnectAttempt = 1
+          void this.runConnect(pane.id)
         }
       }
     },

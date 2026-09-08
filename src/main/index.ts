@@ -13,11 +13,13 @@ import { KnownHosts } from './knownHosts'
 import { SettingsStore } from './settings'
 import { friendlyError } from './friendlyError'
 import { KeyManager } from './keyManager'
+import { MasterLock } from './lock'
 
 const store = new HostStore()
 const knownHosts = new KnownHosts()
 const settings = new SettingsStore()
 const keyManager = new KeyManager(app.getPath('userData'))
+const masterLock = new MasterLock(settings)
 const activeEdits = new Set<string>()
 // Cache of drag-out downloads keyed by session:paths, so files prefetched on
 // mousedown are ready by the time the drag gesture reaches startDrag.
@@ -63,6 +65,24 @@ function prefetchDrag(sessionId: string, items: DragItem[]): Promise<{ dir: stri
 const DRAG_ICON = nativeImage.createFromDataURL(
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
 )
+
+// Temp dirs we create under the OS temp dir for drag-out / edit / open-with.
+// Those that have no timer (or whose timer didn't fire before the app closed)
+// are swept on startup so they can't accumulate disk garbage across restarts.
+const TMP_PREFIXES = ['xssh-drag-', 'xssh-edit-', 'xssh-open-']
+async function sweepTempDirs(): Promise<void> {
+  const base = tmpdir()
+  try {
+    const names = await readdir(base)
+    await Promise.all(
+      names
+        .filter((n) => TMP_PREFIXES.some((p) => n.startsWith(p)))
+        .map((n) => rm(join(base, n), { recursive: true, force: true }).catch(() => undefined))
+    )
+  } catch {
+    /* temp dir unreadable — nothing we can do */
+  }
+}
 
 interface SavedBounds {
   width: number
@@ -460,7 +480,7 @@ function registerIpc(): void {
         app: 'x-ssh',
         version: 2,
         exportedAt: new Date().toISOString(),
-        hosts: await store.exportJson(),
+      hosts: await store.exportJson(true),
         snippets: (await settings.get<Snippet[]>('snippets')) ?? [],
         snapshots: (await settings.get<unknown[]>('snapshots')) ?? [],
         transferHistory: (await settings.get<unknown[]>('sftpTransferHistory')) ?? [],
@@ -487,6 +507,12 @@ function registerIpc(): void {
       if (Array.isArray(data.snippets)) await settings.set('snippets', data.snippets)
       if (Array.isArray(data.snapshots)) await settings.set('snapshots', data.snapshots)
       if (Array.isArray(data.transferHistory)) await settings.set('sftpTransferHistory', data.transferHistory)
+      // Restore the trusted host-key map too, so a full restore is symmetric
+      // with the export instead of silently re-trusting every server.
+      if (Array.isArray(data.knownHosts)) {
+        await knownHosts.load()
+        await knownHosts.importAll(data.knownHosts)
+      }
       return { ok: true }
     } catch (e) {
       return { ok: false, error: friendlyError((e as Error).message) }
@@ -618,7 +644,12 @@ function registerIpc(): void {
   // ---- SSH lifecycle ----
   ipcMain.handle(IPC.sshConnect, async (_e, params: ConnectParams) => {
     if (!sshManager) return { ok: false, error: '窗口尚未就绪' }
-    // Resolve a saved password when connecting to a stored host.
+    // Resolve a saved password when connecting to a stored host. When the app
+    // is locked, don't auto-fill a saved secret — return a clear 'locked' error
+    // so the renderer surfaces the unlock prompt instead of failing obscurely.
+    if (store.isLocked && !params.password && !params.passphrase) {
+      return { ok: false, code: 'locked', error: '应用已锁定，请先解锁' }
+    }
     if (params.hostId && params.auth === 'password' && !params.password) {
       params.password = await store.getPassword(params.hostId)
     }
@@ -645,8 +676,8 @@ function registerIpc(): void {
               auth: jh.auth,
               keyPath: jh.keyPath
             }
-            if (jh.auth === 'password') jump.password = await store.getPassword(jh.id)
-            if (jh.auth === 'key') jump.passphrase = await store.getPassphrase(jh.id)
+            if (jh.auth === 'password') jump.password = store.isLocked ? undefined : await store.getPassword(jh.id)
+            if (jh.auth === 'key') jump.passphrase = store.isLocked ? undefined : await store.getPassphrase(jh.id)
             params.jump = jump
           }
         }
@@ -1057,6 +1088,43 @@ function registerIpc(): void {
     await settings.set('connectionLog', [])
     return { ok: true }
   })
+
+  // ---- App master-lock ----
+  // Lock state lives in main; gating saved secrets is enforced in the HostStore
+  // (getPassword/getPassphrase/exportJson) and in sshConnect below.
+  ipcMain.handle(IPC.lockStatus, () => masterLock.status())
+  ipcMain.handle(IPC.lockSetPassphrase, async (_e, passphrase: string) => {
+    try {
+      if (!passphrase) return { ok: false, error: '口令不能为空' }
+      await masterLock.setPassphrase(passphrase)
+      store.setLocked(masterLock.locked)
+      return { ok: true, ...masterLock.status() }
+    } catch (e) {
+      return { ok: false, error: friendlyError((e as Error).message) }
+    }
+  })
+  ipcMain.handle(IPC.lockDisable, async (_e, passphrase: string) => {
+    const ok = await masterLock.disable(passphrase)
+    store.setLocked(masterLock.locked)
+    return { ok, ...masterLock.status() }
+  })
+  ipcMain.handle(IPC.lockUnlock, async (_e, passphrase: string) => {
+    const ok = await masterLock.unlock(passphrase)
+    store.setLocked(masterLock.locked)
+    return { ok, ...masterLock.status() }
+  })
+  ipcMain.handle(IPC.lockLockNow, () => {
+    masterLock.lock()
+    store.setLocked(masterLock.locked)
+    // Locking can also close any sessions that used saved secrets? No — leave
+    // live sessions running; the door is just shut for new discovery.
+    return masterLock.status()
+  })
+  ipcMain.handle(IPC.lockReset, async () => {
+    await masterLock.reset()
+    store.setLocked(masterLock.locked)
+    return { ok: true, ...masterLock.status() }
+  })
   ipcMain.handle(IPC.pickExecutable, async () => {
     const res = await dialog.showOpenDialog({
       title: '选择外部编辑器程序',
@@ -1150,11 +1218,17 @@ app.whenReady().then(async () => {
     Menu.setApplicationMenu(null)
   }
   registerIpc()
+  // Load the master-lock state so a locked app stays locked across restarts;
+  // store.setLocked() gates saved-secret discovery immediately.
+  await masterLock.load()
+  store.setLocked(masterLock.locked)
   // Warm the hosts cache while the window is still being built, so the
   // renderer's first list() call answers from memory instead of the disk.
   void store.list().catch(() => undefined)
   // Kick off the auto-backup timer (no-op unless autoBackup is enabled).
   void scheduleAutoBackup().catch(() => undefined)
+  // Sweep temp dirs left by drag-out / edit / open-with from a prior run.
+  void sweepTempDirs()
   const [saved, prefs] = await Promise.all([
     settings.get<SavedBounds>('windowBounds'),
     readUiPrefs()

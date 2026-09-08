@@ -24,6 +24,7 @@ import PaneNode from './components/PaneNode.vue'
 import TransferPanel from './components/TransferPanel.vue'
 import SnippetVarsDialog from './components/SnippetVarsDialog.vue'
 import TooltipLayer from './components/TooltipLayer.vue'
+import LockScreen from './components/LockScreen.vue'
 import { useI18n } from './lib/i18n'
 import { collectPaneIds } from './lib/paneLayout'
 import {
@@ -282,7 +283,8 @@ onMounted(async () => {
     store.loadKnownHosts(),
     store.loadSftpBookmarks(),
     store.loadSftpRecent(),
-    store.loadSnapshots()
+    store.loadSnapshots(),
+    store.loadLockStatus()
   ])
   await store.restoreSavedTabs()
   store.initSftpProgress()
@@ -415,6 +417,7 @@ onBeforeUnmount(() => {
     <ConfirmDialog />
     <ToastHost />
     <HistorySearch />
+    <LockScreen v-if="store.lockLocked" />
   </div>
 </template>
 

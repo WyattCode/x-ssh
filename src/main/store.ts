@@ -15,6 +15,7 @@ export class HostStore {
   private secrets: Record<string, string> = {}
   private loaded = false
   private secretsLoadFailed = false
+  private locked = false
 
   private async ensureLoaded(): Promise<void> {
     if (this.loaded) return
@@ -58,14 +59,25 @@ export class HostStore {
     return `pp:${id}`
   }
 
+  /** The app master-lock is active: saved secrets must not leave the store.
+   *  Callers (connect / backup) should refuse discovery or use as well. */
+  setLocked(locked: boolean): void {
+    this.locked = locked
+  }
+
+  get isLocked(): boolean {
+    return this.locked
+  }
+
   async list(): Promise<Host[]> {
     await this.ensureLoaded()
     return [...this.hosts]
       .sort((a, b) => (b.lastUsedAt ?? 0) - (a.lastUsedAt ?? 0))
       .map((h) => ({
         ...h,
-        hasSavedPassword: !!this.secrets[h.id],
-        hasSavedPassphrase: !!this.secrets[this.ppKey(h.id)]
+        // While locked, don't advertise that secrets are stored.
+        hasSavedPassword: !this.locked && !!this.secrets[h.id],
+        hasSavedPassphrase: !this.locked && !!this.secrets[this.ppKey(h.id)]
       }))
   }
 
@@ -106,11 +118,13 @@ export class HostStore {
 
   async getPassword(id: string): Promise<string | undefined> {
     await this.ensureLoaded()
+    if (this.locked) return undefined
     return this.secrets[id]
   }
 
   async getPassphrase(id: string): Promise<string | undefined> {
     await this.ensureLoaded()
+    if (this.locked) return undefined
     return this.secrets[this.ppKey(id)]
   }
 
@@ -125,9 +139,12 @@ export class HostStore {
 
   /** Exports all hosts + their saved secrets to a portable JSON blob. Secrets
    *  are included in plaintext so a backup can be restored on another machine
-   *  (safeStorage/DPAPI is per-machine, so re-encrypting happens on import). */
-  async exportJson(): Promise<string> {
+   *  (safeStorage/DPAPI is per-machine, so re-encrypting happens on import).
+   *  When the app is locked, refuse — unless `allowLocked` is set, which the
+   *  scheduled auto-backup uses so it keeps running unattended. */
+  async exportJson(allowLocked = false): Promise<string> {
     await this.ensureLoaded()
+    if (this.locked && !allowLocked) throw new Error('已锁定，请先解锁')
     const hosts = this.hosts.map((h) => ({
       ...h,
       password: this.secrets[h.id] ?? '',

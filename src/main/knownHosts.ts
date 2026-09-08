@@ -58,6 +58,18 @@ export class KnownHosts {
     await this.persist()
   }
 
+  /** Replaces the whole map from a backup (known-host entries from an export).
+   *  Used by data:importAll so a full restore is symmetric with the export. */
+  async importAll(entries: KnownHostEntry[]): Promise<void> {
+    const map: Record<string, { fp: string; firstSeen?: number }> = {}
+    for (const e of entries) {
+      if (!e || typeof e.fingerprint !== 'string') continue
+      map[KnownHosts.key(e.host, e.port)] = { fp: e.fingerprint, firstSeen: e.firstSeen }
+    }
+    this.map = map
+    await this.persist()
+  }
+
   /** All known hosts, sorted by host for the settings page. */
   list(): KnownHostEntry[] {
     return Object.entries(this.map)

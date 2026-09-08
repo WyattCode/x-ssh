@@ -86,6 +86,14 @@ export const IPC = {
   connLogList: 'connLog:list',
   connLogClear: 'connLog:clear',
 
+  // App master-lock (invoke/handle)
+  lockStatus: 'lock:status',
+  lockSetPassphrase: 'lock:setPassphrase',
+  lockDisable: 'lock:disable',
+  lockUnlock: 'lock:unlock',
+  lockLockNow: 'lock:lockNow',
+  lockReset: 'lock:reset',
+
   // Misc
   pickKeyFile: 'dialog:pickKey',
   pickExecutable: 'dialog:pickExecutable',

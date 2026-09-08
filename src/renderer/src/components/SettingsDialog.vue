@@ -431,6 +431,64 @@ async function backupNow(): Promise<void> {
   toast(r.ok ? t('set.sec.backupDone') : (r.error ?? t('set.sec.backupFail')), r.ok ? 'success' : 'error')
 }
 
+// ---- App master-lock ----
+const lockNewPass = ref('')
+const lockBusy = ref(false)
+const currentPass = ref('')
+async function saveMasterLock(): Promise<void> {
+  if (!lockNewPass.value) {
+    toast(t('lock.passReq'), 'error')
+    return
+  }
+  lockBusy.value = true
+  try {
+    const r = await store.setMasterPassphrase(lockNewPass.value)
+    if (r.ok) {
+      lockNewPass.value = ''
+      toast(t('lock.saved'), 'success')
+    } else {
+      toast(r.error ?? t('lock.saveFail'), 'error')
+    }
+  } finally {
+    lockBusy.value = false
+  }
+}
+async function unlockNow(): Promise<void> {
+  if (!currentPass.value) return
+  const ok = await store.unlockApp(currentPass.value)
+  if (ok) {
+    currentPass.value = ''
+    await store.loadHosts()
+    store.connectPendingAfterUnlock()
+    toast(t('lock.unlocked'), 'success')
+  } else {
+    toast(t('lock.wrong'), 'error')
+  }
+}
+async function lockApp(): Promise<void> {
+  await store.lockNow()
+  toast(t('lock.lockedNow'), 'success')
+}
+async function disableMasterLock(): Promise<void> {
+  if (!currentPass.value) {
+    toast(t('lock.passReq'), 'error')
+    return
+  }
+  const ok = await store.disableMasterLock(currentPass.value)
+  if (ok) {
+    currentPass.value = ''
+    toast(t('lock.disabled'), 'success')
+  } else {
+    toast(t('lock.wrong'), 'error')
+  }
+}
+async function resetMasterLock(): Promise<void> {
+  const res = await confirm(t('lock.resetConfirm'))
+  if (!res) return
+  await store.resetMasterLock()
+  toast(t('lock.resetDone'), 'success')
+}
+
 
 </script>
 
@@ -782,6 +840,36 @@ async function backupNow(): Promise<void> {
               </div>
             </div>
             <div class="section">
+              <div class="label">{{ t('lock.title') }}</div>
+              <p class="desc">{{ t('lock.desc') }}</p>
+              <div class="lock-opts">
+                <template v-if="store.lockEnabled">
+                  <label class="backup-row">
+                    <span class="backup-label">{{ t('lock.current') }}</span>
+                    <input v-model="currentPass" type="password" class="lock-in" :placeholder="t('lock.placeholder')" />
+                  </label>
+                  <div v-if="store.lockLocked" class="btn-row">
+                    <button class="ghost" @click="unlockNow">{{ t('lock.unlock') }}</button>
+                  </div>
+                  <div class="btn-row">
+                    <button class="ghost" :disabled="lockBusy" @click="disableMasterLock">{{ t('lock.disable') }}</button>
+                    <button class="ghost" @click="lockApp">{{ t('lock.lockNow') }}</button>
+                    <button class="ghost danger" @click="resetMasterLock">{{ t('lock.reset') }}</button>
+                  </div>
+                </template>
+                <template v-else>
+                  <label class="backup-row">
+                    <span class="backup-label">{{ t('lock.new') }}</span>
+                    <input v-model="lockNewPass" type="password" class="lock-in" :placeholder="t('lock.placeholder')" />
+                  </label>
+                  <div class="btn-row">
+                    <button class="ghost" :disabled="lockBusy" @click="saveMasterLock">{{ t('lock.save') }}</button>
+                  </div>
+                </template>
+                <p class="desc">{{ t('lock.setHint') }}</p>
+              </div>
+            </div>
+            <div class="section">
               <div class="label">{{ t('set.sec.autoBackup') }}</div>
               <label class="toggle-row" @click="toggleAutoBackup">
                 <span>
@@ -1036,6 +1124,34 @@ async function backupNow(): Promise<void> {
 .btn-row {
   display: flex;
   gap: 8px;
+}
+.lock-opts {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 10px;
+}
+.lock-in {
+  flex: 1;
+  height: 32px;
+  min-width: 0;
+  padding: 0 10px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 12.5px;
+  outline: none;
+}
+.lock-in:focus {
+  border-color: var(--accent);
+}
+.ghost.danger {
+  color: var(--danger);
+}
+.ghost.danger:hover {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  border-color: var(--danger);
 }
 .backup-opts {
   display: flex;

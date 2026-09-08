@@ -297,6 +297,10 @@ onMounted(() => {
     }
     // Any user-remapped app chord must also bubble to the window handler.
     for (const id of REBINDABLE_ACTIONS) {
+      // closeTab (Ctrl+W) is deliberately left to a live shell as werase; the
+      // app-level handler ignores it while a terminal is connected, so bubbling
+      // it here would swallow the key from the shell for nothing.
+      if (id === 'closeTab' && store.paneBySession(props.sessionId)?.status === 'connected') continue
       const chord = store.keybindings[id] ?? DEFAULT_BINDINGS[id as RebindableAction]
       if (chordMatches(e, chord)) return false
     }

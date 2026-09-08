@@ -72,6 +72,20 @@ const api = {
       ipcRenderer.invoke(IPC.connLogList),
     clear: (): Promise<{ ok: boolean }> => ipcRenderer.invoke(IPC.connLogClear)
   },
+  lock: {
+    status: (): Promise<{ enabled: boolean; locked: boolean }> =>
+      ipcRenderer.invoke(IPC.lockStatus),
+    setPassphrase: (passphrase: string): Promise<{ ok: boolean; enabled: boolean; locked: boolean; error?: string }> =>
+      ipcRenderer.invoke(IPC.lockSetPassphrase, passphrase),
+    disable: (passphrase: string): Promise<{ ok: boolean; enabled: boolean; locked: boolean }> =>
+      ipcRenderer.invoke(IPC.lockDisable, passphrase),
+    unlock: (passphrase: string): Promise<{ ok: boolean; enabled: boolean; locked: boolean }> =>
+      ipcRenderer.invoke(IPC.lockUnlock, passphrase),
+    lockNow: (): Promise<{ enabled: boolean; locked: boolean }> =>
+      ipcRenderer.invoke(IPC.lockLockNow),
+    reset: (): Promise<{ ok: boolean; enabled: boolean; locked: boolean }> =>
+      ipcRenderer.invoke(IPC.lockReset)
+  },
   snippets: {
     list: (): Promise<Snippet[]> => ipcRenderer.invoke(IPC.snippetsList),
     save: (snippet: Snippet): Promise<Snippet[]> =>
