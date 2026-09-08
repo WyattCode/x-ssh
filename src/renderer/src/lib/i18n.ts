@@ -384,6 +384,9 @@ const zh: Dict = {
   'hist.copy': '复制',
   'hist.goto': '转到会话',
   'hist.close': '关闭',
+  'hist.hostFilter': '按主机过滤',
+  'hist.allHosts': '所有主机',
+  'hist.export': '导出当前结果',
 
   // host editor
   'host.titleNew': '新建主机',
@@ -836,6 +839,9 @@ const en: Dict = {
   'hist.copy': 'Copy',
   'hist.goto': 'Go to session',
   'hist.close': 'Close',
+  'hist.hostFilter': 'Filter by host',
+  'hist.allHosts': 'All hosts',
+  'hist.export': 'Export current results',
 
   'host.titleNew': 'New host',
   'host.titleEdit': 'Edit host',

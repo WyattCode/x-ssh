@@ -509,6 +509,20 @@ function registerIpc(): void {
     }))
     return [...persisted, ...(sshManager?.historyList() ?? [])]
   })
+  ipcMain.handle(IPC.historyExport, async (_e, text: string) => {
+    const res = await dialog.showSaveDialog({
+      title: '导出历史日志',
+      defaultPath: `x-ssh-log-${new Date().toISOString().slice(0, 10)}.txt`,
+      filters: [{ name: 'Text', extensions: ['txt', 'log'] }]
+    })
+    if (res.canceled || !res.filePath) return { ok: false, canceled: true }
+    try {
+      await writeFile(res.filePath, text, 'utf8')
+      return { ok: true }
+    } catch (e) {
+      return { ok: false, error: friendlyError((e as Error).message) }
+    }
+  })
 
   // ---- Local FS browsing for the dual-panel SFTP drawer ----
   ipcMain.handle(IPC.localHome, () => homedir())

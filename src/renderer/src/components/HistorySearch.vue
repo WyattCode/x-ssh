@@ -10,6 +10,8 @@ const { t } = useI18n()
 const query = ref('')
 const inputEl = ref<HTMLInputElement>()
 const active = ref(0)
+/** History source filter ('' = all sessions). */
+const hostFilter = ref('')
 /** Stripped, flattened lines built once per load (not per keystroke). */
 const lines = ref<{ sessionId: string; label: string; line: string }[]>([])
 
@@ -24,13 +26,23 @@ async function load(): Promise<void> {
     }
   }
   lines.value = flat
+  // Keep the host filter choice in sync with the (re)loaded session set.
+  const available = new Set(flat.map((l) => l.label))
+  if (hostFilter.value && !available.has(hostFilter.value)) hostFilter.value = ''
 }
+
+/** Unique host lineages represented in the loaded history. */
+const hostLabels = computed(() => {
+  const set = new Set(lines.value.map((l) => l.label))
+  return [...set]
+})
 
 watch(
   () => store.historyOpen,
   async (o) => {
     if (o) {
       query.value = ''
+      hostFilter.value = ''
       active.value = 0
       await load()
       nextTick(() => inputEl.value?.focus())
@@ -57,14 +69,22 @@ const MAX_RESULTS = 500
 
 const results = computed<Hit[]>(() => {
   const q = query.value.trim().toLowerCase()
+  const host = hostFilter.value
   const out: Hit[] = []
   for (const l of lines.value) {
+    if (host && l.label !== host) continue
     if (q && !l.line.toLowerCase().includes(q)) continue
     out.push(l)
     if (out.length >= MAX_RESULTS) break
   }
   return out
 })
+
+/** Writes the current (filtered) results to a plaintext log via the main process. */
+function exportLog(): void {
+  const text = results.value.map((h) => `[${h.label}] ${h.line}`).join('\n')
+  void window.api.history.export(text)
+}
 
 function pick(hit: Hit): void {
   store.focusSession(hit.sessionId)
@@ -101,7 +121,12 @@ function onKey(e: KeyboardEvent): void {
           spellcheck="false"
           autocomplete="off"
         />
+        <select v-model="hostFilter" class="hostsel" :title="t('hist.hostFilter')">
+          <option value="">{{ t('hist.allHosts') }}</option>
+          <option v-for="h in hostLabels" :key="h" :value="h">{{ h }}</option>
+        </select>
         <span class="count">{{ results.length }}</span>
+        <button class="iconbtn" :title="t('hist.export')" @click="exportLog"><Icon name="download" :size="14" /></button>
         <button class="close" :title="t('hist.close')" @click="store.toggleHistory(false)"><Icon name="close" :size="15" /></button>
       </div>
 
@@ -183,6 +208,29 @@ function onKey(e: KeyboardEvent): void {
 .close:hover {
   background: var(--bg-elev-2);
   color: var(--text);
+}
+.iconbtn {
+  display: flex;
+  padding: 3px;
+  border-radius: 5px;
+  color: var(--text-faint);
+}
+.iconbtn:hover {
+  background: var(--bg-elev-2);
+  color: var(--text);
+}
+.hostsel {
+  max-width: 170px;
+  height: 28px;
+  padding: 0 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 12px;
+  outline: none;
+  appearance: auto;
+  cursor: pointer;
 }
 .list {
   overflow-y: auto;

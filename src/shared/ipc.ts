@@ -31,6 +31,7 @@ export const IPC = {
 
   // Cross-session output history (invoke/handle)
   historyList: 'history:list',
+  historyExport: 'history:export',
 
   // Local filesystem browsing (dual-panel SFTP) (invoke/handle)
   localList: 'local:list',

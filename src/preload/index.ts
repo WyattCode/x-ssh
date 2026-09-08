@@ -75,7 +75,9 @@ const api = {
   },
   history: {
     list: (): Promise<{ sessionId: string; label: string; text: string }[]> =>
-      ipcRenderer.invoke(IPC.historyList)
+      ipcRenderer.invoke(IPC.historyList),
+    export: (text: string): Promise<{ ok: boolean; canceled?: boolean; error?: string }> =>
+      ipcRenderer.invoke(IPC.historyExport, text)
   },
   local: {
     home: (): Promise<string> => ipcRenderer.invoke(IPC.localHome),
