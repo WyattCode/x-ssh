@@ -188,6 +188,8 @@ interface State {
   fileOpeners: Record<string, string>
   /** Custom UI accent color ('' = default per theme). */
   accentColor: string
+  /** User overrides for rebindable app shortcuts (action → chord). */
+  keybindings: Record<string, string>
   confirmPaste: boolean
   /** Strip non-printing control characters from pasted text (default on). */
   sanitizePaste: boolean
@@ -234,6 +236,7 @@ export const useSessions = defineStore('sessions', {
     autoBackupEveryHours: 24,
     fileOpeners: {},
     accentColor: '',
+    keybindings: {},
     confirmPaste: true,
     sanitizePaste: true
   }),
@@ -317,6 +320,7 @@ export const useSessions = defineStore('sessions', {
       this.autoBackupEveryHours = typeof abh === 'number' && abh > 0 ? abh : 24
       this.fileOpeners = (await window.api.settings.get<Record<string, string>>('fileOpeners')) ?? {}
       this.accentColor = (await window.api.settings.get<string>('accentColor')) ?? ''
+      this.keybindings = (await window.api.settings.get<Record<string, string>>('keybindings')) ?? {}
       this.confirmPaste = cp !== false
       this.sanitizePaste = sp !== false
     },

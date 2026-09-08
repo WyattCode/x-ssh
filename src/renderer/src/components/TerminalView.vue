@@ -11,6 +11,12 @@ import { useConfirm } from '../composables/confirm'
 import { themeFor } from '../lib/terminalThemes'
 import { useI18n } from '../lib/i18n'
 import { useSessions } from '../stores/sessions'
+import {
+  DEFAULT_BINDINGS,
+  REBINDABLE_ACTIONS,
+  chordMatches,
+  type RebindableAction
+} from '../lib/shortcuts'
 import { sanitizePasteText } from '../../../shared/fsUtils'
 import Icon from './Icon.vue'
 
@@ -288,6 +294,11 @@ onMounted(() => {
     }
     if (e.ctrlKey && e.shiftKey && !e.altKey && ['e', 'p', 'o'].includes(e.key.toLowerCase())) {
       return false
+    }
+    // Any user-remapped app chord must also bubble to the window handler.
+    for (const id of REBINDABLE_ACTIONS) {
+      const chord = store.keybindings[id] ?? DEFAULT_BINDINGS[id as RebindableAction]
+      if (chordMatches(e, chord)) return false
     }
     return true
   })

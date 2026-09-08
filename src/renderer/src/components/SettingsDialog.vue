@@ -2,7 +2,12 @@
 import { ref, computed, watch, nextTick, reactive } from 'vue'
 import { useSessions } from '../stores/sessions'
 import Icon from './Icon.vue'
-import { SHORTCUT_GROUPS } from '../lib/shortcuts'
+import {
+  SHORTCUT_GROUPS,
+  DEFAULT_BINDINGS,
+  REBINDABLE_ACTIONS,
+  type RebindableAction
+} from '../lib/shortcuts'
 import { splitShortcutChips } from '../lib/shortcutChips'
 import { PRESETS } from '../lib/terminalThemes'
 import { useI18n } from '../lib/i18n'
@@ -44,6 +49,67 @@ function hintOf(key: string): string {
   const k = 'sck.' + key + 'Hint'
   const v = t(k)
   return v !== k ? v : ''
+}
+
+// ---- rebindable app shortcuts ----
+const recording = ref<RebindableAction | null>(null)
+const recCaptureEl = ref<HTMLElement>()
+watch(recording, async (r) => {
+  if (r) {
+    await nextTick()
+    recCaptureEl.value?.focus()
+  }
+})
+// Maps a rebindable action to its i18n description key in the shortcut list.
+const DESC_KEY: Record<RebindableAction, string> = {
+  palette: 'palette',
+  palette2: 'palette2',
+  newTab: 'newTab',
+  closeTab: 'closeTab',
+  nextTab: 'nextTab',
+  prevTab: 'prevTab',
+  split: 'split',
+  splitCol: 'splitCol',
+  focus: 'focus',
+  closePane: 'closePane',
+  sftp: 'sftp',
+  history: 'history',
+  settings: 'settings',
+  shortcuts: 'shortcuts',
+  zoomIn: 'zoom',
+  zoomOut: 'zoom',
+  zoomReset: 'resetZoom'
+}
+function bindingOf(id: RebindableAction): string {
+  return store.keybindings[id] ?? DEFAULT_BINDINGS[id]
+}
+function startRecord(id: RebindableAction): void {
+  recording.value = id
+}
+function recordChord(e: KeyboardEvent, id: RebindableAction): void {
+  e.preventDefault()
+  if (e.key === 'Escape') {
+    recording.value = null
+    return
+  }
+  const mods = []
+  if (e.ctrlKey || e.metaKey) mods.push('Mod')
+  if (e.shiftKey) mods.push('Shift')
+  if (e.altKey) mods.push('Alt')
+  if (!mods.length) return // require at least one modifier to avoid eating typing
+  let key = e.key
+  if (key === ' ') key = 'Space'
+  const chord = [...mods, key].join('+')
+  const next = { ...store.keybindings, [id]: chord }
+  store.keybindings = next
+  void store.saveSetting('keybindings', next)
+  recording.value = null
+}
+async function resetBinding(id: RebindableAction): Promise<void> {
+  const next = { ...store.keybindings }
+  delete next[id]
+  store.keybindings = next
+  void store.saveSetting('keybindings', next)
 }
 const dialogEl = ref<HTMLElement>()
 
@@ -703,6 +769,28 @@ async function backupNow(): Promise<void> {
 
           <!-- 快捷键 -->
           <template v-else>
+            <div class="section">
+              <div class="label">{{ t('set.sc.custom') }}</div>
+              <p class="desc">{{ t('set.sc.customDesc') }}</p>
+              <div v-for="id in REBINDABLE_ACTIONS" :key="id" class="sc-row rebind">
+                <div class="sc-keys">
+                  <template v-for="(part, pi) in parts(bindingOf(id))" :key="pi">
+                    <span v-if="part.sep" class="sc-sep">{{ part.sep }}</span>
+                    <span v-for="(k, ki) in part.chord || []" :key="ki" class="kbd">{{ k }}</span>
+                  </template>
+                </div>
+                <div class="sc-desc">{{ t('sck.' + DESC_KEY[id]) }}</div>
+                <div v-if="recording !== id" class="sc-actions">
+                  <button class="ghost" @click="startRecord(id)">{{ t('set.sc.rebind') }}</button>
+                  <button v-if="store.keybindings[id]" class="ghost" @click="resetBinding(id)">{{ t('set.sc.reset') }}</button>
+                </div>
+                <div v-else class="sc-actions">
+                  <span class="kbd rec">{{ t('set.sc.recording') }}</span>
+                  <button class="ghost" @click="recording = null">{{ t('set.sc.cancel') }}</button>
+                </div>
+              </div>
+              <div v-if="recording" class="rec-capture" @keydown.prevent="recordChord($event, recording)" tabindex="-1" ref="recCaptureEl"></div>
+            </div>
             <section v-for="g in groups" :key="g.id" class="sc-group">
               <div class="label">{{ t('group.' + g.id) }}</div>
               <div v-for="item in g.items" :key="item.keys" class="sc-row">
@@ -1151,6 +1239,29 @@ async function backupNow(): Promise<void> {
   margin-top: 1px;
   font-size: 11.5px;
   color: var(--text-faint);
+}
+.sc-actions {
+  flex: none;
+  display: flex;
+  gap: 6px;
+}
+.sc-row.rebind {
+  align-items: center;
+}
+.sc-actions .ghost {
+  height: 24px;
+  padding: 0 8px;
+  font-size: 11.5px;
+}
+.kbd.rec {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.rec-capture {
+  position: fixed;
+  inset: 0;
+  z-index: 130;
+  cursor: crosshair;
 }
 @media (max-width: 620px) {
   .sc-row { flex-direction: column; gap: 4px; padding: 8px 0; }

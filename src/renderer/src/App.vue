@@ -26,6 +26,12 @@ import SnippetVarsDialog from './components/SnippetVarsDialog.vue'
 import TooltipLayer from './components/TooltipLayer.vue'
 import { useI18n } from './lib/i18n'
 import { collectPaneIds } from './lib/paneLayout'
+import {
+  DEFAULT_BINDINGS,
+  REBINDABLE_ACTIONS,
+  chordMatches,
+  type RebindableAction
+} from './lib/shortcuts'
 import logoUrl from './assets/logo.png'
 import type { Host } from '../../shared/types'
 
@@ -179,88 +185,62 @@ function onGlobalKey(e: KeyboardEvent): void {
   // Don't hijack typing in form fields (editors, rename, search…).
   if (inEditable) return
 
+  // Number-jump and terminal copy/paste are hard-wired (not rebindable).
   const mod = e.ctrlKey || e.metaKey
-  if (mod && e.shiftKey && e.key.toLowerCase() === 'd') {
-    // Split the active tab side-by-side (a second session to the same target).
-    e.preventDefault()
-    if (store.active && store.activePane?.status === 'connected') {
-      void store.splitPane(store.active.id, 'row')
-    }
-  } else if (mod && e.shiftKey && (e.key === '\\' || e.key === '`')) {
-    // Split the active pane stacked (a second session above/below) for a 2×2.
-    e.preventDefault()
-    if (store.active && store.activePane?.status === 'connected') {
-      void store.splitPane(store.active.id, 'col')
-    }
-  } else if (mod && e.shiftKey && e.key.toLowerCase() === 'w') {
-    // Close just the focused pane (falls back to closing the tab if it's the last).
-    e.preventDefault()
-    if (store.activePane) store.closePane(store.activePane.id)
-  } else if (mod && e.key.toLowerCase() === 'k') {
-    e.preventDefault()
-    store.togglePalette()
-  } else if (mod && e.key.toLowerCase() === 't') {
-    e.preventDefault()
-    store.togglePalette(true)
-  } else if (mod && !e.shiftKey && e.key.toLowerCase() === 'w') {
-    // Ctrl+W is werase in a shell, so don't steal it from a live session. A
-    // closed one is different: nothing receives the keystroke, the dead
-    // terminal still holds focus, and the banner promises Ctrl+W closes the
-    // tab — so it has to work there.
-    if (inTerminal && store.activePane?.status === 'connected') return
-    if (store.activeId) {
-      e.preventDefault()
-      store.closeTab(store.activeId)
-    }
-  } else if (e.ctrlKey && e.key === 'Tab') {
-    e.preventDefault()
-    store.nextTab(e.shiftKey ? -1 : 1)
-  } else if (mod && !e.shiftKey && e.key >= '1' && e.key <= '9') {
-    // Ctrl+1..8 jump to that tab; Ctrl+9 to the last one, as browsers do.
+  if (mod && !e.shiftKey && e.key >= '1' && e.key <= '9') {
     e.preventDefault()
     const n = Number(e.key)
     const tab = n === 9 ? store.tabs[store.tabs.length - 1] : store.tabs[n - 1]
     if (tab) store.setActive(tab.id)
-  } else if (mod && (e.key === '/' || e.key === '?')) {
-    // Ctrl+/ (and Ctrl+? on the same physical key) opens settings straight on
-    // the shortcut list.
-    e.preventDefault()
-    store.toggleSettings(true, 'keys')
-  } else if (mod && !e.shiftKey && e.key === ',') {
-    e.preventDefault()
-    store.toggleSettings()
-  } else if (mod && e.shiftKey && e.key.toLowerCase() === 'e') {
-    // File drawer (SFTP) — the same toggle as the folder button.
-    e.preventDefault()
-    store.toggleSftp()
-  } else if (mod && e.shiftKey && e.key.toLowerCase() === 'p') {
-    e.preventDefault()
-    store.togglePalette()
-  } else if (mod && e.shiftKey && e.key.toLowerCase() === 'f') {
-    // Cross-session output history search.
-    e.preventDefault()
-    store.toggleHistory()
-  } else if (mod && e.shiftKey && e.key.toLowerCase() === 'o') {
-    // Cycle the focused pane of a split. Alt+Arrow would be the usual key,
-    // but the shell needs it for word-wise cursor movement. Walk the layout in
-    // visual (DFS) order so focus follows the on-screen arrangement.
-    e.preventDefault()
-    const tab = store.active
-    const order = tab ? collectPaneIds(tab.layout) : []
-    if (order.length > 1) {
-      const i = order.indexOf(tab!.activePaneId)
-      const next = order[(i + 1) % order.length]
-      store.setActivePane(tab!.id, next)
+    return
+  }
+
+  // Resolve the effective chord for each rebindable action (user override or
+  // default) and dispatch to a handler when the key matches. Ctrl+W respects a
+  // live terminal (werase) via a flag on the handler.
+  const effective = (id: string): string => store.keybindings[id] ?? DEFAULT_BINDINGS[id as RebindableAction]
+  const handlers: Record<RebindableAction, () => void> = {
+    palette: () => store.togglePalette(),
+    palette2: () => store.togglePalette(),
+    newTab: () => store.togglePalette(true),
+    closeTab: () => {
+      if (inTerminal && store.activePane?.status === 'connected') return
+      if (store.activeId) store.closeTab(store.activeId)
+    },
+    nextTab: () => store.nextTab(1),
+    prevTab: () => store.nextTab(-1),
+    split: () => {
+      if (store.active && store.activePane?.status === 'connected') void store.splitPane(store.active.id, 'row')
+    },
+    splitCol: () => {
+      if (store.active && store.activePane?.status === 'connected') void store.splitPane(store.active.id, 'col')
+    },
+    focus: () => {
+      const tab = store.active
+      const order = tab ? collectPaneIds(tab.layout) : []
+      if (order.length > 1) {
+        const i = order.indexOf(tab!.activePaneId)
+        const next = order[(i + 1) % order.length]
+        store.setActivePane(tab!.id, next)
+      }
+    },
+    closePane: () => {
+      if (store.activePane) store.closePane(store.activePane.id)
+    },
+    sftp: () => store.toggleSftp(),
+    history: () => store.toggleHistory(),
+    settings: () => store.toggleSettings(),
+    shortcuts: () => store.toggleSettings(true, 'keys'),
+    zoomIn: () => bumpZoom(0.5),
+    zoomOut: () => bumpZoom(-0.5),
+    zoomReset: () => setZoom(0)
+  }
+  for (const id of REBINDABLE_ACTIONS) {
+    if (chordMatches(e, effective(id))) {
+      e.preventDefault()
+      handlers[id]()
+      return
     }
-  } else if (mod && (e.key === '=' || e.key === '+')) {
-    e.preventDefault()
-    bumpZoom(0.5)
-  } else if (mod && e.key === '-') {
-    e.preventDefault()
-    bumpZoom(-0.5)
-  } else if (mod && e.key === '0') {
-    e.preventDefault()
-    setZoom(0)
   }
 }
 
