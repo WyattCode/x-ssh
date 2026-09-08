@@ -11,13 +11,22 @@ import type { KnownHostEntry } from '../shared/types'
 export class KnownHosts {
   private dir = app.getPath('userData')
   private file = join(this.dir, 'known_hosts.json')
-  private map: Record<string, string> = {}
+  private map: Record<string, { fp: string; firstSeen?: number }> = {}
   private loaded = false
 
   async load(): Promise<void> {
     if (this.loaded) return
     try {
-      this.map = JSON.parse(await readFile(this.file, 'utf8'))
+      const raw = JSON.parse(await readFile(this.file, 'utf8'))
+      // Migrate the legacy string form (`fingerprint`) to the record form and
+      // record when each key was first trusted, so stale keys can be aged out.
+      for (const [key, val] of Object.entries(raw)) {
+        if (typeof val === 'string') {
+          this.map[key] = { fp: val, firstSeen: Date.now() }
+        } else if (val && typeof (val as { fp?: unknown }).fp === 'string') {
+          this.map[key] = { fp: (val as { fp: string }).fp, firstSeen: (val as { firstSeen?: number }).firstSeen }
+        }
+      }
     } catch {
       this.map = {}
     }
@@ -34,11 +43,13 @@ export class KnownHosts {
   }
 
   get(host: string, port: number): string | undefined {
-    return this.map[KnownHosts.key(host, port)]
+    return this.map[KnownHosts.key(host, port)]?.fp
   }
 
   async set(host: string, port: number, fingerprint: string): Promise<void> {
-    this.map[KnownHosts.key(host, port)] = fingerprint
+    const k = KnownHosts.key(host, port)
+    const existing = this.map[k]
+    this.map[k] = { fp: fingerprint, firstSeen: existing?.firstSeen ?? Date.now() }
     await this.persist()
   }
 
@@ -50,10 +61,15 @@ export class KnownHosts {
   /** All known hosts, sorted by host for the settings page. */
   list(): KnownHostEntry[] {
     return Object.entries(this.map)
-      .map(([key, fingerprint]) => {
+      .map(([key, rec]) => {
         const colon = key.lastIndexOf(':')
         const port = Number(key.slice(colon + 1)) || 22
-        return { host: colon > 0 ? key.slice(0, colon) : key, port, fingerprint }
+        return {
+          host: colon > 0 ? key.slice(0, colon) : key,
+          port,
+          fingerprint: rec.fp,
+          firstSeen: rec.firstSeen
+        }
       })
       .sort((a, b) => a.host.localeCompare(b.host) || a.port - b.port)
   }

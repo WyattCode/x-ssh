@@ -67,6 +67,11 @@ const api = {
     forget: (host: string, port: number): Promise<void> =>
       ipcRenderer.invoke(IPC.knownHostsForget, host, port)
   },
+  connLog: {
+    list: (): Promise<{ at: number; event: string; host: string; port: number; username: string }[]> =>
+      ipcRenderer.invoke(IPC.connLogList),
+    clear: (): Promise<{ ok: boolean }> => ipcRenderer.invoke(IPC.connLogClear)
+  },
   snippets: {
     list: (): Promise<Snippet[]> => ipcRenderer.invoke(IPC.snippetsList),
     save: (snippet: Snippet): Promise<Snippet[]> =>

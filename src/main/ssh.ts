@@ -121,6 +121,11 @@ export class SshManager {
     if (buf) this.sendData(sessionId, buf)
   }
 
+  /** The human label (user@host[:port]) for a session, if still live. */
+  label(sessionId: string): string | undefined {
+    return this.sessions.get(sessionId)?.label
+  }
+
   /** stdout path: while suppressing, buffer until the shell-integration clear
    *  marker, then forward only from that clear onward (drops the echoed setup). */
   private emitData(id: string, chunk: string): void {

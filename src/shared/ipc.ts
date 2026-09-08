@@ -82,6 +82,10 @@ export const IPC = {
   settingsGet: 'settings:get',
   settingsSet: 'settings:set',
 
+  // Connection audit log (invoke/handle)
+  connLogList: 'connLog:list',
+  connLogClear: 'connLog:clear',
+
   // Misc
   pickKeyFile: 'dialog:pickKey',
   pickExecutable: 'dialog:pickExecutable',

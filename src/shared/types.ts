@@ -136,6 +136,8 @@ export interface KnownHostEntry {
   host: string
   port: number
   fingerprint: string
+  /** ms epoch of first trust (when set) — used to age out stale keys. */
+  firstSeen?: number
 }
 
 /** A remote file/directory entry from SFTP. */

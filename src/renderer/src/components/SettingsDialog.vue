@@ -120,6 +120,14 @@ watch(
     if (o) nextTick(() => dialogEl.value?.focus())
   }
 )
+// Load the connection audit log each time the security tab is shown.
+watch(
+  () => store.settingsTab,
+  (tab) => {
+    if (tab === 'security') void loadConnLog()
+  },
+  { immediate: false }
+)
 
 async function pickEditor(): Promise<void> {
   const p = await window.api.pickExecutable()
@@ -338,6 +346,27 @@ async function forgetKnownHost(k: KnownHostEntry): Promise<void> {
   await window.api.knownHosts.forget(k.host, k.port)
   await store.loadKnownHosts()
 }
+/** Human age of a trusted host key ('' for unknown/too young to matter). */
+function keyAge(firstSeen?: number): string {
+  if (!firstSeen) return ''
+  const days = Math.floor((Date.now() - firstSeen) / 86400000)
+  if (days < 1) return '0d'
+  if (days < 30) return `${days}d`
+  if (days < 365) return `${Math.floor(days / 30)}mo`
+  return `${Math.floor(days / 365)}y`
+}
+// ---- connection audit log ----
+const connLog = ref<{ at: number; event: string; host: string; port: number; username: string }[]>([])
+async function loadConnLog(): Promise<void> {
+  connLog.value = await window.api.connLog.list()
+}
+async function clearConnLog(): Promise<void> {
+  await window.api.connLog.clear()
+  connLog.value = []
+}
+const eventLabel = (e: string): string =>
+  e === 'connect' ? t('set.sec.connConnect') : e === 'disconnect' ? t('set.sec.connDisconnect') : t('set.sec.connError')
+const connTime = (at: number): string => new Date(at).toLocaleString()
 async function importSshConfig(): Promise<void> {
   await window.api.hosts.importSshConfig()
   await store.loadHosts()
@@ -718,9 +747,21 @@ async function backupNow(): Promise<void> {
               <div v-for="k in store.knownHosts" :key="`${k.host}:${k.port}`" class="kh-row">
                 <span class="kh-host">{{ k.host }}:{{ k.port }}</span>
                 <span class="kh-fp">{{ k.fingerprint }}</span>
+                <span v-if="keyAge(k.firstSeen)" class="kh-age" :title="t('set.sec.keyAge')">{{ keyAge(k.firstSeen) }}</span>
                 <button class="ghost" @click="forgetKnownHost(k)">{{ t('set.sec.delete') }}</button>
               </div>
               <div v-if="!store.knownHosts.length" class="desc">{{ t('set.sec.empty') }}</div>
+            </div>
+            <div class="section">
+              <div class="label">{{ t('set.sec.connLog') }}</div>
+              <p class="desc">{{ t('set.sec.connLogDesc') }}</p>
+              <div v-for="(l, i) in connLog" :key="i" class="cl-row">
+                <span class="cl-time">{{ connTime(l.at) }}</span>
+                <span class="cl-event" :class="l.event">{{ eventLabel(l.event) }}</span>
+                <span class="cl-host">{{ l.username }}@{{ l.host }}:{{ l.port }}</span>
+              </div>
+              <div v-if="!connLog.length" class="desc">{{ t('set.sec.connLogEmpty') }}</div>
+              <button v-if="connLog.length" class="ghost" @click="clearConnLog">{{ t('set.sec.connLogClear') }}</button>
             </div>
             <div class="section">
               <div class="label">{{ t('set.sec.sshConfig') }}</div>
@@ -1392,6 +1433,54 @@ async function backupNow(): Promise<void> {
   font-family: var(--font-mono);
   font-size: 10.5px;
   color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.kh-age {
+  flex: none;
+  font-size: 11px;
+  color: var(--warn);
+  font-variant-numeric: tabular-nums;
+}
+.cl-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 0;
+  font-size: 12px;
+}
+.cl-time {
+  flex: none;
+  width: 130px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+.cl-event {
+  flex: none;
+  width: 72px;
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  text-align: center;
+}
+.cl-event.connect {
+  color: var(--ok);
+  background: rgba(81, 207, 102, 0.12);
+}
+.cl-event.disconnect {
+  color: var(--warn);
+  background: rgba(255, 212, 59, 0.12);
+}
+.cl-event.error {
+  color: var(--danger);
+  background: rgba(255, 107, 107, 0.12);
+}
+.cl-host {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  color: var(--text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

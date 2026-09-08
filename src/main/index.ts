@@ -144,6 +144,19 @@ async function scheduleAutoBackup(): Promise<void> {
   backupTimer.unref?.()
 }
 
+// ---- Connection audit log ----
+interface ConnLogEntry {
+  at: number
+  event: 'connect' | 'disconnect' | 'error'
+  host: string
+  port: number
+  username: string
+}
+async function pushConnLog(e: ConnLogEntry): Promise<void> {
+  const all = (await settings.get<ConnLogEntry[]>('connectionLog')) ?? []
+  await settings.set('connectionLog', [e, ...all].slice(0, 200))
+}
+
 // ---- Command snippets (stored in settings.json under 'snippets') ----
 async function listSnippets(): Promise<Snippet[]> {
   return (await settings.get<Snippet[]>('snippets')) ?? []
@@ -641,10 +654,29 @@ function registerIpc(): void {
     }
     const result = await sshManager.connect(params)
     if (result.ok && params.hostId) await store.touch(params.hostId)
+    // Audit the connection attempt (success or failure) for the security log.
+    void pushConnLog({
+      at: Date.now(),
+      event: result.ok ? 'connect' : 'error',
+      host: params.host,
+      port: params.port,
+      username: params.username
+    }).catch(() => undefined)
     return result
   })
   ipcMain.handle(IPC.sshDisconnect, (_e, sessionId: string) => {
+    const label = sshManager?.label(sessionId)
     sshManager?.disconnect(sessionId)
+    if (label) {
+      const m = /^(?:([^@]+)@)?([^:]+)(?::(\d+))?$/.exec(label)
+      void pushConnLog({
+        at: Date.now(),
+        event: 'disconnect',
+        host: m?.[2] ?? label,
+        port: Number(m?.[3] ?? 22) || 22,
+        username: m?.[1] ?? ''
+      }).catch(() => undefined)
+    }
   })
   ipcMain.handle(
     IPC.sshForgetHostKey,
@@ -1020,6 +1052,11 @@ function registerIpc(): void {
   ipcMain.handle(IPC.settingsSet, (_e, key: string, value: unknown) =>
     settings.set(key, value)
   )
+  ipcMain.handle(IPC.connLogList, async () => (await settings.get<ConnLogEntry[]>('connectionLog')) ?? [])
+  ipcMain.handle(IPC.connLogClear, async () => {
+    await settings.set('connectionLog', [])
+    return { ok: true }
+  })
   ipcMain.handle(IPC.pickExecutable, async () => {
     const res = await dialog.showOpenDialog({
       title: '选择外部编辑器程序',
