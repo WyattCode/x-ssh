@@ -172,10 +172,17 @@ const api = {
       path: string
     ): Promise<{ ok: boolean; content?: string; error?: string }> =>
       ipcRenderer.invoke(IPC.sftpReadText, sessionId, path),
+    readBinary: (
+      sessionId: string,
+      path: string
+    ): Promise<{ ok: boolean; base64?: string; error?: string }> =>
+      ipcRenderer.invoke(IPC.sftpReadBinary, sessionId, path),
     writeText: (sessionId: string, path: string, content: string): Promise<SftpResult> =>
       ipcRenderer.invoke(IPC.sftpWriteText, sessionId, path, content),
     editExternal: (sessionId: string, path: string, name: string): Promise<SftpResult> =>
       ipcRenderer.invoke(IPC.sftpEditExternal, sessionId, path, name),
+    openWith: (sessionId: string, path: string, name: string, program?: string): Promise<SftpResult> =>
+      ipcRenderer.invoke(IPC.sftpOpenWith, sessionId, path, name, program),
     startDrag: (sessionId: string, items: { remotePath: string; name: string; isDir: boolean }[]): void =>
       ipcRenderer.send(IPC.sftpStartDrag, sessionId, items),
     prefetchDrag: (sessionId: string, items: { remotePath: string; name: string; isDir: boolean }[]): void =>

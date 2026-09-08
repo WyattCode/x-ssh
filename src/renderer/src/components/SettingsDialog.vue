@@ -67,6 +67,33 @@ async function clearEditor(): Promise<void> {
   store.externalEditor = null
 }
 
+// ---- per-extension default openers ----
+const openerForm = reactive({ ext: '', program: '' })
+async function upsertOpener(): Promise<void> {
+  const ext = openerForm.ext.trim().toLowerCase().replace(/^\./, '')
+  if (!ext) return
+  const next = { ...store.fileOpeners }
+  if (openerForm.program) next[ext] = openerForm.program
+  else delete next[ext]
+  store.fileOpeners = next
+  await window.api.settings.set('fileOpeners', next)
+  openerForm.ext = ''
+  openerForm.program = ''
+}
+async function setOpenerProgram(ext: string): Promise<void> {
+  const p = await window.api.pickExecutable()
+  if (!p) return
+  const next = { ...store.fileOpeners, [ext]: p }
+  store.fileOpeners = next
+  await window.api.settings.set('fileOpeners', next)
+}
+async function removeOpener(ext: string): Promise<void> {
+  const next = { ...store.fileOpeners }
+  delete next[ext]
+  store.fileOpeners = next
+  await window.api.settings.set('fileOpeners', next)
+}
+
 const cursorOptions = computed(() => [
   { v: 'bar', label: t('set.term.cursorBar') },
   { v: 'block', label: t('set.term.cursorBlock') },
@@ -344,6 +371,21 @@ async function backupNow(): Promise<void> {
                 </span>
                 <button class="ghost" @click="pickEditor">{{ t('set.gen.pickEditor') }}</button>
                 <button v-if="store.externalEditor" class="ghost" @click="clearEditor">{{ t('set.gen.restoreDefault') }}</button>
+              </div>
+            </div>
+            <div class="section">
+              <div class="label">{{ t('set.gen.openers') }}</div>
+              <p class="desc">{{ t('set.gen.openersDesc') }}</p>
+              <div class="opener-form">
+                <input v-model="openerForm.ext" class="opener-ext" :placeholder="t('set.gen.openerExt')" spellcheck="false" />
+                <input v-model="openerForm.program" class="opener-prog" :placeholder="t('set.gen.openerProg')" spellcheck="false" />
+                <button class="ghost" @click="upsertOpener">{{ t('set.gen.openerAdd') }}</button>
+              </div>
+              <div v-for="(prog, ext) in store.fileOpeners" :key="ext" class="opener-row">
+                <span class="opener-ext-tag">.{{ ext }}</span>
+                <span class="opener-prog-tag" :title="prog">{{ prog }}</span>
+                <button class="ghost" @click="setOpenerProgram(ext)">{{ t('set.gen.openerSet') }}</button>
+                <button class="ghost" @click="removeOpener(ext)">{{ t('set.gen.delete') }}</button>
               </div>
             </div>
             <div class="section">
@@ -741,7 +783,64 @@ async function backupNow(): Promise<void> {
   gap: 8px;
   margin-top: 6px;
 }
-.path {
+.opener-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+.opener-ext {
+  width: 90px;
+  height: 32px;
+  padding: 0 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 12.5px;
+  outline: none;
+}
+.opener-prog {
+  flex: 1;
+  height: 32px;
+  padding: 0 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 12.5px;
+  outline: none;
+}
+.opener-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+.opener-ext-tag {
+  flex: none;
+  width: 60px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--accent);
+}
+.opener-prog-tag {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-dim);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}.path {
   flex: 1;
   min-width: 0;
   height: 32px;

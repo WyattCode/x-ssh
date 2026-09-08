@@ -59,8 +59,10 @@ export const IPC = {
   sftpChmod: 'sftp:chmod',
   sftpCancel: 'sftp:cancel',
   sftpReadText: 'sftp:readText',
+  sftpReadBinary: 'sftp:readBinary', // base64 for inline image preview
   sftpWriteText: 'sftp:writeText',
   sftpEditExternal: 'sftp:editExternal',
+  sftpOpenWith: 'sftp:openWith', // open with a per-extension program or OS default
   sftpRevealLocal: 'sftp:revealLocal', // show a finished download in the OS file manager
   sftpStartDrag: 'sftp:startDrag', // renderer -> main (drag out)
   sftpPrefetchDrag: 'sftp:prefetchDrag', // renderer -> main : pre-fetch for drag-out

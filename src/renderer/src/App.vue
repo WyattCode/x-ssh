@@ -86,6 +86,12 @@ async function onEditExternal(p: { path: string; name: string }): Promise<void> 
   const sid = store.activePane?.sshSessionId
   if (sid) await window.api.sftp.editExternal(sid, p.path, p.name)
 }
+async function onOpenWith(p: { path: string; name: string; ext: string }): Promise<void> {
+  const sid = store.activePane?.sshSessionId
+  if (!sid) return
+  const program = store.fileOpeners[p.ext] || undefined
+  await window.api.sftp.openWith(sid, p.path, p.name, program)
+}
 
 // Per-session working directory reported by shell integration (OSC 7).
 const cwds = reactive<Record<string, string>>({})
@@ -378,6 +384,7 @@ onBeforeUnmount(() => {
         @close="store.toggleSftp(false)"
         @edit-file="onEditFile"
         @edit-external="onEditExternal"
+        @open-with="onOpenWith"
         @cd-terminal="onCdTerminal"
       />
     </main>

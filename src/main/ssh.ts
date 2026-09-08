@@ -1295,6 +1295,21 @@ export class SshManager {
     return buf.toString('utf8')
   }
 
+  /** Reads a file as base64 for inline preview (capped at `maxBytes`). */
+  async readBinaryFile(sessionId: string, path: string, maxBytes = 12 * 1024 * 1024): Promise<string> {
+    const sftp = await this.getSftp(sessionId)
+    const st = await new Promise<{ size: number }>((res, rej) =>
+      sftp.stat(path, (e, s) => (e ? rej(e) : res(s as never)))
+    )
+    if (st.size > maxBytes) {
+      throw new Error('文件过大,无法预览')
+    }
+    const buf = await new Promise<Buffer>((res, rej) =>
+      sftp.readFile(path, (e, d) => (e ? rej(e) : res(d as never)))
+    )
+    return buf.toString('base64')
+  }
+
   async writeTextFile(sessionId: string, path: string, content: string): Promise<void> {
     const sftp = await this.getSftp(sessionId)
     await new Promise<void>((res, rej) =>

@@ -19,6 +19,7 @@ const emit = defineEmits<{
   (e: 'close'): void
   (e: 'edit-file', payload: { path: string; name: string }): void
   (e: 'edit-external', payload: { path: string; name: string }): void
+  (e: 'open-with', payload: { path: string; name: string; ext: string }): void
   (e: 'cd-terminal', path: string): void
 }>()
 
@@ -29,6 +30,32 @@ const loading = ref(false)
 const busy = ref(false)
 const error = ref('')
 const dragOver = ref(false)
+
+// ---- inline image preview ----
+const preview = ref<{ open: boolean; name: string; url: string; error: string }>({
+  open: false,
+  name: '',
+  url: '',
+  error: ''
+})
+const IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'ico', 'avif']
+function fileExt(name: string): string {
+  const i = name.lastIndexOf('.')
+  return i < 0 ? '' : name.slice(i + 1).toLowerCase()
+}
+function isImage(entry: FileEntry): boolean {
+  return !entry.isDir && IMAGE_EXTS.includes(fileExt(entry.name))
+}
+function closePreview(): void {
+  preview.value = { open: false, name: '', url: '', error: '' }
+}
+async function previewFile(entry: FileEntry): Promise<void> {
+  if (!props.sessionId) return
+  preview.value = { open: true, name: entry.name, url: '', error: '' }
+  const r = await window.api.sftp.readBinary(props.sessionId, posixJoin(path.value, entry.name))
+  if (r.ok && r.base64) preview.value.url = `data:image/${fileExt(entry.name)};base64,${r.base64}`
+  else preview.value.error = r.error ?? '无法预览'
+}
 
 // ---- local (dual-panel) pane: browse the machine's own filesystem ----
 const localOpen = ref(false)
@@ -641,10 +668,11 @@ function onRowClick(entry: FileEntry, e: MouseEvent): void {
   drawerEl.value?.focus()
 }
 function onRowDblClick(entry: FileEntry): void {
-  // Double-click: enter a directory, or open a file in the built-in editor
-  // (whose Save writes the edits straight back to the remote).
+  // Double-click: enter a directory, preview an image inline, or open a file in
+  // the built-in editor (whose Save writes the edits straight back to remote).
   if (renamingName.value) return
   if (entry.isDir) load(posixJoin(path.value, entry.name))
+  else if (isImage(entry)) void previewFile(entry)
   else editFile(entry, false)
 }
 function goUp(): void {
@@ -734,6 +762,11 @@ function editFile(entry: FileEntry, external: boolean): void {
   const payload = { path: posixJoin(path.value, entry.name), name: entry.name }
   if (external) emit('edit-external', payload)
   else emit('edit-file', payload)
+}
+/** Opens with the per-extension program if configured, else OS default. */
+function openWith(entry: FileEntry): void {
+  const payload = { path: posixJoin(path.value, entry.name), name: entry.name, ext: fileExt(entry.name) }
+  emit('open-with', payload)
 }
 function onRemoteMouseDown(e: MouseEvent, entry: FileEntry): void {
   // Alt+mousedown pre-fetches the drag-out download into the main-process cache
@@ -1495,8 +1528,10 @@ const pct = (t: SftpProgress): number =>
         <template v-if="menu.target">
           <button @click="runMenu(downloadSelected)">{{ tt('sfp.download') }}{{ selCount > 1 ? ` (${selCount})` : '' }}</button>
           <template v-if="selCount === 1 && !menu.target.isDir">
+            <button v-if="isImage(menu.target as FileEntry)" @click="runMenu(() => previewFile(menu.target as FileEntry))">{{ tt('sfp.preview') }}</button>
             <button @click="runMenu(() => editFile(menu.target as FileEntry, false))">{{ tt('sfp.edit') }}</button>
             <button @click="runMenu(() => editFile(menu.target as FileEntry, true))">{{ tt('sfp.openExternal') }}</button>
+            <button @click="runMenu(() => openWith(menu.target as FileEntry))">{{ tt('sfp.openWith') }}</button>
           </template>
           <button
             v-if="selCount === 1 && menu.target.isDir"
@@ -1556,6 +1591,19 @@ const pct = (t: SftpProgress): number =>
           <button class="pm-btn primary" :disabled="perm.busy" @click="applyPerm">
             {{ perm.busy ? tt('sfp.applying') : tt('sfp.ok') }}
           </button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="preview.open" class="pv-overlay" @mousedown.self="closePreview">
+      <div class="pv-dialog" @keydown.esc="closePreview">
+        <div class="pv-head">
+          <span class="pv-name">{{ preview.name }}</span>
+          <button class="pv-x" :title="tt('sfp.close')" @click="closePreview"><Icon name="close" /></button>
+        </div>
+        <div class="pv-body">
+          <img v-if="preview.url" :src="preview.url" class="pv-img" alt="" />
+          <p v-else class="pv-err">{{ preview.error }}</p>
         </div>
       </div>
     </div>
@@ -2474,5 +2522,67 @@ const pct = (t: SftpProgress): number =>
 }
 .bm-item .rm:hover {
   color: var(--danger);
+}
+.pv-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.pv-dialog {
+  display: flex;
+  flex-direction: column;
+  max-width: 84vw;
+  max-height: 84vh;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.pv-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.pv-name {
+  flex: 1;
+  font-size: 13px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pv-x {
+  display: flex;
+  padding: 3px;
+  border-radius: 5px;
+  color: var(--text-faint);
+}
+.pv-x:hover {
+  background: var(--bg-elev-2);
+  color: var(--text);
+}
+.pv-body {
+  padding: 12px;
+  overflow: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.pv-img {
+  max-width: 100%;
+  max-height: 70vh;
+  object-fit: contain;
+}
+.pv-err {
+  color: var(--danger);
+  font-size: 13px;
 }
 </style>

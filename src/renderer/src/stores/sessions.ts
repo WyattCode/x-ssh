@@ -184,6 +184,8 @@ interface State {
   autoBackup: boolean
   autoBackupDir: string | null
   autoBackupEveryHours: number
+  /** Per-extension default opener program path (ext → executable). */
+  fileOpeners: Record<string, string>
   confirmPaste: boolean
   /** Strip non-printing control characters from pasted text (default on). */
   sanitizePaste: boolean
@@ -228,6 +230,7 @@ export const useSessions = defineStore('sessions', {
     autoBackup: false,
     autoBackupDir: null,
     autoBackupEveryHours: 24,
+    fileOpeners: {},
     confirmPaste: true,
     sanitizePaste: true
   }),
@@ -309,6 +312,7 @@ export const useSessions = defineStore('sessions', {
       this.autoBackup = abk === true
       this.autoBackupDir = abd ?? null
       this.autoBackupEveryHours = typeof abh === 'number' && abh > 0 ? abh : 24
+      this.fileOpeners = (await window.api.settings.get<Record<string, string>>('fileOpeners')) ?? {}
       this.confirmPaste = cp !== false
       this.sanitizePaste = sp !== false
     },

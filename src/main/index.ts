@@ -906,6 +906,14 @@ function registerIpc(): void {
       return { ok: false, error: friendlyError((e as Error).message) }
     }
   })
+  ipcMain.handle(IPC.sftpReadBinary, async (_e, sessionId: string, path: string) => {
+    try {
+      const base64 = await sshManager!.readBinaryFile(sessionId, path)
+      return { ok: true, base64 }
+    } catch (e) {
+      return { ok: false, error: friendlyError((e as Error).message) }
+    }
+  })
   ipcMain.handle(
     IPC.sftpWriteText,
     async (_e, sessionId: string, path: string, content: string) => {
@@ -958,6 +966,20 @@ function registerIpc(): void {
       }
     }
   )
+  ipcMain.handle(IPC.sftpOpenWith, async (_e, sessionId: string, path: string, name: string, program?: string) => {
+    try {
+      const remotePath = path
+      const dir = await mkdtemp(join(tmpdir(), 'xssh-open-'))
+      const local = join(dir, name)
+      await sshManager!.downloadTree(sessionId, remotePath, dir, name, false)
+      if (program) spawn(program, [local], { detached: true, stdio: 'ignore' }).unref()
+      else await shell.openPath(local)
+      setTimeout(() => void rm(dir, { recursive: true, force: true }).catch(() => undefined), 30 * 60 * 1000)
+      return { ok: true }
+    } catch (e) {
+      return { ok: false, error: friendlyError((e as Error).message) }
+    }
+  })
 
   // Drag out (dragstart): download to a temp dir, then startDrag.
   ipcMain.on(
