@@ -43,6 +43,7 @@ const form = reactive({
   color: '',
   agentForward: false,
   onConnect: '',
+  onConnectDelayMs: 0,
   forwards: [] as ForwardRow[]
 })
 const password = ref('')
@@ -68,6 +69,7 @@ watch(
       color: h?.color ?? '',
       agentForward: !!h?.agentForward,
       onConnect: h?.onConnect ?? '',
+      onConnectDelayMs: h?.onConnectDelayMs ?? 0,
       forwards: (h?.portForwards ?? []).map((f) => ({
         mode: f.mode ?? 'local',
         localPort: f.localPort,
@@ -77,7 +79,7 @@ watch(
     })
     password.value = ''
     passphrase.value = ''
-    advanced.value = !!(h?.agentForward || h?.onConnect)
+    advanced.value = !!(h?.agentForward || h?.onConnect || h?.onConnectDelayMs)
     nextTick(() => labelEl.value?.focus())
   }
 )
@@ -196,6 +198,7 @@ async function save(): Promise<void> {
     color: form.color.trim() || undefined,
     agentForward: form.agentForward || undefined,
     onConnect: form.onConnect.trim() || undefined,
+    onConnectDelayMs: Number(form.onConnectDelayMs) > 0 ? Number(form.onConnectDelayMs) : undefined,
     portForwards: forwards.length ? forwards : undefined
   }
   // A typed password/passphrase is saved (encrypted); leaving it blank keeps any
@@ -343,8 +346,27 @@ async function remove(): Promise<void> {
 
           <label class="field">
             <span>{{ t('host.onConnect') }}</span>
-            <input v-model="form.onConnect" :placeholder="t('host.onConnectPh')" spellcheck="false" />
+            <textarea
+              v-model="form.onConnect"
+              class="onconnect-ta"
+              :placeholder="t('host.onConnectPh')"
+              rows="3"
+              spellcheck="false"
+            ></textarea>
           </label>
+          <label class="field">
+            <span>{{ t('host.onConnectDelay') }}</span>
+            <input
+              v-model.number="form.onConnectDelayMs"
+              type="number"
+              min="0"
+              max="30000"
+              step="100"
+              class="onconnect-delay"
+              :placeholder="t('host.onConnectDelayPh')"
+            />
+          </label>
+          <p class="hint">{{ t('host.onConnectHint') }}</p>
         </div>
       </template>
 
@@ -481,6 +503,24 @@ async function remove(): Promise<void> {
 }
 .field input:not([type='checkbox']):focus {
   border-color: var(--accent);
+}
+.onconnect-ta {
+  min-height: 68px;
+  padding: 9px 11px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  outline: none;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  resize: vertical;
+}
+.onconnect-ta:focus {
+  border-color: var(--accent);
+}
+.onconnect-delay {
+  width: 120px;
 }
 /* Custom checkbox — the native control would render as a stark box on the
    dark surface; draw a small accent square with a white tick instead. */
@@ -674,8 +714,7 @@ async function remove(): Promise<void> {
   color: var(--danger, #ff6b6b);
   font-size: 11px;
   margin: 4px 0;
-}
-.agent-note {
+}.agent-note {
   font-size: 12px;
   color: var(--text-dim);
 }

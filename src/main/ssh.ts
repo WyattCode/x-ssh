@@ -549,8 +549,15 @@ export class SshManager {
               this.openForwards(session, params.portForwards)
             }
 
-            // Send the per-host startup command after the shell is ready.
-            if (params.onConnect) stream.write(params.onConnect + '\n')
+            // Send the per-host startup command(s) after the shell is ready. An
+            // optional delay lets a slow login shell/MOTD finish first (values
+            // up to a few seconds are typical for `wait`-style startup hooks).
+            if (params.onConnect) {
+              const sendStartup = (): boolean => stream.write(params.onConnect + '\n')
+              const delay = params.onConnectDelayMs ?? 0
+              if (delay > 0) setTimeout(() => void sendStartup(), delay)
+              else sendStartup()
+            }
 
             this.emit({ sessionId: id, status: 'connected' })
             settle({ ok: true, sessionId: id })

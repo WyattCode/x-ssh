@@ -494,6 +494,7 @@ function registerIpc(): void {
         if (!params.portForwards && h.portForwards?.length) params.portForwards = h.portForwards
         if (params.agentForward === undefined) params.agentForward = h.agentForward
         if (params.onConnect === undefined) params.onConnect = h.onConnect
+        if (params.onConnectDelayMs === undefined) params.onConnectDelayMs = h.onConnectDelayMs
         const jumpId = params.jumpHostId ?? h.jumpHostId
         if (jumpId) {
           const jh = (await store.list()).find((x) => x.id === jumpId)

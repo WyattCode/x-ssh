@@ -175,6 +175,8 @@ interface State {
   autoReconnect: boolean
   /** Auto-reconnect restored tabs on launch (rather than showing them closed). */
   restoreConnect: boolean
+  /** `cd` into the last-browsed directory on reconnect / restore. */
+  restoreCwd: boolean
   notifications: boolean
   confirmPaste: boolean
   /** Strip non-printing control characters from pasted text (default on). */
@@ -214,6 +216,7 @@ export const useSessions = defineStore('sessions', {
     restoreTabs: true,
     autoReconnect: true,
     restoreConnect: false,
+    restoreCwd: true,
     notifications: true,
     confirmPaste: true,
     sanitizePaste: true
@@ -250,7 +253,7 @@ export const useSessions = defineStore('sessions', {
     },
 
     async loadSettings(): Promise<void> {
-      const [editor, ka, ct, cr, tc, si, ff, cur, thm, rt, ar, rcn, nt, cp, sp, tq, dq, tfh] = await Promise.all([
+      const [editor, ka, ct, cr, tc, si, ff, cur, thm, rt, ar, rcn, rcw, nt, cp, sp, tq, dq, tfh] = await Promise.all([
         window.api.settings.get<string>('externalEditor'),
         window.api.settings.get<number>('keepaliveSec'),
         window.api.settings.get<number>('connectTimeoutSec'),
@@ -263,6 +266,7 @@ export const useSessions = defineStore('sessions', {
         window.api.settings.get<boolean>('restoreTabs'),
         window.api.settings.get<boolean>('autoReconnect'),
         window.api.settings.get<boolean>('restoreConnect'),
+        window.api.settings.get<boolean>('restoreCwd'),
         window.api.settings.get<boolean>('notifications'),
         window.api.settings.get<boolean>('confirmPaste'),
         window.api.settings.get<boolean>('sanitizePaste'),
@@ -285,6 +289,7 @@ export const useSessions = defineStore('sessions', {
       this.restoreTabs = rt !== false
       this.autoReconnect = ar !== false
       this.restoreConnect = rcn === true
+      this.restoreCwd = rcw !== false
       this.notifications = nt !== false
       this.confirmPaste = cp !== false
       this.sanitizePaste = sp !== false
@@ -737,6 +742,14 @@ export const useSessions = defineStore('sessions', {
         live.pane.errorCode = undefined
         // A first-ever connection may have just recorded the host key.
         void this.loadKnownHosts()
+        // Return to the directory the pane last browsed (on restore / reconnect /
+        // re-split), so the shell lands where the user left off. Safe single
+        // quoted escape; no-op if shell integration / cwd unknown.
+        const savedCwd = live.pane.lastSftpPath
+        if (savedCwd && this.restoreCwd) {
+          const quoted = `'${savedCwd.replace(/'/g, `'\\''`)}'`
+          window.api.ssh.input(result.sessionId, `cd ${quoted}\n`)
+        }
       } else {
         live.pane.status = 'error'
         live.pane.message = result.error ?? t('app.connectFail')
@@ -760,7 +773,8 @@ export const useSessions = defineStore('sessions', {
           keyPath: host.keyPath,
           hostId: host.id,
           agentForward: host.agentForward,
-          onConnect: host.onConnect
+          onConnect: host.onConnect,
+          onConnectDelayMs: host.onConnectDelayMs
         },
         host.label
       )

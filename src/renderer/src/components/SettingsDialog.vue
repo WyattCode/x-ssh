@@ -151,6 +151,10 @@ function toggleRestoreConnect(): void {
   store.restoreConnect = !store.restoreConnect
   void store.saveSetting('restoreConnect', store.restoreConnect)
 }
+function toggleRestoreCwd(): void {
+  store.restoreCwd = !store.restoreCwd
+  void store.saveSetting('restoreCwd', store.restoreCwd)
+}
 function toggleNotifications(): void {
   store.notifications = !store.notifications
   void store.saveSetting('notifications', store.notifications)
@@ -287,6 +291,13 @@ async function importHostsJson(): Promise<void> {
                   <span class="sub">{{ t('set.gen.restoreConnectDesc') }}</span>
                 </span>
                 <span class="switch" :class="{ on: store.restoreConnect }"><i /></span>
+              </label>
+              <label class="toggle-row" @click="toggleRestoreCwd">
+                <span>
+                  <span class="fname">{{ t('set.gen.restoreCwd') }}</span>
+                  <span class="sub">{{ t('set.gen.restoreCwdDesc') }}</span>
+                </span>
+                <span class="switch" :class="{ on: store.restoreCwd }"><i /></span>
               </label>
             </div>
             <div class="section">

@@ -39,8 +39,12 @@ export interface Host {
   portForwards?: HostForward[]
   /** Forward the local ssh-agent to the remote (-A) so remote hosts see it. */
   agentForward?: boolean
-  /** Optional command to send to the shell right after connecting. */
+  /** Optional command(s) to send to the shell right after connecting. May span
+   *  multiple lines (one command per line) or reference a script path. */
   onConnect?: string
+  /** Delay in ms before the startup command(s) are sent (lets the login shell
+   *  and any slow MOTD finish first). Default no delay when unset. */
+  onConnectDelayMs?: number
   /** Optional last-used timestamp (ms) for sorting the palette. */
   lastUsedAt?: number
   color?: string
@@ -212,6 +216,7 @@ export interface ConnectParams {
   /** Lifecycle params forwarded from the saved Host on connect. */
   agentForward?: boolean
   onConnect?: string
+  onConnectDelayMs?: number
   /** Connect timeout in ms (default 20000). Kept global in the store. */
   readyTimeoutMs?: number
 }
