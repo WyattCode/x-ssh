@@ -183,10 +183,6 @@ const splitEl = ref<HTMLElement>()
   min-height: 0;
   flex: 1 1 0;
 }
-.pane-node-root {
-  position: absolute;
-  inset: 0;
-}
 .pane-cell {
   position: relative;
   background: var(--bg);
@@ -210,6 +206,12 @@ const splitEl = ref<HTMLElement>()
   display: flex;
   gap: 1px;
   background: var(--border);
+}
+/* Absolute-fill the stage. Declared after .pane-cell/.pane-split so it wins at
+   equal specificity whether the root is a single leaf or a split branch. */
+.pane-node-root {
+  position: absolute;
+  inset: 0;
 }
 .pane-split.row {
   flex-direction: row;
@@ -270,12 +272,13 @@ const splitEl = ref<HTMLElement>()
   color: var(--text);
 }
 .state {
+  position: absolute;
+  inset: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 14px;
-  height: 100%;
   color: var(--text-dim);
 }
 .spinner {

@@ -11,15 +11,28 @@ const tipEl = ref<HTMLElement>()
 
 let hovered: HTMLElement | null = null
 let originalTitle: string | null = null
+// Hover delay before the tooltip appears, so it doesn't pop on a transient
+// pass-through. The native title is suppressed immediately (on entry) so the
+// OS tooltip can never appear alongside our delayed one.
+let showTimer: number | null = null
+const SHOW_DELAY = 600
 
-function suppress(el: HTMLElement, text: string): void {
-  hovered = el
-  originalTitle = el.getAttribute('title')
-  // Clearing the attribute suppresses the native tooltip; restored on mouseout.
-  el.setAttribute('title', '')
-  state.text = text
-  state.visible = true
-  place(el)
+function clearShowTimer(): void {
+  if (showTimer !== null) {
+    clearTimeout(showTimer)
+    showTimer = null
+  }
+}
+
+/** Restores the previous element's title and clears tooltip state. */
+function release(): void {
+  clearShowTimer()
+  if (hovered && originalTitle !== null && hovered.isConnected) {
+    hovered.setAttribute('title', originalTitle)
+  }
+  hovered = null
+  originalTitle = null
+  state.visible = false
 }
 
 async function place(el: HTMLElement): Promise<void> {
@@ -38,37 +51,42 @@ async function place(el: HTMLElement): Promise<void> {
   state.y = Math.max(8, y)
 }
 
-function restore(): void {
-  if (hovered && originalTitle !== null && hovered.isConnected) {
-    hovered.setAttribute('title', originalTitle)
-  }
-  hovered = null
-  originalTitle = null
-  state.visible = false
-}
-
 function onOver(e: MouseEvent): void {
   const el = (e.target as Element | null)?.closest?.('[title]') as HTMLElement | null
-  if (!el) return
+  if (!el || el === hovered) return
   const text = el.getAttribute('title') || ''
   if (!text) return
-  suppress(el, text)
+  // Drop the previous element first, then suppress this one's native title
+  // immediately (so it can never flash) before scheduling the delayed show.
+  release()
+  hovered = el
+  originalTitle = el.getAttribute('title')
+  el.removeAttribute('title')
+  state.text = text
+  state.visible = false
+  clearShowTimer()
+  showTimer = window.setTimeout(() => {
+    showTimer = null
+    if (!hovered) return
+    state.visible = true
+    void place(hovered)
+  }, SHOW_DELAY)
 }
 function onOut(e: MouseEvent): void {
   const to = e.relatedTarget as Node | null
   if (hovered && to && hovered.contains(to)) return
-  restore()
+  release()
 }
 
 onMounted(() => {
   document.addEventListener('mouseover', onOver, true)
   document.addEventListener('mouseout', onOut, true)
-  window.addEventListener('resize', restore)
+  window.addEventListener('resize', release)
 })
 onBeforeUnmount(() => {
   document.removeEventListener('mouseover', onOver, true)
   document.removeEventListener('mouseout', onOut, true)
-  window.removeEventListener('resize', restore)
+  window.removeEventListener('resize', release)
 })
 </script>
 

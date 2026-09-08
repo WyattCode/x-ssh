@@ -22,6 +22,18 @@ export function buildFlatTree(paneIds: string[], dir: SplitDir): LayoutNode {
   }
 }
 
+/** Deep-clones a layout tree into plain objects (no Vue reactive proxies), so
+ *  it can be structured-cloned across IPC to `settings.set`. */
+export function plainLayout(node: LayoutNode): LayoutNode {
+  if (node.kind === 'leaf') return { kind: 'leaf', paneId: node.paneId }
+  return {
+    kind: 'split',
+    dir: node.dir,
+    children: node.children.map(plainLayout),
+    ...(node.sizes ? { sizes: [...node.sizes] } : {})
+  }
+}
+
 /** All pane ids referenced by the tree, in display (depth-first) order. */
 export function collectPaneIds(node: LayoutNode): string[] {
   if (node.kind === 'leaf') return [node.paneId]

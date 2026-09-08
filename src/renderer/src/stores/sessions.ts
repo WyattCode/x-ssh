@@ -8,6 +8,7 @@ import { clampConcurrency } from '../../../shared/fsUtils'
 import {
   buildFlatTree,
   collectPaneIds,
+  plainLayout,
   splitLeaf,
   removePane,
   setPaneRatio
@@ -198,7 +199,7 @@ export const useSessions = defineStore('sessions', {
     terminalTheme: '',
     restoreTabs: true,
     autoReconnect: true,
-    restoreConnect: true,
+    restoreConnect: false,
     notifications: true,
     confirmPaste: true,
     sanitizePaste: true
@@ -269,7 +270,7 @@ export const useSessions = defineStore('sessions', {
       this.terminalTheme = thm ?? ''
       this.restoreTabs = rt !== false
       this.autoReconnect = ar !== false
-      this.restoreConnect = rcn !== false
+      this.restoreConnect = rcn === true
       this.notifications = nt !== false
       this.confirmPaste = cp !== false
       this.sanitizePaste = sp !== false
@@ -351,7 +352,7 @@ export const useSessions = defineStore('sessions', {
         const ordered = ids.map((id) => byId.get(id)).filter((p) => !!p)
         return {
           title: t.title,
-          tree: t.layout,
+          tree: plainLayout(t.layout),
           activeIndex: Math.max(0, ordered.findIndex((p) => p!.id === t.activePaneId)),
           panes: ordered.map((p) => {
             const params = { ...toRaw(p!.params) }
@@ -564,7 +565,7 @@ export const useSessions = defineStore('sessions', {
         const ordered = ids.map((id) => byId.get(id)).filter((p) => !!p)
         return {
           title: t.title,
-          tree: t.layout,
+          tree: plainLayout(t.layout),
           activeIndex: Math.max(0, ordered.findIndex((p) => p!.id === t.activePaneId)),
           panes: ordered.map((p) => {
             const params = { ...toRaw(p!.params) }
