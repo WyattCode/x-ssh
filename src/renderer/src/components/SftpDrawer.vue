@@ -246,7 +246,6 @@ function fmtLocalTime(ms?: number): string {
 }
 
 // ---- interrupted-transfer resume queue ----
-const runningUpload = ref<{ remoteDir: string; localPaths: string[] } | null>(null)
 const showResume = ref(false)
 async function resumePending(): Promise<void> {
   if (!props.sessionId) return
@@ -396,6 +395,30 @@ const activeTransfers = computed(() =>
 )
 const activeHistory = computed(() => store.transferHistory)
 
+// Refresh the listing once per upload that finished in this pane, debounced so a
+// folder of N files triggers one reload instead of N. Driving it off a value
+// getter (only the set of done-upload ids) rather than deep-watching the whole
+// transfers array means it won't re-fire on every progress tick, and a
+// backgrounded pane's upload never reloads the active one.
+const doneUploadSig = computed(() =>
+  store.transfers
+    .filter(
+      (x) =>
+        x.done &&
+        !x.error &&
+        x.direction === 'up' &&
+        (!x.sessionId || x.sessionId === props.sessionId)
+    )
+    .map((x) => x.id)
+    .sort()
+    .join('|')
+)
+watch(doneUploadSig, (sig) => {
+  if (!sig) return
+  if (uploadReloadTimer) clearTimeout(uploadReloadTimer)
+  uploadReloadTimer = window.setTimeout(() => load(path.value), 500)
+})
+
 async function load(p?: string): Promise<void> {
   if (!props.sessionId) return
   loading.value = true
@@ -445,8 +468,6 @@ watch(
 )
 
 let uploadReloadTimer: number | null = null
-// Upload jobs already acted on by the listing-reload watcher.
-const reloadedDoneIds = new Set<string>()
 // A saved internal editor write should refresh the current listing (size/mtime
 // may have changed), so App.bump reloadKey.
 watch(
@@ -466,29 +487,6 @@ onMounted(() => {
   // Tracking/notification/history are handled globally in the store so they run
   // even when this drawer is closed. Idempotent, so calling it here too is safe.
   store.initSftpProgress()
-  // Refresh the listing after an upload that finished in this pane, debounced so
-  // a folder of N files triggers one reload instead of N. A backgrounded pane's
-  // upload must not reload the active one.
-  watch(
-    () => store.transfers,
-    (list) => {
-      const doneUp = list.find(
-        (x) =>
-          x.done &&
-          !x.error &&
-          x.direction === 'up' &&
-          (!x.sessionId || x.sessionId === props.sessionId) &&
-          !reloadedDoneIds.has(x.id)
-      )
-      if (doneUp) {
-        reloadedDoneIds.add(doneUp.id)
-        runningUpload.value = null
-        if (uploadReloadTimer) clearTimeout(uploadReloadTimer)
-        uploadReloadTimer = window.setTimeout(() => load(path.value), 500)
-      }
-    },
-    { deep: true }
-  )
   window.addEventListener('resize', onWindowResize)
 })
 onBeforeUnmount(() => {
@@ -817,7 +815,6 @@ async function onDrop(e: DragEvent): Promise<void> {
   }
   // Don't gate on `busy` here — dropping a second folder mid-upload is fine —
   // but do surface failures, or a drop that never starts looks like a no-op.
-  runningUpload.value = { remoteDir: path.value, localPaths: paths }
   const r = await window.api.sftp.uploadPaths(props.sessionId, path.value, paths, store.transferConcurrency)
   if (!r.ok && !r.canceled) error.value = r.error ?? tt('sfp.uploadFail')
 }

@@ -57,6 +57,24 @@ describe('removePane', () => {
   })
 })
 
+describe('collectPaneIds (visual/DFS order used by focus cycle & closePane)', () => {
+  it('orders panes by on-screen arrangement, not insertion order', () => {
+    // The store appends new panes to `panes` (insertion order) while the layout
+    // tree nests the new leaf beside its source. Splitting p0 twice yields
+    // panes [p0,p1,p2] but the visual/D-F-S arrangement is [p0,p2,p1].
+    let tree = splitLeaf(leaf('p0'), 'p0', 'row', 'p1')
+    tree = splitLeaf(tree, 'p0', 'col', 'p2')
+    expect(collectPaneIds(tree)).toEqual(['p0', 'p2', 'p1'])
+  })
+  it('keeps the source-adjacent neighbour after a mixed split', () => {
+    // A 2x2 grid built by splitting p0 (col) then p2 (row).
+    let tree = splitLeaf(leaf('p0'), 'p0', 'col', 'p1')
+    tree = splitLeaf(tree, 'p1', 'row', 'p2')
+    expect(collectPaneIds(tree)).toEqual(['p0', 'p1', 'p2'])
+    expect(containsPane(tree, 'p2')).toBe(true)
+  })
+})
+
 describe('setPaneRatio', () => {
   it('moves the pair ratio and keeps the total at 1', () => {
     const tree = buildFlatTree(['a', 'b', 'c'], 'row')
