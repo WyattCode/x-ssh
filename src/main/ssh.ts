@@ -62,8 +62,6 @@ export class SshManager {
   private cancelledJobs = new Set<string>()
   /** Job ids the user asked to pause; their streams are held mid-file. */
   private pausedJobs = new Set<string>()
-  /** True when the user paused every transfer at once. */
-  private pausedAll = false
   /** jobId → bytes/sec cap (0 = unlimited), applied via a leaky-bucket. */
   private jobRate = new Map<string, number>()
   /** jobId → sessionId, so progress events can be tagged for the right pane. */
@@ -78,9 +76,11 @@ export class SshManager {
     if (paused) this.pausedJobs.add(id)
     else this.pausedJobs.delete(id)
   }
-  /** Pauses/resumes every live transfer job at once. */
+  /** Pauses/resumes every live transfer job at once. Bulk mutation of the same
+   *  paused set (not an independent flag) so an individual resume after a
+   *  pause-all still works — a separate `pausedAll` mask would pin everything
+   *  paused and silently swallow per-job resumes. */
   pauseAll(paused: boolean): void {
-    this.pausedAll = paused
     if (paused) for (const id of this.jobSession.keys()) this.pausedJobs.add(id)
     else this.pausedJobs.clear()
   }
@@ -95,7 +95,7 @@ export class SshManager {
    *  affected by a global pause or a stray pauseAll. */
   private isPaused(id: string): boolean {
     if (!this.jobSession.has(id)) return false
-    return this.pausedAll || this.pausedJobs.has(id)
+    return this.pausedJobs.has(id)
   }
 
   /** Cancels a transfer job: stops its loop and aborts every in-flight file. */

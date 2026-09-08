@@ -22,6 +22,10 @@ function togglePause(id: string): void {
 }
 function togglePauseAll(): void {
   allPaused.value = !allPaused.value
+  // Bulk pause mirrors the main process's set: pause adds every active id,
+  // resume clears them, so per-row icons stay truthful.
+  if (allPaused.value) for (const x of active.value) pausedIds.add(x.id)
+  else pausedIds.clear()
   window.api.sftp.pauseAll(allPaused.value)
 }
 
