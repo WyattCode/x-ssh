@@ -6,6 +6,7 @@ import {
   SHORTCUT_GROUPS,
   DEFAULT_BINDINGS,
   REBINDABLE_ACTIONS,
+  canonicalChord,
   type RebindableAction
 } from '../lib/shortcuts'
 import { splitShortcutChips } from '../lib/shortcutChips'
@@ -100,10 +101,27 @@ function recordChord(e: KeyboardEvent, id: RebindableAction): void {
   let key = e.key
   if (key === ' ') key = 'Space'
   const chord = [...mods, key].join('+')
+  // Reject a collision with another action's effective binding (a user override
+  // on another action, or a default we haven't overridden). Same action is fine.
+  const owner = conflictOwner(chord, id)
+  if (owner) {
+    toast(t('set.sc.conflict', { other: t('sck.' + DESC_KEY[owner]) }), 'error')
+    return
+  }
   const next = { ...store.keybindings, [id]: chord }
   store.keybindings = next
   void store.saveSetting('keybindings', next)
   recording.value = null
+}
+/** Returns another rebindable action whose effective chord collides, if any. */
+function conflictOwner(chord: string, id: RebindableAction): RebindableAction | undefined {
+  for (const action of REBINDABLE_ACTIONS) {
+    if (action === id) continue
+    if (canonicalChord(chord, isMac) && canonicalChord(chord, isMac) === canonicalChord(bindingOf(action), isMac)) {
+      return action
+    }
+  }
+  return undefined
 }
 async function resetBinding(id: RebindableAction): Promise<void> {
   const next = { ...store.keybindings }
@@ -355,6 +373,11 @@ function keyAge(firstSeen?: number): string {
   if (days < 365) return `${Math.floor(days / 30)}mo`
   return `${Math.floor(days / 365)}y`
 }
+/** A host key trusted for more than a year is flagged — stale keys should be
+ *  re-verified in case the host was rebuilt / re-keyed. */
+function keyStale(firstSeen?: number): boolean {
+  return !!firstSeen && Date.now() - firstSeen > 365 * 86400000
+}
 // ---- connection audit log ----
 const connLog = ref<{ at: number; event: string; host: string; port: number; username: string }[]>([])
 async function loadConnLog(): Promise<void> {
@@ -483,10 +506,23 @@ async function disableMasterLock(): Promise<void> {
   }
 }
 async function resetMasterLock(): Promise<void> {
+  // Reset is verification-gated: enter the passphrase to confirm intent, so a
+  // casual user can't wipe the lock with one unguarded click.
+  if (!currentPass.value) {
+    toast(t('lock.passReq'), 'error')
+    return
+  }
   const res = await confirm(t('lock.resetConfirm'))
   if (!res) return
-  await store.resetMasterLock()
-  toast(t('lock.resetDone'), 'success')
+  const ok = await store.resetMasterLock(currentPass.value)
+  if (ok) {
+    currentPass.value = ''
+    await store.loadHosts()
+    store.connectPendingAfterUnlock()
+    toast(t('lock.resetDone'), 'success')
+  } else {
+    toast(t('lock.wrong'), 'error')
+  }
 }
 
 
@@ -805,7 +841,7 @@ async function resetMasterLock(): Promise<void> {
               <div v-for="k in store.knownHosts" :key="`${k.host}:${k.port}`" class="kh-row">
                 <span class="kh-host">{{ k.host }}:{{ k.port }}</span>
                 <span class="kh-fp">{{ k.fingerprint }}</span>
-                <span v-if="keyAge(k.firstSeen)" class="kh-age" :title="t('set.sec.keyAge')">{{ keyAge(k.firstSeen) }}</span>
+                <span v-if="keyAge(k.firstSeen)" class="kh-age" :class="{ stale: keyStale(k.firstSeen) }" :title="keyStale(k.firstSeen) ? t('set.sec.keyStaleTip') : t('set.sec.keyAge')">{{ keyAge(k.firstSeen) }}</span>
                 <button class="ghost" @click="forgetKnownHost(k)">{{ t('set.sec.delete') }}</button>
               </div>
               <div v-if="!store.knownHosts.length" class="desc">{{ t('set.sec.empty') }}</div>
@@ -1558,6 +1594,10 @@ async function resetMasterLock(): Promise<void> {
   font-size: 11px;
   color: var(--warn);
   font-variant-numeric: tabular-nums;
+}
+.kh-age.stale {
+  color: var(--danger);
+  font-weight: 600;
 }
 .cl-row {
   display: flex;

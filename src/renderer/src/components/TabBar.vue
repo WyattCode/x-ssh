@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
+import { reactive, ref, nextTick } from 'vue'
 import { useSessions, type Tab } from '../stores/sessions'
 import { useTheme } from '../composables/theme'
 import { useI18n } from '../lib/i18n'
@@ -58,17 +58,41 @@ function run(action: (id: string) => void): void {
 function hostColor(tab: Tab): string | undefined {
   return tab.hostId ? store.hosts.find((h) => h.id === tab.hostId)?.color : undefined
 }
+
+// ---- Inline rename ----
+const editingId = ref('')
+const editingText = ref('')
+const editEl = ref<HTMLInputElement>()
+function startRename(): void {
+  const tab = store.tabs.find((t) => t.id === menu.tabId)
+  if (!tab) return
+  menu.open = false
+  editingText.value = tab.title
+  editingId.value = tab.id
+  nextTick(() => {
+    editEl.value?.focus()
+    editEl.value?.select()
+  })
+}
+function commitRename(): void {
+  if (editingId.value) store.renameTab(editingId.value, editingText.value)
+  editingId.value = ''
+}
+function cancelRename(): void {
+  editingId.value = ''
+}
 </script>
 
 <template>
   <div class="tabbar">
     <div class="tabs">
-      <button
+      <div
         v-for="tab in store.tabs"
         :key="tab.id"
         class="tab"
         :class="{ active: tab.id === store.activeId, dragging: dragging === tab.id, 'drop-target': dropTarget === tab.id }"
         draggable="true"
+        role="tab"
         @dragstart="dragging = tab.id"
         @dragend="dragging = ''; dropTarget = ''"
         @dragover.prevent="onDragOver(tab.id)"
@@ -84,9 +108,20 @@ function hostColor(tab: Tab): string | undefined {
         />
         <span class="dot" :style="{ background: statusColor(tabStatus(tab)) }" />
         <span v-if="tab.panes.length > 1" class="pane-count">{{ tab.panes.length }}</span>
-        <span class="label">{{ tab.title }}</span>
+        <input
+          v-if="editingId === tab.id"
+          ref="editEl"
+          v-model="editingText"
+          class="rename"
+          spellcheck="false"
+          @click.stop
+          @keydown.enter.prevent="commitRename"
+          @keydown.esc.prevent="cancelRename"
+          @blur="commitRename"
+        />
+        <span v-else class="label">{{ tab.title }}</span>
         <span class="close" :title="t('tabbar.close')" @click.stop="store.closeTab(tab.id)"><Icon name="close" :size="13" /></span>
-      </button>
+      </div>
     </div>
     <button class="new" :title="t('tabbar.newConn', { key: `${modKey}+K` })" @click="store.togglePalette(true)">
       <Icon name="plus" :size="17" />
@@ -138,6 +173,7 @@ function hostColor(tab: Tab): string | undefined {
     <div class="ctx" :style="{ left: menu.x + 'px', top: menu.y + 'px' }" @mousedown.stop>
       <button @click="run(store.reconnectTab)">{{ t('tabbar.reconnect') }}</button>
       <button @click="run(store.duplicate)">{{ t('tabbar.duplicate') }}</button>
+      <button @click="startRename">{{ t('tabbar.rename') }}</button>
       <div class="sep" />
       <button @click="run(store.closeTab)">{{ t('tabbar.closeTab') }}</button>
       <button :disabled="store.tabs.length < 2" @click="run(store.closeOthers)">{{ t('tabbar.closeOthers') }}</button>
@@ -177,6 +213,8 @@ function hostColor(tab: Tab): string | undefined {
   border-radius: var(--radius-sm);
   color: var(--text-dim);
   border: 1px solid transparent;
+  box-sizing: border-box;
+  cursor: default;
   transition: background 0.12s, color 0.12s;
 }
 .tab:hover {
@@ -202,9 +240,6 @@ function hostColor(tab: Tab): string | undefined {
 }
 .tab {
   position: relative;
-}
-.tab[draggable='true'] {
-  cursor: default;
 }
 .dot {
   width: 7px;
@@ -239,6 +274,17 @@ function hostColor(tab: Tab): string | undefined {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.rename {
+  width: 110px;
+  height: 20px;
+  padding: 0 5px;
+  background: var(--bg);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 12px;
+  outline: none;
 }
 .close {
   display: inline-flex;

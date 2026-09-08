@@ -433,10 +433,11 @@ export const useSessions = defineStore('sessions', {
       // Hide the hasSavedPassword flags in the in-memory host list while locked.
       if (this.lockLocked) await this.loadHosts()
     },
-    async resetMasterLock(): Promise<void> {
-      const r = await window.api.lock.reset()
+    async resetMasterLock(passphrase: string): Promise<boolean> {
+      const r = await window.api.lock.reset(passphrase)
       this.lockEnabled = r.enabled
       this.lockLocked = r.locked
+      return r.ok
     },
 
     /** Persists every tab (layout + panes, minus secrets) so it can be restored. */
@@ -1038,6 +1039,15 @@ export const useSessions = defineStore('sessions', {
       if (from < 0 || to < 0) return
       const [tab] = this.tabs.splice(from, 1)
       this.tabs.splice(to, 0, tab)
+      this.persistTabs()
+    },
+
+    /** Renames a tab (label only; does not touch the underlying host). */
+    renameTab(id: string, title: string): void {
+      const tab = this.tabs.find((t) => t.id === id)
+      if (!tab) return
+      const next = title.trim()
+      tab.title = next || tab.title
       this.persistTabs()
     },
 

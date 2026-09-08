@@ -83,8 +83,8 @@ const api = {
       ipcRenderer.invoke(IPC.lockUnlock, passphrase),
     lockNow: (): Promise<{ enabled: boolean; locked: boolean }> =>
       ipcRenderer.invoke(IPC.lockLockNow),
-    reset: (): Promise<{ ok: boolean; enabled: boolean; locked: boolean }> =>
-      ipcRenderer.invoke(IPC.lockReset)
+    reset: (passphrase: string): Promise<{ ok: boolean; enabled: boolean; locked: boolean }> =>
+      ipcRenderer.invoke(IPC.lockReset, passphrase)
   },
   snippets: {
     list: (): Promise<Snippet[]> => ipcRenderer.invoke(IPC.snippetsList),

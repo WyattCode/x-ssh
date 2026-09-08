@@ -98,12 +98,16 @@ export class MasterLock {
     if (this.enabled) this.unlocked = false
   }
 
-  /** Clears the gate entirely (forgotten-passphrase recovery). The OS-level
-   *  safeStorage encryption of the secrets file is unaffected. */
-  async reset(): Promise<void> {
+  /** Clears the gate, but only after the current passphrase is entered and
+   *  verified — a casual user at the desk can't wipe the lock with one click.
+   *  Passing the correct `passphrase` is required; returns false if wrong.
+   *  (The OS-level safeStorage encryption of the secrets file is unaffected.) */
+  async reset(passphrase: string): Promise<boolean> {
+    if (!this.verify(passphrase)) return false
     this.hash = null
     this.salt = ''
     this.unlocked = true
     await this.settings.set(KEY, undefined)
+    return true
   }
 }

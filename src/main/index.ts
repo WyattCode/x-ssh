@@ -6,7 +6,7 @@ import { mkdtemp, rm, readFile, stat, readdir, mkdir, unlink, rename, writeFile 
 import { watchFile, unwatchFile } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { IPC, PREFS_ARG } from '../shared/ipc'
-import type { ConnectParams, Host, JumpConfig, LocalEntry, Snippet, UiPrefs } from '../shared/types'
+import type { ConnectParams, Host, HostForward, JumpConfig, LocalEntry, Snippet, UiPrefs } from '../shared/types'
 import { SshManager } from './ssh'
 import { HostStore } from './store'
 import { KnownHosts } from './knownHosts'
@@ -98,6 +98,32 @@ function isWebUrl(url: string): boolean {
   } catch {
     return false
   }
+}
+
+/**
+ * Before a download-to-folder overwrites existing local files, ask once. Returns
+ * true to proceed (nothing exists, or the user confirms), false to cancel.
+ * Only existing regular files trigger (a target folder merges its children, so
+ * it isn't a destructive overwrite and shouldn't prompt).
+ */
+async function confirmOverwriteLocal(targets: string[]): Promise<boolean> {
+  const existing = (await Promise.all(
+    targets.map((p) =>
+      stat(p)
+        .then((s) => (s.isDirectory() ? null : p))
+        .catch(() => null)
+    )
+  )).filter((p): p is string => !!p)
+  if (!existing.length) return true
+  const { response } = await dialog.showMessageBox({
+    type: 'warning',
+    buttons: ['覆盖', '取消'],
+    defaultId: 1,
+    cancelId: 1,
+    message: '以下本地文件已存在,下载将覆盖:',
+    detail: existing.map((p) => basename(p)).join(', ')
+  })
+  return response === 0
 }
 
 async function notifyEnabled(): Promise<boolean> {
@@ -212,6 +238,9 @@ interface SshConfigHost {
   port?: number
   identityFile?: string
   proxyJump?: string
+  /** Conditional keywords forwarded/imported when present. */
+  agentForward?: boolean
+  forwards?: HostForward[]
 }
 /** Minimal single-pass parser for the common OpenSSH `Host` blocks. */
 function parseSshConfig(raw: string): SshConfigHost[] {
@@ -253,6 +282,31 @@ function parseSshConfig(raw: string): SshConfigHost[] {
       case 'proxyjump':
         current.proxyJump = val.split(',')[0]
         break
+      case 'forwardagent':
+        // OpenSSH accepts "yes/no" (also optional host list); only a leading
+        // `yes` enables it — `no`, `none` and a host list all disable.
+        current.agentForward = /^yes/i.test(val)
+        break
+      case 'localforward':
+        // "LocalForward [bind:]port host:port". The optional bind address is
+        // ignored (we always listen on localhost for safety).
+        {
+          const parts = val.split(/\s+/)
+          const listen = parts[0]
+          const target = parts[1]
+          if (!target) break
+          const lp = Number(listen.split(':').pop()) || 0
+          const tm = /^(.*?):(\d+)$/.exec(target)
+          if (!lp || !tm) break
+          current.forwards = current.forwards || []
+          current.forwards.push({
+            mode: 'local',
+            localPort: lp,
+            remoteHost: tm[1] || '',
+            remotePort: Number(tm[2])
+          })
+        }
+        break
     }
   }
   if (current) out.push(current)
@@ -271,6 +325,34 @@ async function importSshConfig(): Promise<{ ok: boolean; count: number; error?: 
   }
   const parsed = parseSshConfig(raw)
   const existing = new Set((await store.list()).map((h) => `${h.host}:${h.port}:${h.username}`))
+
+  // Resolve a `ProxyJump` alias to an imported Host id. The jump target may not
+  // be a Host block of its own (e.g. a bare hostname), so create one lazily.
+  let jumpCounter = 0
+  async function jumpHostId(spec: string): Promise<string | undefined> {
+    // "user@host" or "host" (a connect-time command string is not supported).
+    const jm = /^(?:([^@]+)@)?([^:]+)(?::(\d+))?$/.exec(spec.trim())
+    if (!jm) return undefined
+    const jhost = jm[2]
+    const jport = Number(jm[3]) || 22
+    const juser = jm[1] || 'root'
+    const existingJump = (await store.list()).find(
+      (h) => h.host === jhost && h.port === jport && h.group === 'OpenSSH'
+    )
+    if (existingJump) return existingJump.id
+    const jump: Host = {
+      id: `host-jump-${Date.now()}-${jumpCounter++}`,
+      label: jhost,
+      host: jhost,
+      port: jport,
+      username: juser,
+      auth: 'password',
+      group: 'OpenSSH'
+    }
+    await store.save(jump)
+    return jump.id
+  }
+
   let count = 0
   for (const c of parsed) {
     if (c.host.startsWith('!') || c.host === '*') continue
@@ -286,7 +368,15 @@ async function importSshConfig(): Promise<{ ok: boolean; count: number; error?: 
       username: user,
       auth: c.identityFile ? 'key' : 'password',
       keyPath: c.identityFile,
-      group: 'OpenSSH'
+      group: 'OpenSSH',
+      agentForward: c.agentForward || undefined,
+      portForwards: c.forwards?.length ? c.forwards : undefined
+    }
+    // Map ProxyJump to a jump host entry so the tunnel is actually established
+    // (previously it was parsed but dropped).
+    if (c.proxyJump) {
+      const jid = await jumpHostId(c.proxyJump)
+      if (jid) host.jumpHostId = jid
     }
     await store.save(host)
     existing.add(key)
@@ -783,6 +873,10 @@ function registerIpc(): void {
         properties: ['openDirectory']
       })
       if (res.canceled || !res.filePaths[0]) return { ok: false, canceled: true }
+      // Confirmation before overwriting existing local files in the target dir.
+      if (!(await confirmOverwriteLocal(items.map((it) => join(res.filePaths[0], it.name))))) {
+        return { ok: false, canceled: true }
+      }
       try {
         await sshManager.downloadJob(sessionId, items, res.filePaths[0], randomUUID(), concurrency)
         return { ok: true, count: items.length }
@@ -816,6 +910,10 @@ function registerIpc(): void {
       concurrency?: number
     ) => {
       if (!sshManager) return { ok: false, error: '窗口未就绪' }
+      // Confirmation before overwriting existing local files in the target dir.
+      if (!(await confirmOverwriteLocal(items.map((it) => join(targetDir, it.name))))) {
+        return { ok: false, canceled: true }
+      }
       try {
         await sshManager.downloadJob(sessionId, items, targetDir, randomUUID(), concurrency)
         return { ok: true, count: items.length }
@@ -1120,10 +1218,10 @@ function registerIpc(): void {
     // live sessions running; the door is just shut for new discovery.
     return masterLock.status()
   })
-  ipcMain.handle(IPC.lockReset, async () => {
-    await masterLock.reset()
+  ipcMain.handle(IPC.lockReset, async (_e, passphrase: string) => {
+    const ok = await masterLock.reset(passphrase)
     store.setLocked(masterLock.locked)
-    return { ok: true, ...masterLock.status() }
+    return { ok, ...masterLock.status() }
   })
   ipcMain.handle(IPC.pickExecutable, async () => {
     const res = await dialog.showOpenDialog({

@@ -139,6 +139,24 @@ function parseChord(chord: string): { mods: number; key: string } {
   return { mods, key }
 }
 
+/**
+ * Canonical, comparison-safe form of a chord for conflict detection. Normalizes
+ * which modifier actually fires on this platform — on Windows/Linux `Mod` and
+ * `Ctrl` both mean Ctrl, so `Mod+K` conflicts with `Ctrl+K`; on macOS `Mod`
+ * means ⌘ and `Ctrl` stays distinct. Returns undefined for a bare key (no
+ * modifier), which a recorded binding never produces.
+ */
+export function canonicalChord(chord: string, isMac: boolean): string | undefined {
+  const { mods, key } = parseChord(chord)
+  const modSet: string[] = []
+  if (mods & 1) modSet.push(isMac ? 'Meta' : 'Ctrl') // Mod
+  if (mods & 2) modSet.push('Ctrl')
+  if (mods & 4) modSet.push('Shift')
+  if (mods & 8) modSet.push('Alt')
+  if (!modSet.length) return undefined
+  return [...new Set(modSet)].sort().join('+') + '+' + key.toLowerCase()
+}
+
 /** True when the keyboard event matches the given chord exactly. */
 export function chordMatches(e: KeyboardEvent, chord: string): boolean {
   const { mods, key } = parseChord(chord)
