@@ -52,6 +52,16 @@ const api = {
     importJson: (): Promise<{ ok: boolean; count?: number; canceled?: boolean; error?: string }> =>
       ipcRenderer.invoke(IPC.hostsImportJson)
   },
+  data: {
+    exportAll: (): Promise<{ ok: boolean; canceled?: boolean; error?: string }> =>
+      ipcRenderer.invoke(IPC.dataExportAll),
+    importAll: (): Promise<{ ok: boolean; count?: number; canceled?: boolean; error?: string }> =>
+      ipcRenderer.invoke(IPC.dataImportAll),
+    backupNow: (): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke(IPC.dataBackupNow),
+    rescheduleBackup: (): Promise<{ ok: boolean }> =>
+      ipcRenderer.invoke(IPC.dataRescheduleBackup)
+  },
   knownHosts: {
     list: (): Promise<KnownHostEntry[]> => ipcRenderer.invoke(IPC.knownHostsList),
     forget: (host: string, port: number): Promise<void> =>
@@ -184,12 +194,14 @@ const api = {
   /** Opens a terminal link in the default browser (http/https only). */
   openExternal: (url: string): Promise<boolean> =>
     ipcRenderer.invoke(IPC.openExternal, url),
-  /** Shows a native notification (respects the user's notifications setting). */
-  notify: (title: string, body: string): void =>
-    ipcRenderer.send(IPC.notify, title, body),
+  /** Shows a native notification (respects the notifications/notifySound settings). */
+  notify: (title: string, body: string, sound = false): void =>
+    ipcRenderer.send(IPC.notify, title, body, sound),
   pickKeyFile: (): Promise<string | undefined> => ipcRenderer.invoke(IPC.pickKeyFile),
   pickExecutable: (): Promise<string | undefined> =>
     ipcRenderer.invoke(IPC.pickExecutable),
+  pickDirectory: (): Promise<string | undefined> =>
+    ipcRenderer.invoke(IPC.pickDirectory),
   keys: {
     list: (): Promise<ManagedKey[]> => ipcRenderer.invoke(IPC.keysList),
     generate: (opts: { name: string; type?: string; passphrase?: string; bits?: number }): Promise<{ ok: boolean; key?: ManagedKey; error?: string }> =>

@@ -84,9 +84,64 @@ async function notifyEnabled(): Promise<boolean> {
   return (await settings.get<boolean>('notifications')) !== false
 }
 
-function notify(title: string, body: string): void {
+async function notifySoundEnabled(): Promise<boolean> {
+  return (await settings.get<boolean>('notifySound')) === true
+}
+
+function notify(title: string, body: string, sound = false): void {
   if (!Notification.isSupported()) return
-  new Notification({ title, body, silent: true }).show()
+  new Notification({ title, body, silent: !sound }).show()
+}
+
+// ---- Scheduled automatic backups ----
+// Writes a full data snapshot (hosts+secrets+snippets+snapshots+known hosts)
+// to a chosen directory on a timer, so a deleted profile is never unrecoverable.
+// Controlled by settings keys: autoBackup (bool), autoBackupDir (string),
+// autoBackupEveryHours (number).
+let backupTimer: NodeJS.Timeout | null = null
+
+async function buildBackupPayload(): Promise<string> {
+  await knownHosts.load()
+  return JSON.stringify(
+    {
+      app: 'x-ssh',
+      version: 2,
+      exportedAt: new Date().toISOString(),
+      hosts: await store.exportJson(),
+      snippets: (await settings.get<Snippet[]>('snippets')) ?? [],
+      snapshots: (await settings.get<unknown[]>('snapshots')) ?? [],
+      transferHistory: (await settings.get<unknown[]>('sftpTransferHistory')) ?? [],
+      knownHosts: await knownHosts.list()
+    },
+    null,
+    2
+  )
+}
+
+export async function writeAutoBackupSync(): Promise<boolean> {
+  const enabled = (await settings.get<boolean>('autoBackup')) === true
+  if (!enabled) return false
+  const dir = await settings.get<string>('autoBackupDir')
+  if (!dir) return false
+  try {
+    await mkdir(dir, { recursive: true })
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+    const target = join(dir, `x-ssh-backup-${stamp}.json`)
+    await writeFile(target, await buildBackupPayload(), 'utf8')
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function scheduleAutoBackup(): Promise<void> {
+  if (backupTimer) clearInterval(backupTimer)
+  backupTimer = null
+  const enabled = (await settings.get<boolean>('autoBackup')) === true
+  if (!enabled) return
+  const hours = Math.max(1, (await settings.get<number>('autoBackupEveryHours')) || 24)
+  backupTimer = setInterval(() => void writeAutoBackupSync(), hours * 60 * 60 * 1000)
+  backupTimer.unref?.()
 }
 
 // ---- Command snippets (stored in settings.json under 'snippets') ----
@@ -374,6 +429,61 @@ function registerIpc(): void {
     } catch (e) {
       return { ok: false, error: friendlyError((e as Error).message) }
     }
+  })
+
+  // ---- Full data backup (hosts + secrets + snippets + snapshots + history) ----
+  ipcMain.handle(IPC.dataExportAll, async () => {
+    const res = await dialog.showSaveDialog({
+      title: '导出全部数据',
+      defaultPath: `x-ssh-backup-${new Date().toISOString().slice(0, 10)}.json`,
+      filters: [{ name: 'JSON', extensions: ['json'] }]
+    })
+    if (res.canceled || !res.filePath) return { ok: false, canceled: true }
+    try {
+      await knownHosts.load()
+      const data = {
+        app: 'x-ssh',
+        version: 2,
+        exportedAt: new Date().toISOString(),
+        hosts: await store.exportJson(),
+        snippets: (await settings.get<Snippet[]>('snippets')) ?? [],
+        snapshots: (await settings.get<unknown[]>('snapshots')) ?? [],
+        transferHistory: (await settings.get<unknown[]>('sftpTransferHistory')) ?? [],
+        knownHosts: await knownHosts.list()
+      }
+      await writeFile(res.filePath, JSON.stringify(data, null, 2), 'utf8')
+      return { ok: true }
+    } catch (e) {
+      return { ok: false, error: friendlyError((e as Error).message) }
+    }
+  })
+  ipcMain.handle(IPC.dataImportAll, async () => {
+    const res = await dialog.showOpenDialog({
+      title: '导入全部数据',
+      properties: ['openFile'],
+      filters: [{ name: 'JSON', extensions: ['json'] }]
+    })
+    if (res.canceled || !res.filePaths[0]) return { ok: false, canceled: true }
+    try {
+      const buf = await readFile(res.filePaths[0], 'utf8')
+      const data = JSON.parse(buf)
+      if (!Array.isArray(data.hosts)) return { ok: false, error: '无效的备份文件' }
+      await store.importJson(JSON.stringify(data.hosts))
+      if (Array.isArray(data.snippets)) await settings.set('snippets', data.snippets)
+      if (Array.isArray(data.snapshots)) await settings.set('snapshots', data.snapshots)
+      if (Array.isArray(data.transferHistory)) await settings.set('sftpTransferHistory', data.transferHistory)
+      return { ok: true }
+    } catch (e) {
+      return { ok: false, error: friendlyError((e as Error).message) }
+    }
+  })
+  ipcMain.handle(IPC.dataBackupNow, async () => {
+    const ok = await writeAutoBackupSync()
+    return { ok, error: ok ? undefined : '自动备份未启用或未选择目标目录' }
+  })
+  ipcMain.handle(IPC.dataRescheduleBackup, async () => {
+    await scheduleAutoBackup()
+    return { ok: true }
   })
 
   // ---- Known hosts (settings page) ----
@@ -883,6 +993,13 @@ function registerIpc(): void {
     })
     return res.canceled ? undefined : res.filePaths[0]
   })
+  ipcMain.handle(IPC.pickDirectory, async () => {
+    const res = await dialog.showOpenDialog({
+      title: '选择备份目录',
+      properties: ['openDirectory', 'createDirectory']
+    })
+    return res.canceled ? undefined : res.filePaths[0]
+  })
 
   // Opens a link from terminal output in the default browser. Restricted to
   // http/https on purpose: the URL comes from whatever the remote host printed,
@@ -898,8 +1015,8 @@ function registerIpc(): void {
 
   // Native notification (session drop, transfer completion…). The renderer
   // decides when; main just honors the user's toggle.
-  ipcMain.on(IPC.notify, async (_e, title: string, body: string) => {
-    if (await notifyEnabled()) notify(title, body)
+  ipcMain.on(IPC.notify, async (_e, title: string, body: string, sound = false) => {
+    if (await notifyEnabled()) notify(title, body, sound && (await notifySoundEnabled()))
   })
 
   // ---- Dialogs ----
@@ -961,6 +1078,8 @@ app.whenReady().then(async () => {
   // Warm the hosts cache while the window is still being built, so the
   // renderer's first list() call answers from memory instead of the disk.
   void store.list().catch(() => undefined)
+  // Kick off the auto-backup timer (no-op unless autoBackup is enabled).
+  void scheduleAutoBackup().catch(() => undefined)
   const [saved, prefs] = await Promise.all([
     settings.get<SavedBounds>('windowBounds'),
     readUiPrefs()

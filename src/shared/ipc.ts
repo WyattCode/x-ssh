@@ -8,6 +8,12 @@ export const IPC = {
   hostsExportJson: 'hosts:exportJson',
   hostsImportJson: 'hosts:importJson',
 
+  // Full data backup (hosts+secrets+snippets+snapshots+history+known hosts)
+  dataExportAll: 'data:exportAll',
+  dataImportAll: 'data:importAll',
+  dataBackupNow: 'data:backupNow', // trigger a scheduled-style backup immediately
+  dataRescheduleBackup: 'data:rescheduleBackup', // re-read auto-backup prefs & restart timer
+
   // SSH key library (invoke/handle)
   keysList: 'keys:list',
   keysGenerate: 'keys:generate',
@@ -76,6 +82,7 @@ export const IPC = {
   // Misc
   pickKeyFile: 'dialog:pickKey',
   pickExecutable: 'dialog:pickExecutable',
+  pickDirectory: 'dialog:pickDirectory',
   openExternal: 'shell:openExternal',
   notify: 'notify'
 } as const

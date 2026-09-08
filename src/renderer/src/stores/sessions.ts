@@ -178,6 +178,12 @@ interface State {
   /** `cd` into the last-browsed directory on reconnect / restore. */
   restoreCwd: boolean
   notifications: boolean
+  /** Play a system sound on desktop notifications (transfer done / disconnect). */
+  notifySound: boolean
+  /** Scheduled automatic backups (dir + interval hours). */
+  autoBackup: boolean
+  autoBackupDir: string | null
+  autoBackupEveryHours: number
   confirmPaste: boolean
   /** Strip non-printing control characters from pasted text (default on). */
   sanitizePaste: boolean
@@ -218,6 +224,10 @@ export const useSessions = defineStore('sessions', {
     restoreConnect: false,
     restoreCwd: true,
     notifications: true,
+    notifySound: false,
+    autoBackup: false,
+    autoBackupDir: null,
+    autoBackupEveryHours: 24,
     confirmPaste: true,
     sanitizePaste: true
   }),
@@ -253,7 +263,7 @@ export const useSessions = defineStore('sessions', {
     },
 
     async loadSettings(): Promise<void> {
-      const [editor, ka, ct, cr, tc, si, ff, cur, thm, rt, ar, rcn, rcw, nt, cp, sp, tq, dq, tfh] = await Promise.all([
+      const [editor, ka, ct, cr, tc, si, ff, cur, thm, rt, ar, rcn, rcw, nt, ns, cp, sp, tq, dq, tfh, abk, abd, abh] = await Promise.all([
         window.api.settings.get<string>('externalEditor'),
         window.api.settings.get<number>('keepaliveSec'),
         window.api.settings.get<number>('connectTimeoutSec'),
@@ -268,11 +278,15 @@ export const useSessions = defineStore('sessions', {
         window.api.settings.get<boolean>('restoreConnect'),
         window.api.settings.get<boolean>('restoreCwd'),
         window.api.settings.get<boolean>('notifications'),
+        window.api.settings.get<boolean>('notifySound'),
         window.api.settings.get<boolean>('confirmPaste'),
         window.api.settings.get<boolean>('sanitizePaste'),
         window.api.settings.get<TransferOp[]>('transferQueue'),
         window.api.settings.get<DownloadQueueOp[]>('downloadQueue'),
-        window.api.settings.get<TransferHistoryItem[]>('sftpTransferHistory')
+        window.api.settings.get<TransferHistoryItem[]>('sftpTransferHistory'),
+        window.api.settings.get<boolean>('autoBackup'),
+        window.api.settings.get<string>('autoBackupDir'),
+        window.api.settings.get<number>('autoBackupEveryHours')
       ])
       this.externalEditor = editor ?? null
       this.keepaliveSec = typeof ka === 'number' ? ka : 20
@@ -291,6 +305,10 @@ export const useSessions = defineStore('sessions', {
       this.restoreConnect = rcn === true
       this.restoreCwd = rcw !== false
       this.notifications = nt !== false
+      this.notifySound = ns === true
+      this.autoBackup = abk === true
+      this.autoBackupDir = abd ?? null
+      this.autoBackupEveryHours = typeof abh === 'number' && abh > 0 ? abh : 24
       this.confirmPaste = cp !== false
       this.sanitizePaste = sp !== false
     },
@@ -358,6 +376,11 @@ export const useSessions = defineStore('sessions', {
 
     async saveSetting(key: string, value: unknown): Promise<void> {
       await window.api.settings.set(key, toPlain(value))
+    },
+
+    /** Re-reads auto-backup prefs in the main process and restarts its timer. */
+    async rescheduleBackup(): Promise<void> {
+      await window.api.data.rescheduleBackup()
     },
 
     /** Persists every tab (layout + panes, minus secrets) so it can be restored. */
@@ -453,6 +476,12 @@ export const useSessions = defineStore('sessions', {
     async loadSnapshots(): Promise<void> {
       this.snapshots = (await window.api.settings.get<Snapshot[]>('snapshots')) ?? []
     },
+    /** Reloads the persisted transfer history (after a full import). */
+    loadTransferHistory(): Promise<void> {
+      return window.api.settings.get<TransferHistoryItem[]>('sftpTransferHistory').then((h) => {
+        this.transferHistory = h ?? []
+      })
+    },
     /** Records an interrupted upload so it can be resumed after a reconnect. */
     async queueUpload(remoteDir: string, localPaths: string[]): Promise<void> {
       if (!localPaths.length) return
@@ -535,7 +564,8 @@ export const useSessions = defineStore('sessions', {
           if (!cancelled) {
             window.api.notify(
               p.error ? t('sfp.notifyError') : t('sfp.notifyDone'),
-              `${p.name} · ${p.direction === 'up' ? t('sfp.up') : t('sfp.down')}${p.error ? ` · ${p.error}` : ''}`
+              `${p.name} · ${p.direction === 'up' ? t('sfp.up') : t('sfp.down')}${p.error ? ` · ${p.error}` : ''}`,
+              !p.error
             )
             toast(
               p.error ? `${p.name} · ${t('sfp.failed')}` : `${p.name} · ${t('sfp.done')}`,
@@ -824,7 +854,8 @@ export const useSessions = defineStore('sessions', {
         if (this.notifications) {
           window.api.notify(
             t('app.sessionDisconnected'),
-            `${pane.params.username}@${pane.params.host}${pane.params.port !== 22 ? `:${pane.params.port}` : ''} · ${message ?? t('app.sessionLost')}`
+            `${pane.params.username}@${pane.params.host}${pane.params.port !== 22 ? `:${pane.params.port}` : ''} · ${message ?? t('app.sessionLost')}`,
+            true
           )
         }
         if (this.autoReconnect) this.scheduleReconnect(pane.id)

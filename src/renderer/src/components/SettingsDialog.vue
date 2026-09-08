@@ -159,6 +159,10 @@ function toggleNotifications(): void {
   store.notifications = !store.notifications
   void store.saveSetting('notifications', store.notifications)
 }
+function toggleNotifySound(): void {
+  store.notifySound = !store.notifySound
+  void store.saveSetting('notifySound', store.notifySound)
+}
 
 // ---- command snippets ----
 const snippetForm = reactive({
@@ -227,6 +231,49 @@ async function importHostsJson(): Promise<void> {
     await store.loadHosts()
     toast(`${t('set.sec.imported')} ${r.count ?? 0} ${t('set.sec.hosts')}`, 'success')
   }
+}
+
+// ---- full data backup (hosts + secrets + snippets + snapshots + history) ----
+const backupBusy = ref(false)
+async function exportAllData(): Promise<void> {
+  const r = await window.api.data.exportAll()
+  if (!r.ok && !r.canceled) toast(r.error ?? t('set.sec.exportFail'), 'error')
+  else if (r.ok) toast(t('set.sec.exportedAll'), 'success')
+}
+async function importAllData(): Promise<void> {
+  const res = await confirm(t('set.sec.importAllConfirm'))
+  if (!res) return
+  const r = await window.api.data.importAll()
+  if (!r.ok && !r.canceled) toast(r.error ?? t('set.sec.importFail'), 'error')
+  else if (r.ok) {
+    await Promise.all([store.loadHosts(), store.loadSnippets(), store.loadSnapshots(), store.loadTransferHistory()])
+    toast(t('set.sec.importedAll'), 'success')
+  }
+}
+function toggleAutoBackup(): void {
+  store.autoBackup = !store.autoBackup
+  void store.saveSetting('autoBackup', store.autoBackup)
+  void store.rescheduleBackup()
+}
+async function pickBackupDir(): Promise<void> {
+  const dir = await window.api.pickDirectory()
+  if (dir) {
+    store.autoBackupDir = dir
+    void store.saveSetting('autoBackupDir', dir)
+    void store.rescheduleBackup()
+  }
+}
+function onBackupHours(e: Event): void {
+  const v = Number((e.target as HTMLInputElement).value)
+  store.autoBackupEveryHours = v > 0 ? v : 24
+  void store.saveSetting('autoBackupEveryHours', store.autoBackupEveryHours)
+  void store.rescheduleBackup()
+}
+async function backupNow(): Promise<void> {
+  backupBusy.value = true
+  const r = await window.api.data.backupNow()
+  backupBusy.value = false
+  toast(r.ok ? t('set.sec.backupDone') : (r.error ?? t('set.sec.backupFail')), r.ok ? 'success' : 'error')
 }
 
 
@@ -488,6 +535,13 @@ async function importHostsJson(): Promise<void> {
                 </span>
                 <span class="switch" :class="{ on: store.notifications }"><i /></span>
               </label>
+              <label class="toggle-row" @click="toggleNotifySound">
+                <span>
+                  <span class="fname">{{ t('set.conn.notifySound') }}</span>
+                  <span class="sub">{{ t('set.conn.notifySoundDesc') }}</span>
+                </span>
+                <span class="switch" :class="{ on: store.notifySound }"><i /></span>
+              </label>
             </div>
           </template>
 
@@ -514,6 +568,36 @@ async function importHostsJson(): Promise<void> {
               <div class="btn-row">
                 <button class="ghost" @click="exportHostsJson">{{ t('set.sec.export') }}</button>
                 <button class="ghost" @click="importHostsJson">{{ t('set.sec.restore') }}</button>
+              </div>
+              <p class="desc">{{ t('set.sec.fullBackupDesc') }}</p>
+              <div class="btn-row">
+                <button class="ghost" @click="exportAllData">{{ t('set.sec.exportAll') }}</button>
+                <button class="ghost" @click="importAllData">{{ t('set.sec.importAll') }}</button>
+              </div>
+            </div>
+            <div class="section">
+              <div class="label">{{ t('set.sec.autoBackup') }}</div>
+              <label class="toggle-row" @click="toggleAutoBackup">
+                <span>
+                  <span class="fname">{{ t('set.sec.autoBackup') }}</span>
+                  <span class="sub">{{ t('set.sec.autoBackupDesc') }}</span>
+                </span>
+                <span class="switch" :class="{ on: store.autoBackup }"><i /></span>
+              </label>
+              <div v-if="store.autoBackup" class="backup-opts">
+                <div class="backup-row">
+                  <span class="backup-label">{{ t('set.sec.backupDir') }}</span>
+                  <span class="backup-val">{{ store.autoBackupDir || t('set.sec.backupDirNone') }}</span>
+                  <button class="ghost" @click="pickBackupDir">{{ t('host.browse') }}</button>
+                </div>
+                <div class="backup-row">
+                  <span class="backup-label">{{ t('set.sec.backupEvery') }}</span>
+                  <label class="hour-input">
+                    <input :value="store.autoBackupEveryHours" type="number" min="1" max="720" @change="onBackupHours" />
+                    <span class="unit">{{ t('set.sec.hours') }}</span>
+                  </label>
+                </div>
+                <button class="ghost" :disabled="backupBusy" @click="backupNow">{{ t('set.sec.backupNow') }}</button>
               </div>
             </div>
           </template>
@@ -653,6 +737,52 @@ async function importHostsJson(): Promise<void> {
 .btn-row {
   display: flex;
   gap: 8px;
+}
+.backup-opts {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+}
+.backup-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.backup-label {
+  font-size: 12px;
+  color: var(--text-dim);
+  flex: none;
+  width: 80px;
+}
+.backup-val {
+  flex: 1;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hour-input {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.hour-input input {
+  width: 64px;
+  height: 30px;
+  padding: 0 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 12.5px;
+  outline: none;
+}
+.hour-input .unit {
+  font-size: 12px;
+  color: var(--text-dim);
 }
 .field {
   display: flex;
