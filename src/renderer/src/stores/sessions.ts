@@ -194,7 +194,7 @@ export const useSessions = defineStore('sessions', {
     transferConcurrency: 4,
     shellIntegration: true,
     terminalFontFamily: '',
-    terminalCursor: 'block',
+    terminalCursor: 'bar',
     terminalTheme: '',
     restoreTabs: true,
     autoReconnect: true,
@@ -265,7 +265,7 @@ export const useSessions = defineStore('sessions', {
       this.downloadQueue = dq ?? []
       this.transferHistory = tfh ?? []
       this.terminalFontFamily = ff ?? ''
-      this.terminalCursor = cur ?? 'block'
+      this.terminalCursor = cur ?? 'bar'
       this.terminalTheme = thm ?? ''
       this.restoreTabs = rt !== false
       this.autoReconnect = ar !== false

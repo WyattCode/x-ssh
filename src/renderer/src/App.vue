@@ -23,6 +23,7 @@ import Icon from './components/Icon.vue'
 import PaneNode from './components/PaneNode.vue'
 import TransferPanel from './components/TransferPanel.vue'
 import SnippetVarsDialog from './components/SnippetVarsDialog.vue'
+import TooltipLayer from './components/TooltipLayer.vue'
 import { useI18n } from './lib/i18n'
 import { collectPaneIds } from './lib/paneLayout'
 import logoUrl from './assets/logo.png'
@@ -397,6 +398,7 @@ onBeforeUnmount(() => {
     <SettingsDialog />
     <TransferPanel />
     <SnippetVarsDialog />
+    <TooltipLayer />
     <ConfirmDialog />
     <ToastHost />
     <HistorySearch />
