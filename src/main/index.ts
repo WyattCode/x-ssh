@@ -1155,6 +1155,26 @@ function registerIpc(): void {
     }
   )
   ipcMain.handle(
+    IPC.sftpSync,
+    async (
+      _e,
+      sessionId: string,
+      localDir: string,
+      remoteDir: string,
+      mode: 'up' | 'down' | 'both',
+      deleteExtras: boolean,
+      concurrency?: number
+    ) => {
+      if (!sshManager) return { ok: false, error: '窗口未就绪', count: 0 }
+      try {
+        await sshManager.syncJob(sessionId, localDir, remoteDir, mode, deleteExtras, randomUUID(), concurrency, await defaultTransferRate())
+        return { ok: true, count: 0 }
+      } catch (e) {
+        return { ok: false, error: friendlyError((e as Error).message), count: 0 }
+      }
+    }
+  )
+  ipcMain.handle(
     IPC.sftpPackDownload,
     async (
       _e,

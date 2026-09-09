@@ -983,6 +983,22 @@ function runMore(fn: () => void): void {
   moreMenu.open = false
   fn()
 }
+// ---- Incremental sync (rsync-style) ----
+const sync = reactive({ open: false, local: '', remote: '', mode: 'both' as 'up' | 'down' | 'both', del: false })
+function openSyncDialog(): void {
+  if (!props.sessionId) return
+  sync.local = localPath.value
+  sync.remote = path.value
+  sync.mode = 'both'
+  sync.del = false
+  sync.open = true
+}
+async function startSync(): Promise<void> {
+  if (!props.sessionId || !sync.local || !sync.remote) return
+  sync.open = false
+  const r = await window.api.sftp.sync(props.sessionId, sync.local, sync.remote, sync.mode, sync.del, store.transferConcurrency)
+  if (!r.ok) error.value = r.error ?? tt('sfp.syncFail')
+}
 function openHistory(): void {
   // The history menu is wider (300px) than the more-menu it inherits its anchor
   // from, so clamp it to keep the whole panel on-screen.
@@ -1273,6 +1289,7 @@ const pct = (t: SftpProgress): number =>
         <button @click="runMore(uploadDirPick)"><Icon name="folder-up" :size="15" /><span>{{ tt('sfp.uploadDir') }}</span></button>
         <button @click="runMore(uploadExtractPick)"><Icon name="zip" :size="15" /><span>{{ tt('sfp.uploadExtract') }}</span></button>
         <button @click="runMore(packDownloadSelected)"><Icon name="archive" :size="15" /><span>{{ tt('sfp.packDownload') }}</span></button>
+        <button @click="runMore(openSyncDialog)"><Icon name="sync" :size="15" /><span>{{ tt('sfp.sync') }}</span></button>
         <button @click="runMore(toggleHidden)"><Icon name="eye" :size="15" /><span>{{ showHidden ? tt('sfp.toggleHiddenHide') : tt('sfp.toggleHiddenShow') }}</span></button>
         <button v-if="hasTermCwd" @click="runMore(gotoTerminalDir)"><Icon name="terminal" :size="15" /><span>{{ tt('sfp.gotoTerminal') }}</span></button>
         <button @click="runMore(openHistory)"><Icon name="clock" :size="15" /><span>{{ tt('sfp.history') }}{{ activeHistory.length ? ` (${activeHistory.length})` : '' }}</span></button>
@@ -1590,6 +1607,42 @@ const pct = (t: SftpProgress): number =>
           <button class="pm-btn ghost" @click="perm.open = false">{{ tt('sfp.cancel') }}</button>
           <button class="pm-btn primary" :disabled="perm.busy" @click="applyPerm">
             {{ perm.busy ? tt('sfp.applying') : tt('sfp.ok') }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="sync.open" class="pm-overlay" @mousedown.self="sync.open = false">
+      <div class="pm-dialog sync-dialog">
+        <div class="pm-head">
+          <span>{{ tt('sfp.sync') }}</span>
+          <button class="pm-x" :title="tt('sfp.close')" @click="sync.open = false"><Icon name="close" /></button>
+        </div>
+        <label class="sync-field">
+          <span>{{ tt('sfp.syncLocal') }}</span>
+          <input v-model="sync.local" spellcheck="false" />
+        </label>
+        <label class="sync-field">
+          <span>{{ tt('sfp.syncRemote') }}</span>
+          <input v-model="sync.remote" spellcheck="false" />
+        </label>
+        <label class="sync-field">
+          <span>{{ tt('sfp.syncMode') }}</span>
+          <select v-model="sync.mode">
+            <option value="both">{{ tt('sfp.syncBoth') }}</option>
+            <option value="up">{{ tt('sfp.syncUp') }}</option>
+            <option value="down">{{ tt('sfp.syncDown') }}</option>
+          </select>
+        </label>
+        <label v-if="sync.mode !== 'both'" class="pm-recur">
+          <input v-model="sync.del" type="checkbox" />
+          <span>{{ tt('sfp.syncDelete') }}</span>
+        </label>
+        <p class="pm-err" v-if="!sync.local || !sync.remote">{{ tt('sfp.syncPathsRequired') }}</p>
+        <div class="pm-foot">
+          <button class="pm-btn ghost" @click="sync.open = false">{{ tt('sfp.cancel') }}</button>
+          <button class="pm-btn primary" :disabled="!sync.local || !sync.remote" @click="startSync">
+            {{ tt('sfp.syncStart') }}
           </button>
         </div>
       </div>
@@ -2327,6 +2380,29 @@ const pct = (t: SftpProgress): number =>
   padding: 16px 18px 18px;
   outline: none;
 }
+.sync-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.sync-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+}
+.sync-field input,
+.sync-field select {
+  width: 100%;
+  height: 30px;
+  padding: 0 8px;
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  color: var(--text);
+  outline: none;
+}
 .pm-head {
   display: flex;
   align-items: center;
@@ -2429,6 +2505,7 @@ const pct = (t: SftpProgress): number =>
   gap: 8px;
   margin-top: 14px;
   font-size: 12.5px;
+
   color: var(--text-dim);
   cursor: pointer;
 }

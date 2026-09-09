@@ -24,6 +24,7 @@ const P: Record<string, string> = {
   download: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4 M7 10l5 5 5-5 M12 15V3',
   'arrow-up': 'M12 19V5 M5 12l7-7 7 7',
   'arrow-down': 'M12 5v14 M5 12l7 7 7-7',
+  sync: 'M17 2l4 4-4 4 M21 6H8 M3 22l-4-4 4-4 M0 18h13 M16 8v8 M8 8v8',
   search: 'M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16z M21 21l-4.3-4.3',
   edit: 'M12 20h9 M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z',
   terminal: 'M4 17l6-6-6-6 M12 19h8',

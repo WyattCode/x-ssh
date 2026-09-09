@@ -164,6 +164,15 @@ const api = {
       ipcRenderer.invoke(IPC.sftpUploadDir, sessionId, remoteDir, concurrency, overwrite),
     uploadPaths: (sessionId: string, remoteDir: string, paths: string[], concurrency?: number, overwrite?: UploadOverwrite): Promise<SftpResult> =>
       ipcRenderer.invoke(IPC.sftpUploadPaths, sessionId, remoteDir, paths, concurrency, overwrite),
+    sync: (
+      sessionId: string,
+      localDir: string,
+      remoteDir: string,
+      mode: 'up' | 'down' | 'both',
+      deleteExtras: boolean,
+      concurrency?: number
+    ): Promise<SftpResult> =>
+      ipcRenderer.invoke(IPC.sftpSync, sessionId, localDir, remoteDir, mode, deleteExtras, concurrency),
     packDownload: (
       sessionId: string,
       items: { path: string; name: string; isDir: boolean }[],

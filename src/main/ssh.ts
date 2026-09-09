@@ -1003,6 +1003,202 @@ export class SshManager {
     return this.posixJoin(dir, `${stem} (${Date.now()})${ext}`)
   }
 
+  /** Full stat incl. mtime, or null on error. ssh2 Stats exposes mtime (sec)
+   *  and mtimeMs (ms); convert to ms uniformly for cross-side comparison. */
+  private statFull(sftp: SFTPWrapper, path: string): Promise<{ size: number; mtimeMs: number } | null> {
+    return new Promise((res) =>
+      sftp.stat(path, (e, s) => {
+        if (e) return res(null)
+        const attrs = s as { size: number; mtime?: number; mtimeMs?: number }
+        res({ size: attrs.size, mtimeMs: attrs.mtimeMs ?? (attrs.mtime ?? 0) * 1000 })
+      })
+    )
+  }
+
+  /** Recursively enumerates a local directory into rel-path → {size, mtime}. */
+  private async walkLocalTree(dir: string, base: string, map: Map<string, { size: number; mtimeMs: number }>): Promise<void> {
+    let items: import('node:fs').Dirent[]
+    try {
+      items = await readdir(this.longPath(dir), { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const it of items) {
+      const abs = join(dir, it.name)
+      const rel = this.posixJoin(base, it.name)
+      if (it.isDirectory()) await this.walkLocalTree(abs, rel, map)
+      else if (it.isFile()) {
+        try {
+          const st = await stat(this.longPath(abs))
+          map.set(rel, { size: st.size, mtimeMs: st.mtimeMs })
+        } catch {
+          /* skip */
+        }
+      }
+    }
+  }
+
+  /** Recursively enumerates a remote directory into rel-path → {size, mtime}. */
+  private async walkRemoteTree(sftp: SFTPWrapper, dir: string, base: string, map: Map<string, { size: number; mtimeMs: number }>): Promise<void> {
+    let list: { filename: string; attrs: { size: number; isDirectory(): boolean } }[]
+    try {
+      list = await this.readdirFull(sftp, dir)
+    } catch {
+      return
+    }
+    for (const it of list) {
+      const rel = this.posixJoin(base, it.filename)
+      if (it.attrs.isDirectory()) {
+        await this.walkRemoteTree(sftp, this.posixJoin(dir, it.filename), rel, map)
+      } else {
+        const st = await this.statFull(sftp, this.posixJoin(dir, it.filename))
+        if (st) map.set(rel, st)
+      }
+    }
+  }
+
+  /** Mirrors a local <-> remote directory tree, transferring only the files
+   *  that differ (size or mtime) — an rsync-style incremental sync. `mode`:
+   *   - 'up':   local is the source of truth (newer/different local files win).
+   *   - 'down': remote is the source of truth.
+   *   - 'both': the newer of the two sides wins per file.
+   *  When `deleteExtras` is on for a one-way mode, files absent from the source
+   *  are removed at the destination. `keepNewer` (both) avoids deleting. */
+  async syncJob(
+    sessionId: string,
+    localDir: string,
+    remoteDir: string,
+    mode: 'up' | 'down' | 'both',
+    deleteExtras: boolean,
+    jobId: string,
+    concurrency?: number,
+    rateBytesPerSec = 0
+  ): Promise<void> {
+    this.jobSession.set(jobId, sessionId)
+    if (rateBytesPerSec > 0) this.jobRate.set(jobId, rateBytesPerSec)
+    const conc = clampConcurrency(concurrency ?? SshManager.CONCURRENCY, SshManager.CONCURRENCY)
+    const sftp = await this.getSftp(sessionId).catch((e) => {
+      this.jobSession.delete(jobId)
+      throw e
+    })
+
+    const localMap = new Map<string, { size: number; mtimeMs: number }>()
+    const remoteMap = new Map<string, { size: number; mtimeMs: number }>()
+    await Promise.all([
+      this.walkLocalTree(localDir, '', localMap),
+      this.walkRemoteTree(sftp, remoteDir, '', remoteMap)
+    ])
+
+    // Plan: each entry is a transfer (dir up/down) or a deletion.
+    interface FilePlan { dir: 'up' | 'down'; local: string; remote: string; rel: string; size: number }
+    const plan: FilePlan[] = []
+    const deletions: { rel: string; dir: 'up' | 'down' }[] = []
+    const all = new Set<string>([...localMap.keys(), ...remoteMap.keys()])
+    for (const rel of all) {
+      const L = localMap.get(rel)
+      const R = remoteMap.get(rel)
+      const lp = this.safeLocalJoin(localDir, rel)
+      const rp = this.posixJoin(remoteDir, rel)
+      const newer = (a: { mtimeMs: number }, b: { mtimeMs: number }): boolean => a.mtimeMs > b.mtimeMs
+      if (mode === 'up' || mode === 'both') {
+        if (L && (!R || L.size !== R.size || newer(L, R))) plan.push({ dir: 'up', local: lp, remote: rp, rel, size: L.size })
+      }
+      if (mode === 'down') {
+        if (R && (!L || R.size !== L.size || newer(R, L))) plan.push({ dir: 'down', local: lp, remote: rp, rel, size: R.size })
+      }
+      if (mode === 'both' && L && R && L.size !== R.size) {
+        // Same plan computed above for up; add a down plan when remote is newer.
+        // (up plan already covers remote-missing/newer-local; add newer-remote -> down.)
+        if (newer(R, L)) plan.push({ dir: 'down', local: lp, remote: rp, rel, size: R.size })
+      }
+      if (deleteExtras && mode === 'up' && !L && R) deletions.push({ rel, dir: 'up' })
+      if (deleteExtras && mode === 'down' && !R && L) deletions.push({ rel, dir: 'down' })
+    }
+
+    let bytesDone = 0
+    let filesDone = 0
+    let errors = 0
+    const knownTotal = plan.reduce((a, p) => a + p.size, 0)
+    const totalPlanned = plan.length + deletions.length
+    const emit = (rel: string, dir: 'up' | 'down' = 'up', done?: boolean, error?: string): void =>
+      this.emitProgress({
+        id: jobId,
+        name: rel,
+        direction: dir,
+        transferred: bytesDone,
+        total: knownTotal,
+        count: totalPlanned,
+        index: filesDone,
+        localDir,
+        remoteDir,
+        done,
+        error
+      })
+
+    const worker = async (): Promise<void> => {
+      for (;;) {
+        if (this.cancelledJobs.has(jobId)) return
+        const item = plan.shift()
+        if (!item) return
+        let read: Readable | undefined
+        let write: Writable | undefined
+        try {
+          emit(item.rel, item.dir)
+          // Ensure the destination directory exists (files are shuffled, so a
+          // deep file may be picked before its parents were created).
+          const destDir = item.dir === 'up' ? this.parentOf(item.remote) : this.parentOf(item.local)
+          if (item.dir === 'up') await this.ensureRemoteDir(sftp, destDir)
+          else await mkdir(this.longPath(destDir), { recursive: true })
+          if (item.dir === 'up') {
+            write = sftp.createWriteStream(item.remote)
+            read = createReadStream(this.longPath(item.local))
+          } else {
+            write = createWriteStream(this.longPath(item.local))
+            read = sftp.createReadStream(item.remote)
+          }
+          await this.pipeStream(jobId, read, write, (n) => {
+            bytesDone += n
+            emit(item.rel, item.dir)
+          })
+          filesDone++
+        } catch {
+          read?.destroy()
+          write?.destroy()
+          if (this.cancelledJobs.has(jobId)) return
+          errors++
+        }
+      }
+    }
+
+    emit('', 'up')
+    const workers = Promise.all(Array.from({ length: conc }, () => worker()))
+    await workers
+
+    // Apply deletions (asymptotic, after transfers) for one-way + deleteExtras.
+    for (const d of deletions) {
+      if (this.cancelledJobs.has(jobId)) break
+      try {
+        if (d.dir === 'up') await this.deletePath(sessionId, this.posixJoin(remoteDir, d.rel), false)
+        else await unlink(this.longPath(this.safeLocalJoin(localDir, d.rel)))
+      } catch {
+        errors++
+      }
+    }
+
+    if (this.cancelledJobs.has(jobId)) emit('', 'up', false, '已取消')
+    else if (errors) emit('', 'up', false, `${errors} 项失败`)
+    else {
+      const t = bytesDone || 1
+      this.emitProgress({ id: jobId, name: '同步', direction: 'up', transferred: t, total: t, count: totalPlanned, done: true })
+    }
+    this.cancelledJobs.delete(jobId)
+    this.pausedJobs.delete(jobId)
+    this.jobRate.delete(jobId)
+    this.lastProgressAt.delete(jobId)
+    this.jobSession.delete(jobId)
+  }
+
+
   /** Pipes readable→writable, reporting byte deltas; abortable via the job id
    *  (its abort is one of possibly several registered under that job). Honors
    *  pause and a per-job byte rate (leaky bucket) so a transfer can be stopped
@@ -1492,6 +1688,19 @@ export class SshManager {
   async mkdir(sessionId: string, path: string): Promise<void> {
     const sftp = await this.getSftp(sessionId)
     await new Promise<void>((res, rej) => sftp.mkdir(path, (e) => (e ? rej(e) : res())))
+  }
+
+  /** Recursively ensures a remote directory (and its ancestors) exist. Errors
+   *  on an existing dir are ignored (idempotent); a genuinely unwritable parent
+   *  surfaces via the child upload instead. */
+  private async ensureRemoteDir(sftp: SFTPWrapper, path: string): Promise<void> {
+    const parent = this.parentOf(path)
+    if (parent && parent !== path && parent !== '.' && parent !== '/') {
+      await this.ensureRemoteDir(sftp, parent)
+    }
+    await new Promise<void>((res) => {
+      sftp.mkdir(path, () => res())
+    })
   }
 
   /** Creates an empty file, failing if it already exists. */
