@@ -34,6 +34,8 @@ let sshManager: SshManager | null = null
 // setting and rebuilt when it opens, so a language change takes effect live.
 let tray: Tray | null = null
 let quitting = false
+/** The currently-visible main window (single-window app), for tray balloon use. */
+let mainWindow: BrowserWindow | null = null
 /** Cached copy of the `minimizeToTray` setting, kept in sync by the setter. */
 let minimizeToTray = false
 async function buildTrayMenu(win: BrowserWindow): Promise<Electron.Menu> {
@@ -236,8 +238,22 @@ async function defaultTransferRate(): Promise<number> {
 }
 
 function notify(title: string, body: string, sound = false): void {
-  if (!Notification.isSupported()) return
-  new Notification({ title, body, silent: !sound }).show()
+  if (Notification.isSupported()) {
+    new Notification({ title, body, silent: !sound }).show()
+  }
+  // When the main window is hidden/minimized to the tray (or in the background),
+  // also pop a balloon off the tray icon so the event isn't missed (Windows).
+  const hidden =
+    !mainWindow ||
+    mainWindow.isDestroyed() ||
+    (mainWindow.isMinimized() ? true : !mainWindow.isVisible())
+  if (hidden && tray && process.platform === 'win32') {
+    try {
+      tray.displayBalloon({ title, content: body, iconType: 'info' })
+    } catch {
+      /* balloon unsupported (old Windows) — the system notification above covers it */
+    }
+  }
 }
 
 // ---- Scheduled automatic backups ----
@@ -542,6 +558,7 @@ function createWindow(saved?: SavedBounds, prefs: UiPrefs = {}): void {
   })
 
   if (useSaved && saved!.maximized) win.maximize()
+  mainWindow = win
 
   // Remember the size (debounced) so it restores next launch. Position is
   // deliberately not saved: the window always opens centered.
@@ -631,6 +648,7 @@ function createWindow(saved?: SavedBounds, prefs: UiPrefs = {}): void {
     sshManager?.disposeAll()
     sshManager = null
     targetSender = null
+    mainWindow = null
   })
 }
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive, ref, nextTick } from 'vue'
+import { reactive, ref, computed, nextTick } from 'vue'
 import { useSessions, type Tab } from '../stores/sessions'
 import { useTheme } from '../composables/theme'
 import { useI18n } from '../lib/i18n'
@@ -9,6 +9,29 @@ const store = useSessions()
 const { mode, toggle } = useTheme()
 const { t } = useI18n()
 const modKey = /mac|iphone|ipad/i.test(navigator.platform || navigator.userAgent) ? '⌘' : 'Ctrl'
+
+// ---- Tab search / filter ----
+const filterOpen = ref(false)
+const filterQuery = ref('')
+const filterEl = ref<HTMLInputElement>()
+function toggleFilter(): void {
+  filterOpen.value = !filterOpen.value
+  if (filterOpen.value) nextTick(() => filterEl.value?.focus())
+  else filterQuery.value = ''
+}
+/** Tabs matching the filter (by title or the underpinning host label). */
+const visibleTabs = computed(() => {
+  const q = filterQuery.value.trim().toLowerCase()
+  if (!q) return store.tabs
+  return store.tabs.filter((tab) => {
+    if (tab.title.toLowerCase().includes(q)) return true
+    if (tab.hostId) {
+      const h = store.hosts.find((x) => x.id === tab.hostId)
+      if (h && (`${h.label} ${h.username}@${h.host}`.toLowerCase().includes(q))) return true
+    }
+    return false
+  })
+})
 
 const dragging = ref('')
 const dropTarget = ref('')
@@ -87,7 +110,7 @@ function cancelRename(): void {
   <div class="tabbar">
     <div class="tabs">
       <div
-        v-for="tab in store.tabs"
+        v-for="tab in visibleTabs"
         :key="tab.id"
         class="tab"
         :class="{ active: tab.id === store.activeId, dragging: dragging === tab.id, 'drop-target': dropTarget === tab.id }"
@@ -123,6 +146,21 @@ function cancelRename(): void {
         <span class="close" :title="t('tabbar.close')" @click.stop="store.closeTabSafe(tab.id)"><Icon name="close" :size="13" /></span>
       </div>
     </div>
+    <div v-if="filterOpen" class="filter-box">
+      <Icon name="search" :size="14" />
+      <input
+        ref="filterEl"
+        v-model="filterQuery"
+        class="filter-input"
+        :placeholder="t('tabbar.filter')"
+        spellcheck="false"
+        @keydown.esc.prevent="toggleFilter"
+      />
+      <span class="filter-count">{{ visibleTabs.length }}/{{ store.tabs.length }}</span>
+    </div>
+    <button class="tool" :class="{ on: filterOpen }" :title="t('tabbar.filter')" @click="toggleFilter">
+      <Icon name="search" :size="16" />
+    </button>
     <button class="new" :title="t('tabbar.newConn', { key: `${modKey}+K` })" @click="store.togglePalette(true)">
       <Icon name="plus" :size="17" />
     </button>
@@ -305,9 +343,36 @@ function cancelRename(): void {
   background: var(--border-strong);
   color: var(--text);
 }
-.new,
-.tool {
+.filter-box {
   display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text-faint);
+  -webkit-app-region: no-drag;
+}
+.filter-input {
+  width: 128px;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font-size: 12px;
+}
+.filter-input::placeholder {
+  color: var(--text-faint);
+}
+.filter-count {
+  font-size: 11px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+.new,
+.tool {  display: flex;
   align-items: center;
   justify-content: center;
   width: 28px;

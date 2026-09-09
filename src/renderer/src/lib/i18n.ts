@@ -558,6 +558,7 @@ const zh: Dict = {
   'tabbar.reconnect': '重新连接',
   'tabbar.duplicate': '复制会话',
   'tabbar.rename': '重命名',
+  'tabbar.filter': '过滤标签…',
   'tabbar.closeTab': '关闭',
   'tabbar.closeOthers': '关闭其他'
 }
@@ -1103,6 +1104,7 @@ const en: Dict = {
   'tabbar.reconnect': 'Reconnect',
   'tabbar.duplicate': 'Duplicate session',
   'tabbar.rename': 'Rename',
+  'tabbar.filter': 'Filter tabs…',
   'tabbar.closeTab': 'Close',
   'tabbar.closeOthers': 'Close others'
 }
