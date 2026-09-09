@@ -481,6 +481,9 @@ watch(
       menu.open = moreMenu.open = historyMenu.open = bookmarksMenu.open = perm.open = false
       localMenu.open = false
       menu.target = null
+      // Leave any continuous sync on the previous session.
+      if (old[0]) void window.api.sftp.watchStop(old[0])
+      watchActive.value = false
     }
     if (open && sid) {
       homePath.value = ''
@@ -984,20 +987,37 @@ function runMore(fn: () => void): void {
   fn()
 }
 // ---- Incremental sync (rsync-style) ----
-const sync = reactive({ open: false, local: '', remote: '', mode: 'both' as 'up' | 'down' | 'both', del: false })
+const sync = reactive({ open: false, local: '', remote: '', mode: 'both' as 'up' | 'down' | 'both', del: false, watch: false, interval: 5 })
+const watchActive = ref(false)
 function openSyncDialog(): void {
   if (!props.sessionId) return
   sync.local = localPath.value
   sync.remote = path.value
   sync.mode = 'both'
   sync.del = false
+  sync.watch = false
+  sync.interval = 5
   sync.open = true
 }
 async function startSync(): Promise<void> {
   if (!props.sessionId || !sync.local || !sync.remote) return
   sync.open = false
+  // Continuous mode keeps a background watcher alive on the session.
+  if (sync.watch) {
+    const r = await window.api.sftp.watchStart(
+      props.sessionId, sync.local, sync.remote, sync.mode, sync.del, sync.interval
+    )
+    if (r.ok) watchActive.value = true
+    else error.value = r.error ?? tt('sfp.syncFail')
+    return
+  }
   const r = await window.api.sftp.sync(props.sessionId, sync.local, sync.remote, sync.mode, sync.del, store.transferConcurrency)
   if (!r.ok) error.value = r.error ?? tt('sfp.syncFail')
+}
+async function stopWatch(): Promise<void> {
+  if (!props.sessionId) return
+  await window.api.sftp.watchStop(props.sessionId)
+  watchActive.value = false
 }
 function openHistory(): void {
   // The history menu is wider (300px) than the more-menu it inherits its anchor
@@ -1289,7 +1309,8 @@ const pct = (t: SftpProgress): number =>
         <button @click="runMore(uploadDirPick)"><Icon name="folder-up" :size="15" /><span>{{ tt('sfp.uploadDir') }}</span></button>
         <button @click="runMore(uploadExtractPick)"><Icon name="zip" :size="15" /><span>{{ tt('sfp.uploadExtract') }}</span></button>
         <button @click="runMore(packDownloadSelected)"><Icon name="archive" :size="15" /><span>{{ tt('sfp.packDownload') }}</span></button>
-        <button @click="runMore(openSyncDialog)"><Icon name="sync" :size="15" /><span>{{ tt('sfp.sync') }}</span></button>
+        <button @click="runMore(openSyncDialog)"><Icon name="sync" :size="15" /><span>{{ tt('sfp.sync') }}<template v-if="watchActive"> · {{ tt('sfp.syncOn') }}</template></span></button>
+        <button v-if="watchActive" @click="runMore(stopWatch)"><Icon name="pause" :size="15" /><span>{{ tt('sfp.syncWatchStop') }}</span></button>
         <button @click="runMore(toggleHidden)"><Icon name="eye" :size="15" /><span>{{ showHidden ? tt('sfp.toggleHiddenHide') : tt('sfp.toggleHiddenShow') }}</span></button>
         <button v-if="hasTermCwd" @click="runMore(gotoTerminalDir)"><Icon name="terminal" :size="15" /><span>{{ tt('sfp.gotoTerminal') }}</span></button>
         <button @click="runMore(openHistory)"><Icon name="clock" :size="15" /><span>{{ tt('sfp.history') }}{{ activeHistory.length ? ` (${activeHistory.length})` : '' }}</span></button>
@@ -1634,6 +1655,14 @@ const pct = (t: SftpProgress): number =>
             <option value="down">{{ tt('sfp.syncDown') }}</option>
           </select>
         </label>
+        <label class="pm-recur">
+          <input v-model="sync.watch" type="checkbox" />
+          <span>{{ tt('sfp.syncWatch') }}</span>
+        </label>
+        <label v-if="sync.watch" class="sync-field">
+          <span>{{ tt('sfp.syncWatchInterval') }}</span>
+          <input v-model.number="sync.interval" type="number" min="1" max="3600" />
+        </label>
         <label v-if="sync.mode !== 'both'" class="pm-recur">
           <input v-model="sync.del" type="checkbox" />
           <span>{{ tt('sfp.syncDelete') }}</span>
@@ -1642,7 +1671,7 @@ const pct = (t: SftpProgress): number =>
         <div class="pm-foot">
           <button class="pm-btn ghost" @click="sync.open = false">{{ tt('sfp.cancel') }}</button>
           <button class="pm-btn primary" :disabled="!sync.local || !sync.remote" @click="startSync">
-            {{ tt('sfp.syncStart') }}
+            {{ sync.watch ? tt('sfp.syncWatchStart') : tt('sfp.syncStart') }}
           </button>
         </div>
       </div>

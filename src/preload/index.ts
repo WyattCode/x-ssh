@@ -173,6 +173,17 @@ const api = {
       concurrency?: number
     ): Promise<SftpResult> =>
       ipcRenderer.invoke(IPC.sftpSync, sessionId, localDir, remoteDir, mode, deleteExtras, concurrency),
+    watchStart: (
+      sessionId: string,
+      localDir: string,
+      remoteDir: string,
+      mode: 'up' | 'down' | 'both',
+      deleteExtras: boolean,
+      intervalSec: number
+    ): Promise<{ ok: boolean; watchId?: string; error?: string }> =>
+      ipcRenderer.invoke(IPC.sftpWatchStart, sessionId, localDir, remoteDir, mode, deleteExtras, intervalSec),
+    watchStop: (sessionId: string): Promise<{ ok: boolean }> =>
+      ipcRenderer.invoke(IPC.sftpWatchStop, sessionId),
     packDownload: (
       sessionId: string,
       items: { path: string; name: string; isDir: boolean }[],

@@ -5,6 +5,7 @@ import { useI18n } from '../lib/i18n'
 import { useToast } from '../composables/toast'
 import { useConfirm } from '../composables/confirm'
 import Icon from './Icon.vue'
+import { PRESETS } from '../lib/terminalThemes'
 import type { AuthMethod, ForwardMode, Host, ManagedKey } from '../../../shared/types'
 
 const props = defineProps<{ open: boolean; host: Host | null }>()
@@ -41,6 +42,8 @@ const form = reactive({
   group: '',
   jumpHostId: '',
   color: '',
+  terminalTheme: '',
+  terminalFontFamily: '',
   agentForward: false,
   onConnect: '',
   onConnectDelayMs: 0,
@@ -73,6 +76,8 @@ watch(
       group: h?.group ?? '',
       jumpHostId: h?.jumpHostId ?? '',
       color: h?.color ?? '',
+      terminalTheme: h?.terminalTheme ?? '',
+      terminalFontFamily: h?.terminalFontFamily ?? '',
       agentForward: !!h?.agentForward,
       onConnect: h?.onConnect ?? '',
       onConnectDelayMs: h?.onConnectDelayMs ?? 0,
@@ -208,6 +213,8 @@ async function save(): Promise<void> {
     group: form.group.trim() || undefined,
     jumpHostId: form.jumpHostId || undefined,
     color: form.color.trim() || undefined,
+    terminalTheme: form.terminalTheme || undefined,
+    terminalFontFamily: form.terminalFontFamily.trim() || undefined,
     agentForward: form.agentForward || undefined,
     onConnect: form.onConnect.trim() || undefined,
     onConnectDelayMs: Number(form.onConnectDelayMs) > 0 ? Number(form.onConnectDelayMs) : undefined,
@@ -305,6 +312,22 @@ async function remove(): Promise<void> {
             <input v-model="form.color" type="color" />
           </label>
         </div>
+      </div>
+
+      <div class="grid">
+        <label class="field grow">
+          <span>{{ t('host.termTheme') }}</span>
+          <div class="select-wrap">
+            <select v-model="form.terminalTheme">
+              <option value="">{{ t('host.termThemeSystem') }}</option>
+              <option v-for="p in PRESETS" :key="p.id" :value="p.id">{{ p.label }}</option>
+            </select>
+          </div>
+        </label>
+        <label class="field grow">
+          <span>{{ t('host.termFont') }}</span>
+          <input v-model="form.terminalFontFamily" :placeholder="t('host.termFontPh')" spellcheck="false" />
+        </label>
       </div>
 
       <div class="field">

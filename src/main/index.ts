@@ -1176,6 +1176,30 @@ function registerIpc(): void {
     }
   )
   ipcMain.handle(
+    IPC.sftpWatchStart,
+    async (
+      _e,
+      sessionId: string,
+      localDir: string,
+      remoteDir: string,
+      mode: 'up' | 'down' | 'both',
+      deleteExtras: boolean,
+      intervalSec: number
+    ) => {
+      if (!sshManager) return { ok: false, error: '窗口未就绪' }
+      try {
+        const watchId = await sshManager.startWatchSync(sessionId, localDir, remoteDir, mode, deleteExtras, intervalSec)
+        return { ok: true, watchId }
+      } catch (e) {
+        return { ok: false, error: friendlyError((e as Error).message) }
+      }
+    }
+  )
+  ipcMain.handle(IPC.sftpWatchStop, (_e, sessionId: string) => {
+    sshManager?.stopWatchSyncsForSession(sessionId)
+    return { ok: true }
+  })
+  ipcMain.handle(
     IPC.sftpPackDownload,
     async (
       _e,

@@ -56,6 +56,8 @@ export const IPC = {
   sftpUploadDir: 'sftp:uploadDir',
   sftpUploadPaths: 'sftp:uploadPaths',
   sftpSync: 'sftp:sync', // incremental local<->remote directory sync
+  sftpWatchStart: 'sftp:watchStart', // start a continuous (polling) auto-sync
+  sftpWatchStop: 'sftp:watchStop', // stop the session's continuous auto-sync
   sftpMkdir: 'sftp:mkdir',
   sftpCreateFile: 'sftp:createFile',
   sftpRename: 'sftp:rename',

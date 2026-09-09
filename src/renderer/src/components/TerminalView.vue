@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, ref, reactive, watch, nextTick } from 'vue'
+import { onMounted, onBeforeUnmount, ref, reactive, computed, watch, nextTick } from 'vue'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
@@ -35,6 +35,16 @@ const { mode } = useTheme()
 const { size: fontSize } = useFontSize()
 const store = useSessions()
 const { t } = useI18n()
+
+// Per-host terminal overrides (fall back to the global settings).
+const host = computed(() => {
+  const h = store.paneBySession(props.sessionId)?.params.hostId
+  return h ? store.hosts.find((x) => x.id === h) : undefined
+})
+const hostThemeId = computed(() => host.value?.terminalTheme || '')
+const hostFontFamily = computed(() => host.value?.terminalFontFamily || '')
+const currentTheme = (): ReturnType<typeof themeFor> =>
+  themeFor(mode.value, hostThemeId.value || store.terminalTheme)
 
 const DEFAULT_FONT =
   "'SFMono-Regular','Cascadia Code','JetBrains Mono',Menlo,Consolas,monospace"
@@ -208,14 +218,14 @@ function openLink(uri: string): void {
 onMounted(() => {
   if (!el.value) return
   term = new Terminal({
-    fontFamily: fontFamilyFor(store.terminalFontFamily),
+    fontFamily: fontFamilyFor(hostFontFamily.value || store.terminalFontFamily),
     lineHeight: 1.25,
     letterSpacing: 0,
     cursorBlink: true,
     cursorStyle: store.terminalCursor,
     scrollback: 10000,
     fontSize: fontSize.value,
-    theme: themeFor(mode.value, store.terminalTheme),
+    theme: currentTheme(),
     allowProposedApi: true,
     // OSC 8 hyperlinks (what a program like Codex emits). Without this, xterm's
     // own default pops a native confirm() and then tries window.open(), which
@@ -384,17 +394,14 @@ watch(
 )
 
 // Restyle live terminals when the day/night theme changes.
-watch(mode, (m) => {
-  if (term) term.options.theme = themeFor(m, store.terminalTheme)
+watch(mode, () => {
+  if (term) term.options.theme = currentTheme()
 })
 
-// Apply a user-selected terminal color scheme live.
-watch(
-  () => store.terminalTheme,
-  (t) => {
-    if (term) term.options.theme = themeFor(mode.value, t)
-  }
-)
+// Apply a user-selected terminal color scheme (global or per-host) live.
+watch([() => store.terminalTheme, hostThemeId], () => {
+  if (term) term.options.theme = currentTheme()
+})
 
 // Keep every terminal's font size in sync with the shared setting.
 watch(fontSize, (s) => {
@@ -409,7 +416,16 @@ watch(
   () => store.terminalFontFamily,
   (f) => {
     if (term) {
-      term.options.fontFamily = fontFamilyFor(f)
+      term.options.fontFamily = fontFamilyFor(hostFontFamily.value || f)
+      doFit()
+    }
+  }
+)
+watch(
+  hostFontFamily,
+  (f) => {
+    if (term) {
+      term.options.fontFamily = fontFamilyFor(f || store.terminalFontFamily)
       doFit()
     }
   }

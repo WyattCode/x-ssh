@@ -57,6 +57,20 @@ interface Session {
   logging?: boolean
 }
 
+/** A running continuous-sync watcher (polls both trees for changes). */
+interface WatchSyncState {
+  sessionId: string
+  localDir: string
+  remoteDir: string
+  mode: 'up' | 'down' | 'both'
+  deleteExtras: boolean
+  /** Baseline snapshots (rel → {size, mtimeMs}) from the last completed pass. */
+  baselineLocal: Map<string, { size: number; mtimeMs: number }>
+  baselineRemote: Map<string, { size: number; mtimeMs: number }>
+  timer: ReturnType<typeof setTimeout> | null
+  busy: boolean
+}
+
 /**
  * Owns all live SSH connections. One shell channel per session.
  * Data flows: renderer keystroke -> write(); server output -> IPC sshData.
@@ -73,6 +87,10 @@ export class SshManager {
   private jobRate = new Map<string, number>()
   /** jobId → sessionId, so progress events can be tagged for the right pane. */
   private jobSession = new Map<string, string>()
+  /** Jobs that run silently (continuous sync) — progress is not sent to the UI. */
+  private quietJobs = new Set<string>()
+  /** Active continuous-sync watchers keyed by watch id. */
+  private watchSyncs = new Map<string, WatchSyncState>()
   /** Connection multiplexing: one shared ssh2 Client per host-key, opened on
    *  demand (opt-in via the `multiplex` param). refs counts live sessions. */
   private masters = new Map<string, { client: Client; refs: number; sessions: Set<string>; jumpClient: Client | null; sock?: Duplex }>()
@@ -1098,6 +1116,8 @@ export class SshManager {
   private static readonly PROGRESS_INTERVAL = 100
 
   private emitProgress(p: SftpProgress): void {
+    // Continuous-sync jobs run silently: no per-file progress, no UI toasts.
+    if (this.quietJobs.has(p.id)) return
     // A big folder produces a progress tick per chunk per file — tens of
     // thousands of IPC messages that would starve the renderer for no visible
     // gain. Rate-limit the running updates; done/error always go through.
@@ -1227,9 +1247,11 @@ export class SshManager {
     deleteExtras: boolean,
     jobId: string,
     concurrency?: number,
-    rateBytesPerSec = 0
+    rateBytesPerSec = 0,
+    quiet = false
   ): Promise<void> {
     this.jobSession.set(jobId, sessionId)
+    if (quiet) this.quietJobs.add(jobId)
     if (rateBytesPerSec > 0) this.jobRate.set(jobId, rateBytesPerSec)
     const conc = clampConcurrency(concurrency ?? SshManager.CONCURRENCY, SshManager.CONCURRENCY)
     const sftp = await this.getSftp(sessionId).catch((e) => {
@@ -1357,6 +1379,134 @@ export class SshManager {
     this.jobRate.delete(jobId)
     this.lastProgressAt.delete(jobId)
     this.jobSession.delete(jobId)
+    this.quietJobs.delete(jobId)
+  }
+
+  // ---- Continuous sync (watch) ----
+  /** Compares two map snapshots for any membership/size/mtime difference. */
+  private static mapsDiffer(
+    a: Map<string, { size: number; mtimeMs: number }>,
+    b: Map<string, { size: number; mtimeMs: number }>
+  ): boolean {
+    if (a.size !== b.size) return true
+    for (const [k, va] of a) {
+      const vb = b.get(k)
+      if (!vb || va.size !== vb.size || va.mtimeMs !== vb.mtimeMs) return true
+    }
+    return false
+  }
+
+  /** Refreshes a watch state's baseline snapshot from both trees. */
+  private async refreshWatchBaseline(state: WatchSyncState): Promise<void> {
+    const local = new Map<string, { size: number; mtimeMs: number }>()
+    const remote = new Map<string, { size: number; mtimeMs: number }>()
+    try {
+      const sftp = await this.getSftp(state.sessionId)
+      await Promise.all([
+        this.walkLocalTree(state.localDir, '', local),
+        this.walkRemoteTree(sftp, state.remoteDir, '', remote)
+      ])
+    } catch {
+      /* leave partial maps; a later pass will retry */
+    }
+    state.baselineLocal = local
+    state.baselineRemote = remote
+  }
+
+  /** Starts a background watcher that auto-syncs a local↔remote dir pair
+   *  whenever either side changes (polling both trees at `intervalSec`). */
+  async startWatchSync(
+    sessionId: string,
+    localDir: string,
+    remoteDir: string,
+    mode: 'up' | 'down' | 'both',
+    deleteExtras: boolean,
+    intervalSec: number
+  ): Promise<string> {
+    // One watcher per session keeps the UI state unambiguous.
+    this.stopWatchSyncsForSession(sessionId)
+    const watchId = randomUUID()
+    const state: WatchSyncState = {
+      sessionId,
+      localDir,
+      remoteDir,
+      mode,
+      deleteExtras,
+      baselineLocal: new Map(),
+      baselineRemote: new Map(),
+      timer: null,
+      busy: false
+    }
+    this.watchSyncs.set(watchId, state)
+    await this.refreshWatchBaseline(state)
+    if (!this.watchSyncs.get(watchId)) return watchId // stopped while priming
+    const interval = Math.max(1000, (intervalSec > 0 ? intervalSec : 5) * 1000)
+    state.timer = setInterval(() => void this.runWatchPass(watchId), interval)
+    return watchId
+  }
+
+  stopWatchSync(watchId: string): void {
+    const state = this.watchSyncs.get(watchId)
+    if (!state) return
+    if (state.timer) clearInterval(state.timer)
+    this.watchSyncs.delete(watchId)
+  }
+
+  /** Stops every watcher bound to a session (called on disconnect/quit). */
+  stopWatchSyncsForSession(sessionId: string): void {
+    for (const [id, s] of this.watchSyncs) {
+      if (s.sessionId === sessionId) {
+        if (s.timer) clearInterval(s.timer)
+        this.watchSyncs.delete(id)
+      }
+    }
+  }
+
+  /** One polling pass: if either tree changed, run a silent sync of the pair. */
+  private async runWatchPass(watchId: string): Promise<void> {
+    const state = this.watchSyncs.get(watchId)
+    if (!state || state.busy) return
+    state.busy = true
+    try {
+      const local = new Map<string, { size: number; mtimeMs: number }>()
+      const remote = new Map<string, { size: number; mtimeMs: number }>()
+      try {
+        const sftp = await this.getSftp(state.sessionId)
+        await Promise.all([
+          this.walkLocalTree(state.localDir, '', local),
+          this.walkRemoteTree(sftp, state.remoteDir, '', remote)
+        ])
+      } catch {
+        return // link down or dir missing; retry next pass
+      }
+      const changed =
+        SshManager.mapsDiffer(state.baselineLocal, local) ||
+        SshManager.mapsDiffer(state.baselineRemote, remote)
+      if (changed) {
+        // Run silently (quiet): no progress/toasts for automatic syncs.
+        await this.syncJob(
+          state.sessionId,
+          state.localDir,
+          state.remoteDir,
+          state.mode,
+          state.deleteExtras,
+          randomUUID(),
+          undefined,
+          0,
+          true
+        ).catch(() => undefined)
+        // Re-baseline AFTER the sync, not from the stale pre-transfer snapshot.
+        // SFTP uploads stamp the destination mtime with the transfer time, so a
+        // pre-sync snapshot would report that file as "changed" on the next pass
+        // and re-sync it forever.
+        await this.refreshWatchBaseline(state)
+      } else {
+        state.baselineLocal = local
+        state.baselineRemote = remote
+      }
+    } finally {
+      state.busy = false
+    }
   }
 
 
@@ -2098,6 +2248,7 @@ export class SshManager {
     if (session.suppressTimer) clearTimeout(session.suppressTimer)
     this.closeForwards(session)
     this.stopLog(sessionId)
+    this.stopWatchSyncsForSession(sessionId)
     session.sftp?.end()
     session.stream?.end()
     if (masterKey) {
@@ -2113,12 +2264,15 @@ export class SshManager {
     for (const session of this.sessions.values()) {
       if (session.suppressTimer) clearTimeout(session.suppressTimer)
       this.stopLog(session.id)
+      this.stopWatchSyncsForSession(session.id)
       // Mark a clean close so a late client 'close' isn't misread as a drop.
       session.shellExit = true
       session.client.end()
     }
     this.sessions.clear()
     this.masters.clear()
+    for (const w of this.watchSyncs.values()) if (w.timer) clearInterval(w.timer)
+    this.watchSyncs.clear()
   }
 
   /** Cross-session output for the history-search panel (bounded per session). */

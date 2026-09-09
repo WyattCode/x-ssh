@@ -68,6 +68,10 @@ export interface Host {
   /** Optional last-used timestamp (ms) for sorting the palette. */
   lastUsedAt?: number
   color?: string
+  /** Per-host terminal color-scheme override (''/unset = use the global theme). */
+  terminalTheme?: string
+  /** Per-host terminal font-family override (unset = use the global font). */
+  terminalFontFamily?: string
   /** Runtime-only flag (not persisted): whether an encrypted password exists. */
   hasSavedPassword?: boolean
   /** Runtime-only flag: whether an encrypted key passphrase exists. */
