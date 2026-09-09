@@ -9,6 +9,8 @@ const store = useSessions()
 const { mode, toggle } = useTheme()
 const { t } = useI18n()
 const modKey = /mac|iphone|ipad/i.test(navigator.platform || navigator.userAgent) ? '⌘' : 'Ctrl'
+/** Layout/split operations need a connected active tab. */
+const canLayout = computed(() => store.activePane?.status === 'connected')
 
 // ---- Tab search / filter ----
 const filterOpen = ref(false)
@@ -75,6 +77,29 @@ function openTabMenu(e: MouseEvent, id: string): void {
 function run(action: (id: string) => void): void {
   action(menu.tabId)
   menu.open = false
+}
+
+// ---- Split / layout presets ----
+const layoutMenu = reactive({ open: false, x: 0, y: 0 })
+const presets: { label: string; rows: number; cols: number }[] = [
+  { label: '2', rows: 1, cols: 2 },
+  { label: '3', rows: 1, cols: 3 },
+  { label: '4', rows: 1, cols: 4 },
+  { label: '2×2', rows: 2, cols: 2 }
+]
+function openLayoutMenu(e: MouseEvent): void {
+  const b = (e.currentTarget as HTMLElement).getBoundingClientRect()
+  layoutMenu.x = Math.max(8, b.right - 184)
+  layoutMenu.y = b.bottom + 12
+  layoutMenu.open = true
+}
+function doSplit(dir: 'row' | 'col'): void {
+  layoutMenu.open = false
+  if (store.active) store.splitPane(store.active.id, dir)
+}
+function applyPreset(rows: number, cols: number): void {
+  layoutMenu.open = false
+  void store.applyLayoutPreset(rows, cols)
 }
 
 /** A tab's own accent color (from its saved host), if any. */
@@ -166,20 +191,12 @@ function cancelRename(): void {
     </button>
     <div class="drag-spacer" />
     <button
-      v-if="store.activePane?.status === 'connected'"
       class="tool"
-      :title="t('tabbar.split', { key: `${modKey}+Shift+D` })"
-      @click="store.active && store.splitPane(store.active.id, 'row')"
+      :class="{ on: layoutMenu.open }"
+      :title="t('tabbar.layout')"
+      @click.stop="openLayoutMenu"
     >
-      <Icon name="split" :size="16" />
-    </button>
-    <button
-      v-if="store.activePane?.status === 'connected'"
-      class="tool"
-      :title="t('tabbar.splitCol', { key: `${modKey}+Shift+\\` })"
-      @click="store.active && store.splitPane(store.active.id, 'col')"
-    >
-      <Icon name="rows" :size="16" />
+      <Icon name="layout" :size="16" />
     </button>
     <button
       v-if="store.activePane?.status === 'connected'"
@@ -205,6 +222,17 @@ function cancelRename(): void {
     >
       <Icon :name="mode === 'dark' ? 'sun' : 'moon'" :size="16" />
     </button>
+  </div>
+
+  <div v-if="layoutMenu.open" class="ctx-overlay" @mousedown="layoutMenu.open = false" @contextmenu.prevent="layoutMenu.open = false">
+    <div class="ctx layout-menu" :style="{ left: layoutMenu.x + 'px', top: layoutMenu.y + 'px' }" @mousedown.stop>
+      <button :disabled="!canLayout" @click="doSplit('row')">{{ t('tabbar.splitAction') }}</button>
+      <button :disabled="!canLayout" @click="doSplit('col')">{{ t('tabbar.splitColAction') }}</button>
+      <div class="sep" />
+      <button v-for="p in presets" :key="p.label" :disabled="!canLayout" @click="applyPreset(p.rows, p.cols)">
+        {{ t('tabbar.preset', { n: p.label }) }}
+      </button>
+    </div>
   </div>
 
   <div v-if="menu.open" class="ctx-overlay" @mousedown="menu.open = false" @contextmenu.prevent="menu.open = false">
@@ -427,6 +455,9 @@ function cancelRename(): void {
 .ctx button:disabled {
   color: var(--text-faint);
   cursor: default;
+}
+.ctx.layout-menu {
+  width: 184px;
 }
 .ctx .sep {
   height: 1px;

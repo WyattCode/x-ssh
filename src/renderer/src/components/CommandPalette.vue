@@ -169,27 +169,6 @@ const sections = computed<{ id: string; title: string; items: Item[] }[]>(() => 
       run: openBroadcast
     })
   }
-  // Split-layout presets: reset the active tab to a grid of the same target.
-  if (matchesAction('分屏布局 preset split grid columns rows')) {
-    const layouts: { label: string; rows: number; cols: number }[] = [
-      { label: '2', rows: 1, cols: 2 },
-      { label: '3', rows: 1, cols: 3 },
-      { label: '4', rows: 1, cols: 4 },
-      { label: '2×2', rows: 2, cols: 2 }
-    ]
-    for (const l of layouts) {
-      actions.push({
-        kind: 'action',
-        title: t('pal.layoutPreset', { n: l.label }),
-        sub: t('pal.layoutPresetDesc', { n: l.label }),
-        icon: 'grid',
-        run: () => {
-          store.togglePalette(false)
-          void store.applyLayoutPreset(l.rows, l.cols)
-        }
-      })
-    }
-  }
   add('actions', t('pal.actions'), actions)
 
   // Named session snapshots: capture & restore the whole tab layout.
