@@ -202,7 +202,7 @@ interface State {
   confirmPaste: boolean
   /** Strip non-printing control characters from pasted text (default on). */
   sanitizePaste: boolean
-  /** Confirm before closing a tab that still has a live session (default on). */
+  /** Confirm before closing a tab that still has a live session (default off). */
   confirmClose: boolean
   /** Default per-transfer rate cap (KiB/s; 0 = unlimited). */
   transferRateKbps: number
@@ -259,7 +259,7 @@ export const useSessions = defineStore('sessions', {
     paletteSeed: null,
     confirmPaste: true,
     sanitizePaste: true,
-    confirmClose: true,
+    confirmClose: false,
     transferRateKbps: 0,
     minimizeToTray: false
   }),
@@ -346,7 +346,7 @@ export const useSessions = defineStore('sessions', {
       this.keybindings = (await window.api.settings.get<Record<string, string>>('keybindings')) ?? {}
       this.confirmPaste = cp !== false
       this.sanitizePaste = sp !== false
-      this.confirmClose = (await window.api.settings.get<boolean>('confirmClose')) !== false
+      this.confirmClose = (await window.api.settings.get<boolean>('confirmClose')) === true
       this.transferRateKbps =
         (await window.api.settings.get<number>('transferRateKbps')) ?? 0
       this.minimizeToTray = (await window.api.settings.get<boolean>('minimizeToTray')) === true
