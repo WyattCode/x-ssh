@@ -73,10 +73,18 @@ export class SshManager {
   private jobRate = new Map<string, number>()
   /** jobId → sessionId, so progress events can be tagged for the right pane. */
   private jobSession = new Map<string, string>()
+  /** Connection multiplexing: one shared ssh2 Client per host-key, opened on
+   *  demand (opt-in via the `multiplex` param). refs counts live sessions. */
+  private masters = new Map<string, { client: Client; refs: number; sessions: Set<string>; jumpClient: Client | null; sock?: Duplex }>()
   /** Files transferred concurrently within one job. */
   private static readonly CONCURRENCY = 4
   /** How far a job's tree walk may run ahead of its transfer workers. */
   private static readonly QUEUE_MAX = 2000
+
+  private masterKey(params: ConnectParams): string {
+    const port = params.port || 22
+    return `${params.username}@${params.host}:${port}`
+  }
 
   /** Pauses/resumes a single transfer job (held mid-file). */
   pauseTransfer(id: string, paused: boolean): void {
@@ -650,6 +658,23 @@ export class SshManager {
 
   async connect(params: ConnectParams): Promise<ConnectResult> {
     const id = randomUUID()
+
+    // Connection multiplexing (opt-in): reuse an already-established link to
+    // the same user@host:port instead of a full re-handshake.
+    if (params.multiplex) {
+      const key = this.masterKey(params)
+      const m = this.masters.get(key)
+      if (m) {
+        m.refs++
+        m.sessions.add(id)
+        const session: Session = { id, client: m.client }
+        this.sessions.set(id, session)
+        const port = params.port || 22
+        session.label = `${params.username}@${params.host}${port !== 22 ? `:${port}` : ''}`
+        return this.openReuseShell(id, m.client, params)
+      }
+    }
+
     const client = new Client()
     this.sessions.set(id, { id, client })
 
@@ -735,6 +760,15 @@ export class SshManager {
       this.emit({ sessionId: id, status: 'connecting' })
 
       client.on('ready', () => {
+        // Multiplex (opt-in): register this fresh link as the master so later
+        // sessions to the same host can reuse it. Attach a teardown that, on a
+        // drop, closes every session sharing this connection.
+        if (params.multiplex && !this.masters.has(this.masterKey(params))) {
+          const m = { client, refs: 1, sessions: new Set<string>([id]), jumpClient, sock: config.sock as Duplex | undefined }
+          this.masters.set(this.masterKey(params), m)
+          client.on('close', () => this.teardownMaster(this.masterKey(params)))
+          client.on('error', () => this.teardownMaster(this.masterKey(params)))
+        }
         client.shell(
           { term: 'xterm-256color', cols: params.cols ?? 80, rows: params.rows ?? 24 },
           (err, stream) => {
@@ -842,6 +876,109 @@ export class SshManager {
         settle({ ok: false, error: friendlyError((err as Error).message) })
       }
     })
+  }
+
+  /** Opens a shell on an existing (multiplexed) master link for a new session,
+   *  wiring output exactly like the fresh-connect path. Does not end the shared
+   *  client when this session's shell closes — the master stays for its peers. */
+  private openReuseShell(id: string, client: Client, params: ConnectParams): Promise<ConnectResult> {
+    const key = this.masterKey(params)
+    return new Promise<ConnectResult>((resolve) => {
+      let settled = false
+      const settle = (r: ConnectResult): void => {
+        if (settled) return
+        settled = true
+        resolve(r)
+      }
+      this.emit({ sessionId: id, status: 'connecting' })
+      client.shell(
+        { term: 'xterm-256color', cols: params.cols ?? 80, rows: params.rows ?? 24 },
+        (err, stream) => {
+          if (err) {
+            const message = friendlyError(err.message)
+            this.emit({ sessionId: id, status: 'error', message })
+            this.releaseMaster(key, id)
+            this.sessions.delete(id)
+            return settle({ ok: false, error: message })
+          }
+          const session = this.sessions.get(id)
+          if (session) session.stream = stream
+          stream.on('data', (d: Buffer) => this.emitData(id, d.toString('utf8')))
+          stream.stderr.on('data', (d: Buffer) => this.sendData(id, d.toString('utf8')))
+          stream.on('close', () => {
+            const sess = this.sessions.get(id)
+            if (sess) sess.shellExit = true
+            if (sess) this.emit({ sessionId: id, status: 'closed' })
+            this.releaseMaster(key, id)
+            this.sessions.delete(id)
+          })
+          if (params.shellIntegration && session) {
+            session.suppressing = true
+            session.suppressBuf = ''
+            session.suppressTimer = setTimeout(() => this.stopSuppress(id, true), 2500)
+            stream.write(
+              "[ -n \"$BASH_VERSION\" ] && { export PROMPT_COMMAND='printf \"\\033]7;%s\\a\" \"$PWD\"; [ \"$__xsi\" ] && { read -r __n __r < <(history 1); case \"$__r\" in *__xsi*) history -d \"$__n\" 2>/dev/null;; esac; unset __xsi __n __r; }'\"${PROMPT_COMMAND:+;$PROMPT_COMMAND}\"; __xsi=1; }; printf '\\033[3J\\033[2J\\033[H'\n"
+            )
+          }
+          if (session && params.portForwards?.length) this.openForwards(session, params.portForwards)
+          if (params.onConnect) {
+            const delay = params.onConnectDelayMs ?? 0
+            if (delay > 0) setTimeout(() => stream.write(params.onConnect + '\n'), delay)
+            else stream.write(params.onConnect + '\n')
+          }
+          this.emit({ sessionId: id, status: 'connected' })
+          settle({ ok: true, sessionId: id })
+        }
+      )
+    })
+  }
+
+  /** Removes a session from a master's refcount; destroys the master when the
+   *  last session goes away. */
+  private releaseMaster(key: string, id: string): void {
+    const m = this.masters.get(key)
+    if (!m) return
+    m.sessions.delete(id)
+    m.refs--
+    if (m.refs <= 0) this.destroyMaster(key)
+  }
+
+  /** Closes every session on a leap that just dropped (network error/close). */
+  private teardownMaster(key: string): void {
+    const m = this.masters.get(key)
+    if (!m) return
+    for (const sid of [...m.sessions]) {
+      const s = this.sessions.get(sid)
+      if (s) {
+        this.emit({ sessionId: sid, status: 'error', message: '连接已断开' })
+        this.stopLog(sid)
+        s.stream?.end()
+        this.sessions.delete(sid)
+      }
+    }
+    m.jumpClient?.end()
+    m.sock?.destroy()
+    this.masters.delete(key)
+  }
+
+  /** Releases resources of a master whose last session disconnected. */
+  private destroyMaster(key: string): void {
+    const m = this.masters.get(key)
+    if (!m) return
+    const { client, jumpClient, sock } = m
+    this.masters.delete(key)
+    for (const sid of [...m.sessions]) {
+      const s = this.sessions.get(sid)
+      if (s) {
+        this.emit({ sessionId: sid, status: 'closed' })
+        this.stopLog(sid)
+        s.stream?.end()
+        this.sessions.delete(sid)
+      }
+    }
+    jumpClient?.end()
+    sock?.destroy()
+    client.end()
   }
 
   write(sessionId: string, data: string): void {
@@ -1925,11 +2062,25 @@ export class SshManager {
   disconnect(sessionId: string): void {
     const session = this.sessions.get(sessionId)
     if (!session) return
+    // If this session shares a multiplexed master, release the reference rather
+    // than ending the shared client (which would drop its peer sessions).
+    let masterKey: string | undefined
+    for (const [k, m] of this.masters) {
+      if (m.sessions.has(sessionId)) {
+        masterKey = k
+        break
+      }
+    }
     if (session.suppressTimer) clearTimeout(session.suppressTimer)
     this.closeForwards(session)
     this.stopLog(sessionId)
     session.sftp?.end()
     session.stream?.end()
+    if (masterKey) {
+      this.releaseMaster(masterKey, sessionId)
+      this.sessions.delete(sessionId)
+      return
+    }
     session.client.end()
     this.sessions.delete(sessionId)
   }
@@ -1943,6 +2094,7 @@ export class SshManager {
       session.client.end()
     }
     this.sessions.clear()
+    this.masters.clear()
   }
 
   /** Cross-session output for the history-search panel (bounded per session). */

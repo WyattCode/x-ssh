@@ -305,6 +305,10 @@ function toggleMinimizeToTray(): void {
   store.minimizeToTray = !store.minimizeToTray
   void store.saveSetting('minimizeToTray', store.minimizeToTray)
 }
+function toggleConnectionMultiplex(): void {
+  store.connectionMultiplex = !store.connectionMultiplex
+  void store.saveSetting('connectionMultiplex', store.connectionMultiplex)
+}
 
 // ---- Update check (GitHub releases feed) ----
 const updateState = reactive({
@@ -664,6 +668,13 @@ async function resetMasterLock(): Promise<void> {
                   <span class="sub">{{ t('set.gen.minimizeToTrayDesc') }}</span>
                 </span>
                 <span class="switch" :class="{ on: store.minimizeToTray }"><i /></span>
+              </label>
+              <label class="toggle-row" @click="toggleConnectionMultiplex">
+                <span>
+                  <span class="fname">{{ t('set.gen.connectionMultiplex') }}</span>
+                  <span class="sub">{{ t('set.gen.connectionMultiplexDesc') }}</span>
+                </span>
+                <span class="switch" :class="{ on: store.connectionMultiplex }"><i /></span>
               </label>
             </div>
             <div class="section">

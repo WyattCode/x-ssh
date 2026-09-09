@@ -922,6 +922,7 @@ function registerIpc(): void {
         if (params.onConnect === undefined) params.onConnect = h.onConnect
         if (params.onConnectDelayMs === undefined) params.onConnectDelayMs = h.onConnectDelayMs
         if (!params.proxy && h.proxy) params.proxy = h.proxy
+        if (params.multiplex === undefined) params.multiplex = (await settings.get<boolean>('connectionMultiplex')) === true
         const jumpId = params.jumpHostId ?? h.jumpHostId
         if (jumpId) {
           const jh = (await store.list()).find((x) => x.id === jumpId)
@@ -950,9 +951,9 @@ function registerIpc(): void {
         }
       }
     }
+    if (params.multiplex === undefined) params.multiplex = (await settings.get<boolean>('connectionMultiplex')) === true
     const result = await sshManager.connect(params)
-    if (result.ok && params.hostId) await store.touch(params.hostId)
-    // Audit the connection attempt (success or failure) for the security log.
+    if (result.ok && params.hostId) await store.touch(params.hostId)    // Audit the connection attempt (success or failure) for the security log.
     void pushConnLog({
       at: Date.now(),
       event: result.ok ? 'connect' : 'error',

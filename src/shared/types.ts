@@ -246,6 +246,8 @@ export interface ConnectParams {
   agentForward?: boolean
   onConnect?: string
   onConnectDelayMs?: number
+  /** Reuse a shared connection to the same host (connection multiplexing). */
+  multiplex?: boolean
   /** Connect timeout in ms (default 20000). Kept global in the store. */
   readyTimeoutMs?: number
 }

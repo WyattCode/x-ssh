@@ -209,6 +209,9 @@ interface State {
   /** Minimize to the system tray on close (instead of quitting), so transfers
    *  keep running (default off). */
   minimizeToTray: boolean
+  /** Reuse a shared connection to the same host (ControlMaster-style
+   *  multiplexing; default off). */
+  connectionMultiplex: boolean
 }
 
 export const useSessions = defineStore('sessions', {
@@ -261,7 +264,8 @@ export const useSessions = defineStore('sessions', {
     sanitizePaste: true,
     confirmClose: false,
     transferRateKbps: 0,
-    minimizeToTray: false
+    minimizeToTray: false,
+    connectionMultiplex: false
   }),
 
   getters: {
@@ -350,6 +354,7 @@ export const useSessions = defineStore('sessions', {
       this.transferRateKbps =
         (await window.api.settings.get<number>('transferRateKbps')) ?? 0
       this.minimizeToTray = (await window.api.settings.get<boolean>('minimizeToTray')) === true
+      this.connectionMultiplex = (await window.api.settings.get<boolean>('connectionMultiplex')) === true
     },
 
     async loadSnippets(): Promise<void> {
