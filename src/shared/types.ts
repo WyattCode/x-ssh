@@ -8,6 +8,14 @@ export type AuthMethod = 'password' | 'key' | 'agent'
 /** How a port-forward rule is established. */
 export type ForwardMode = 'local' | 'remote' | 'dynamic'
 
+/**
+ * How an upload treats remote files that already exist at the destination.
+ *  - overwrite: replace (resume partials, skip truly identical-size files).
+ *  - skip:      leave existing remote files untouched.
+ *  - keep:      upload alongside under a new name ("name (1).ext").
+ */
+export type UploadOverwrite = 'overwrite' | 'skip' | 'keep'
+
 /** An HTTP(S) or SOCKS5 proxy the SSH connection tunnels through. */
 export interface ProxyConfig {
   host: string

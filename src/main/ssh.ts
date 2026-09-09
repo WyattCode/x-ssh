@@ -17,7 +17,8 @@ import type {
   ProxyConfig,
   SessionEvent,
   SftpList,
-  SftpProgress
+  SftpProgress,
+  UploadOverwrite
 } from '../shared/types'
 import { KnownHosts } from './knownHosts'
 import { friendlyError } from './friendlyError'
@@ -973,6 +974,35 @@ export class SshManager {
     )
   }
 
+  /** Names at `dir` that already exist (used to ask the user how to handle an
+   *  upload that would overwrite them). Empty if the dir can't be read. */
+  async remoteConflicts(sessionId: string, dir: string, names: string[]): Promise<string[]> {
+    try {
+      const sftp = await this.getSftp(sessionId)
+      const list = await this.readdirFull(sftp, dir)
+      const existing = new Set(list.map((i) => i.filename))
+      return names.filter((n) => existing.has(n))
+    } catch {
+      return []
+    }
+  }
+
+  /** Finds an unused remote path next to `path` by appending " (n)" before the
+   *  extension ("report.txt" → "report (1).txt"), for the "keep both" policy. */
+  private async uniqueRemote(sftp: SFTPWrapper, path: string): Promise<string> {
+    const dir = this.parentOf(path)
+    const base = basename(path)
+    const dot = base.lastIndexOf('.')
+    const stem = dot > 0 ? base.slice(0, dot) : base
+    const ext = dot > 0 ? base.slice(dot) : ''
+    for (let i = 1; i < 1000; i++) {
+      const candidate = this.posixJoin(dir, `${stem} (${i})${ext}`)
+      const size = await this.statSize(sftp, candidate).catch(() => -1)
+      if (size < 0) return candidate
+    }
+    return this.posixJoin(dir, `${stem} (${Date.now()})${ext}`)
+  }
+
   /** Pipes readable→writable, reporting byte deltas; abortable via the job id
    *  (its abort is one of possibly several registered under that job). Honors
    *  pause and a per-job byte rate (leaky bucket) so a transfer can be stopped
@@ -1231,7 +1261,8 @@ export class SshManager {
     remoteDir: string,
     jobId: string,
     concurrency?: number,
-    rateBytesPerSec = 0
+    rateBytesPerSec = 0,
+    overwrite: UploadOverwrite = 'overwrite'
   ): Promise<void> {
     this.jobSession.set(jobId, sessionId)
     if (rateBytesPerSec > 0) this.jobRate.set(jobId, rateBytesPerSec)
@@ -1306,10 +1337,11 @@ export class SshManager {
           let write: Writable | undefined
           try {
             emit(item.name)
-            // Resume: if the remote file already exists and is smaller than the
-            // local source, continue from its size; a same-or-larger remote is
-            // already complete, so skip it. This keeps a failed/partial upload
-            // from re-sending bytes already on the server.
+            // Conflict policy for files that already exist at the target.
+            // - skip: leave existing remote files alone (counted as done).
+            // - keep: upload alongside under a fresh name (name (1).ext, ...).
+            // - overwrite (default): resume partials; skip truly identical-size
+            //   remote files; otherwise write from the start / from the offset.
             let offset = 0
             let localSize: number | null = null
             try {
@@ -1319,13 +1351,25 @@ export class SshManager {
             }
             if (localSize !== null) {
               const remoteSize = await this.statSize(sftp, item.remote).catch(() => -1)
-              if (remoteSize === localSize) {
+              const exists = remoteSize >= 0
+              if (exists && overwrite === 'skip') {
                 filesDone++
                 if (localSize) bytesDone += localSize
                 emit(item.name)
                 continue
               }
-              if (remoteSize > 0 && remoteSize < localSize) offset = remoteSize
+              if (exists && overwrite === 'keep') {
+                item.remote = await this.uniqueRemote(sftp, item.remote)
+              } else if (!exists || overwrite !== 'keep') {
+                // overwrite (default) resume/from-scratch.
+                if (remoteSize === localSize) {
+                  filesDone++
+                  if (localSize) bytesDone += localSize
+                  emit(item.name)
+                  continue
+                }
+                if (remoteSize > 0 && remoteSize < localSize) offset = remoteSize
+              }
             }
             // Build both streams before piping, and destroy them here if
             // either constructor throws — an orphaned stream leaks its fd and

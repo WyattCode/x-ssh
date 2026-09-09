@@ -6,7 +6,7 @@ import { mkdtemp, rm, readFile, stat, readdir, mkdir, unlink, rename, writeFile 
 import { watchFile, unwatchFile } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { IPC, PREFS_ARG } from '../shared/ipc'
-import type { ConnectParams, Host, HostForward, JumpConfig, LocalEntry, Snippet, UiPrefs } from '../shared/types'
+import type { ConnectParams, Host, HostForward, JumpConfig, LocalEntry, Snippet, UiPrefs, UploadOverwrite } from '../shared/types'
 import { readLaunchTarget, targetFromUrl, PROTOCOL, compareVersions } from '../shared/launchTarget'
 import { SshManager } from './ssh'
 import { HostStore } from './store'
@@ -224,6 +224,35 @@ async function confirmOverwriteLocal(targets: string[]): Promise<boolean> {
 
 async function notifyEnabled(): Promise<boolean> {
   return (await settings.get<boolean>('notifications')) !== false
+}
+
+/**
+ * Asks how to handle an upload whose top-level files already exist at remoteDir.
+ * Returns the policy, or 'cancel'. When nothing conflicts (or a policy was given
+ * explicitly) it returns 'overwrite' without prompting.
+ */
+async function resolveUploadOverwrite(
+  sessionId: string,
+  remoteDir: string,
+  names: string[],
+  overwrite?: UploadOverwrite
+): Promise<UploadOverwrite | 'cancel'> {
+  if (overwrite) return overwrite
+  if (!names.length) return 'overwrite'
+  const conflicts = await sshManager!.remoteConflicts(sessionId, remoteDir, names)
+  if (!conflicts.length) return 'overwrite'
+  const { response } = await dialog.showMessageBox({
+    type: 'warning',
+    buttons: ['覆盖', '跳过', '保留两者', '取消'],
+    defaultId: 0,
+    cancelId: 3,
+    message: '以下远端文件已存在,请选择处理方式:',
+    detail: conflicts.join(', ')
+  })
+  if (response === 0) return 'overwrite'
+  if (response === 1) return 'skip'
+  if (response === 2) return 'keep'
+  return 'cancel'
 }
 
 async function notifySoundEnabled(): Promise<boolean> {
@@ -1013,14 +1042,16 @@ function registerIpc(): void {
   )
   ipcMain.handle(
     IPC.sftpUpload,
-    async (_e, sessionId: string, remoteDir: string, concurrency?: number) => {
+    async (_e, sessionId: string, remoteDir: string, concurrency?: number, overwrite?: UploadOverwrite) => {
       if (!sshManager) return { ok: false, error: '窗口未就绪', count: 0 }
       const res = await dialog.showOpenDialog({
         properties: ['openFile', 'multiSelections']
       })
       if (res.canceled) return { ok: false, canceled: true, count: 0 }
       try {
-        await sshManager.uploadJob(sessionId, res.filePaths, remoteDir, randomUUID(), concurrency, await defaultTransferRate())
+        const policy = await resolveUploadOverwrite(sessionId, remoteDir, res.filePaths.map((p) => basename(p)), overwrite)
+        if (policy === 'cancel') return { ok: false, canceled: true, count: 0 }
+        await sshManager.uploadJob(sessionId, res.filePaths, remoteDir, randomUUID(), concurrency, await defaultTransferRate(), policy)
         return { ok: true, count: res.filePaths.length }
       } catch (e) {
         return { ok: false, error: friendlyError((e as Error).message), count: 0 }
@@ -1092,7 +1123,7 @@ function registerIpc(): void {
   )
   ipcMain.handle(
     IPC.sftpUploadDir,
-    async (_e, sessionId: string, remoteDir: string, concurrency?: number) => {
+    async (_e, sessionId: string, remoteDir: string, concurrency?: number, overwrite?: UploadOverwrite) => {
       if (!sshManager) return { ok: false, error: '窗口未就绪', count: 0 }
       const res = await dialog.showOpenDialog({
         title: '选择要上传的文件夹',
@@ -1100,7 +1131,9 @@ function registerIpc(): void {
       })
       if (res.canceled) return { ok: false, canceled: true, count: 0 }
       try {
-        await sshManager.uploadJob(sessionId, res.filePaths, remoteDir, randomUUID(), concurrency, await defaultTransferRate())
+        const policy = await resolveUploadOverwrite(sessionId, remoteDir, res.filePaths.map((p) => basename(p)), overwrite)
+        if (policy === 'cancel') return { ok: false, canceled: true, count: 0 }
+        await sshManager.uploadJob(sessionId, res.filePaths, remoteDir, randomUUID(), concurrency, await defaultTransferRate(), policy)
         return { ok: true, count: res.filePaths.length }
       } catch (e) {
         return { ok: false, error: friendlyError((e as Error).message), count: 0 }
@@ -1109,10 +1142,12 @@ function registerIpc(): void {
   )
   ipcMain.handle(
     IPC.sftpUploadPaths,
-    async (_e, sessionId: string, remoteDir: string, paths: string[], concurrency?: number) => {
+    async (_e, sessionId: string, remoteDir: string, paths: string[], concurrency?: number, overwrite?: UploadOverwrite) => {
       if (!sshManager) return { ok: false, error: '窗口未就绪', count: 0 }
       try {
-        await sshManager.uploadJob(sessionId, paths, remoteDir, randomUUID(), concurrency, await defaultTransferRate())
+        const policy = await resolveUploadOverwrite(sessionId, remoteDir, paths.map((p) => basename(p)), overwrite)
+        if (policy === 'cancel') return { ok: false, canceled: true, count: 0 }
+        await sshManager.uploadJob(sessionId, paths, remoteDir, randomUUID(), concurrency, await defaultTransferRate(), policy)
         return { ok: true, count: paths.length }
       } catch (e) {
         return { ok: false, error: friendlyError((e as Error).message), count: 0 }
@@ -1149,7 +1184,7 @@ function registerIpc(): void {
   )
   ipcMain.handle(
     IPC.sftpUploadExtract,
-    async (_e, sessionId: string, remoteDir: string, concurrency?: number) => {
+    async (_e, sessionId: string, remoteDir: string, concurrency?: number, overwrite?: UploadOverwrite) => {
       if (!sshManager) return { ok: false, error: '窗口未就绪' }
       const res = await dialog.showOpenDialog({
         title: '选择要上传并解压的归档文件',
@@ -1160,8 +1195,10 @@ function registerIpc(): void {
       })
       if (res.canceled || !res.filePaths[0]) return { ok: false, canceled: true }
       try {
+        const policy = await resolveUploadOverwrite(sessionId, remoteDir, res.filePaths.map((p) => basename(p)), overwrite)
+        if (policy === 'cancel') return { ok: false, canceled: true }
         // Upload the archive into remoteDir, then extract it there.
-        await sshManager.uploadJob(sessionId, res.filePaths, remoteDir, randomUUID(), concurrency, await defaultTransferRate())
+        await sshManager.uploadJob(sessionId, res.filePaths, remoteDir, randomUUID(), concurrency, await defaultTransferRate(), policy)
         const name = basename(res.filePaths[0])
         return await sshManager.extractArchive(sessionId, remoteDir, name)
       } catch (e) {

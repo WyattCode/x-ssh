@@ -12,7 +12,8 @@ import type {
   SftpProgress,
   Snippet,
   UiPrefs,
-  LocalEntry
+  LocalEntry,
+  UploadOverwrite
 } from '../shared/types'
 
 /** Startup preferences main passed as a launch argument — no IPC, no storage. */
@@ -157,12 +158,12 @@ const api = {
       ipcRenderer.invoke(IPC.sftpDownloadTo, sessionId, items, targetDir, concurrency),
     revealLocal: (target: string): Promise<{ ok: boolean; error?: string }> =>
       ipcRenderer.invoke(IPC.sftpRevealLocal, target),
-    upload: (sessionId: string, remoteDir: string, concurrency?: number): Promise<SftpResult> =>
-      ipcRenderer.invoke(IPC.sftpUpload, sessionId, remoteDir, concurrency),
-    uploadDir: (sessionId: string, remoteDir: string, concurrency?: number): Promise<SftpResult> =>
-      ipcRenderer.invoke(IPC.sftpUploadDir, sessionId, remoteDir, concurrency),
-    uploadPaths: (sessionId: string, remoteDir: string, paths: string[], concurrency?: number): Promise<SftpResult> =>
-      ipcRenderer.invoke(IPC.sftpUploadPaths, sessionId, remoteDir, paths, concurrency),
+    upload: (sessionId: string, remoteDir: string, concurrency?: number, overwrite?: UploadOverwrite): Promise<SftpResult> =>
+      ipcRenderer.invoke(IPC.sftpUpload, sessionId, remoteDir, concurrency, overwrite),
+    uploadDir: (sessionId: string, remoteDir: string, concurrency?: number, overwrite?: UploadOverwrite): Promise<SftpResult> =>
+      ipcRenderer.invoke(IPC.sftpUploadDir, sessionId, remoteDir, concurrency, overwrite),
+    uploadPaths: (sessionId: string, remoteDir: string, paths: string[], concurrency?: number, overwrite?: UploadOverwrite): Promise<SftpResult> =>
+      ipcRenderer.invoke(IPC.sftpUploadPaths, sessionId, remoteDir, paths, concurrency, overwrite),
     packDownload: (
       sessionId: string,
       items: { path: string; name: string; isDir: boolean }[],
@@ -171,8 +172,8 @@ const api = {
       ipcRenderer.invoke(IPC.sftpPackDownload, sessionId, items, archiveName),
     extract: (sessionId: string, remoteDir: string, archiveFileName: string): Promise<SftpResult> =>
       ipcRenderer.invoke(IPC.sftpExtract, sessionId, remoteDir, archiveFileName),
-    uploadExtract: (sessionId: string, remoteDir: string, concurrency?: number): Promise<SftpResult> =>
-      ipcRenderer.invoke(IPC.sftpUploadExtract, sessionId, remoteDir, concurrency),
+    uploadExtract: (sessionId: string, remoteDir: string, concurrency?: number, overwrite?: UploadOverwrite): Promise<SftpResult> =>
+      ipcRenderer.invoke(IPC.sftpUploadExtract, sessionId, remoteDir, concurrency, overwrite),
     mkdir: (sessionId: string, path: string): Promise<SftpResult> =>
       ipcRenderer.invoke(IPC.sftpMkdir, sessionId, path),
     createFile: (sessionId: string, path: string): Promise<SftpResult> =>
