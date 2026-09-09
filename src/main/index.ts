@@ -34,6 +34,10 @@ let sshManager: SshManager | null = null
 // setting and rebuilt when it opens, so a language change takes effect live.
 let tray: Tray | null = null
 let quitting = false
+// Windows toast notifications are attributed to the app via its AppUserModelID;
+// it must be set as early as possible (before notifications are created) so
+// toasts show under X-SSH's name and icon rather than a generic "Electron".
+if (process.platform === 'win32') app.setAppUserModelId('com.x-ssh.app')
 /** The currently-visible main window (single-window app), for tray balloon use. */
 let mainWindow: BrowserWindow | null = null
 /** Cached copy of the `minimizeToTray` setting, kept in sync by the setter. */
@@ -268,7 +272,23 @@ async function defaultTransferRate(): Promise<number> {
 
 function notify(title: string, body: string, sound = false): void {
   if (Notification.isSupported()) {
-    new Notification({ title, body, silent: !sound }).show()
+    const n = new Notification({
+      title,
+      body,
+      silent: !sound,
+      // Keep a toast visible long enough to be read, and let the action center
+      // manage it like any other app toast.
+      timeoutType: 'default'
+    })
+    // Clicking the toast brings the app forward — otherwise it's a dead-end.
+    n.on('click', () => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        if (mainWindow.isMinimized()) mainWindow.restore()
+        mainWindow.show()
+        mainWindow.focus()
+      }
+    })
+    n.show()
   }
   // When the main window is hidden/minimized to the tray (or in the background),
   // also pop a balloon off the tray icon so the event isn't missed (Windows).

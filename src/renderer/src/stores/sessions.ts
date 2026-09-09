@@ -663,7 +663,7 @@ export const useSessions = defineStore('sessions', {
           if (!cancelled) {
             window.api.notify(
               p.error ? t('sfp.notifyError') : t('sfp.notifyDone'),
-              `${p.name} · ${p.direction === 'up' ? t('sfp.up') : t('sfp.down')}${p.error ? ` · ${p.error}` : ''}`,
+              `${p.name}\n${p.direction === 'up' ? t('sfp.up') : t('sfp.down')}${p.error ? ` · ${p.error}` : ''}`,
               !p.error
             )
             toast(
@@ -1012,7 +1012,7 @@ export const useSessions = defineStore('sessions', {
         if (this.notifications) {
           window.api.notify(
             t('app.sessionDisconnected'),
-            `${pane.params.username}@${pane.params.host}${pane.params.port !== 22 ? `:${pane.params.port}` : ''} · ${message ?? t('app.sessionLost')}`,
+            `${pane.params.username}@${pane.params.host}${pane.params.port !== 22 ? `:${pane.params.port}` : ''}\n${message ?? t('app.sessionLost')}`,
             true
           )
         }
