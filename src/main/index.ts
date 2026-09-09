@@ -36,9 +36,6 @@ let tray: Tray | null = null
 let quitting = false
 /** Cached copy of the `minimizeToTray` setting, kept in sync by the setter. */
 let minimizeToTray = false
-async function minimizeToTrayEnabled(): Promise<boolean> {
-  return (await settings.get<boolean>('minimizeToTray')) === true
-}
 async function buildTrayMenu(win: BrowserWindow): Promise<Electron.Menu> {
   const lang = await settings.get<'zh' | 'en'>('lang')
   const en = lang === 'en'

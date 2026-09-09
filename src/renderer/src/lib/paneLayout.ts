@@ -22,6 +22,31 @@ export function buildFlatTree(paneIds: string[], dir: SplitDir): LayoutNode {
   }
 }
 
+/** Builds a rows×cols grid of panes (in row-major order) as a nested layout:
+ *  an outer split stacking `rows` branches, each an inner split putting `cols`
+ *  panes side-by-side. A single row/col collapses to the matching flat tree. */
+export function buildGrid(paneIds: string[], rows: number, cols: number): LayoutNode {
+  if (!paneIds.length) return buildFlatTree([], 'row')
+  if (rows <= 1) return buildFlatTree(paneIds, 'row')
+  if (cols <= 1) return buildFlatTree(paneIds, 'col')
+  const outer: LayoutNode[] = []
+  let idx = 0
+  for (let r = 0; r < rows; r++) {
+    const rowIds: string[] = []
+    for (let c = 0; c < cols && idx < paneIds.length; c++) {
+      rowIds.push(paneIds[idx++])
+    }
+    if (rowIds.length === 1) outer.push({ kind: 'leaf', paneId: rowIds[0] })
+    else outer.push(buildFlatTree(rowIds, 'row'))
+  }
+  return {
+    kind: 'split',
+    dir: 'col',
+    children: outer,
+    sizes: outer.map(() => 1 / outer.length)
+  }
+}
+
 /** Deep-clones a layout tree into plain objects (no Vue reactive proxies), so
  *  it can be structured-cloned across IPC to `settings.set`. */
 export function plainLayout(node: LayoutNode): LayoutNode {

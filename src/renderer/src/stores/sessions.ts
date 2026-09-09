@@ -7,6 +7,7 @@ import { useSnippetVars } from '../composables/snippetVars'
 import { clampConcurrency } from '../../../shared/fsUtils'
 import {
   buildFlatTree,
+  buildGrid,
   collectPaneIds,
   plainLayout,
   splitLeaf,
@@ -836,16 +837,16 @@ export const useSessions = defineStore('sessions', {
       return sent
     },
 
-    /** Resets the active tab to a clean N-pane grid (`dir` = split axis) of the
-     *  same target. Extra panes beyond the source are closed first, then new
-     *  panes are opened to fill the grid — all identical to the focused pane. */
-    async applyLayoutPreset(dir: SplitDir, cells: number): Promise<void> {
+    /** Resets the active tab to a clean rows×cols grid of the same target. Any
+     *  panes beyond the source are closed first, then new panes are opened to
+     *  fill the grid — all identical to the focused pane. */
+    async applyLayoutPreset(rows: number, cols: number): Promise<void> {
       const tab = this.tabs.find((t) => t.id === this.activeId)
       if (!tab) return
       const src = tab.panes.find((p) => p.id === tab.activePaneId) ?? tab.panes[0]
       if (!src) return
-      const want = Math.min(cells, 8)
-      if (want <= 0) return
+      const cells = Math.min(rows * cols, 8)
+      if (cells <= 0) return
       // Close every pane except the source so the grid is clean.
       const keep = src.id
       for (const pane of [...tab.panes]) {
@@ -854,13 +855,15 @@ export const useSessions = defineStore('sessions', {
       }
       tab.panes = tab.panes.filter((p) => p.id === keep)
       // Open the remaining panes to fill the grid.
+      const fillRows = Math.max(1, rows)
+      const fillCols = Math.max(1, cells)
       const fills = [keep]
-      while (fills.length < want) {
+      while (fills.length < cells) {
         const paneId = uid('pane')
         fills.push(paneId)
         tab.panes.push({ id: paneId, status: 'connecting', params: { ...toRaw(src.params) } })
       }
-      tab.layout = buildFlatTree(fills, dir)
+      tab.layout = buildGrid(fills, fillRows, fillCols)
       tab.activePaneId = keep
       // Connect the new panes; keep source focus until each goes live.
       for (let i = 1; i < fills.length; i++) {

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   buildFlatTree,
+  buildGrid,
   collectPaneIds,
   containsPane,
   splitLeaf,
@@ -72,6 +73,37 @@ describe('collectPaneIds (visual/DFS order used by focus cycle & closePane)', ()
     tree = splitLeaf(tree, 'p1', 'row', 'p2')
     expect(collectPaneIds(tree)).toEqual(['p0', 'p1', 'p2'])
     expect(containsPane(tree, 'p2')).toBe(true)
+  })
+})
+
+describe('buildGrid', () => {
+  it('makes a single pane stay a leaf', () => {
+    expect(buildGrid(['a'], 1, 1)).toEqual({ kind: 'leaf', paneId: 'a' })
+  })
+  it('2 cols yields a flat row split', () => {
+    expect(buildGrid(['a', 'b'], 1, 2)).toEqual(buildFlatTree(['a', 'b'], 'row'))
+  })
+  it('2 rows yields a flat col split', () => {
+    expect(buildGrid(['a', 'b'], 2, 1)).toEqual(buildFlatTree(['a', 'b'], 'col'))
+  })
+  it('2x2 yields nested rows-of-columns, all 4 panes in row-major order', () => {
+    const g = buildGrid(['a', 'b', 'c', 'd'], 2, 2)
+    expect(collectPaneIds(g)).toEqual(['a', 'b', 'c', 'd'])
+    expect(g.kind).toBe('split')
+    const outer = g as Extract<LayoutNode, { kind: 'split' }>
+    expect(outer.dir).toBe('col') // rows stacked
+    expect(outer.children).toHaveLength(2)
+    const row0 = outer.children[0] as Extract<LayoutNode, { kind: 'split' }>
+    const row1 = outer.children[1] as Extract<LayoutNode, { kind: 'split' }>
+    expect(row0.kind).toBe('split')
+    expect(row0.dir).toBe('row') // columns side-by-side
+    expect(collectPaneIds(row0)).toEqual(['a', 'b'])
+    expect(collectPaneIds(row1)).toEqual(['c', 'd'])
+  })
+  it('handles a ragged cell count (3 panes in a 2x2 grid)', () => {
+    const g = buildGrid(['a', 'b', 'c'], 2, 2)
+    expect(g.kind).toBe('split')
+    expect(collectPaneIds(g)).toEqual(['a', 'b', 'c'])
   })
 })
 
