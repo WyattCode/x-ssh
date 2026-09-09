@@ -8,6 +8,8 @@
  * Each item carries a `key` used to look up its (already-grouped) i18n
  * description and optional hint: `sck.<key>` and `sck.<key>Hint`.
  */
+import { isMac } from '../composables/platform'
+
 export interface Shortcut {
   keys: string
   /** i18n key suffix: `sck.<key>` for the description, `sck.<key>Hint` for the note. */
@@ -160,7 +162,6 @@ export function canonicalChord(chord: string, isMac: boolean): string | undefine
 /** True when the keyboard event matches the given chord exactly. */
 export function chordMatches(e: KeyboardEvent, chord: string): boolean {
   const { mods, key } = parseChord(chord)
-  const isMac = /mac|iphone|ipad/i.test(navigator.platform || navigator.userAgent)
   const mod = mods & 1 ? (isMac ? e.metaKey : e.ctrlKey) || e.metaKey : false
   const ctrl = mods & 2 ? e.ctrlKey : false
   const shift = mods & 4 ? e.shiftKey : false
