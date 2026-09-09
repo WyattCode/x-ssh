@@ -400,7 +400,9 @@ export class SshManager {
     })
   }
 
-  /** SOCKS5: greeting + method negotiation, then CONNECT to the target. */
+  /** SOCKS5: greeting + method negotiation, then CONNECT to the target.
+   *  Buffers across TCP fragments and re-injects any tunnel bytes that arrive
+   *  bundled with the CONNECT reply (via unshift) so none are dropped. */
   private socks5Handshake(
     sock: Socket,
     proxy: ProxyConfig,
@@ -408,47 +410,14 @@ export class SshManager {
     targetPort: number
   ): Promise<void> {
     return new Promise((res, rej) => {
-      // Greeting: version 5, preparse the available auth methods.
       const methods = proxy.username ? [0, 2] : [0]
       sock.write(Buffer.from([5, methods.length, ...methods]))
-      let stage = 0
-      const onData = (d: Buffer): void => {
-        try {
-          if (stage === 0) {
-            // Method selection reply: [ver, method]
-            if (d[0] !== 5) throw new Error('SOCKS5 代理版本不符')
-            const method = d[1]
-            if (method === 2) {
-              // Username/password (RFC 1929).
-              const u = Buffer.from(proxy.username ?? '')
-              const p = Buffer.from(proxy.password ?? '')
-              const buf = Buffer.concat([Buffer.from([1, u.length]), u, Buffer.from([p.length]), p])
-              sock.write(buf)
-              stage = 1
-            } else if (method === 0) {
-              stage = 1
-              sendConnect()
-            } else {
-              throw new Error('SOCKS5 代理要求认证,但未配置用户名密码')
-            }
-          } else if (stage === 1) {
-            // Auth reply: [ver, status]
-            if (d[1] !== 0) throw new Error('SOCKS5 代理认证失败')
-            sendConnect()
-          } else if (stage === 2) {
-            const reply = d[1]
-            if (reply !== 0) throw new Error(`SOCKS5 代理连接失败 (0x${reply.toString(16)})`)
-            cleanup()
-            res()
-          }
-        } catch (e) {
-          cleanup()
-          rej(e as Error)
-        }
-      }
+      // 0 = greeting reply, 1 = auth reply, 2 = CONNECT reply.
+      let phase = 0
+      let buf = Buffer.alloc(0)
+      const cleanup = (): void => { sock.removeListener('data', onData) }
+      const fail = (msg: string): void => { cleanup(); rej(new Error(msg)) }
       const sendConnect = (): void => {
-        stage = 2
-        // CONNECT: ver, cmd=1, rsv, atyp, addr, port.
         const addr = Buffer.from(targetHost, 'utf8')
         const req = Buffer.alloc(6 + addr.length + 1)
         req[0] = 5
@@ -460,12 +429,64 @@ export class SshManager {
         req.writeUInt16BE(targetPort, 5 + addr.length)
         sock.write(req)
       }
-      const cleanup = (): void => { sock.removeListener('data', onData) }
+      const onData = (d: Buffer): void => {
+        buf = Buffer.concat([buf, d])
+        try {
+          if (phase === 0) {
+            // Method-selection reply: [ver, method].
+            if (buf.length < 2) return
+            if (buf[0] !== 5) return fail('SOCKS5 代理版本不符')
+            const method = buf[1]
+            buf = buf.slice(2)
+            if (method === 2) {
+              const u = Buffer.from(proxy.username ?? '')
+              const p = Buffer.from(proxy.password ?? '')
+              sock.write(Buffer.concat([Buffer.from([1, u.length]), u, Buffer.from([p.length]), p]))
+              phase = 1
+              return
+            }
+            if (method === 0) {
+              phase = 2
+              sendConnect()
+              return
+            }
+            return fail('SOCKS5 代理要求认证,但未配置用户名密码')
+          }
+          if (phase === 1) {
+            // Auth reply: [ver, status].
+            if (buf.length < 2) return
+            if (buf[1] !== 0) return fail('SOCKS5 代理认证失败')
+            buf = buf.slice(2)
+            phase = 2
+            sendConnect()
+            return
+          }
+          // CONNECT reply: [ver, rep, rsv, atyp, ...] — variable length.
+          if (buf.length < 4) return
+          const rep = buf[1]
+          if (rep !== 0) return fail(`SOCKS5 代理连接失败 (0x${rep.toString(16)})`)
+          const atyp = buf[3]
+          let hdrLen = 4
+          if (atyp === 1) hdrLen += 4
+          else if (atyp === 3) hdrLen += 1 + buf[4]
+          else if (atyp === 4) hdrLen += 16
+          else return fail('SOCKS5 代理响应地址类型无效')
+          if (buf.length < hdrLen + 2) return
+          const leftover = buf.slice(hdrLen + 2)
+          cleanup()
+          if (leftover.length) sock.unshift(leftover)
+          res()
+        } catch (e) {
+          fail((e as Error).message)
+        }
+      }
       sock.on('data', onData)
     })
   }
 
-  /** HTTP CONNECT: request the proxy to open a tunnel to the target host:port. */
+  /** HTTP CONNECT: request the proxy to open a tunnel to the target host:port.
+   *  Buffers fragmented headers and forwards any bytes after the header terminator
+   *  (which belong to the tunnel) via unshift so nothing is lost. */
   private httpConnectHandshake(
     sock: Socket,
     proxy: ProxyConfig,
@@ -476,20 +497,24 @@ export class SshManager {
       const auth = proxy.username
         ? 'Proxy-Authorization: Basic ' + Buffer.from(`${proxy.username}:${proxy.password ?? ''}`).toString('base64') + '\r\n'
         : ''
-      const req =
+      sock.write(
         `CONNECT ${targetHost}:${targetPort} HTTP/1.1\r\n` +
         `Host: ${targetHost}:${targetPort}\r\n` +
         auth +
         '\r\n'
-      sock.write(req)
-      let buf = ''
+      )
+      let buf = Buffer.alloc(0)
+      const cleanup = (): void => { sock.removeListener('data', onData) }
       const onData = (d: Buffer): void => {
-        buf += d.toString('utf8')
+        buf = Buffer.concat([buf, d])
         const idx = buf.indexOf('\r\n\r\n')
         if (idx < 0) return
-        sock.removeListener('data', onData)
-        const status = /^HTTP\/1\.[01]\s+(\d+)/.exec(buf)
+        const head = buf.slice(0, idx + 4).toString('utf8')
+        const leftover = buf.slice(idx + 4)
+        cleanup()
+        const status = /^HTTP\/1\.[01]\s+(\d+)/.exec(head)
         const code = status ? Number(status[1]) : 0
+        if (leftover.length) sock.unshift(leftover)
         if (code === 200) res()
         else rej(new Error(`HTTP 代理隧道失败 (${code})`))
       }
@@ -1649,6 +1674,7 @@ export class SshManager {
     if (!session) return
     if (session.suppressTimer) clearTimeout(session.suppressTimer)
     this.closeForwards(session)
+    this.stopLog(sessionId)
     session.sftp?.end()
     session.stream?.end()
     session.client.end()
@@ -1658,6 +1684,7 @@ export class SshManager {
   disposeAll(): void {
     for (const session of this.sessions.values()) {
       if (session.suppressTimer) clearTimeout(session.suppressTimer)
+      this.stopLog(session.id)
       // Mark a clean close so a late client 'close' isn't misread as a drop.
       session.shellExit = true
       session.client.end()
