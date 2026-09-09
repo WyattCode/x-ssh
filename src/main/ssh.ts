@@ -789,6 +789,19 @@ export class SshManager {
               // actual status is emitted once, from client 'close', based on it.
               const sess = this.sessions.get(id)
               if (sess) sess.shellExit = true
+              // If this session opened the shared multiplex link and peers are
+              // using it, ending the client would drop them too — release a ref
+              // instead and let the master live for its other sessions.
+              if (params.multiplex && sess && this.masters.has(this.masterKey(params))) {
+                const m = this.masters.get(this.masterKey(params))!
+                if (m.refs > 1) {
+                  this.closeForwards(sess)
+                  this.emit({ sessionId: id, status: 'closed' })
+                  this.releaseMaster(this.masterKey(params), id)
+                  this.sessions.delete(id)
+                  return
+                }
+              }
               client.end()
             })
 
@@ -907,8 +920,11 @@ export class SshManager {
           stream.stderr.on('data', (d: Buffer) => this.sendData(id, d.toString('utf8')))
           stream.on('close', () => {
             const sess = this.sessions.get(id)
-            if (sess) sess.shellExit = true
-            if (sess) this.emit({ sessionId: id, status: 'closed' })
+            if (sess) {
+              sess.shellExit = true
+              this.closeForwards(sess)
+              this.emit({ sessionId: id, status: 'closed' })
+            }
             this.releaseMaster(key, id)
             this.sessions.delete(id)
           })
@@ -952,6 +968,7 @@ export class SshManager {
       if (s) {
         this.emit({ sessionId: sid, status: 'error', message: '连接已断开' })
         this.stopLog(sid)
+        this.closeForwards(s)
         s.stream?.end()
         this.sessions.delete(sid)
       }
@@ -972,6 +989,7 @@ export class SshManager {
       if (s) {
         this.emit({ sessionId: sid, status: 'closed' })
         this.stopLog(sid)
+        this.closeForwards(s)
         s.stream?.end()
         this.sessions.delete(sid)
       }
@@ -1237,19 +1255,25 @@ export class SshManager {
       const lp = this.safeLocalJoin(localDir, rel)
       const rp = this.posixJoin(remoteDir, rel)
       const newer = (a: { mtimeMs: number }, b: { mtimeMs: number }): boolean => a.mtimeMs > b.mtimeMs
-      if (mode === 'up' || mode === 'both') {
+      if (mode === 'up') {
+        // Local is the source of truth: push local when it's absent/mismatched/newer.
         if (L && (!R || L.size !== R.size || newer(L, R))) plan.push({ dir: 'up', local: lp, remote: rp, rel, size: L.size })
-      }
-      if (mode === 'down') {
+        if (deleteExtras && !L && R) deletions.push({ rel, dir: 'up' })
+      } else if (mode === 'down') {
+        // Remote is the source of truth.
         if (R && (!L || R.size !== L.size || newer(R, L))) plan.push({ dir: 'down', local: lp, remote: rp, rel, size: R.size })
+        if (deleteExtras && !R && L) deletions.push({ rel, dir: 'down' })
+      } else if (mode === 'both') {
+        // Newer side wins per file; equal mtime (with different size) falls back
+        // to the local side, so a divergent file isn't left silently in sync.
+        if (L && !R) plan.push({ dir: 'up', local: lp, remote: rp, rel, size: L.size })
+        else if (!L && R) plan.push({ dir: 'down', local: lp, remote: rp, rel, size: R.size })
+        else if (L && R) {
+          if (newer(L, R)) plan.push({ dir: 'up', local: lp, remote: rp, rel, size: L.size })
+          else if (newer(R, L)) plan.push({ dir: 'down', local: lp, remote: rp, rel, size: R.size })
+          else if (L.size !== R.size) plan.push({ dir: 'up', local: lp, remote: rp, rel, size: L.size })
+        }
       }
-      if (mode === 'both' && L && R && L.size !== R.size) {
-        // Same plan computed above for up; add a down plan when remote is newer.
-        // (up plan already covers remote-missing/newer-local; add newer-remote -> down.)
-        if (newer(R, L)) plan.push({ dir: 'down', local: lp, remote: rp, rel, size: R.size })
-      }
-      if (deleteExtras && mode === 'up' && !L && R) deletions.push({ rel, dir: 'up' })
-      if (deleteExtras && mode === 'down' && !R && L) deletions.push({ rel, dir: 'down' })
     }
 
     let bytesDone = 0
