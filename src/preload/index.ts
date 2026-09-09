@@ -123,6 +123,9 @@ const api = {
     /** Call right after onData(): main flushes the output buffered since the
      *  shell opened, which would otherwise have been dropped. */
     attach: (sessionId: string): void => ipcRenderer.send(IPC.sshAttach, sessionId),
+    startLog: (sessionId: string): Promise<{ ok: boolean; canceled?: boolean; path?: string }> =>
+      ipcRenderer.invoke(IPC.sessionLogStart, sessionId),
+    stopLog: (sessionId: string): void => ipcRenderer.send(IPC.sessionLogStop, sessionId),
     onData: (cb: (payload: SshData) => void): (() => void) => {
       const listener = (_e: unknown, payload: SshData): void => cb(payload)
       ipcRenderer.on(IPC.sshData, listener)

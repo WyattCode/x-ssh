@@ -24,6 +24,9 @@ export const IPC = {
   sshConnect: 'ssh:connect',
   sshDisconnect: 'ssh:disconnect',
   sshForgetHostKey: 'ssh:forgetHostKey',
+  // Per-session output log-to-file (invoke/handle)
+  sessionLogStart: 'sessionLog:start',
+  sessionLogStop: 'sessionLog:stop',
 
   // Known-hosts management (invoke/handle)
   knownHostsList: 'knownHosts:list',

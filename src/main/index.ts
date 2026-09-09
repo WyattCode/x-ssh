@@ -892,6 +892,7 @@ function registerIpc(): void {
         if (params.agentForward === undefined) params.agentForward = h.agentForward
         if (params.onConnect === undefined) params.onConnect = h.onConnect
         if (params.onConnectDelayMs === undefined) params.onConnectDelayMs = h.onConnectDelayMs
+        if (!params.proxy && h.proxy) params.proxy = h.proxy
         const jumpId = params.jumpHostId ?? h.jumpHostId
         if (jumpId) {
           const jh = (await store.list()).find((x) => x.id === jumpId)
@@ -953,6 +954,25 @@ function registerIpc(): void {
       await knownHosts.forget(host, port)
     }
   )
+
+  // ---- Session log-to-file ----
+  // Start capturing a live session's output to a user-chosen log file.
+  ipcMain.handle(
+    IPC.sessionLogStart,
+    async (e, sessionId: string) => {
+      const res = await dialog.showSaveDialog({
+        title: '保存会话日志',
+        defaultPath: `session-${new Date().toISOString().replace(/[:.]/g, '-')}.log`,
+        filters: [{ name: 'Log', extensions: ['log', 'txt'] }]
+      })
+      if (res.canceled || !res.filePath) return { ok: false, canceled: true }
+      const ok = sshManager!.startLog(sessionId, res.filePath)
+      return { ok, canceled: false, path: res.filePath }
+    }
+  )
+  ipcMain.on(IPC.sessionLogStop, (_e, sessionId: string) => {
+    sshManager!.stopLog(sessionId)
+  })
 
   // ---- SSH stream (fire-and-forget) ----
   ipcMain.on(IPC.sshInput, (_e, sessionId: string, data: string) => {

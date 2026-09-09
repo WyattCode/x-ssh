@@ -8,6 +8,16 @@ export type AuthMethod = 'password' | 'key' | 'agent'
 /** How a port-forward rule is established. */
 export type ForwardMode = 'local' | 'remote' | 'dynamic'
 
+/** An HTTP(S) or SOCKS5 proxy the SSH connection tunnels through. */
+export interface ProxyConfig {
+  host: string
+  port: number
+  /** 'socks5' | 'http'. */
+  type: 'socks5' | 'http'
+  username?: string
+  password?: string
+}
+
 /** A single port-forward rule attached to a connection. */
 export interface HostForward {
   /** For 'local'/'dynamic': local listen port. For 'remote': listen port on the server. */
@@ -35,6 +45,8 @@ export interface Host {
   group?: string
   /** Id of another saved Host to tunnel through (ProxyJump). */
   jumpHostId?: string
+  /** Tunnel this connection through an HTTP/SOCKS5 proxy instead of a direct link. */
+  proxy?: ProxyConfig
   /** Local port-forward rules opened once connected. */
   portForwards?: HostForward[]
   /** Forward the local ssh-agent to the remote (-A) so remote hosts see it. */
@@ -220,6 +232,8 @@ export interface ConnectParams {
   jumpHostId?: string
   /** Resolved jump connection spec; main fills this from the saved Host. */
   jump?: JumpConfig
+  /** Tunnel through an HTTP/SOCKS5 proxy (resolved by main from the Host). */
+  proxy?: ProxyConfig
   /** Lifecycle params forwarded from the saved Host on connect. */
   agentForward?: boolean
   onConnect?: string

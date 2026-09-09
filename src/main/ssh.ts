@@ -2,10 +2,11 @@ import { readFile, stat, readdir, mkdir, unlink } from 'node:fs/promises'
 import { createReadStream, createWriteStream } from 'node:fs'
 import { basename, dirname, join, resolve, relative, isAbsolute } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { createServer, type Server, Socket } from 'node:net'
+import { createServer, createConnection, type Server, Socket } from 'node:net'
 import { Duplex } from 'node:stream'
 import { Client, type ClientChannel, type SFTPWrapper } from 'ssh2'
 import type { Readable, Writable } from 'node:stream'
+import type { WriteStream } from 'node:fs'
 import type { WebContents } from 'electron'
 import { IPC } from '../shared/ipc'
 import type {
@@ -13,6 +14,7 @@ import type {
   ConnectResult,
   HostForward,
   JumpConfig,
+  ProxyConfig,
   SessionEvent,
   SftpList,
   SftpProgress
@@ -48,6 +50,10 @@ interface Session {
   /** Set once the shell channel closes normally (e.g. the user typed `exit`),
    *  so a subsequent client close is classified as intentional, not a drop. */
   shellExit?: boolean
+  /** Append-only stream writing this session's output to a local log file. */
+  logWrite?: WriteStream
+  /** Whether output is currently being captured to the log file. */
+  logging?: boolean
 }
 
 /**
@@ -126,6 +132,10 @@ export class SshManager {
   private sendData(id: string, chunk: string): void {
     const session = this.sessions.get(id)
     if (session) session.history = ((session.history ?? '') + chunk).slice(-SshManager.HISTORY_MAX)
+    // Live log-to-file: append every byte to the session's log if enabled.
+    if (session?.logWrite && session.logging) {
+      session.logWrite.write(chunk)
+    }
     // The renderer only subscribes to sshData after connect() resolves and the
     // pane has rendered its terminal, so everything the shell emits before that
     // (MOTD, first prompt) would be dropped. Park it until sshAttach arrives.
@@ -155,6 +165,35 @@ export class SshManager {
   /** The human label (user@host[:port]) for a session, if still live. */
   label(sessionId: string): string | undefined {
     return this.sessions.get(sessionId)?.label
+  }
+
+  /** Begins appending a session's live output to a local log file (that file's
+   *  dir must exist). Returns false if the session is gone or already logging. */
+  startLog(sessionId: string, path: string): boolean {
+    const session = this.sessions.get(sessionId)
+    if (!session || session.logWrite) return false
+    try {
+      const ws = createWriteStream(path, { flags: 'a' })
+      session.logWrite = ws
+      session.logging = true
+      ws.on('error', () => {
+        // A failed write (dir removed / disk full) shouldn't crash the session;
+        // just stop logging quietly.
+        session.logging = false
+      })
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  /** Stops logging a session and flushes/closes its log stream. */
+  stopLog(sessionId: string): void {
+    const session = this.sessions.get(sessionId)
+    if (!session?.logWrite) return
+    session.logging = false
+    session.logWrite.end()
+    session.logWrite = undefined
   }
 
   /** stdout path: while suppressing, buffer until the shell-integration clear
@@ -332,6 +371,132 @@ export class SshManager {
     })
   }
 
+  /** Establishes a tunneled socket to the SSH target through an HTTP/SOCKS5
+   *  proxy, for ssh2's `sock` option. Handles both handshake protocols and
+   *  optional proxy auth. */
+  private connectProxy(
+    proxy: ProxyConfig,
+    targetHost: string,
+    targetPort: number
+  ): Promise<Socket> {
+    return new Promise((res, rej) => {
+      const sock = createConnection({ host: proxy.host, port: proxy.port })
+      let settled = false
+      const fail = (msg: string): void => {
+        if (settled) return
+        settled = true
+        sock.destroy()
+        rej(new Error(msg))
+      }
+      sock.on('error', (e) => fail(friendlyError(e.message)))
+      sock.on('connect', () => {
+        if (proxy.type === 'socks5') this.socks5Handshake(sock, proxy, targetHost, targetPort)
+          .then(() => { if (!settled) { settled = true; res(sock) } })
+          .catch((e) => fail((e as Error).message))
+        else this.httpConnectHandshake(sock, proxy, targetHost, targetPort)
+          .then(() => { if (!settled) { settled = true; res(sock) } })
+          .catch((e) => fail((e as Error).message))
+      })
+    })
+  }
+
+  /** SOCKS5: greeting + method negotiation, then CONNECT to the target. */
+  private socks5Handshake(
+    sock: Socket,
+    proxy: ProxyConfig,
+    targetHost: string,
+    targetPort: number
+  ): Promise<void> {
+    return new Promise((res, rej) => {
+      // Greeting: version 5, preparse the available auth methods.
+      const methods = proxy.username ? [0, 2] : [0]
+      sock.write(Buffer.from([5, methods.length, ...methods]))
+      let stage = 0
+      const onData = (d: Buffer): void => {
+        try {
+          if (stage === 0) {
+            // Method selection reply: [ver, method]
+            if (d[0] !== 5) throw new Error('SOCKS5 代理版本不符')
+            const method = d[1]
+            if (method === 2) {
+              // Username/password (RFC 1929).
+              const u = Buffer.from(proxy.username ?? '')
+              const p = Buffer.from(proxy.password ?? '')
+              const buf = Buffer.concat([Buffer.from([1, u.length]), u, Buffer.from([p.length]), p])
+              sock.write(buf)
+              stage = 1
+            } else if (method === 0) {
+              stage = 1
+              sendConnect()
+            } else {
+              throw new Error('SOCKS5 代理要求认证,但未配置用户名密码')
+            }
+          } else if (stage === 1) {
+            // Auth reply: [ver, status]
+            if (d[1] !== 0) throw new Error('SOCKS5 代理认证失败')
+            sendConnect()
+          } else if (stage === 2) {
+            const reply = d[1]
+            if (reply !== 0) throw new Error(`SOCKS5 代理连接失败 (0x${reply.toString(16)})`)
+            cleanup()
+            res()
+          }
+        } catch (e) {
+          cleanup()
+          rej(e as Error)
+        }
+      }
+      const sendConnect = (): void => {
+        stage = 2
+        // CONNECT: ver, cmd=1, rsv, atyp, addr, port.
+        const addr = Buffer.from(targetHost, 'utf8')
+        const req = Buffer.alloc(6 + addr.length + 1)
+        req[0] = 5
+        req[1] = 1
+        req[2] = 0
+        req[3] = 3 // domain
+        req[4] = addr.length
+        addr.copy(req, 5)
+        req.writeUInt16BE(targetPort, 5 + addr.length)
+        sock.write(req)
+      }
+      const cleanup = (): void => { sock.removeListener('data', onData) }
+      sock.on('data', onData)
+    })
+  }
+
+  /** HTTP CONNECT: request the proxy to open a tunnel to the target host:port. */
+  private httpConnectHandshake(
+    sock: Socket,
+    proxy: ProxyConfig,
+    targetHost: string,
+    targetPort: number
+  ): Promise<void> {
+    return new Promise((res, rej) => {
+      const auth = proxy.username
+        ? 'Proxy-Authorization: Basic ' + Buffer.from(`${proxy.username}:${proxy.password ?? ''}`).toString('base64') + '\r\n'
+        : ''
+      const req =
+        `CONNECT ${targetHost}:${targetPort} HTTP/1.1\r\n` +
+        `Host: ${targetHost}:${targetPort}\r\n` +
+        auth +
+        '\r\n'
+      sock.write(req)
+      let buf = ''
+      const onData = (d: Buffer): void => {
+        buf += d.toString('utf8')
+        const idx = buf.indexOf('\r\n\r\n')
+        if (idx < 0) return
+        sock.removeListener('data', onData)
+        const status = /^HTTP\/1\.[01]\s+(\d+)/.exec(buf)
+        const code = status ? Number(status[1]) : 0
+        if (code === 200) res()
+        else rej(new Error(`HTTP 代理隧道失败 (${code})`))
+      }
+      sock.on('data', onData)
+    })
+  }
+
   /** Opens port forwards per rule mode (local -L, remote -R, dynamic SOCKS -D). */
   private openForwards(session: Session, rules: HostForward[]): void {
     const servers: Server[] = []
@@ -498,6 +663,19 @@ export class SshManager {
       }
     }
 
+    // HTTP/SOCKS5 proxy: if no jump tunnel is in use, route the direct link
+    // through the proxy so the target reachable only via it can be connected.
+    if (params.proxy && !config.sock) {
+      try {
+        const psock = await this.connectProxy(params.proxy, params.host, port)
+        psock.on('error', () => undefined)
+        config.sock = psock
+      } catch (err) {
+        this.sessions.delete(id)
+        return { ok: false, error: (err as Error).message }
+      }
+    }
+
     try {
       Object.assign(
         config,
@@ -606,6 +784,7 @@ export class SshManager {
           ? '主机密钥与首次连接时记录的不一致,连接已中止;这可能是中间人攻击,若你确认服务器已重装或更换,可选择“信任新密钥并重连”'
           : friendlyError(err.message)
         this.emit({ sessionId: id, status: 'error', message })
+        this.stopLog(id)
         if (jumpClient) jumpClient.end()
         this.sessions.delete(id)
         settle({
@@ -625,6 +804,7 @@ export class SshManager {
           else this.emit({ sessionId: id, status: 'error', message: '连接已断开' })
         }
         if (jumpClient) jumpClient.end()
+        this.stopLog(id)
         this.sessions.delete(id)
       })
 

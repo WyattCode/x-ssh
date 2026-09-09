@@ -135,6 +135,20 @@ function toggleFollow(): void {
   scrolledUp.value = false
 }
 
+// ---- Session log-to-file ----
+// Toggles appending the live session output to a local log file. The actual
+// file is chosen once via a save dialog (main), then caption follows main.
+const logOn = ref(false)
+async function toggleLog(): Promise<void> {
+  if (logOn.value) {
+    window.api.ssh.stopLog(props.sessionId)
+    logOn.value = false
+  } else {
+    const res = await window.api.ssh.startLog(props.sessionId)
+    if (res.ok) logOn.value = true
+  }
+}
+
 function openMenu(e: MouseEvent): void {
   e.preventDefault()
   menu.hasSel = !!term?.hasSelection()
@@ -463,7 +477,13 @@ onBeforeUnmount(() => {
         <button @click="runMenu(toggleFollow)">
           <span>{{ t('term.follow') }}</span>
           <span class="k" :class="followOutput ? 'on' : ''">{{ followOutput ? t('term.on') : t('term.off') }}</span>
-        </button>        <button @click="runMenu(clearTerm)"><span>{{ t('term.clear') }}</span></button>
+        </button>
+        <button @click="runMenu(clearTerm)"><span>{{ t('term.clear') }}</span></button>
+        <div class="sep" />
+        <button @click="runMenu(toggleLog)">
+          <span>{{ logOn ? t('term.logStop') : t('term.logStart') }}</span>
+          <span class="k" :class="logOn ? 'on' : ''">{{ logOn ? t('term.on') : t('term.off') }}</span>
+        </button>
       </div>
     </div>
   </div>

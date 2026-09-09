@@ -44,6 +44,12 @@ const form = reactive({
   agentForward: false,
   onConnect: '',
   onConnectDelayMs: 0,
+  proxyOn: false,
+  proxyHost: '',
+  proxyPort: 1080,
+  proxyType: 'socks5' as 'socks5' | 'http',
+  proxyUser: '',
+  proxyPass: '',
   forwards: [] as ForwardRow[]
 })
 const password = ref('')
@@ -70,6 +76,12 @@ watch(
       agentForward: !!h?.agentForward,
       onConnect: h?.onConnect ?? '',
       onConnectDelayMs: h?.onConnectDelayMs ?? 0,
+      proxyOn: !!h?.proxy,
+      proxyHost: h?.proxy?.host ?? '',
+      proxyPort: h?.proxy?.port ?? 1080,
+      proxyType: h?.proxy?.type ?? 'socks5',
+      proxyUser: h?.proxy?.username ?? '',
+      proxyPass: h?.proxy?.password ?? '',
       forwards: (h?.portForwards ?? []).map((f) => ({
         mode: f.mode ?? 'local',
         localPort: f.localPort,
@@ -199,7 +211,16 @@ async function save(): Promise<void> {
     agentForward: form.agentForward || undefined,
     onConnect: form.onConnect.trim() || undefined,
     onConnectDelayMs: Number(form.onConnectDelayMs) > 0 ? Number(form.onConnectDelayMs) : undefined,
-    portForwards: forwards.length ? forwards : undefined
+    portForwards: forwards.length ? forwards : undefined,
+    proxy: form.proxyOn && form.proxyHost.trim()
+      ? {
+          host: form.proxyHost.trim(),
+          port: Number(form.proxyPort) || (form.proxyType === 'socks5' ? 1080 : 8080),
+          type: form.proxyType,
+          ...(form.proxyUser ? { username: form.proxyUser.trim() } : {}),
+          ...(form.proxyUser && form.proxyPass ? { password: form.proxyPass } : {})
+        }
+      : undefined
   }
   // A typed password/passphrase is saved (encrypted); leaving it blank keeps any
   // previously saved secret untouched (empty → undefined, store won't overwrite).
@@ -317,6 +338,32 @@ async function remove(): Promise<void> {
           <button class="mini danger" @click="removeForward(i)"><Icon name="close" :size="13" /></button>
         </div>
         <p v-if="!form.forwards.length" class="hint">{{ t('host.fwHint') }}</p>
+      </div>
+
+      <div class="field">
+        <span>{{ t('host.proxy') }}</span>
+        <label class="check">
+          <input v-model="form.proxyOn" type="checkbox" />
+          <span class="check-label">{{ t('host.proxyOn') }}</span>
+        </label>
+        <template v-if="form.proxyOn">
+          <div class="proxy-row">
+            <div class="select-wrap fw-mode">
+              <select v-model="form.proxyType" class="select-in">
+                <option value="socks5">SOCKS5</option>
+                <option value="http">HTTP</option>
+              </select>
+              <Icon name="chevron-down" :size="13" class="select-caret" />
+            </div>
+            <input v-model="form.proxyHost" :placeholder="t('host.proxyHostPh')" spellcheck="false" />
+            <input v-model.number="form.proxyPort" type="number" min="1" max="65535" :placeholder="t('host.proxyPortPh')" />
+          </div>
+          <div class="proxy-row">
+            <input v-model="form.proxyUser" :placeholder="t('host.proxyUserPh')" autocomplete="off" />
+            <input v-model="form.proxyPass" type="password" :placeholder="t('host.proxyPassPh')" autocomplete="off" />
+          </div>
+        </template>
+        <p class="hint">{{ t('host.proxyHint') }}</p>
       </div>
 
       <div class="field">
@@ -832,6 +879,28 @@ button.danger:hover {
   height: 30px;
 }
 .fw-row input[type='number'] {
+  width: 84px;
+  flex: none;
+}
+.proxy-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 6px;
+}
+.proxy-row .fw-mode {
+  flex: none;
+  width: 100px;
+}
+.proxy-row .fw-mode .select-in {
+  height: 30px;
+}
+.proxy-row input {
+  min-width: 0;
+  height: 30px;
+  flex: 1;
+}
+.proxy-row input[type='number'] {
   width: 84px;
   flex: none;
 }
