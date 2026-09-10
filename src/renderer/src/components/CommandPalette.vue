@@ -160,6 +160,15 @@ const sections = computed<{ id: string; title: string; items: Item[] }[]>(() => 
       run: () => store.toggleHistory(true)
     })
   }
+  if (matchesAction('tmux 会话 session 管理 接入 attach')) {
+    actions.push({
+      kind: 'action',
+      title: t('pal.tmux'),
+      sub: t('pal.tmuxDesc'),
+      icon: 'terminal',
+      run: () => store.toggleTmux(true)
+    })
+  }
   if (matchesAction('广播 broadcast command 所有 send all')) {
     actions.push({
       kind: 'action',

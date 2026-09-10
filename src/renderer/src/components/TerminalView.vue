@@ -168,6 +168,22 @@ function openMenu(e: MouseEvent): void {
   menu.y = Math.min(e.clientY, window.innerHeight - mh - 8)
   menu.open = true
 }
+/** Right-click pastes when that option is on; otherwise shows the menu. */
+function onContextMenu(e: MouseEvent): void {
+  if (store.rightClickPaste) {
+    e.preventDefault()
+    void pasteClipboard()
+    return
+  }
+  openMenu(e)
+}
+/** Middle-click pastes the clipboard when that option is on. */
+function onAuxClick(e: MouseEvent): void {
+  if (e.button === 1 && store.middleClickPaste) {
+    e.preventDefault()
+    void pasteClipboard()
+  }
+}
 function runMenu(action: () => void): void {
   action()
   menu.open = false
@@ -240,6 +256,14 @@ onMounted(() => {
   // Plain http(s) text in the output takes the same route.
   term.loadAddon(new WebLinksAddon((_e, uri) => openLink(uri)))
   term.open(el.value)
+
+  // Auto-copy the selection to the clipboard when the option is on.
+  term.onSelectionChange(() => {
+    if (store.copyOnSelect) {
+      const sel = term?.getSelection()
+      if (sel) window.api.clipboard.writeText(sel)
+    }
+  })
 
   try {
     term.loadAddon(new WebglAddon())
@@ -450,7 +474,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="term-wrap" @contextmenu="openMenu">
+  <div class="term-wrap" @contextmenu="onContextMenu" @auxclick="onAuxClick">
     <div ref="el" class="term" />
 
     <div v-if="searchBar.open" class="search-bar" @mousedown.stop>

@@ -17,6 +17,7 @@ import TextEditor from './components/TextEditor.vue'
 import ConfirmDialog from './components/ConfirmDialog.vue'
 import ToastHost from './components/ToastHost.vue'
 import HistorySearch from './components/HistorySearch.vue'
+import TmuxDialog from './components/TmuxDialog.vue'
 import SettingsDialog from './components/SettingsDialog.vue'
 import StatusBar from './components/StatusBar.vue'
 import Icon from './components/Icon.vue'
@@ -426,6 +427,7 @@ onBeforeUnmount(() => {
     <ConfirmDialog />
     <ToastHost />
     <HistorySearch />
+    <TmuxDialog />
     <LockScreen v-if="store.lockLocked" />
   </div>
 </template>

@@ -8,6 +8,7 @@ import { useI18n } from '../lib/i18n'
 import { useToast } from '../composables/toast'
 import { useSessions } from '../stores/sessions'
 import Icon from './Icon.vue'
+import FileDiff from './FileDiff.vue'
 
 const { confirm } = useConfirm()
 const { t: tt } = useI18n()
@@ -144,6 +145,10 @@ function localSelectAll(): void {
   localSelSet.value = new Set(localSorted.value.map((e) => e.name))
 }
 const localSelCount = computed(() => localSelSet.value.size)
+/** Selected local file names, in the pane's current sort order (stable). */
+function localSelectedNames(): string[] {
+  return localSorted.value.filter((e) => localSelSet.value.has(e.name)).map((e) => e.name)
+}
 function localSelect(entry: LocalEntry, e?: MouseEvent): void {
   localActive.value = true
   if (e?.ctrlKey || e?.metaKey) {
@@ -766,6 +771,53 @@ function editFile(entry: FileEntry, external: boolean): void {
   if (external) emit('edit-external', payload)
   else emit('edit-file', payload)
 }
+// ---- Compare a remote file against a local file ----
+const diff = reactive({ open: false, remoteName: '', remoteContent: '', localName: '', localContent: '' })
+async function diffWithLocal(entry: FileEntry): Promise<void> {
+  if (!props.sessionId) return
+  const remote = await window.api.sftp.readText(props.sessionId, posixJoin(path.value, entry.name))
+  if (!remote.ok) {
+    error.value = remote.error ?? tt('sfp.diffFail')
+    return
+  }
+  const picked = await window.api.local.pickFile()
+  if (!picked.ok || !picked.path) return
+  const local = await window.api.local.readText(picked.path)
+  if (!local.ok || local.content === undefined) {
+    error.value = local.error ?? tt('sfp.diffFail')
+    return
+  }
+  diff.remoteName = entry.name
+  diff.remoteContent = remote.content ?? ''
+  diff.localName = picked.path.split(/[\\/]/).pop() ?? picked.path
+  diff.localContent = local.content
+  diff.open = true
+}
+// ---- Deploy: upload selected local files then run a command ----
+const deploy = reactive({ open: false, cmd: '', busy: false })
+function openDeploy(): void {
+  if (!props.sessionId || !localSelCount) return
+  deploy.cmd = ''
+  deploy.open = true
+}
+async function runDeploy(): Promise<void> {
+  if (!props.sessionId || !localSelCount || !deploy.cmd.trim()) return
+  deploy.busy = true
+  try {
+    const names = localSelectedNames()
+    const paths = names.map((n) => localJoin(localPath.value, n))
+    const up = await window.api.sftp.uploadPaths(props.sessionId, path.value, paths, store.transferConcurrency, 'overwrite')
+    if (up.ok) {
+      window.api.ssh.input(props.sessionId, deploy.cmd.endsWith('\n') ? deploy.cmd : deploy.cmd + '\n')
+      toast(tt('sfp.deployDone'), 'success')
+      deploy.open = false
+    } else if (!up.canceled) {
+      error.value = up.error ?? tt('sfp.deployFail')
+    }
+  } finally {
+    deploy.busy = false
+  }
+}
 /** Opens with the per-extension program if configured, else OS default. */
 function openWith(entry: FileEntry): void {
   const payload = { path: posixJoin(path.value, entry.name), name: entry.name, ext: fileExt(entry.name) }
@@ -1358,6 +1410,7 @@ const pct = (t: SftpProgress): number =>
         <span class="local-path" :title="localPath">{{ localPath }}</span>
         <span v-if="localSelCount" class="loc-selcount">{{ tt('sfp.selected', { n: localSelCount }) }}</span>
         <button class="mini new" :title="tt('sfp.selectAll')" @click="localSelectAll"><Icon name="check-all" :size="14" /></button>
+        <button class="mini new" :title="tt('sfp.deploy')" :disabled="!localSelCount || !props.sessionId" @click="openDeploy"><Icon name="send" :size="14" /></button>
         <button class="mini new" :title="tt('sfp.newFile')" @click="localNew('file')"><Icon name="plus" :size="14" /></button>
         <button class="mini new" :title="tt('sfp.newFolder')" @click="localNew('folder')"><Icon name="folder-plus" :size="14" /></button>
         <button class="up" :title="tt('sfp.refresh')" :disabled="localLoading" @click="refreshLocal()"><Icon name="refresh" :size="14" /></button>
@@ -1570,6 +1623,7 @@ const pct = (t: SftpProgress): number =>
             <button @click="runMenu(() => editFile(menu.target as FileEntry, false))">{{ tt('sfp.edit') }}</button>
             <button @click="runMenu(() => editFile(menu.target as FileEntry, true))">{{ tt('sfp.openExternal') }}</button>
             <button @click="runMenu(() => openWith(menu.target as FileEntry))">{{ tt('sfp.openWith') }}</button>
+            <button @click="runMenu(() => diffWithLocal(menu.target as FileEntry))">{{ tt('sfp.diffLocal') }}</button>
           </template>
           <button
             v-if="selCount === 1 && menu.target.isDir"
@@ -1677,6 +1731,34 @@ const pct = (t: SftpProgress): number =>
       </div>
     </div>
 
+    <div v-if="deploy.open" class="pm-overlay" @mousedown.self="deploy.open = false">
+      <div class="pm-dialog sync-dialog" @keydown.esc="deploy.open = false">
+        <div class="pm-head">
+          <span>{{ tt('sfp.deploy') }}</span>
+          <button class="pm-x" :title="tt('sfp.close')" @click="deploy.open = false"><Icon name="close" /></button>
+        </div>
+        <label class="sync-field">
+          <span>{{ tt('sfp.deployLocal') }}</span>
+          <input :value="`${localPath} · ${localSelCount} ${tt('sfp.items')}`" disabled spellcheck="false" />
+        </label>
+        <label class="sync-field">
+          <span>{{ tt('sfp.deployRemote') }}</span>
+          <input :value="path" disabled spellcheck="false" />
+        </label>
+        <label class="sync-field">
+          <span>{{ tt('sfp.deployCmd') }}</span>
+          <textarea v-model="deploy.cmd" rows="3" spellcheck="false" :placeholder="tt('sfp.deployCmdPh')" />
+        </label>
+        <p class="pm-err" v-if="!deploy.cmd.trim()">{{ tt('sfp.deployCmdReq') }}</p>
+        <div class="pm-foot">
+          <button class="pm-btn ghost" @click="deploy.open = false">{{ tt('sfp.cancel') }}</button>
+          <button class="pm-btn primary" :disabled="deploy.busy || !deploy.cmd.trim()" @click="runDeploy">
+            {{ deploy.busy ? tt('sfp.deploying') : tt('sfp.deployRun') }}
+          </button>
+        </div>
+      </div>
+    </div>
+
     <div v-if="preview.open" class="pv-overlay" @mousedown.self="closePreview">
       <div class="pv-dialog" @keydown.esc="closePreview">
         <div class="pv-head">
@@ -1689,6 +1771,15 @@ const pct = (t: SftpProgress): number =>
         </div>
       </div>
     </div>
+
+    <FileDiff
+      v-if="diff.open"
+      :remote-name="diff.remoteName"
+      :remote-content="diff.remoteContent"
+      :local-name="diff.localName"
+      :local-content="diff.localContent"
+      @close="diff.open = false"
+    />
   </aside>
 </template>
 
@@ -2422,9 +2513,10 @@ const pct = (t: SftpProgress): number =>
   color: var(--text-dim);
 }
 .sync-field input,
-.sync-field select {
+.sync-field select,
+.sync-field textarea {
   width: 100%;
-  height: 30px;
+  min-height: 30px;
   padding: 0 8px;
   background: var(--bg);
   border: 1px solid var(--border-strong);

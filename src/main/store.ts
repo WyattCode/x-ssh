@@ -176,4 +176,40 @@ export class HostStore {
     await this.persist()
     return { count: imported.length }
   }
+
+  /** Builds an OpenSSH `~/.ssh/config` block from the saved hosts. Secrets are
+   *  NOT exported (identity files / agent are referenced, never embedded). */
+  async exportSshConfig(): Promise<string> {
+    await this.ensureLoaded()
+    if (this.locked) throw new Error('已锁定，请先解锁')
+    const byId = new Map(this.hosts.map((h) => [h.id, h]))
+    const blocks = this.hosts.map((h) => {
+      const lines: string[] = [`Host ${this.configAlias(h)}`]
+      lines.push(`\tHostName ${h.host}`)
+      lines.push(`\tPort ${h.port || 22}`)
+      lines.push(`\tUser ${h.username}`)
+      if (h.auth === 'key' && h.keyPath) lines.push(`\tIdentityFile ${h.keyPath}`)
+      if (h.agentForward) lines.push(`\tForwardAgent yes`)
+      if (h.jumpHostId) {
+        const j = byId.get(h.jumpHostId)
+        if (j) lines.push(`\tProxyJump ${this.configAlias(j)}`)
+      }
+      if (h.proxy && h.proxy.type === 'http') {
+        const auth = h.proxy.username ? `${encodeURIComponent(h.proxy.username)}:${encodeURIComponent(h.proxy.password ?? '')}@` : ''
+        lines.push(`\tProxyCommand connect-proxy -H ${auth}${h.proxy.host}:${h.proxy.port} %h %p`)
+      }
+      if (h.onConnect) lines.push(`\tRemoteCommand ${h.onConnect.split('\n').join(' && ')}`)
+      if (h.group) lines.push(`\t# group: ${h.group}`)
+      return lines.join('\n')
+    })
+    return blocks.join('\n\n') + '\n'
+  }
+
+  /** A stable, unique alias for a host used in `Host` blocks / ProxyJump. Falls
+   *  back to `user@host` then the host itself when empty/duplicate. */
+  private configAlias(h: Host): string {
+    const base = h.label.trim() || (h.username ? `${h.username}@${h.host}` : h.host)
+    // Collapse to a single token; OpenSSH Host patterns are space-separated.
+    return base.replace(/[ \t]+/g, '-')
+  }
 }

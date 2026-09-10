@@ -2283,6 +2283,45 @@ export class SshManager {
     }
     return out
   }
+
+  // ---- tmux / screen session helpers (run over a separate exec channel) ----
+
+  /** Runs a command on a dedicated shell channel and returns its stdout. */
+  private remoteExec(sessionId: string, cmd: string): Promise<string> {
+    const session = this.sessions.get(sessionId)
+    if (!session) return Promise.reject(new Error('会话不存在'))
+    return new Promise((resolve, reject) => {
+      session.client.exec(cmd, (err, stream) => {
+        if (err) return reject(err)
+        let out = ''
+        stream.on('data', (d: Buffer) => {
+          out += d.toString()
+        })
+        stream.on('close', () => resolve(out))
+        stream.on('error', reject)
+      })
+    })
+  }
+
+  /** Lists tmux session names on the remote, via a throwaway exec channel. */
+  async tmuxListSessions(sessionId: string): Promise<string[]> {
+    const out = await this.remoteExec(
+      sessionId,
+      'tmux list-sessions -F "#{session_name}" 2>/dev/null || true'
+    ).catch(() => '')
+    return out.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)
+  }
+
+  /** Attaches to a tmux session in the live shell, creating it if absent
+   *  (`new -A`). Writes to the interactive stream so tmux takes over the pane. */
+  tmuxAttachOrCreate(sessionId: string, name: string): void {
+    const session = this.sessions.get(sessionId)
+    // Single-quote the name so host labels/settings with spaces (or quotes) don't
+    // split the shell token — tmux would otherwise create a wrongly-named window.
+    const safe = name ? `'${name.replace(/'/g, `'\\''`)}'` : ''
+    const cmd = name ? `tmux new -A -s ${safe}` : 'tmux new -A'
+    session?.stream?.write(cmd + '\n')
+  }
 }
 
 /** Parses a SOCKS5 CONNECT request buffer, returning the target if complete

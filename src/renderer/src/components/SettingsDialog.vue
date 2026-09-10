@@ -244,6 +244,18 @@ function toggleSanitizePaste(): void {
   store.sanitizePaste = !store.sanitizePaste
   void store.saveSetting('sanitizePaste', store.sanitizePaste)
 }
+function toggleCopyOnSelect(): void {
+  store.copyOnSelect = !store.copyOnSelect
+  void store.saveSetting('copyOnSelect', store.copyOnSelect)
+}
+function toggleMiddleClickPaste(): void {
+  store.middleClickPaste = !store.middleClickPaste
+  void store.saveSetting('middleClickPaste', store.middleClickPaste)
+}
+function toggleRightClickPaste(): void {
+  store.rightClickPaste = !store.rightClickPaste
+  void store.saveSetting('rightClickPaste', store.rightClickPaste)
+}
 function onKeepalive(e: Event): void {
   const n = Math.max(0, Math.min(600, parseInt((e.target as HTMLInputElement).value, 10) || 0))
   store.keepaliveSec = n
@@ -308,6 +320,15 @@ function toggleMinimizeToTray(): void {
 function toggleConnectionMultiplex(): void {
   store.connectionMultiplex = !store.connectionMultiplex
   void store.saveSetting('connectionMultiplex', store.connectionMultiplex)
+}
+function toggleTmuxOnConnect(): void {
+  store.tmuxOnConnect = !store.tmuxOnConnect
+  void store.saveSetting('tmuxOnConnect', store.tmuxOnConnect)
+}
+function onTmuxSessionName(e: Event): void {
+  const v = (e.target as HTMLInputElement).value
+  store.tmuxSessionName = v
+  void store.saveSetting('tmuxSessionName', v)
 }
 
 // ---- Update check (GitHub releases feed) ----
@@ -461,6 +482,11 @@ async function importHostsJson(): Promise<void> {
     await store.loadHosts()
     toast(`${t('set.sec.imported')} ${r.count ?? 0} ${t('set.sec.hosts')}`, 'success')
   }
+}
+async function exportSshConfig(): Promise<void> {
+  const r = await window.api.hosts.exportSshConfig()
+  if (!r.ok && !r.canceled) toast(r.error ?? t('set.sec.exportFail'), 'error')
+  else if (r.ok) toast(t('set.sec.exportedSsh'), 'success')
 }
 
 // ---- full data backup (hosts + secrets + snippets + snapshots + history) ----
@@ -676,6 +702,26 @@ async function resetMasterLock(): Promise<void> {
                 </span>
                 <span class="switch" :class="{ on: store.connectionMultiplex }"><i /></span>
               </label>
+              <label class="toggle-row" @click="toggleTmuxOnConnect">
+                <span>
+                  <span class="fname">{{ t('set.gen.tmuxOnConnect') }}</span>
+                  <span class="sub">{{ t('set.gen.tmuxOnConnectDesc') }}</span>
+                </span>
+                <span class="switch" :class="{ on: store.tmuxOnConnect }"><i /></span>
+              </label>
+              <label v-if="store.tmuxOnConnect" class="toggle-row">
+                <span>
+                  <span class="fname">{{ t('set.gen.tmuxSessionName') }}</span>
+                  <input
+                    class="text"
+                    :value="store.tmuxSessionName"
+                    :placeholder="t('set.gen.tmuxSessionNamePh')"
+                    spellcheck="false"
+                    @change="onTmuxSessionName"
+                    @keyup.enter="onTmuxSessionName"
+                  />
+                </span>
+              </label>
             </div>
             <div class="section">
               <div class="label">{{ t('set.gen.snippets') }}</div>
@@ -813,6 +859,27 @@ async function resetMasterLock(): Promise<void> {
                   <span class="sub">{{ t('set.term.sanitizePasteDesc') }}</span>
                 </span>
                 <span class="switch" :class="{ on: store.sanitizePaste }"><i /></span>
+              </label>
+              <label class="toggle-row" @click="toggleCopyOnSelect">
+                <span>
+                  <span class="fname">{{ t('set.term.copyOnSelect') }}</span>
+                  <span class="sub">{{ t('set.term.copyOnSelectDesc') }}</span>
+                </span>
+                <span class="switch" :class="{ on: store.copyOnSelect }"><i /></span>
+              </label>
+              <label class="toggle-row" @click="toggleMiddleClickPaste">
+                <span>
+                  <span class="fname">{{ t('set.term.middleClickPaste') }}</span>
+                  <span class="sub">{{ t('set.term.middleClickPasteDesc') }}</span>
+                </span>
+                <span class="switch" :class="{ on: store.middleClickPaste }"><i /></span>
+              </label>
+              <label class="toggle-row" @click="toggleRightClickPaste">
+                <span>
+                  <span class="fname">{{ t('set.term.rightClickPaste') }}</span>
+                  <span class="sub">{{ t('set.term.rightClickPasteDesc') }}</span>
+                </span>
+                <span class="switch" :class="{ on: store.rightClickPaste }"><i /></span>
               </label>
             </div>
             <div class="section">
@@ -962,7 +1029,10 @@ async function resetMasterLock(): Promise<void> {
             <div class="section">
               <div class="label">{{ t('set.sec.sshConfig') }}</div>
               <p class="desc">{{ t('set.sec.sshConfigDesc') }}</p>
-              <button class="ghost" @click="importSshConfig">{{ t('set.sec.import') }}</button>
+              <div class="btn-row">
+                <button class="ghost" @click="importSshConfig">{{ t('set.sec.import') }}</button>
+                <button class="ghost" @click="exportSshConfig">{{ t('set.sec.export') }}</button>
+              </div>
             </div>
             <div class="section">
               <div class="label">{{ t('set.sec.backup') }}</div>

@@ -50,6 +50,8 @@ const api = {
       ipcRenderer.invoke(IPC.hostsImportSshConfig),
     exportJson: (): Promise<{ ok: boolean; count?: number; canceled?: boolean; error?: string }> =>
       ipcRenderer.invoke(IPC.hostsExportJson),
+    exportSshConfig: (): Promise<{ ok: boolean; canceled?: boolean; error?: string }> =>
+      ipcRenderer.invoke(IPC.hostsExportSshConfig),
     importJson: (): Promise<{ ok: boolean; count?: number; canceled?: boolean; error?: string }> =>
       ipcRenderer.invoke(IPC.hostsImportJson)
   },
@@ -108,7 +110,11 @@ const api = {
     rename: (dir: string, oldName: string, newName: string): Promise<SftpResult> =>
       ipcRenderer.invoke(IPC.localRename, dir, oldName, newName),
     del: (dir: string, name: string, isDir: boolean): Promise<SftpResult> =>
-      ipcRenderer.invoke(IPC.localDelete, dir, name, isDir)
+      ipcRenderer.invoke(IPC.localDelete, dir, name, isDir),
+    readText: (path: string): Promise<{ ok: boolean; content?: string; error?: string }> =>
+      ipcRenderer.invoke(IPC.localReadText, path),
+    pickFile: (): Promise<{ ok: boolean; path?: string; canceled?: boolean; error?: string }> =>
+      ipcRenderer.invoke(IPC.localPickFile)
   },
   ssh: {
     connect: (params: ConnectParams): Promise<ConnectResult> =>
@@ -136,7 +142,11 @@ const api = {
       const listener = (_e: unknown, event: SessionEvent): void => cb(event)
       ipcRenderer.on(IPC.sshEvent, listener)
       return () => ipcRenderer.removeListener(IPC.sshEvent, listener)
-    }
+    },
+    tmuxList: (sessionId: string): Promise<string[]> =>
+      ipcRenderer.invoke(IPC.sshTmuxList, sessionId),
+    tmuxAttach: (sessionId: string, name: string): Promise<{ ok: boolean }> =>
+      ipcRenderer.invoke(IPC.sshTmuxAttach, sessionId, name)
   },
   sftp: {
     list: (sessionId: string, path?: string): Promise<SftpList> =>

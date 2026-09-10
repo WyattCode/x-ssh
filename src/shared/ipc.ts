@@ -6,6 +6,7 @@ export const IPC = {
   hostsDelete: 'hosts:delete',
   hostsImportSshConfig: 'hosts:importSshConfig',
   hostsExportJson: 'hosts:exportJson',
+  hostsExportSshConfig: 'hosts:exportSshConfig',
   hostsImportJson: 'hosts:importJson',
 
   // Full data backup (hosts+secrets+snippets+snapshots+history+known hosts)
@@ -39,6 +40,8 @@ export const IPC = {
   // Local filesystem browsing (dual-panel SFTP) (invoke/handle)
   localList: 'local:list',
   localHome: 'local:home',
+  localReadText: 'local:readText',
+  localPickFile: 'local:pickFile',
   localCreate: 'local:create',
   localRename: 'local:rename',
   localDelete: 'local:delete',
@@ -84,6 +87,8 @@ export const IPC = {
   sshInput: 'ssh:input', // renderer -> main : keystrokes
   sshResize: 'ssh:resize', // renderer -> main : pty resize
   sshAttach: 'ssh:attach', // renderer -> main : listener ready, flush buffered output
+  sshTmuxList: 'ssh:tmuxList', // list remote tmux sessions
+  sshTmuxAttach: 'ssh:tmuxAttach', // attach-or-create a remote tmux session
   sshData: 'ssh:data', // main -> renderer : stdout/stderr
   sshEvent: 'ssh:event', // main -> renderer : status changes
 

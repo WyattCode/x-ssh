@@ -726,6 +726,21 @@ function registerIpc(): void {
       return { ok: false, error: friendlyError((e as Error).message) }
     }
   })
+  ipcMain.handle(IPC.hostsExportSshConfig, async () => {
+    const res = await dialog.showSaveDialog({
+      title: '导出 OpenSSH 配置',
+      defaultPath: 'config',
+      filters: [{ name: 'OpenSSH config', extensions: ['config'] }]
+    })
+    if (res.canceled || !res.filePath) return { ok: false, canceled: true }
+    try {
+      const text = await store.exportSshConfig()
+      await writeFile(res.filePath, text, 'utf8')
+      return { ok: true }
+    } catch (e) {
+      return { ok: false, error: friendlyError((e as Error).message) }
+    }
+  })
   ipcMain.handle(IPC.hostsImportJson, async () => {
     const res = await dialog.showOpenDialog({
       title: '从 JSON 恢复主机',
@@ -741,7 +756,6 @@ function registerIpc(): void {
       return { ok: false, error: friendlyError((e as Error).message) }
     }
   })
-
   // ---- Full data backup (hosts + secrets + snippets + snapshots + history) ----
   ipcMain.handle(IPC.dataExportAll, async () => {
     const res = await dialog.showSaveDialog({
@@ -875,6 +889,21 @@ function registerIpc(): void {
       }
     }
   )
+  // Read a local file's text (for comparing against a remote file).
+  ipcMain.handle(IPC.localReadText, async (_e, p: string) => {
+    try {
+      const content = await readFile(p, 'utf8')
+      return { ok: true, content }
+    } catch (e) {
+      return { ok: false, error: friendlyError((e as Error).message) }
+    }
+  })
+  // Let the user pick a local file (for the "compare with local" action).
+  ipcMain.handle(IPC.localPickFile, async () => {
+    const res = await dialog.showOpenDialog({ properties: ['openFile'] })
+    if (res.canceled || !res.filePaths[0]) return { ok: false, canceled: true }
+    return { ok: true, path: res.filePaths[0] }
+  })
   // ---- Local FS mutations (create / rename / delete) for the local pane ----
   ipcMain.handle(
     IPC.localCreate,
@@ -1033,6 +1062,15 @@ function registerIpc(): void {
   })
   ipcMain.on(IPC.sshAttach, (_e, sessionId: string) => {
     sshManager?.attach(sessionId)
+  })
+  ipcMain.handle(IPC.sshTmuxList, async (_e, sessionId: string) => {
+    if (!sshManager) return []
+    return sshManager.tmuxListSessions(sessionId).catch(() => [])
+  })
+  ipcMain.handle(IPC.sshTmuxAttach, (_e, sessionId: string, name: string) => {
+    if (!sshManager) return { ok: false }
+    sshManager.tmuxAttachOrCreate(sessionId, name)
+    return { ok: true }
   })
 
   // ---- SFTP ----

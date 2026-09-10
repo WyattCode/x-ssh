@@ -202,6 +202,12 @@ interface State {
   confirmPaste: boolean
   /** Strip non-printing control characters from pasted text (default on). */
   sanitizePaste: boolean
+  /** Auto-copy the terminal selection to the clipboard on select. */
+  copyOnSelect: boolean
+  /** Middle mouse button pastes the clipboard (default on). */
+  middleClickPaste: boolean
+  /** Right mouse button pastes the clipboard instead of the context menu. */
+  rightClickPaste: boolean
   /** Confirm before closing a tab that still has a live session (default off). */
   confirmClose: boolean
   /** Default per-transfer rate cap (KiB/s; 0 = unlimited). */
@@ -212,6 +218,12 @@ interface State {
   /** Reuse a shared connection to the same host (ControlMaster-style
    *  multiplexing; default off). */
   connectionMultiplex: boolean
+  /** Auto-attach-or-create a tmux session after connecting (default off). */
+  tmuxOnConnect: boolean
+  /** Name of the tmux session to auto-attach ('' = derive from the host). */
+  tmuxSessionName: string
+  /** Whether the tmux session-manager dialog is open. */
+  tmuxOpen: boolean
 }
 
 export const useSessions = defineStore('sessions', {
@@ -262,10 +274,16 @@ export const useSessions = defineStore('sessions', {
     paletteSeed: null,
     confirmPaste: true,
     sanitizePaste: true,
+    copyOnSelect: false,
+    middleClickPaste: true,
+    rightClickPaste: false,
     confirmClose: false,
     transferRateKbps: 0,
     minimizeToTray: false,
-    connectionMultiplex: false
+    connectionMultiplex: false,
+    tmuxOnConnect: false,
+    tmuxSessionName: '',
+    tmuxOpen: false
   }),
 
   getters: {
@@ -350,11 +368,16 @@ export const useSessions = defineStore('sessions', {
       this.keybindings = (await window.api.settings.get<Record<string, string>>('keybindings')) ?? {}
       this.confirmPaste = cp !== false
       this.sanitizePaste = sp !== false
+      this.copyOnSelect = (await window.api.settings.get<boolean>('copyOnSelect')) === true
+      this.middleClickPaste = (await window.api.settings.get<boolean>('middleClickPaste')) !== false
+      this.rightClickPaste = (await window.api.settings.get<boolean>('rightClickPaste')) === true
       this.confirmClose = (await window.api.settings.get<boolean>('confirmClose')) === true
       this.transferRateKbps =
         (await window.api.settings.get<number>('transferRateKbps')) ?? 0
       this.minimizeToTray = (await window.api.settings.get<boolean>('minimizeToTray')) === true
       this.connectionMultiplex = (await window.api.settings.get<boolean>('connectionMultiplex')) === true
+      this.tmuxOnConnect = (await window.api.settings.get<boolean>('tmuxOnConnect')) === true
+      this.tmuxSessionName = (await window.api.settings.get<string>('tmuxSessionName')) ?? ''
     },
 
     async loadSnippets(): Promise<void> {
@@ -770,6 +793,10 @@ export const useSessions = defineStore('sessions', {
       this.historyOpen = open ?? !this.historyOpen
       this.paletteOpen = false
     },
+    toggleTmux(open?: boolean): void {
+      this.tmuxOpen = open ?? !this.tmuxOpen
+      this.paletteOpen = false
+    },
     /** Focuses the tab/pane owning a live session id (history-result jump). */
     focusSession(sessionId: string): void {
       for (const tab of this.tabs) {
@@ -933,6 +960,12 @@ export const useSessions = defineStore('sessions', {
         if (savedCwd && this.restoreCwd) {
           const quoted = `'${savedCwd.replace(/'/g, `'\\''`)}'`
           window.api.ssh.input(result.sessionId, `cd ${quoted}\n`)
+        }
+        // Auto-attach-or-create a tmux session (default off). Name falls back to
+        // the host label so a reconnection re-joins the same window.
+        if (this.tmuxOnConnect) {
+          const name = this.tmuxSessionName.trim() || live.pane.params.host
+          if (name) window.api.ssh.tmuxAttach(result.sessionId, name)
         }
       } else {
         live.pane.status = 'error'
