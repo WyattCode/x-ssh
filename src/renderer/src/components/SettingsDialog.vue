@@ -34,13 +34,32 @@ const TABS: { id: SettingsTab; label: string; icon: string }[] = [
 const modKey = isMac ? '⌘' : 'Ctrl'
 const withMod = (t: string): string => t.split('Mod').join(modKey)
 
+// Chip labels. macOS spells its modifiers as symbols, and DOM key names
+// (ArrowRight…) would otherwise be shown to the user verbatim.
+const MAC_MOD_SYMBOL: Record<string, string> = { Shift: '⇧', Alt: '⌥', Ctrl: '⌃' }
+const KEY_LABEL: Record<string, string> = {
+  ArrowRight: '→',
+  ArrowLeft: '←',
+  ArrowUp: '↑',
+  ArrowDown: '↓'
+}
+function chipLabel(part: string): string {
+  if (part === 'Mod') return modKey
+  // Pointer "keys" are words, not glyphs, so they go through i18n. Spelled out
+  // as literals so the i18n linter can see them.
+  if (part === 'MouseRight') return t('kbd.mouseRight')
+  if (part === 'MouseWheel') return t('kbd.mouseWheel')
+  if (isMac && MAC_MOD_SYMBOL[part]) return MAC_MOD_SYMBOL[part]
+  return KEY_LABEL[part] ?? part
+}
+
 /** Splits a spec into chip groups and the separators between them:
  *  "Mod+1 … Mod+8" renders as [Ctrl][1] … [Ctrl][8]. */
 function parts(keys: string): { chord?: string[]; sep?: string }[] {
   return splitShortcutChips(keys).map((piece) =>
     'sep' in piece
       ? { sep: piece.sep === 'or' ? t('kbd.or') : '…' }
-      : { chord: piece.chord.map(withMod) }
+      : { chord: piece.chord.map(chipLabel) }
   )
 }
 

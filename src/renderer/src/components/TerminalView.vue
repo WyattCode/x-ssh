@@ -327,6 +327,10 @@ onMounted(() => {
     }
     if (mod && !otherMod && !e.shiftKey && !e.altKey && c === 'KeyC') {
       if (term?.hasSelection()) {
+        // preventDefault as well as returning false: on macOS the app menu's
+        // Copy role would otherwise still run, and it copies the *document*
+        // selection — xterm draws its own, so that is empty.
+        e.preventDefault()
         copySelection()
         term.clearSelection()
         return false
