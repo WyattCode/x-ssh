@@ -477,7 +477,11 @@ export const useSessions = defineStore('sessions', {
       toast(t('app.networkOnline'), 'success')
       for (const tab of this.tabs) {
         for (const pane of tab.panes) {
-          if (pane.status === 'error' && pane.params && !pane.sshSessionId && this.autoReconnect) {
+          // Only revive genuinely-dropped sessions (errorCode is unset for a
+          // drop; a never-connected host that failed auth/connect keeps it set),
+          // so a network blip doesn't hammer a host that can't authenticate.
+          const dropped = pane.status === 'error' && !pane.errorCode && !pane.sshSessionId
+          if (dropped && pane.params && this.autoReconnect) {
             this.cancelReconnect(pane)
             this.scheduleReconnect(pane.id)
           }

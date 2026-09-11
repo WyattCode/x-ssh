@@ -337,7 +337,6 @@ async function onGlobalShowHide(e: Event): Promise<void> {
   globalHotkey.error = r.ok
     ? ''
     : (r.error ?? t('set.gen.globalShortcutErr'))
-  void window.api.settings.set('globalShowHideAccel', store.globalShowHide)
 }
 
 // ---- Update check (GitHub releases feed) ----
@@ -1539,6 +1538,9 @@ async function resetMasterLock(): Promise<void> {
   font-size: 11.5px;
   color: var(--text-faint);
   line-height: 1.45;
+}
+.toggle-row .sub.err {
+  color: var(--danger);
 }
 .switch {
   flex: none;
