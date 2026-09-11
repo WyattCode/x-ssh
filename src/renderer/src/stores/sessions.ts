@@ -18,6 +18,8 @@ import type { LayoutNode, SplitDir } from '../lib/paneLayout'
 import type {
   ConnectParams,
   Host,
+  HostForward,
+  ForwardMode,
   KnownHostEntry,
   SessionStatus,
   Snippet,
@@ -224,6 +226,10 @@ interface State {
   tmuxSessionName: string
   /** Whether the tmux session-manager dialog is open. */
   tmuxOpen: boolean
+  /** Whether the port-forward manager dialog is open. */
+  forwardOpen: boolean
+  /** Whether the "publish public key to hosts" dialog is open. */
+  publishOpen: boolean
   /** Global show/hide hotkey (Electron accelerator, '' = disabled). */
   globalShowHide: string
   /** Whether the OS reports the network as online (drives an offline banner). */
@@ -288,6 +294,8 @@ export const useSessions = defineStore('sessions', {
     tmuxOnConnect: false,
     tmuxSessionName: '',
     tmuxOpen: false,
+    forwardOpen: false,
+    publishOpen: false,
     globalShowHide: '',
     networkOnline: true
   }),
@@ -840,6 +848,40 @@ export const useSessions = defineStore('sessions', {
     toggleTmux(open?: boolean): void {
       this.tmuxOpen = open ?? !this.tmuxOpen
       this.paletteOpen = false
+    },
+    toggleForwards(open?: boolean): void {
+      this.forwardOpen = open ?? !this.forwardOpen
+      this.paletteOpen = false
+    },
+    togglePublish(open?: boolean): void {
+      this.publishOpen = open ?? !this.publishOpen
+      this.paletteOpen = false
+    },
+    /** Opens a port forward on the active session now, and records it on its
+     *  pane so the status bar reflects it for the life of the session. */
+    async addForward(rule: HostForward): Promise<{ ok: boolean; error?: string }> {
+      const sid = this.activePane?.sshSessionId
+      if (!sid) return { ok: false, error: t('app.needLiveSession') }
+      const r = await window.api.ssh.forwardAdd(sid, rule)
+      if (!r.ok) return r
+      const pane = this.activePane
+      if (pane) pane.params.portForwards = [...(pane.params.portForwards ?? []), rule]
+      return { ok: true }
+    },
+    /** Stops a port forward on the active session and drops it from its pane. */
+    async removeForward(mode: ForwardMode | undefined, localPort: number): Promise<{ ok: boolean; error?: string }> {
+      const sid = this.activePane?.sshSessionId
+      if (!sid) return { ok: false, error: t('app.needLiveSession') }
+      const r = await window.api.ssh.forwardRemove(sid, { mode: mode ?? 'local', localPort })
+      if (!r.ok) return r
+      const pane = this.activePane
+      const mm = mode ?? 'local'
+      if (pane?.params.portForwards) {
+        pane.params.portForwards = pane.params.portForwards.filter(
+          (f) => !((f.mode ?? 'local') === mm && f.localPort === localPort)
+        )
+      }
+      return { ok: true }
     },
     /** Focuses the tab/pane owning a live session id (history-result jump). */
     focusSession(sessionId: string): void {

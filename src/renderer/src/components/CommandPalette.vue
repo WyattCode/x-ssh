@@ -178,6 +178,15 @@ const sections = computed<{ id: string; title: string; items: Item[] }[]>(() => 
       run: openBroadcast
     })
   }
+  if (matchesAction('发布公钥 密钥 key 上传 authorized 主机')) {
+    actions.push({
+      kind: 'action',
+      title: t('pal.publishKey'),
+      sub: t('pal.publishKeyDesc'),
+      icon: 'keyboard',
+      run: () => store.togglePublish(true)
+    })
+  }
   add('actions', t('pal.actions'), actions)
 
   // Named session snapshots: capture & restore the whole tab layout.

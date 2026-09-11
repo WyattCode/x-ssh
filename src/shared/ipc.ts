@@ -20,6 +20,8 @@ export const IPC = {
   keysGenerate: 'keys:generate',
   keysImport: 'keys:import',
   keysDelete: 'keys:delete',
+  keysPublicKey: 'keys:publicKey', // read a managed key's public line
+  keysPublish: 'keys:publish', // append a public key to selected hosts
 
   // SSH lifecycle (invoke/handle)
   sshConnect: 'ssh:connect',
@@ -89,6 +91,8 @@ export const IPC = {
   sshAttach: 'ssh:attach', // renderer -> main : listener ready, flush buffered output
   sshTmuxList: 'ssh:tmuxList', // list remote tmux sessions
   sshTmuxAttach: 'ssh:tmuxAttach', // attach-or-create a remote tmux session
+  sshForwardAdd: 'ssh:forwardAdd', // start a port forward on the live session
+  sshForwardRemove: 'ssh:forwardRemove', // stop a port forward on the live session
   sshData: 'ssh:data', // main -> renderer : stdout/stderr
   sshEvent: 'ssh:event', // main -> renderer : status changes
 

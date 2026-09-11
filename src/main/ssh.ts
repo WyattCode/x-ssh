@@ -13,6 +13,7 @@ import type {
   ConnectParams,
   ConnectResult,
   HostForward,
+  ForwardMode,
   JumpConfig,
   ProxyConfig,
   SessionEvent,
@@ -44,6 +45,9 @@ interface Session {
   forwardServers?: Server[]
   /** Remote (-R) forwards: remote-listen port → handler for an accepted socket. */
   remoteForwards?: Map<number, (socket: Duplex) => void>
+  /** Port forwards added at runtime (keyed `mode:localPort`), so they can be
+   *  tracked and removed; also lets us tell runtime from host-configured rules. */
+  runtimeRules?: Map<string, { mode: ForwardMode; localPort: number; remoteHost: string; remotePort: number; servers: Server[] }>
   /** Human label for history results (user@host[:port]). */
   label?: string
   /** Recent raw output, capped, for cross-session history search. */
@@ -549,51 +553,103 @@ export class SshManager {
     })
   }
 
-  /** Opens port forwards per rule mode (local -L, remote -R, dynamic SOCKS -D). */
+  /** Opens a single port forward per rule mode (local -L, remote -R, dynamic
+   *  SOCKS -D) and returns the local servers it created (none for remote). */
+  private openRule(session: Session, rule: HostForward): Server[] {
+    if (!rule.localPort) return []
+    const mode = rule.mode ?? 'local'
+    // Remote forwards are attached to the client's 'tcp connection' handler
+    // (one shared listener), which openRemoteForward wires up on first use.
+    if (mode === 'remote') {
+      this.openRemoteForward(session, rule)
+      return []
+    }
+    if (mode === 'dynamic') {
+      const server = createServer((socket: Socket) => this.handleSocks(session, socket))
+      server.on('error', () => {
+        /* local port busy — skip silently */
+      })
+      server.listen(rule.localPort, '127.0.0.1')
+      return [server]
+    }
+    // Local forward (-L): listen here, tunnel to remoteHost:remotePort.
+    const lp = rule.localPort
+    const rh = rule.remoteHost || '127.0.0.1'
+    const rp = rule.remotePort
+    const server = createServer((socket: Socket) => {
+      session.client.forwardOut('127.0.0.1', lp, rh, rp, (err, channel) => {
+        if (err) {
+          socket.end()
+          return
+        }
+        socket.on('error', () => channel.destroy())
+        channel.on('error', () => socket.destroy())
+        socket.pipe(channel).pipe(socket)
+      })
+    })
+    server.on('error', () => {
+      /* local port busy or not permitted — skip silently */
+    })
+    server.listen(lp, '127.0.0.1')
+    return [server]
+  }
+
+  /** Opens port forwards per rule mode (used at connect time). */
   private openForwards(session: Session, rules: HostForward[]): void {
     const servers: Server[] = []
-    for (const rule of rules) {
-      if (!rule.localPort) continue
-      const mode = rule.mode ?? 'local'
-      // Remote forwards are attached to the client's 'tcp connection' handler
-      // (one shared listener), which openRemoteForward wires up on first use.
-      if (mode === 'remote') {
-        this.openRemoteForward(session, rule)
-        continue
-      }
-      if (mode === 'dynamic') {
-        const server = createServer((socket: Socket) => this.handleSocks(session, socket))
-        server.on('error', () => {
-          /* local port busy — skip silently */
-        })
-        server.listen(rule.localPort, '127.0.0.1')
-        servers.push(server)
-        continue
-      }
-      // Local forward (-L): listen here, tunnel to remoteHost:remotePort.
-      const lp = rule.localPort
-      const rh = rule.remoteHost || '127.0.0.1'
-      const rp = rule.remotePort
-      const server = createServer((socket: Socket) => {
-        session.client.forwardOut('127.0.0.1', lp, rh, rp, (err, channel) => {
-          if (err) {
-            socket.end()
-            return
-          }
-          socket.on('error', () => channel.destroy())
-          channel.on('error', () => socket.destroy())
-          socket.pipe(channel).pipe(socket)
-        })
-      })
-      server.on('error', () => {
-        /* local port busy or not permitted — skip silently */
-      })
-      server.listen(lp, '127.0.0.1')
-      servers.push(server)
-    }
+    for (const rule of rules) servers.push(...this.openRule(session, rule))
     if (servers.length) {
       session.forwardServers = (session.forwardServers ?? []).concat(servers)
     }
+  }
+
+  /** Adds a port forward to a live session at runtime. Returns ok/error. */
+  addForward(sessionId: string, rule: HostForward): { ok: boolean; error?: string } {
+    const session = this.sessions.get(sessionId)
+    if (!session) return { ok: false, error: '会话不存在' }
+    if (!rule.localPort) return { ok: false, error: '缺少本地端口' }
+    const mode = rule.mode ?? 'local'
+    if (mode !== 'dynamic' && !rule.remotePort) return { ok: false, error: '缺少远端端口' }
+    const key = `${mode}:${rule.localPort}`
+    if (session.runtimeRules?.has(key)) return { ok: false, error: '该端口已处于转发状态' }
+    const servers = this.openRule(session, rule)
+    if (servers.length) {
+      session.forwardServers = (session.forwardServers ?? []).concat(servers)
+    }
+    if (!session.runtimeRules) session.runtimeRules = new Map()
+    session.runtimeRules.set(key, { mode, localPort: rule.localPort, remoteHost: rule.remoteHost || '127.0.0.1', remotePort: rule.remotePort || 0, servers })
+    return { ok: true }
+  }
+
+  /** Removes a port forward from a live session. Handles both runtime-added and
+   *  host-configured rules by matching the local listener port. */
+  removeForward(sessionId: string, rule: { mode?: ForwardMode; localPort: number }): { ok: boolean; error?: string } {
+    const session = this.sessions.get(sessionId)
+    if (!session) return { ok: false, error: '会话不存在' }
+    const mode = rule.mode ?? 'local'
+    const key = `${mode}:${rule.localPort}`
+    // Close any local/dynamic listener bound to this port (static or runtime).
+    const owned = session.runtimeRules?.get(key)?.servers ?? []
+    const port = rule.localPort
+    const toClose = session.forwardServers?.filter((s) => {
+      const addr = s.address()
+      const boundPort = addr && typeof addr !== 'string' ? addr.port : -1
+      return owned.includes(s) || boundPort === port
+    }) ?? []
+    toClose.forEach((s) => s.close())
+    if (toClose.length) {
+      session.forwardServers = (session.forwardServers ?? []).filter((s) => !toClose.includes(s))
+    }
+    if (mode === 'remote') {
+      try {
+        session.client.unforwardIn('127.0.0.1', port, () => {})
+      } catch {
+        /* already gone */
+      }
+      session.remoteForwards?.delete(port)
+    }
+    session.runtimeRules?.delete(key)
+    return { ok: true }
   }
 
   /** Remote forward (-R): listen on the server; each inbound connection is
@@ -2301,6 +2357,11 @@ export class SshManager {
         stream.on('error', reject)
       })
     })
+  }
+
+  /** Runs a command on a dedicated exec channel and returns its stdout. */
+  execCommand(sessionId: string, cmd: string): Promise<string> {
+    return this.remoteExec(sessionId, cmd)
   }
 
   /** Lists tmux session names on the remote, via a throwaway exec channel. */

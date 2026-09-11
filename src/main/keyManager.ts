@@ -191,8 +191,22 @@ export class KeyManager {
     return this.describe(priv, id, label)
   }
 
-  async remove(id: string): Promise<void> {
+  /** Returns the public key line for a managed key (from the .pub file, or
+   *  derived from an unprotected private key). Used by "publish key to hosts". */
+  async publicKey(id: string): Promise<string> {
     await this.ensureDir()
+    if (basename(id) !== id) throw new Error('非法密钥标识')
+    const priv = join(this.keysDir, id)
+    try {
+      return (await readFile(`${priv}.pub`, 'utf8')).trim()
+    } catch {
+      // No .pub alongside — derive it, which only works for passphrase-free keys.
+      const { stdout } = await this.sshKeygen(['-y', '-P', '', '-f', priv])
+      return stdout.trim()
+    }
+  }
+
+  async remove(id: string): Promise<void> {    await this.ensureDir()
     // Only ever operate inside the key dir: refuse path traversal in the id,
     // since it arrives over IPC from the renderer.
     if (basename(id) !== id) throw new Error('非法密钥标识')

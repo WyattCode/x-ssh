@@ -5,6 +5,7 @@ import type {
   ConnectResult,
   Host,
   HostForward,
+  ForwardMode,
   KnownHostEntry,
   ManagedKey,
   SessionEvent,
@@ -146,7 +147,14 @@ const api = {
     tmuxList: (sessionId: string): Promise<string[]> =>
       ipcRenderer.invoke(IPC.sshTmuxList, sessionId),
     tmuxAttach: (sessionId: string, name: string): Promise<{ ok: boolean }> =>
-      ipcRenderer.invoke(IPC.sshTmuxAttach, sessionId, name)
+      ipcRenderer.invoke(IPC.sshTmuxAttach, sessionId, name),
+    forwardAdd: (sessionId: string, rule: HostForward): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke(IPC.sshForwardAdd, sessionId, rule),
+    forwardRemove: (
+      sessionId: string,
+      rule: { mode?: ForwardMode; localPort: number }
+    ): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke(IPC.sshForwardRemove, sessionId, rule)
   },
   sftp: {
     list: (sessionId: string, path?: string): Promise<SftpList> =>
@@ -292,7 +300,14 @@ const api = {
       ipcRenderer.invoke(IPC.keysGenerate, opts),
     import: (): Promise<{ ok: boolean; key?: ManagedKey; error?: string; canceled?: boolean }> =>
       ipcRenderer.invoke(IPC.keysImport),
-    del: (id: string): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke(IPC.keysDelete, id)
+    del: (id: string): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke(IPC.keysDelete, id),
+    publicKey: (id: string): Promise<{ ok: boolean; text?: string; error?: string }> =>
+      ipcRenderer.invoke(IPC.keysPublicKey, id),
+    publish: (
+      keyId: string,
+      hostIds: string[]
+    ): Promise<{ ok: boolean; results?: { host: string; ok: boolean; error?: string }[]; error?: string }> =>
+      ipcRenderer.invoke(IPC.keysPublish, keyId, hostIds)
   },
   /** Resolve a dropped File's absolute path (File.path was removed in Electron 32+). */
   getPathForFile: (file: File): string => webUtils.getPathForFile(file),

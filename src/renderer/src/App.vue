@@ -18,6 +18,8 @@ import ConfirmDialog from './components/ConfirmDialog.vue'
 import ToastHost from './components/ToastHost.vue'
 import HistorySearch from './components/HistorySearch.vue'
 import TmuxDialog from './components/TmuxDialog.vue'
+import ForwardDialog from './components/ForwardDialog.vue'
+import PublishKeyDialog from './components/PublishKeyDialog.vue'
 import SettingsDialog from './components/SettingsDialog.vue'
 import StatusBar from './components/StatusBar.vue'
 import Icon from './components/Icon.vue'
@@ -445,6 +447,8 @@ onBeforeUnmount(() => {
     <ToastHost />
     <HistorySearch />
     <TmuxDialog />
+    <ForwardDialog />
+    <PublishKeyDialog />
     <LockScreen v-if="store.lockLocked" />
   </div>
 </template>

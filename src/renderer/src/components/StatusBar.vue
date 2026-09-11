@@ -43,9 +43,6 @@ const uptime = computed(() => {
   return mm > 0 ? `${mm}m${ss}s` : `${s}s`
 })
 const forwards = computed(() => pane.value?.params.portForwards?.length ?? 0)
-const forwardList = computed(() => pane.value?.params.portForwards ?? [])
-const fwOpen = ref(false)
-const modeLabel = (m: string): string => (m === 'local' ? t('status.fwLocal') : m === 'remote' ? t('status.fwRemote') : t('status.fwDynamic'))
 const hasJump = computed(() => !!pane.value?.params.jumpHostId)
 const keyKnown = computed(() => {
   const p = pane.value?.params
@@ -90,11 +87,11 @@ const activeTransfers = computed(() => store.transfers.filter((x) => !x.done && 
       <span>{{ t('status.jump') }}</span>
     </span>
     <button
-      v-if="forwards > 0"
+      v-if="connected"
       class="seg badge"
-      :class="{ on: fwOpen }"
+      :class="{ on: store.forwardOpen }"
       :title="t('status.forwardsTip', { n: forwards })"
-      @click="fwOpen = !fwOpen"
+      @click="store.toggleForwards()"
     >
       <Icon name="split" :size="12" />
       <span>{{ forwards }} {{ t('status.forwards') }}</span>
@@ -107,19 +104,6 @@ const activeTransfers = computed(() => store.transfers.filter((x) => !x.done && 
     >
       <Icon :name="keyKnown ? 'shield' : 'alert-triangle'" :size="12" />
     </span>
-  </div>
-
-  <div v-if="fwOpen" class="fw-overlay" @mousedown.self="fwOpen = false">
-    <div class="fw-pop">
-      <div class="fw-head">{{ t('status.forwardsTitle') }}</div>
-      <div v-for="(f, i) in forwardList" :key="i" class="fw-row">
-        <span class="fw-badge">{{ modeLabel(f.mode ?? 'local') }}</span>
-        <span class="fw-rule">
-          {{ f.mode === 'dynamic' ? 'SOCKS local' : '' }}
-          {{ f.mode !== 'dynamic' ? `${f.localPort} → ${f.remoteHost || '127.0.0.1'}:${f.remotePort}` : '' }}
-        </span>
-      </div>
-    </div>
   </div>
 </template>
 

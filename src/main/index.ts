@@ -6,7 +6,7 @@ import { mkdtemp, rm, readFile, stat, readdir, mkdir, unlink, rename, writeFile 
 import { watchFile, unwatchFile } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { IPC, PREFS_ARG } from '../shared/ipc'
-import type { ConnectParams, Host, HostForward, JumpConfig, LocalEntry, Snippet, UiPrefs, UploadOverwrite } from '../shared/types'
+import type { ConnectParams, Host, HostForward, ForwardMode, JumpConfig, LocalEntry, Snippet, UiPrefs, UploadOverwrite } from '../shared/types'
 import { readLaunchTarget, targetFromUrl, PROTOCOL, compareVersions } from '../shared/launchTarget'
 import { SshManager } from './ssh'
 import { HostStore } from './store'
@@ -1072,6 +1072,14 @@ function registerIpc(): void {
     sshManager.tmuxAttachOrCreate(sessionId, name)
     return { ok: true }
   })
+  ipcMain.handle(IPC.sshForwardAdd, (_e, sessionId: string, rule: HostForward) => {
+    if (!sshManager) return { ok: false, error: '窗口未就绪' }
+    return sshManager.addForward(sessionId, rule)
+  })
+  ipcMain.handle(IPC.sshForwardRemove, (_e, sessionId: string, rule: { mode?: ForwardMode; localPort: number }) => {
+    if (!sshManager) return { ok: false, error: '窗口未就绪' }
+    return sshManager.removeForward(sessionId, rule)
+  })
 
   // ---- SFTP ----
   ipcMain.handle(IPC.sftpList, (_e, sessionId: string, path?: string) => {
@@ -1617,6 +1625,92 @@ function registerIpc(): void {
     } catch (e) {
       return { ok: false, error: friendlyError((e as Error).message) }
     }
+  })
+  ipcMain.handle(IPC.keysPublicKey, async (_e, id: string) => {
+    try {
+      const text = await keyManager.publicKey(id)
+      if (!text) return { ok: false, error: '该密钥没有可用的公钥' }
+      return { ok: true, text }
+    } catch (e) {
+      return { ok: false, error: friendlyError((e as Error).message) }
+    }
+  })
+  // Appends a public key to the authorized_keys of several saved hosts. Each is
+  // connected with its own saved credentials, the key written via a shell
+  // here-doc (safe from quoting), then the one-shot session is torn down.
+  ipcMain.handle(IPC.keysPublish, async (_e, keyId: string, hostIds: string[]) => {
+    let pub: string
+    try {
+      pub = (await keyManager.publicKey(keyId)).trim()
+    } catch (e) {
+      return { ok: false, error: friendlyError((e as Error).message) }
+    }
+    if (!pub) return { ok: false, error: '该密钥没有可用的公钥' }
+    if (!sshManager) return { ok: false, error: '窗口未就绪' }
+    const results: { host: string; ok: boolean; error?: string }[] = []
+    for (const hostId of hostIds) {
+      const h = (await store.list()).find((x) => x.id === hostId)
+      const hostLabel = h ? `${h.username}@${h.host}${h.port && h.port !== 22 ? `:${h.port}` : ''}` : hostId
+      if (!h) {
+        results.push({ host: hostLabel, ok: false, error: '主机不存在' })
+        continue
+      }
+      const params: ConnectParams = {
+        host: h.host,
+        port: h.port,
+        username: h.username,
+        auth: h.auth,
+        keyPath: h.keyPath,
+        hostId: h.id,
+        agentForward: h.agentForward
+      }
+      try {
+        if (store.isLocked && !params.password && !params.passphrase) {
+          results.push({ host: hostLabel, ok: false, error: '应用已锁定' })
+          continue
+        }
+        if (h.auth === 'password' && !params.password) params.password = await store.getPassword(h.id)
+        if (h.auth === 'key' && !params.passphrase) params.passphrase = await store.getPassphrase(h.id)
+        if (h.portForwards?.length) params.portForwards = h.portForwards
+        if (h.proxy) params.proxy = h.proxy
+        params.multiplex = (await settings.get<boolean>('connectionMultiplex')) === true
+        if (h.jumpHostId) {
+          const jh = (await store.list()).find((x) => x.id === h.jumpHostId)
+          if (jh) {
+            const jump: JumpConfig = {
+              host: jh.host,
+              port: jh.port,
+              username: jh.username,
+              auth: jh.auth,
+              keyPath: jh.keyPath
+            }
+            if (jh.auth === 'password') jump.password = store.isLocked ? undefined : await store.getPassword(jh.id)
+            if (jh.auth === 'key') jump.passphrase = store.isLocked ? undefined : await store.getPassphrase(jh.id)
+            params.jump = jump
+          }
+        }
+        const r = await sshManager.connect(params)
+        if (!r.ok || !r.sessionId) {
+          results.push({ host: hostLabel, ok: false, error: r.error ?? '连接失败' })
+          continue
+        }
+        const sid = r.sessionId
+        const cmd = `umask 077; mkdir -p ~/.ssh && chmod 700 ~/.ssh\ncat >> ~/.ssh/authorized_keys <<'XSSH'\n${pub}\nXSSH\ntouch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys`
+        try {
+          await sshManager.execCommand(sid, cmd)
+          results.push({ host: hostLabel, ok: true })
+        } finally {
+          try {
+            sshManager.disconnect(sid)
+          } catch {
+            /* ignore */
+          }
+        }
+      } catch (e) {
+        results.push({ host: hostLabel, ok: false, error: friendlyError((e as Error).message) })
+      }
+    }
+    return { ok: true, results }
   })
 
   // ---- Update check vs GitHub releases ----
