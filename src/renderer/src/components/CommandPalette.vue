@@ -187,6 +187,15 @@ const sections = computed<{ id: string; title: string; items: Item[] }[]>(() => 
       run: () => store.togglePublish(true)
     })
   }
+  if (matchesAction('会话回放 replay 日志 log 记录')) {
+    actions.push({
+      kind: 'action',
+      title: t('pal.replay'),
+      sub: t('pal.replayDesc'),
+      icon: 'file',
+      run: () => store.toggleReplay(true)
+    })
+  }
   add('actions', t('pal.actions'), actions)
 
   // Named session snapshots: capture & restore the whole tab layout.

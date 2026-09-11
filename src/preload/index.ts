@@ -72,9 +72,11 @@ const api = {
       ipcRenderer.invoke(IPC.knownHostsForget, host, port)
   },
   connLog: {
-    list: (): Promise<{ at: number; event: string; host: string; port: number; username: string }[]> =>
+    list: (): Promise<{ at: number; event: string; host: string; port: number; username: string; detail?: string; bytes?: number }[]> =>
       ipcRenderer.invoke(IPC.connLogList),
-    clear: (): Promise<{ ok: boolean }> => ipcRenderer.invoke(IPC.connLogClear)
+    clear: (): Promise<{ ok: boolean }> => ipcRenderer.invoke(IPC.connLogClear),
+    push: (entry: { at: number; event: string; host: string; port: number; username: string; detail?: string; bytes?: number }): Promise<{ ok: boolean }> =>
+      ipcRenderer.invoke(IPC.connLogPush, entry)
   },
   lock: {
     status: (): Promise<{ enabled: boolean; locked: boolean }> =>
@@ -272,6 +274,12 @@ const api = {
     const listener = (_e: unknown, target: string): void => cb(target)
     ipcRenderer.on(IPC.appOpenTarget, listener)
     return () => ipcRenderer.removeListener(IPC.appOpenTarget, listener)
+  },
+  /** Machine woke from sleep / screen unlocked → re-evaluate connectivity. */
+  onOnlineChanged: (cb: (online: boolean) => void): (() => void) => {
+    const listener = (_e: unknown, online: boolean): void => cb(online)
+    ipcRenderer.on(IPC.appOnlineChanged, listener)
+    return () => ipcRenderer.removeListener(IPC.appOnlineChanged, listener)
   },
   checkUpdate: (): Promise<{
     ok: boolean

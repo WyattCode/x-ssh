@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain, dialog, nativeImage, screen, Menu, Notification, Tray, globalShortcut } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, dialog, nativeImage, screen, Menu, Notification, Tray, globalShortcut, powerMonitor } from 'electron'
 import { join, dirname, basename, isAbsolute } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { tmpdir, homedir } from 'node:os'
@@ -359,10 +359,14 @@ async function scheduleAutoBackup(): Promise<void> {
 // ---- Connection audit log ----
 interface ConnLogEntry {
   at: number
-  event: 'connect' | 'disconnect' | 'error'
+  event: 'connect' | 'disconnect' | 'error' | 'transfer' | 'forward'
   host: string
   port: number
   username: string
+  /** Free-form detail (transfer name/direction, forward rule…). */
+  detail?: string
+  /** Byte count for transfer events. */
+  bytes?: number
 }
 async function pushConnLog(e: ConnLogEntry): Promise<void> {
   const all = (await settings.get<ConnLogEntry[]>('connectionLog')) ?? []
@@ -1508,6 +1512,10 @@ function registerIpc(): void {
     return settings.set(key, value)
   })
   ipcMain.handle(IPC.connLogList, async () => (await settings.get<ConnLogEntry[]>('connectionLog')) ?? [])
+  ipcMain.handle(IPC.connLogPush, async (_e, entry: ConnLogEntry) => {
+    await pushConnLog(entry)
+    return { ok: true }
+  })
   ipcMain.handle(IPC.connLogClear, async () => {
     await settings.set('connectionLog', [])
     return { ok: true }
@@ -1838,6 +1846,21 @@ app.whenReady().then(async () => {
     readUiPrefs()
   ])
   createWindow(saved, prefs)
+
+  // Finer network-health trigger: when the machine wakes from sleep the network
+  // may have dropped while the app was suspended. Nudge every renderer to
+  // re-evaluate connectivity so dropped sessions retry (mirrors the online/offline
+  // listeners already wired in the renderer).
+  powerMonitor.on('resume', () => {
+    for (const w of BrowserWindow.getAllWindows()) {
+      if (!w.isDestroyed()) w.webContents.send(IPC.appOnlineChanged, true)
+    }
+  })
+  powerMonitor.on('unlock-screen', () => {
+    for (const w of BrowserWindow.getAllWindows()) {
+      if (!w.isDestroyed()) w.webContents.send(IPC.appOnlineChanged, true)
+    }
+  })
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow(saved, prefs)

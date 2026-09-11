@@ -20,6 +20,7 @@ import HistorySearch from './components/HistorySearch.vue'
 import TmuxDialog from './components/TmuxDialog.vue'
 import ForwardDialog from './components/ForwardDialog.vue'
 import PublishKeyDialog from './components/PublishKeyDialog.vue'
+import SessionReplayDialog from './components/SessionReplayDialog.vue'
 import SettingsDialog from './components/SettingsDialog.vue'
 import StatusBar from './components/StatusBar.vue'
 import Icon from './components/Icon.vue'
@@ -257,6 +258,7 @@ function onGlobalKey(e: KeyboardEvent): void {
 
 let offEvent: (() => void) | null = null
 let offOpenTarget: (() => void) | null = null
+let offOnlineChanged: (() => void) | null = null
 /** Converts a #rrggbb hex color into an rgba() string at the given alpha. */
 function accentSoft(hex: string, alpha = 0.14): string {
   const m = /^#?([0-9a-f]{6})$/i.exec(hex)
@@ -314,6 +316,9 @@ onMounted(async () => {
     store.paletteSeed = target
     store.togglePalette(true)
   })
+  // Machine woke from sleep / screen unlocked: the network may have dropped while
+  // suspended, so re-evaluate connectivity and let dropped sessions retry.
+  offOnlineChanged = window.api.onOnlineChanged(() => store.handleNetworkOnline())
   // Pull the deferred chunks in while the app is idle, so the first connection
   // never waits on them.
   const prefetch = (): void => {
@@ -331,6 +336,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('offline', onNetworkOffline)
   offEvent?.()
   offOpenTarget?.()
+  offOnlineChanged?.()
 })
 </script>
 
@@ -449,6 +455,7 @@ onBeforeUnmount(() => {
     <TmuxDialog />
     <ForwardDialog />
     <PublishKeyDialog />
+    <SessionReplayDialog />
     <LockScreen v-if="store.lockLocked" />
   </div>
 </template>

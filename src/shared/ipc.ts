@@ -103,6 +103,7 @@ export const IPC = {
   // Connection audit log (invoke/handle)
   connLogList: 'connLog:list',
   connLogClear: 'connLog:clear',
+  connLogPush: 'connLog:push', // renderer -> main : record a transfer/forward event
 
   // App master-lock (invoke/handle)
   lockStatus: 'lock:status',
@@ -126,7 +127,10 @@ export const IPC = {
   appCheckUpdate: 'app:checkUpdate',
 
   // Global (systemwide) hotkey: show/hide the main window
-  appGlobalShortcut: 'app:globalShortcut'
+  appGlobalShortcut: 'app:globalShortcut',
+
+  // Main → renderer: machine woke from sleep / unlock → re-evaluate connectivity
+  appOnlineChanged: 'app:onlineChanged'
 } as const
 
 /** Prefix of the launch argument carrying UiPrefs from main to the preload. */

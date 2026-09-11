@@ -230,6 +230,8 @@ interface State {
   forwardOpen: boolean
   /** Whether the "publish public key to hosts" dialog is open. */
   publishOpen: boolean
+  /** Whether the session-recording replay dialog is open. */
+  replayOpen: boolean
   /** Global show/hide hotkey (Electron accelerator, '' = disabled). */
   globalShowHide: string
   /** Whether the OS reports the network as online (drives an offline banner). */
@@ -296,6 +298,7 @@ export const useSessions = defineStore('sessions', {
     tmuxOpen: false,
     forwardOpen: false,
     publishOpen: false,
+    replayOpen: false,
     globalShowHide: '',
     networkOnline: true
   }),
@@ -734,6 +737,22 @@ export const useSessions = defineStore('sessions', {
         if (p.error && !cancelled && p.direction === 'down' && p.items?.length) {
           void this.queueDownload(p.sessionId ?? '', p.items, p.localDir ?? '')
         }
+        // Audit the transfer for the security log (who moved what, if the pane
+        // maps back to a host). Only terminal events (done/error) are recorded.
+        if (p.done || p.error) {
+          const owner = p.sessionId ? this.paneBySession(p.sessionId) : undefined
+          if (owner) {
+            void window.api.connLog.push({
+              at: Date.now(),
+              event: 'transfer',
+              host: owner.params.host,
+              port: owner.params.port || 22,
+              username: owner.params.username,
+              detail: p.error ? `${p.name} · ${p.error}` : p.name,
+              bytes: p.transferred
+            })
+          }
+        }
         if (p.done || p.error) {
           if (!cancelled) {
             window.api.notify(
@@ -855,7 +874,10 @@ export const useSessions = defineStore('sessions', {
     },
     togglePublish(open?: boolean): void {
       this.publishOpen = open ?? !this.publishOpen
-      this.paletteOpen = false
+    },
+
+    toggleReplay(open?: boolean): void {
+      this.replayOpen = open ?? !this.replayOpen
     },
     /** Opens a port forward on the active session now, and records it on its
      *  pane so the status bar reflects it for the life of the session. */
@@ -866,6 +888,7 @@ export const useSessions = defineStore('sessions', {
       if (!r.ok) return r
       const pane = this.activePane
       if (pane) pane.params.portForwards = [...(pane.params.portForwards ?? []), rule]
+      this.auditForward(pane, rule)
       return { ok: true }
     },
     /** Stops a port forward on the active session and drops it from its pane. */
@@ -881,7 +904,29 @@ export const useSessions = defineStore('sessions', {
           (f) => !((f.mode ?? 'local') === mm && f.localPort === localPort)
         )
       }
+      if (pane) {
+        void window.api.connLog.push({
+          at: Date.now(),
+          event: 'forward',
+          host: pane.params.host,
+          port: pane.params.port || 22,
+          username: pane.params.username,
+          detail: `remove ${mm} ${localPort}`
+        })
+      }
       return { ok: true }
+    },
+    /** Records an add of a port forward into the security audit log. */
+    auditForward(pane: Pane | undefined, rule: HostForward): void {
+      if (!pane) return
+      void window.api.connLog.push({
+        at: Date.now(),
+        event: 'forward',
+        host: pane.params.host,
+        port: pane.params.port || 22,
+        username: pane.params.username,
+        detail: `add ${rule.mode ?? 'local'} ${rule.localPort}`
+      })
     },
     /** Focuses the tab/pane owning a live session id (history-result jump). */
     focusSession(sessionId: string): void {
