@@ -603,8 +603,10 @@ export class SshManager {
     }
   }
 
-  /** Adds a port forward to a live session at runtime. Returns ok/error. */
-  addForward(sessionId: string, rule: HostForward): { ok: boolean; error?: string } {
+  /** Adds a port forward to a live session at runtime. Returns ok/error.
+   *  Unlike connect-time forwards, the bind is awaited so a port already in use
+   *  (EADDRINUSE) is reported instead of silently appearing to have succeeded. */
+  async addForward(sessionId: string, rule: HostForward): Promise<{ ok: boolean; error?: string }> {
     const session = this.sessions.get(sessionId)
     if (!session) return { ok: false, error: '会话不存在' }
     if (!rule.localPort) return { ok: false, error: '缺少本地端口' }
@@ -614,11 +616,35 @@ export class SshManager {
     if (session.runtimeRules?.has(key)) return { ok: false, error: '该端口已处于转发状态' }
     const servers = this.openRule(session, rule)
     if (servers.length) {
+      // A failed bind surfaces as an async 'error' after listen(); wait for all
+      // servers to actually start listening (or roll back the ones that didn't).
+      const bound = await Promise.all(servers.map((s) => this.waitForListen(s)))
+      if (bound.some((b) => !b)) {
+        servers.forEach((s) => s.close())
+        return { ok: false, error: `本地端口 ${rule.localPort} 已被占用` }
+      }
       session.forwardServers = (session.forwardServers ?? []).concat(servers)
     }
     if (!session.runtimeRules) session.runtimeRules = new Map()
     session.runtimeRules.set(key, { mode, localPort: rule.localPort, remoteHost: rule.remoteHost || '127.0.0.1', remotePort: rule.remotePort || 0, servers })
     return { ok: true }
+  }
+
+  /** Resolves once a server is listening (true) or failed to bind (false). */
+  private waitForListen(server: Server): Promise<boolean> {
+    return new Promise((resolve) => {
+      if (server.listening) return resolve(true)
+      const onListening = (): void => {
+        server.removeListener('error', onError)
+        resolve(true)
+      }
+      const onError = (): void => {
+        server.removeListener('listening', onListening)
+        resolve(false)
+      }
+      server.once('listening', onListening)
+      server.once('error', onError)
+    })
   }
 
   /** Removes a port forward from a live session. Handles both runtime-added and
