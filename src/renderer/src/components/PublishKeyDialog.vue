@@ -12,8 +12,10 @@ const keys = ref<ManagedKey[]>([])
 const keyId = ref('')
 const selected = reactive(new Set<string>())
 const busy = ref(false)
+const revokeBusy = ref(false)
 const err = ref('')
 const results = ref<{ host: string; ok: boolean; error?: string }[]>([])
+const revokeResults = ref<{ host: string; ok: boolean; error?: string }[]>([])
 
 const hostList = computed(() => [...store.hosts].sort((a, b) => a.label.localeCompare(b.label)))
 
@@ -39,12 +41,25 @@ async function publish(): Promise<void> {
   }
   results.value = r.results ?? []
 }
+async function revoke(): Promise<void> {
+  if (!keyId.value || !selected.size) return
+  revokeBusy.value = true
+  revokeResults.value = []
+  const r = await window.api.keys.revoke(keyId.value, [...selected])
+  revokeBusy.value = false
+  if (!r.ok) {
+    err.value = r.error ?? t('keyPub.revokeFail')
+    return
+  }
+  revokeResults.value = r.results ?? []
+}
 
 watch(
   () => store.publishOpen,
   async (open) => {
     if (!open) return
     results.value = []
+    revokeResults.value = []
     err.value = ''
     selected.clear()
     await refresh()
@@ -74,12 +89,26 @@ watch(
           </label>
           <p v-if="!hostList.length" class="kp-empty">{{ t('keyPub.noHosts') }}</p>
         </div>
-        <button class="kp-run" :disabled="busy || !keyId || !selected.size" @click="publish">
-          <Icon name="send" :size="14" />{{ t('keyPub.publish') }}
-        </button>
+        <div class="kp-actions">
+          <button class="kp-run" :disabled="busy || !keyId || !selected.size" @click="publish">
+            <Icon name="send" :size="14" />{{ t('keyPub.publish') }}
+          </button>
+          <button class="kp-run ghost" :disabled="revokeBusy || !keyId || !selected.size" @click="revoke">
+            <Icon name="trash" :size="14" />{{ t('keyPub.revoke') }}
+          </button>
+        </div>
         <p v-if="err" class="kp-err">{{ err }}</p>
         <div v-if="results.length" class="kp-results">
+          <div class="kp-results-h">{{ t('keyPub.published') }}</div>
           <div v-for="(r, i) in results" :key="i" class="kp-result" :class="r.ok ? 'ok' : 'bad'">
+            <Icon :name="r.ok ? 'check' : 'alert-triangle'" :size="13" />
+            <span class="kp-host-label">{{ r.host }}</span>
+            <span v-if="!r.ok" class="kp-err">{{ r.error }}</span>
+          </div>
+        </div>
+        <div v-if="revokeResults.length" class="kp-results">
+          <div class="kp-results-h">{{ t('keyPub.revoked') }}</div>
+          <div v-for="(r, i) in revokeResults" :key="i" class="kp-result" :class="r.ok ? 'ok' : 'bad'">
             <Icon :name="r.ok ? 'check' : 'alert-triangle'" :size="13" />
             <span class="kp-host-label">{{ r.host }}</span>
             <span v-if="!r.ok" class="kp-err">{{ r.error }}</span>
@@ -201,9 +230,25 @@ watch(
   font-size: 13px;
   cursor: pointer;
 }
+.kp-actions {
+  display: flex;
+  gap: 8px;
+}
 .kp-run:disabled {
   opacity: 0.5;
   cursor: default;
+}
+.kp-run.ghost {
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+}
+.kp-results-h {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-faint);
+  margin-top: 4px;
 }
 .kp-err {
   color: var(--danger);

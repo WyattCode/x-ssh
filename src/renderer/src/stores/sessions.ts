@@ -170,6 +170,8 @@ interface State {
   connectTimeoutSec: number
   connectRetries: number
   transferConcurrency: number
+  /** Verify each downloaded file's SHA-256 against the remote copy. */
+  verifyChecksums: boolean
   shellIntegration: boolean
   terminalFontFamily: string
   terminalCursor: CursorStyle
@@ -264,6 +266,7 @@ export const useSessions = defineStore('sessions', {
     connectTimeoutSec: 20,
     connectRetries: 6,
     transferConcurrency: 4,
+    verifyChecksums: false,
     shellIntegration: true,
     terminalFontFamily: '',
     terminalCursor: 'bar',
@@ -334,12 +337,13 @@ export const useSessions = defineStore('sessions', {
     },
 
     async loadSettings(): Promise<void> {
-      const [editor, ka, ct, cr, tc, si, ff, cur, thm, rt, ar, rcn, rcw, nt, ns, cp, sp, tq, dq, tfh, abk, abd, abh] = await Promise.all([
+      const [editor, ka, ct, cr, tc, vcs, si, ff, cur, thm, rt, ar, rcn, rcw, nt, ns, cp, sp, tq, dq, tfh, abk, abd, abh] = await Promise.all([
         window.api.settings.get<string>('externalEditor'),
         window.api.settings.get<number>('keepaliveSec'),
         window.api.settings.get<number>('connectTimeoutSec'),
         window.api.settings.get<number>('connectRetries'),
         window.api.settings.get<number>('transferConcurrency'),
+        window.api.settings.get<boolean>('verifyChecksums'),
         window.api.settings.get<boolean>('shellIntegration'),
         window.api.settings.get<string>('terminalFontFamily'),
         window.api.settings.get<CursorStyle>('terminalCursor'),
@@ -364,6 +368,7 @@ export const useSessions = defineStore('sessions', {
       this.connectTimeoutSec = typeof ct === 'number' && ct > 0 ? ct : 20
       this.connectRetries = typeof cr === 'number' && cr >= 0 ? cr : 6
       this.transferConcurrency = clampConcurrency(typeof tc === 'number' ? tc : 4, 4)
+      this.verifyChecksums = vcs === true
       this.shellIntegration = si !== false
       this.transferQueue = tq ?? []
       this.downloadQueue = dq ?? []

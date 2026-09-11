@@ -1063,6 +1063,42 @@ function runMore(fn: () => void): void {
 // ---- Incremental sync (rsync-style) ----
 const sync = reactive({ open: false, local: '', remote: '', mode: 'both' as 'up' | 'down' | 'both', del: false, watch: false, interval: 5 })
 const watchActive = ref(false)
+// ---- Directory tree diff (rsync-style, read-only) ----
+const dirDiff = reactive({
+  open: false,
+  local: '',
+  remote: '',
+  busy: false,
+  err: '',
+  onlyLocal: [] as string[],
+  onlyRemote: [] as string[],
+  sizeDiff: [] as string[],
+  done: false
+})
+function openDirDiff(): void {
+  if (!props.sessionId) return
+  dirDiff.local = localPath.value
+  dirDiff.remote = path.value
+  dirDiff.done = false
+  dirDiff.err = ''
+  dirDiff.open = true
+}
+async function runDirDiff(): Promise<void> {
+  if (!props.sessionId || !dirDiff.local || !dirDiff.remote) return
+  dirDiff.busy = true
+  dirDiff.err = ''
+  const r = await window.api.sftp.diffDirs(props.sessionId, dirDiff.local, dirDiff.remote)
+  dirDiff.busy = false
+  if (!r.ok) {
+    dirDiff.err = r.error ?? tt('dirDiff.fail')
+    dirDiff.done = false
+    return
+  }
+  dirDiff.onlyLocal = r.onlyLocal ?? []
+  dirDiff.onlyRemote = r.onlyRemote ?? []
+  dirDiff.sizeDiff = r.sizeDiff ?? []
+  dirDiff.done = true
+}
 function openSyncDialog(): void {
   if (!props.sessionId) return
   sync.local = localPath.value
@@ -1384,6 +1420,7 @@ const pct = (t: SftpProgress): number =>
         <button @click="runMore(uploadExtractPick)"><Icon name="zip" :size="15" /><span>{{ tt('sfp.uploadExtract') }}</span></button>
         <button @click="runMore(packDownloadSelected)"><Icon name="archive" :size="15" /><span>{{ tt('sfp.packDownload') }}</span></button>
         <button @click="runMore(openSyncDialog)"><Icon name="sync" :size="15" /><span>{{ tt('sfp.sync') }}<template v-if="watchActive"> · {{ tt('sfp.syncOn') }}</template></span></button>
+        <button @click="runMore(openDirDiff)"><Icon name="diff" :size="15" /><span>{{ tt('sfp.dirDiff') }}</span></button>
         <button v-if="watchActive" @click="runMore(stopWatch)"><Icon name="pause" :size="15" /><span>{{ tt('sfp.syncWatchStop') }}</span></button>
         <button @click="runMore(toggleHidden)"><Icon name="eye" :size="15" /><span>{{ showHidden ? tt('sfp.toggleHiddenHide') : tt('sfp.toggleHiddenShow') }}</span></button>
         <button v-if="hasTermCwd" @click="runMore(gotoTerminalDir)"><Icon name="terminal" :size="15" /><span>{{ tt('sfp.gotoTerminal') }}</span></button>
@@ -1756,6 +1793,46 @@ const pct = (t: SftpProgress): number =>
           <button class="pm-btn ghost" @click="sync.open = false">{{ tt('sfp.cancel') }}</button>
           <button class="pm-btn primary" :disabled="!sync.local || !sync.remote" @click="startSync">
             {{ sync.watch ? tt('sfp.syncWatchStart') : tt('sfp.syncStart') }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="dirDiff.open" class="pm-overlay" @mousedown.self="dirDiff.open = false">
+      <div class="pm-dialog sync-dialog" @keydown.esc="dirDiff.open = false">
+        <div class="pm-head">
+          <span>{{ tt('sfp.dirDiff') }}</span>
+          <button class="pm-x" :title="tt('sfp.close')" @click="dirDiff.open = false"><Icon name="close" /></button>
+        </div>
+        <label class="sync-field">
+          <span>{{ tt('sfp.syncLocal') }}</span>
+          <input v-model="dirDiff.local" spellcheck="false" />
+        </label>
+        <label class="sync-field">
+          <span>{{ tt('sfp.syncRemote') }}</span>
+          <input v-model="dirDiff.remote" spellcheck="false" />
+        </label>
+        <p class="pm-err" v-if="!dirDiff.local || !dirDiff.remote">{{ tt('sfp.syncPathsRequired') }}</p>
+        <div v-if="dirDiff.done" class="dd-body">
+          <div v-if="!dirDiff.onlyRemote.length && !dirDiff.onlyLocal.length && !dirDiff.sizeDiff.length" class="dd-empty">{{ tt('dirDiff.same') }}</div>
+          <div v-for="g in [
+            { label: tt('dirDiff.onlyRemote'), items: dirDiff.onlyRemote, cls: 'rr' },
+            { label: tt('dirDiff.onlyLocal'), items: dirDiff.onlyLocal, cls: 'll' },
+            { label: tt('dirDiff.sizeDiff'), items: dirDiff.sizeDiff, cls: 'df' }
+          ].filter((g) => g.items.length)" :key="g.cls" class="dd-group">
+            <div class="dd-h">
+              <Icon :name="g.cls === 'll' ? 'upload' : g.cls === 'df' ? 'diff' : 'download'" :size="13" />
+              <span>{{ g.label }}</span>
+              <em>{{ g.items.length }}</em>
+            </div>
+            <div v-for="f in g.items" :key="f" class="dd-row" :title="f">{{ f }}</div>
+          </div>
+        </div>
+        <p v-if="dirDiff.err" class="pm-err">{{ dirDiff.err }}</p>
+        <div class="pm-foot">
+          <button class="pm-btn ghost" @click="dirDiff.open = false">{{ tt('sfp.close') }}</button>
+          <button class="pm-btn primary" :disabled="dirDiff.busy || !dirDiff.local || !dirDiff.remote" @click="runDirDiff">
+            {{ dirDiff.busy ? tt('dirDiff.scanning') : tt('dirDiff.run') }}
           </button>
         </div>
       </div>
@@ -2567,6 +2644,48 @@ const pct = (t: SftpProgress): number =>
   gap: 5px;
   font-size: 12.5px;
   color: var(--text-dim);
+}
+.dd-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 42vh;
+  overflow: auto;
+  padding-right: 2px;
+}
+.dd-empty {
+  color: var(--text-faint);
+  font-size: 12.5px;
+  margin: 0;
+}
+.dd-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.dd-h {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-faint);
+  padding-bottom: 2px;
+}
+.dd-h em {
+  font-style: normal;
+  color: var(--text-faint);
+  opacity: 0.8;
+}
+.dd-row {
+  font-family: var(--font-mono, monospace);
+  font-size: 11.5px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 1px 0;
 }
 .sync-field input,
 .sync-field select,

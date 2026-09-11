@@ -276,6 +276,10 @@ function onConcurrency(e: Event): void {
   store.transferConcurrency = n
   void store.saveSetting('transferConcurrency', n)
 }
+function toggleVerifyChecksums(): void {
+  store.verifyChecksums = !store.verifyChecksums
+  void store.saveSetting('verifyChecksums', store.verifyChecksums)
+}
 function onRate(e: Event): void {
   const n = Math.max(0, Math.min(131072, parseInt((e.target as HTMLInputElement).value, 10) || 0))
   store.transferRateKbps = n
@@ -1005,6 +1009,13 @@ async function resetMasterLock(): Promise<void> {
                 <span class="unit">{{ t('set.conn.kbps') }}</span>
               </div>
               <p class="desc">{{ t('set.conn.xferRateDesc') }}</p>
+              <label class="toggle-row" @click="toggleVerifyChecksums">
+                <span>
+                  <span class="fname">{{ t('set.conn.verifyChecksums') }}</span>
+                  <span class="sub">{{ t('set.conn.verifyChecksumsDesc') }}</span>
+                </span>
+                <span class="switch" :class="{ on: store.verifyChecksums }"><i /></span>
+              </label>
             </div>
             <div class="section">
               <div class="label">{{ t('set.conn.drop') }}</div>

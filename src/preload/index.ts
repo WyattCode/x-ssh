@@ -204,6 +204,12 @@ const api = {
       ipcRenderer.invoke(IPC.sftpWatchStart, sessionId, localDir, remoteDir, mode, deleteExtras, intervalSec),
     watchStop: (sessionId: string): Promise<{ ok: boolean }> =>
       ipcRenderer.invoke(IPC.sftpWatchStop, sessionId),
+    diffDirs: (
+      sessionId: string,
+      localDir: string,
+      remoteDir: string
+    ): Promise<{ ok: boolean; onlyLocal?: string[]; onlyRemote?: string[]; sizeDiff?: string[]; error?: string }> =>
+      ipcRenderer.invoke(IPC.sftpDiffDirs, sessionId, localDir, remoteDir),
     packDownload: (
       sessionId: string,
       items: { path: string; name: string; isDir: boolean }[],
@@ -315,7 +321,12 @@ const api = {
       keyId: string,
       hostIds: string[]
     ): Promise<{ ok: boolean; results?: { host: string; ok: boolean; error?: string }[]; error?: string }> =>
-      ipcRenderer.invoke(IPC.keysPublish, keyId, hostIds)
+      ipcRenderer.invoke(IPC.keysPublish, keyId, hostIds),
+    revoke: (
+      keyId: string,
+      hostIds: string[]
+    ): Promise<{ ok: boolean; results?: { host: string; ok: boolean; error?: string }[]; error?: string }> =>
+      ipcRenderer.invoke(IPC.keysRevoke, keyId, hostIds)
   },
   /** Resolve a dropped File's absolute path (File.path was removed in Electron 32+). */
   getPathForFile: (file: File): string => webUtils.getPathForFile(file),

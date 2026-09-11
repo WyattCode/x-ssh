@@ -1,7 +1,7 @@
 import { readFile, stat, readdir, mkdir, unlink } from 'node:fs/promises'
 import { createReadStream, createWriteStream } from 'node:fs'
 import { basename, dirname, join, resolve, relative, isAbsolute } from 'node:path'
-import { randomUUID } from 'node:crypto'
+import { randomUUID, createHash } from 'node:crypto'
 import { createServer, createConnection, type Server, Socket } from 'node:net'
 import { Duplex } from 'node:stream'
 import { Client, type ClientChannel, type SFTPWrapper } from 'ssh2'
@@ -24,6 +24,17 @@ import type {
 import { KnownHosts } from './knownHosts'
 import { friendlyError } from './friendlyError'
 import { posixJoin, parentOf, clampConcurrency, buildPackCommand, buildExtractCommand } from '../shared/fsUtils'
+
+/** Streams a local file through SHA-256 and resolves its lowercase hex digest. */
+function sha256File(p: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const h = createHash('sha256')
+    const s = createReadStream(p)
+    s.on('data', (d: Buffer | string) => h.update(d))
+    s.on('end', () => resolve(h.digest('hex')))
+    s.on('error', reject)
+  })
+}
 
 interface Session {
   id: string
@@ -1691,7 +1702,8 @@ export class SshManager {
     localBase: string,
     jobId: string,
     concurrency?: number,
-    rateBytesPerSec = 0
+    rateBytesPerSec = 0,
+    verifyChecksums = false
   ): Promise<void> {
     this.jobSession.set(jobId, sessionId)
     if (rateBytesPerSec > 0) this.jobRate.set(jobId, rateBytesPerSec)
@@ -1708,6 +1720,9 @@ export class SshManager {
     let discovered = 0
     let knownTotal = 0
     const failures: string[] = []
+    // Files that copied fine but whose SHA-256 didn't match the remote — a
+    // silent-corruption signal, kept apart from copy failures (different cause).
+    const sumFails: string[] = []
     // A producer (walk) fills this queue; a pool of workers drains it in
     // parallel — streaming (downloads start as files are found) AND concurrent.
     const queue: { remote: string; local: string; name: string }[] = []
@@ -1783,6 +1798,14 @@ export class SshManager {
             }
           )
           filesDone++
+          if (verifyChecksums) {
+            try {
+              await this.verifyChecksum(sessionId, item.remote, item.local)
+            } catch {
+              if (this.cancelledJobs.has(jobId)) return
+              sumFails.push(item.name)
+            }
+          }
         } catch {
           read?.destroy()
           write?.destroy()
@@ -1825,6 +1848,8 @@ export class SshManager {
         emit(label, false, friendlyError((walkError as Error).message), true)
       } else if (failures.length) {
         emit(label, false, `${failures.length} 个文件失败`, true)
+      } else if (sumFails.length) {
+        emit(label, false, `校验和不匹配 ${sumFails.length} 个文件`, true)
       } else {
         const t = bytesDone || 1
         this.emitProgress({ id: jobId, name: label, direction: 'down', transferred: t, total: t, count: discovered, done: true })
@@ -1835,6 +1860,58 @@ export class SshManager {
       this.jobRate.delete(jobId)
       this.jobSession.delete(jobId)
       this.lastProgressAt.delete(jobId)
+    }
+  }
+
+  /** Compares a just-downloaded file's SHA-256 against the remote copy.
+   *  Throws on a genuine mismatch; silently no-ops when it cannot verify
+   *  (exec failed, no sha256sum, unparseable output) so a missing tool never
+   *  fails a transfer. */
+  private async verifyChecksum(sessionId: string, remotePath: string, localPath: string): Promise<void> {
+    // Single-quote the path (escaping embedded quotes) so spaces stay in one
+    // token; `--` guards against names that start with a dash.
+    const q = `'${remotePath.replace(/'/g, `'\\''`)}'`
+    let out: string
+    try {
+      out = await this.execCommand(sessionId, `sha256sum -- ${q} 2>/dev/null`)
+    } catch {
+      return
+    }
+    const remoteHash = out.trim().split(/\s+/)[0]?.toLowerCase()
+    if (!remoteHash || !/^[a-f0-9]{64}$/.test(remoteHash)) return
+    const localHash = await sha256File(this.longPath(localPath))
+    if (localHash !== remoteHash) throw new Error('sha256 mismatch')
+  }
+
+  /** Compares a local and a remote directory tree, returning the relative
+   *  paths that exist on only one side or differ in size (rsync-style diff). */
+  async diffDirs(
+    sessionId: string,
+    localDir: string,
+    remoteDir: string
+  ): Promise<{ onlyLocal: string[]; onlyRemote: string[]; sizeDiff: string[] }> {
+    const sftp = await this.getSftp(sessionId)
+    const localMap = new Map<string, { size: number; mtimeMs: number }>()
+    const remoteMap = new Map<string, { size: number; mtimeMs: number }>()
+    await Promise.all([
+      this.walkLocalTree(localDir, '', localMap),
+      this.walkRemoteTree(sftp, remoteDir, '', remoteMap)
+    ])
+    const onlyLocal: string[] = []
+    const onlyRemote: string[] = []
+    const sizeDiff: string[] = []
+    // Cap each list so a huge tree can't produce an unbounded IPC payload / DOM.
+    const cap = (arr: string[]): string[] => (arr.length > 2000 ? arr.slice(0, 2000) : arr)
+    for (const rel of localMap.keys()) {
+      const R = remoteMap.get(rel)
+      if (!R) onlyLocal.push(rel)
+      else if (R.size !== localMap.get(rel)!.size) sizeDiff.push(rel)
+    }
+    for (const rel of remoteMap.keys()) if (!localMap.has(rel)) onlyRemote.push(rel)
+    return {
+      onlyLocal: cap(onlyLocal.sort()),
+      onlyRemote: cap(onlyRemote.sort()),
+      sizeDiff: cap(sizeDiff.sort())
     }
   }
 

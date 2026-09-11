@@ -270,6 +270,10 @@ async function defaultTransferRate(): Promise<number> {
   return typeof kbps === 'number' && kbps > 0 ? Math.round(kbps * 1024) : 0
 }
 
+async function verifyChecksumsEnabled(): Promise<boolean> {
+  return (await settings.get<boolean>('verifyChecksums')) === true
+}
+
 function notify(title: string, body: string, sound = false): void {
   if (Notification.isSupported()) {
     const n = new Notification({
@@ -371,6 +375,78 @@ interface ConnLogEntry {
 async function pushConnLog(e: ConnLogEntry): Promise<void> {
   const all = (await settings.get<ConnLogEntry[]>('connectionLog')) ?? []
   await settings.set('connectionLog', [e, ...all].slice(0, 200))
+}
+
+// ---- One-shot multi-host operations (publish / revoke a key) ----
+// Connects to each saved host with its own credentials, runs `fn` on a
+// one-shot session, tears that session down, and collects per-host results.
+async function withTempHosts(
+  hostIds: string[],
+  fn: (sessionId: string, host: Host) => Promise<void>
+): Promise<{ host: string; ok: boolean; error?: string }[]> {
+  const results: { host: string; ok: boolean; error?: string }[] = []
+  for (const hostId of hostIds) {
+    const h = (await store.list()).find((x) => x.id === hostId)
+    const hostLabel = h ? `${h.username}@${h.host}${h.port && h.port !== 22 ? `:${h.port}` : ''}` : hostId
+    if (!h) {
+      results.push({ host: hostLabel, ok: false, error: '主机不存在' })
+      continue
+    }
+    const params: ConnectParams = {
+      host: h.host,
+      port: h.port,
+      username: h.username,
+      auth: h.auth,
+      keyPath: h.keyPath,
+      hostId: h.id,
+      agentForward: h.agentForward
+    }
+    try {
+      if (store.isLocked && !params.password && !params.passphrase) {
+        results.push({ host: hostLabel, ok: false, error: '应用已锁定' })
+        continue
+      }
+      if (h.auth === 'password' && !params.password) params.password = await store.getPassword(h.id)
+      if (h.auth === 'key' && !params.passphrase) params.passphrase = await store.getPassphrase(h.id)
+      if (h.portForwards?.length) params.portForwards = h.portForwards
+      if (h.proxy) params.proxy = h.proxy
+      params.multiplex = (await settings.get<boolean>('connectionMultiplex')) === true
+      if (h.jumpHostId) {
+        const jh = (await store.list()).find((x) => x.id === h.jumpHostId)
+        if (jh) {
+          const jump: JumpConfig = {
+            host: jh.host,
+            port: jh.port,
+            username: jh.username,
+            auth: jh.auth,
+            keyPath: jh.keyPath
+          }
+          if (jh.auth === 'password') jump.password = store.isLocked ? undefined : await store.getPassword(jh.id)
+          if (jh.auth === 'key') jump.passphrase = store.isLocked ? undefined : await store.getPassphrase(jh.id)
+          params.jump = jump
+        }
+      }
+      const r = await sshManager!.connect(params)
+      if (!r.ok || !r.sessionId) {
+        results.push({ host: hostLabel, ok: false, error: r.error ?? '连接失败' })
+        continue
+      }
+      const sid = r.sessionId
+      try {
+        await fn(sid, h)
+        results.push({ host: hostLabel, ok: true })
+      } finally {
+        try {
+          sshManager!.disconnect(sid)
+        } catch {
+          /* ignore */
+        }
+      }
+    } catch (e) {
+      results.push({ host: hostLabel, ok: false, error: friendlyError((e as Error).message) })
+    }
+  }
+  return results
 }
 
 // ---- Command snippets (stored in settings.json under 'snippets') ----
@@ -1103,7 +1179,8 @@ function registerIpc(): void {
           dirname(res.filePath),
           randomUUID(),
           concurrency,
-          await defaultTransferRate()
+          await defaultTransferRate(),
+          await verifyChecksumsEnabled()
         )
         return { ok: true }
       } catch (e) {
@@ -1148,7 +1225,7 @@ function registerIpc(): void {
         return { ok: false, canceled: true }
       }
       try {
-        await sshManager.downloadJob(sessionId, items, res.filePaths[0], randomUUID(), concurrency, await defaultTransferRate())
+        await sshManager.downloadJob(sessionId, items, res.filePaths[0], randomUUID(), concurrency, await defaultTransferRate(), await verifyChecksumsEnabled())
         return { ok: true, count: items.length }
       } catch (e) {
         return { ok: false, error: friendlyError((e as Error).message) }
@@ -1185,7 +1262,7 @@ function registerIpc(): void {
         return { ok: false, canceled: true }
       }
       try {
-        await sshManager.downloadJob(sessionId, items, targetDir, randomUUID(), concurrency, await defaultTransferRate())
+        await sshManager.downloadJob(sessionId, items, targetDir, randomUUID(), concurrency, await defaultTransferRate(), await verifyChecksumsEnabled())
         return { ok: true, count: items.length }
       } catch (e) {
         return { ok: false, error: friendlyError((e as Error).message) }
@@ -1269,6 +1346,18 @@ function registerIpc(): void {
     sshManager?.stopWatchSyncsForSession(sessionId)
     return { ok: true }
   })
+  ipcMain.handle(
+    IPC.sftpDiffDirs,
+    async (_e, sessionId: string, localDir: string, remoteDir: string) => {
+      if (!sshManager) return { ok: false, error: '窗口未就绪' }
+      try {
+        const r = await sshManager.diffDirs(sessionId, localDir, remoteDir)
+        return { ok: true, ...r }
+      } catch (e) {
+        return { ok: false, error: friendlyError((e as Error).message) }
+      }
+    }
+  )
   ipcMain.handle(
     IPC.sftpPackDownload,
     async (
@@ -1655,69 +1744,31 @@ function registerIpc(): void {
     }
     if (!pub) return { ok: false, error: '该密钥没有可用的公钥' }
     if (!sshManager) return { ok: false, error: '窗口未就绪' }
-    const results: { host: string; ok: boolean; error?: string }[] = []
-    for (const hostId of hostIds) {
-      const h = (await store.list()).find((x) => x.id === hostId)
-      const hostLabel = h ? `${h.username}@${h.host}${h.port && h.port !== 22 ? `:${h.port}` : ''}` : hostId
-      if (!h) {
-        results.push({ host: hostLabel, ok: false, error: '主机不存在' })
-        continue
-      }
-      const params: ConnectParams = {
-        host: h.host,
-        port: h.port,
-        username: h.username,
-        auth: h.auth,
-        keyPath: h.keyPath,
-        hostId: h.id,
-        agentForward: h.agentForward
-      }
-      try {
-        if (store.isLocked && !params.password && !params.passphrase) {
-          results.push({ host: hostLabel, ok: false, error: '应用已锁定' })
-          continue
-        }
-        if (h.auth === 'password' && !params.password) params.password = await store.getPassword(h.id)
-        if (h.auth === 'key' && !params.passphrase) params.passphrase = await store.getPassphrase(h.id)
-        if (h.portForwards?.length) params.portForwards = h.portForwards
-        if (h.proxy) params.proxy = h.proxy
-        params.multiplex = (await settings.get<boolean>('connectionMultiplex')) === true
-        if (h.jumpHostId) {
-          const jh = (await store.list()).find((x) => x.id === h.jumpHostId)
-          if (jh) {
-            const jump: JumpConfig = {
-              host: jh.host,
-              port: jh.port,
-              username: jh.username,
-              auth: jh.auth,
-              keyPath: jh.keyPath
-            }
-            if (jh.auth === 'password') jump.password = store.isLocked ? undefined : await store.getPassword(jh.id)
-            if (jh.auth === 'key') jump.passphrase = store.isLocked ? undefined : await store.getPassphrase(jh.id)
-            params.jump = jump
-          }
-        }
-        const r = await sshManager.connect(params)
-        if (!r.ok || !r.sessionId) {
-          results.push({ host: hostLabel, ok: false, error: r.error ?? '连接失败' })
-          continue
-        }
-        const sid = r.sessionId
-        const cmd = `umask 077; mkdir -p ~/.ssh && chmod 700 ~/.ssh\ncat >> ~/.ssh/authorized_keys <<'XSSH'\n${pub}\nXSSH\ntouch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys`
-        try {
-          await sshManager.execCommand(sid, cmd)
-          results.push({ host: hostLabel, ok: true })
-        } finally {
-          try {
-            sshManager.disconnect(sid)
-          } catch {
-            /* ignore */
-          }
-        }
-      } catch (e) {
-        results.push({ host: hostLabel, ok: false, error: friendlyError((e as Error).message) })
-      }
+    const results = await withTempHosts(hostIds, async (sid) => {
+      const cmd = `umask 077; mkdir -p ~/.ssh && chmod 700 ~/.ssh\ncat >> ~/.ssh/authorized_keys <<'XSSH'\n${pub}\nXSSH\ntouch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys`
+      await sshManager!.execCommand(sid, cmd)
+    })
+    return { ok: true, results }
+  })
+
+  // The inverse of publish: removes this key's line from authorized_keys on the
+  // given hosts. Only the key type + base64 are used as the match (the comment
+  // may contain arbitrary text that would break shell quoting). A host whose
+  // authorized_keys doesn't contain the key is reported ok (nothing to do).
+  ipcMain.handle(IPC.keysRevoke, async (_e, keyId: string, hostIds: string[]) => {
+    let pub: string
+    try {
+      pub = (await keyManager.publicKey(keyId)).trim()
+    } catch (e) {
+      return { ok: false, error: friendlyError((e as Error).message) }
     }
+    if (!pub) return { ok: false, error: '该密钥没有可用的公钥' }
+    if (!sshManager) return { ok: false, error: '窗口未就绪' }
+    const keyPart = pub.split(/\s+/).slice(0, 2).join(' ')
+    const results = await withTempHosts(hostIds, async (sid) => {
+      const cmd = `k=${JSON.stringify(keyPart)}; [ -f "$HOME/.ssh/authorized_keys" ] && awk -v k="$k" 'index($0,k)==0' "$HOME/.ssh/authorized_keys" > "$HOME/.ssh/authorized_keys.xssh" && cat "$HOME/.ssh/authorized_keys.xssh" > "$HOME/.ssh/authorized_keys" && rm -f "$HOME/.ssh/authorized_keys.xssh"`
+      await sshManager!.execCommand(sid, cmd)
+    })
     return { ok: true, results }
   })
 

@@ -104,6 +104,8 @@ export const IPC = {
   connLogList: 'connLog:list',
   connLogClear: 'connLog:clear',
   connLogPush: 'connLog:push', // renderer -> main : record a transfer/forward event
+  sftpDiffDirs: 'sftp:diffDirs', // compare a local & remote directory tree
+  keysRevoke: 'keys:revoke', // remove a managed key's pub line from hosts
 
   // App master-lock (invoke/handle)
   lockStatus: 'lock:status',
