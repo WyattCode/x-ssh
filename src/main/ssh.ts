@@ -2453,11 +2453,27 @@ export class SshManager {
       session.client.exec(cmd, (err, stream) => {
         if (err) return reject(err)
         let out = ''
+        // The SSH2 spec makes exit-status optional, so a missing 'exit' event
+        // still resolves (back-compat); when present, a non-zero code is a
+        // failure — previously this was silently reported as success.
+        let exitCode: number | null = null
+        let settled = false
+        const settle = (e?: Error, value?: string): void => {
+          if (settled) return
+          settled = true
+          if (e) reject(e)
+          else resolve(value ?? out)
+        }
         stream.on('data', (d: Buffer) => {
           out += d.toString()
         })
-        stream.on('close', () => resolve(out))
-        stream.on('error', reject)
+        stream.on('exit', (code: unknown) => {
+          if (typeof code === 'number') exitCode = code
+        })
+        stream.on('close', () =>
+          settle(exitCode !== null && exitCode !== 0 ? new Error(`远程命令退出码 ${exitCode}`) : undefined)
+        )
+        stream.on('error', (e: Error) => settle(e))
       })
     })
   }

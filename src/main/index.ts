@@ -1766,7 +1766,9 @@ function registerIpc(): void {
     if (!sshManager) return { ok: false, error: '窗口未就绪' }
     const keyPart = pub.split(/\s+/).slice(0, 2).join(' ')
     const results = await withTempHosts(hostIds, async (sid) => {
-      const cmd = `k=${JSON.stringify(keyPart)}; [ -f "$HOME/.ssh/authorized_keys" ] && awk -v k="$k" 'index($0,k)==0' "$HOME/.ssh/authorized_keys" > "$HOME/.ssh/authorized_keys.xssh" && cat "$HOME/.ssh/authorized_keys.xssh" > "$HOME/.ssh/authorized_keys" && rm -f "$HOME/.ssh/authorized_keys.xssh"`
+      // if/fi (not a bare &&-chain) so a host without authorized_keys exits 0
+      // ("nothing to do") while a real failure (permissions, disk) exits non-zero.
+      const cmd = `k=${JSON.stringify(keyPart)}; if [ -f "$HOME/.ssh/authorized_keys" ]; then awk -v k="$k" 'index($0,k)==0' "$HOME/.ssh/authorized_keys" > "$HOME/.ssh/authorized_keys.xssh" && cat "$HOME/.ssh/authorized_keys.xssh" > "$HOME/.ssh/authorized_keys" && rm -f "$HOME/.ssh/authorized_keys.xssh"; fi`
       await sshManager!.execCommand(sid, cmd)
     })
     return { ok: true, results }
