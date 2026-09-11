@@ -224,6 +224,10 @@ interface State {
   tmuxSessionName: string
   /** Whether the tmux session-manager dialog is open. */
   tmuxOpen: boolean
+  /** Global show/hide hotkey (Electron accelerator, '' = disabled). */
+  globalShowHide: string
+  /** Whether the OS reports the network as online (drives an offline banner). */
+  networkOnline: boolean
 }
 
 export const useSessions = defineStore('sessions', {
@@ -283,7 +287,9 @@ export const useSessions = defineStore('sessions', {
     connectionMultiplex: false,
     tmuxOnConnect: false,
     tmuxSessionName: '',
-    tmuxOpen: false
+    tmuxOpen: false,
+    globalShowHide: '',
+    networkOnline: true
   }),
 
   getters: {
@@ -378,6 +384,7 @@ export const useSessions = defineStore('sessions', {
       this.connectionMultiplex = (await window.api.settings.get<boolean>('connectionMultiplex')) === true
       this.tmuxOnConnect = (await window.api.settings.get<boolean>('tmuxOnConnect')) === true
       this.tmuxSessionName = (await window.api.settings.get<string>('tmuxSessionName')) ?? ''
+      this.globalShowHide = (await window.api.settings.get<string>('globalShowHideAccel')) ?? ''
     },
 
     async loadSnippets(): Promise<void> {
@@ -443,6 +450,39 @@ export const useSessions = defineStore('sessions', {
 
     async saveSetting(key: string, value: unknown): Promise<void> {
       await window.api.settings.set(key, toPlain(value))
+    },
+
+    /** Registers the global show/hide hotkey ('' = disable). Persists on success. */
+    async setGlobalShowHide(accel: string): Promise<{ ok: boolean; error?: string }> {
+      const r = await window.api.setGlobalShortcut(accel)
+      if (!r.ok) return r
+      this.globalShowHide = accel.trim()
+      await this.saveSetting('globalShowHideAccel', this.globalShowHide)
+      return { ok: true }
+    },
+
+    /** The OS network went offline: flag it (drives the offline banner). */
+    handleNetworkOffline(): void {
+      this.networkOnline = false
+      toast(t('app.networkOffline'), 'info')
+    },
+    /** The OS network came back: drop the offline flag and retry dropped panes.
+     *  The per-pane backoff already retries on a session drop, but that loop is
+     *  blind to the network coming back while waiting — this gives a pane that
+     *  gave up (or is mid-backoff) a fresh retry the moment the link returns. */
+    handleNetworkOnline(): void {
+      const wasOffline = !this.networkOnline
+      this.networkOnline = true
+      if (!wasOffline) return
+      toast(t('app.networkOnline'), 'success')
+      for (const tab of this.tabs) {
+        for (const pane of tab.panes) {
+          if (pane.status === 'error' && pane.params && !pane.sshSessionId && this.autoReconnect) {
+            this.cancelReconnect(pane)
+            this.scheduleReconnect(pane.id)
+          }
+        }
+      }
     },
 
     /** Re-reads auto-backup prefs in the main process and restarts its timer. */

@@ -330,6 +330,15 @@ function onTmuxSessionName(e: Event): void {
   store.tmuxSessionName = v
   void store.saveSetting('tmuxSessionName', v)
 }
+const globalHotkey = reactive({ error: '' })
+async function onGlobalShowHide(e: Event): Promise<void> {
+  const v = (e.target as HTMLInputElement).value
+  const r = await store.setGlobalShowHide(v)
+  globalHotkey.error = r.ok
+    ? ''
+    : (r.error ?? t('set.gen.globalShortcutErr'))
+  void window.api.settings.set('globalShowHideAccel', store.globalShowHide)
+}
 
 // ---- Update check (GitHub releases feed) ----
 const updateState = reactive({
@@ -720,6 +729,21 @@ async function resetMasterLock(): Promise<void> {
                     @change="onTmuxSessionName"
                     @keyup.enter="onTmuxSessionName"
                   />
+                </span>
+              </label>
+              <label class="toggle-row">
+                <span>
+                  <span class="fname">{{ t('set.gen.globalShowHide') }}</span>
+                  <input
+                    class="text"
+                    :value="store.globalShowHide"
+                    :placeholder="t('set.gen.globalShowHidePh')"
+                    spellcheck="false"
+                    @change="onGlobalShowHide"
+                    @keyup.enter="onGlobalShowHide"
+                  />
+                  <span v-if="globalHotkey.error" class="sub err">{{ globalHotkey.error }}</span>
+                  <span v-else class="sub">{{ t('set.gen.globalShowHideDesc') }}</span>
                 </span>
               </label>
             </div>

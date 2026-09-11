@@ -60,7 +60,9 @@ const P: Record<string, string> = {
   pause: 'M8 5v14 M16 5v14',
    send: 'M22 2 11 13 M22 2 15 22 11 13 2 9z',
    layout: 'M3 4a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z M3 9h18 M9 21V9',
-   grid: 'M4 4h7v7H4z M13 4h7v7h-7z M4 13h7v7H4z M13 13h7v7h-7z'
+   grid: 'M4 4h7v7H4z M13 4h7v7h-7z M4 13h7v7H4z M13 13h7v7h-7z',
+   'wifi-off':
+     'M1 1l22 22 M16.72 11.06 19 12.55 M5 12.55a10.94 10.94 0 0 1 5.17-2.39 M10.71 5.05 22.58 9 M1.42 9a15.91 15.91 0 0 1 4.7-2.88 M8.53 16.11a6 6 0 0 1 6.95 0 M12 20h.01'
 }
 </script>
 

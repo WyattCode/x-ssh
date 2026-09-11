@@ -275,6 +275,9 @@ const api = {
     notes?: string
     error?: string
   }> => ipcRenderer.invoke(IPC.appCheckUpdate),
+  /** Register/replace (or clear, with '') the global show/hide hotkey. */
+  setGlobalShortcut: (accelerator: string): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke(IPC.appGlobalShortcut, accelerator),
   /** Shows a native notification (respects the notifications/notifySound settings). */
   notify: (title: string, body: string, sound = false): void =>
     ipcRenderer.send(IPC.notify, title, body, sound),

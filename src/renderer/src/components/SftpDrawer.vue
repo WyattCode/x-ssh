@@ -3,6 +3,7 @@ import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick } 
 import type { FileEntry, LocalEntry, SftpProgress, TransferHistoryItem } from '../../../shared/types'
 import { posixJoin, parentOf } from '../../../shared/fsUtils'
 import { canRetryHistory, buildRetryItems, canRevealHistory } from '../lib/transferHistory'
+import { globMatch } from '../lib/glob'
 import { useConfirm } from '../composables/confirm'
 import { useI18n } from '../lib/i18n'
 import { useToast } from '../composables/toast'
@@ -141,6 +142,27 @@ const localModal = reactive({ open: false, kind: 'file' as 'file' | 'folder', ac
 const localActive = ref(false)
 const localSelSet = ref<Set<string>>(new Set())
 const localAnchor = ref<string | null>(null)
+
+/** "Select by pattern" input state (glob, e.g. *.log or *.{js,ts}). */
+const localPattern = ref('')
+const localPatternErr = ref('')
+
+/** Selects the local entries matching a glob pattern (replacing the selection). */
+function selectByPattern(): void {
+  const pattern = localPattern.value.trim()
+  if (!pattern) return
+  const matched = localSorted.value
+    .filter((e) => globMatch(pattern, e.name))
+    .map((e) => e.name)
+  if (!matched.length) {
+    localPatternErr.value = tt('sfp.patternNoMatch', { pattern })
+    return
+  }
+  localPatternErr.value = ''
+  localSelSet.value = new Set(matched)
+  localAnchor.value = matched[0] ?? null
+}
+
 function localSelectAll(): void {
   localSelSet.value = new Set(localSorted.value.map((e) => e.name))
 }
@@ -1409,6 +1431,14 @@ const pct = (t: SftpProgress): number =>
         <button class="up" :title="tt('sfp.upLevel')" :disabled="localLoading" @click="localGoUp"><Icon name="arrow-up" :size="15" /></button>
         <span class="local-path" :title="localPath">{{ localPath }}</span>
         <span v-if="localSelCount" class="loc-selcount">{{ tt('sfp.selected', { n: localSelCount }) }}</span>
+        <input
+          v-model="localPattern"
+          class="loc-pattern"
+          :placeholder="tt('sfp.patternPh')"
+          spellcheck="false"
+          @keyup.enter="selectByPattern"
+        />
+        <span v-if="localPatternErr" class="loc-err" :title="localPatternErr">{{ !localPatternErr ? '' : '!' }}</span>
         <button class="mini new" :title="tt('sfp.selectAll')" @click="localSelectAll"><Icon name="check-all" :size="14" /></button>
         <button class="mini new" :title="tt('sfp.deploy')" :disabled="!localSelCount || !props.sessionId" @click="openDeploy"><Icon name="send" :size="14" /></button>
         <button class="mini new" :title="tt('sfp.newFile')" @click="localNew('file')"><Icon name="plus" :size="14" /></button>
@@ -2042,6 +2072,32 @@ const pct = (t: SftpProgress): number =>
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 14%, transparent);
   border-radius: 999px;
+}
+.loc-pattern {
+  flex: 1 1 auto;
+  min-width: 60px;
+  max-width: 150px;
+  padding: 3px 7px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 11px;
+  font-family: var(--font-mono, monospace);
+}
+.loc-err {
+  flex: none;
+  margin: 0 2px;
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  border-radius: 50%;
 }
 .loc-head {
   display: flex;

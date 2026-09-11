@@ -178,6 +178,13 @@ function onWheel(e: WheelEvent): void {
   bumpZoom(e.deltaY < 0 ? 0.5 : -0.5)
 }
 
+function onNetworkOnline(): void {
+  store.handleNetworkOnline()
+}
+function onNetworkOffline(): void {
+  store.handleNetworkOffline()
+}
+
 function onGlobalKey(e: KeyboardEvent): void {
   const t = e.target as HTMLElement | null
   const inTerminal = !!t?.closest?.('.xterm')
@@ -290,8 +297,11 @@ onMounted(async () => {
   ])
   await store.restoreSavedTabs()
   store.initSftpProgress()
+  store.networkOnline = navigator.onLine
   window.addEventListener('keydown', onGlobalKey)
   window.addEventListener('wheel', onWheel, { passive: false, capture: true })
+  window.addEventListener('online', onNetworkOnline)
+  window.addEventListener('offline', onNetworkOffline)
   offEvent = window.api.ssh.onEvent((ev) => {
     store.applyEvent(ev.sessionId, ev.status, ev.message)
   })
@@ -315,6 +325,8 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onGlobalKey)
   window.removeEventListener('wheel', onWheel, { capture: true } as EventListenerOptions)
+  window.removeEventListener('online', onNetworkOnline)
+  window.removeEventListener('offline', onNetworkOffline)
   offEvent?.()
   offOpenTarget?.()
 })
@@ -323,6 +335,11 @@ onBeforeUnmount(() => {
 <template>
   <div class="app">
     <TabBar />
+
+    <div v-if="!store.networkOnline" class="offline-banner">
+      <Icon name="wifi-off" :size="14" />
+      <span>{{ t('app.networkOffline') }}</span>
+    </div>
 
     <main class="stage">
       <div class="main-area">
@@ -752,5 +769,18 @@ onBeforeUnmount(() => {
 }
 .banner-dim {
   color: var(--text-faint);
+}
+.offline-banner {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 5px 12px;
+  background: color-mix(in srgb, var(--warn) 18%, transparent);
+  color: var(--warn);
+  font-size: 12px;
+  font-weight: 500;
+  border-top: 1px solid color-mix(in srgb, var(--warn) 30%, transparent);
 }
 </style>

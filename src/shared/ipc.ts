@@ -119,7 +119,10 @@ export const IPC = {
   appOpenTarget: 'app:openTarget',
 
   // Update check against the GitHub releases feed
-  appCheckUpdate: 'app:checkUpdate'
+  appCheckUpdate: 'app:checkUpdate',
+
+  // Global (systemwide) hotkey: show/hide the main window
+  appGlobalShortcut: 'app:globalShortcut'
 } as const
 
 /** Prefix of the launch argument carrying UiPrefs from main to the preload. */

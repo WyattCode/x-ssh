@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain, dialog, nativeImage, screen, Menu, Notification, Tray } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, dialog, nativeImage, screen, Menu, Notification, Tray, globalShortcut } from 'electron'
 import { join, dirname, basename, isAbsolute } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { tmpdir, homedir } from 'node:os'
@@ -1653,6 +1653,41 @@ function registerIpc(): void {
       return { ok: false, error: friendlyError((e as Error).message) }
     }
   })
+  ipcMain.handle(IPC.appGlobalShortcut, (_e, accelerator: string) => setGlobalShowHide(accelerator))
+}
+
+// ---- Global (system-wide) show/hide hotkey ----
+let globalAccel = ''
+/** Toggles the main window: focused+visible -> hide, otherwise show+focus. */
+function toggleMainWindow(): void {
+  if (!mainWindow) return
+  if (mainWindow.isVisible() && mainWindow.isFocused()) mainWindow.hide()
+  else {
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.show()
+    mainWindow.focus()
+  }
+}
+/** Registers (or clears, with '') the global show/hide accelerator. */
+function setGlobalShowHide(accel: string): { ok: boolean; error?: string } {
+  const acc = accel.trim()
+  if (globalAccel) {
+    globalShortcut.unregister(globalAccel)
+    globalAccel = ''
+  }
+  if (!acc) return { ok: true }
+  try {
+    const okReg = globalShortcut.register(acc, toggleMainWindow)
+    if (!okReg) return { ok: false, error: '快捷键已被其他程序占用' }
+    globalAccel = acc
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: friendlyError((e as Error).message) }
+  }
+}
+async function applyGlobalShowHideFromSettings(): Promise<void> {
+  const accel = (await settings.get<string>('globalShowHideAccel')) ?? ''
+  if (accel) setGlobalShowHide(accel)
 }
 
 // Several instances may run side by side, so nothing here may touch storage
@@ -1701,6 +1736,7 @@ app.whenReady().then(async () => {
   void store.list().catch(() => undefined)
   // Kick off the auto-backup timer (no-op unless autoBackup is enabled).
   void scheduleAutoBackup().catch(() => undefined)
+  void applyGlobalShowHideFromSettings().catch(() => undefined)
   // Sweep temp dirs left by drag-out / edit / open-with from a prior run.
   void sweepTempDirs()
   const [saved, prefs] = await Promise.all([
