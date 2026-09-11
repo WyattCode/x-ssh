@@ -500,6 +500,23 @@ export const useSessions = defineStore('sessions', {
       }
     },
 
+    /** Machine woke from sleep / screen unlocked (main powerMonitor). The network
+     *  may have dropped while suspended, but the OS usually stays "online", so
+     *  handleNetworkOnline's wasOffline-gate would no-op here. Re-read the actual
+     *  connectivity and force a fresh retry of any genuinely-dropped pane. */
+    handleWake(): void {
+      this.networkOnline = typeof navigator !== 'undefined' ? navigator.onLine : true
+      for (const tab of this.tabs) {
+        for (const pane of tab.panes) {
+          const dropped = pane.status === 'error' && !pane.errorCode && !pane.sshSessionId
+          if (dropped && pane.params && this.autoReconnect) {
+            this.cancelReconnect(pane)
+            this.scheduleReconnect(pane.id)
+          }
+        }
+      }
+    },
+
     /** Re-reads auto-backup prefs in the main process and restarts its timer. */
     async rescheduleBackup(): Promise<void> {
       await window.api.data.rescheduleBackup()

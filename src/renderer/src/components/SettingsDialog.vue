@@ -460,7 +460,7 @@ function keyStale(firstSeen?: number): boolean {
   return !!firstSeen && Date.now() - firstSeen > 365 * 86400000
 }
 // ---- connection audit log ----
-const connLog = ref<{ at: number; event: string; host: string; port: number; username: string }[]>([])
+const connLog = ref<{ at: number; event: string; host: string; port: number; username: string; detail?: string; bytes?: number }[]>([])
 async function loadConnLog(): Promise<void> {
   connLog.value = await window.api.connLog.list()
 }
@@ -469,8 +469,22 @@ async function clearConnLog(): Promise<void> {
   connLog.value = []
 }
 const eventLabel = (e: string): string =>
-  e === 'connect' ? t('set.sec.connConnect') : e === 'disconnect' ? t('set.sec.connDisconnect') : t('set.sec.connError')
+  e === 'connect'
+    ? t('set.sec.connConnect')
+    : e === 'disconnect'
+      ? t('set.sec.connDisconnect')
+      : e === 'transfer'
+        ? t('set.sec.connTransfer')
+        : e === 'forward'
+          ? t('set.sec.connForward')
+          : t('set.sec.connError')
 const connTime = (at: number): string => new Date(at).toLocaleString()
+function fmtBytes(n: number): string {
+  if (!n) return '0 B'
+  const u = ['B', 'KB', 'MB', 'GB', 'TB']
+  const i = Math.min(u.length - 1, Math.floor(Math.log(n) / Math.log(1024)))
+  return `${(n / 1024 ** i).toFixed(i ? 1 : 0)} ${u[i]}`
+}
 async function importSshConfig(): Promise<void> {
   await window.api.hosts.importSshConfig()
   await store.loadHosts()
@@ -1045,6 +1059,7 @@ async function resetMasterLock(): Promise<void> {
                 <span class="cl-time">{{ connTime(l.at) }}</span>
                 <span class="cl-event" :class="l.event">{{ eventLabel(l.event) }}</span>
                 <span class="cl-host">{{ l.username }}@{{ l.host }}:{{ l.port }}</span>
+                <span v-if="l.detail" class="cl-detail">{{ l.detail }}<template v-if="l.bytes != null"> · {{ fmtBytes(l.bytes) }}</template></span>
               </div>
               <div v-if="!connLog.length" class="desc">{{ t('set.sec.connLogEmpty') }}</div>
               <button v-if="connLog.length" class="ghost" @click="clearConnLog">{{ t('set.sec.connLogClear') }}</button>
@@ -1841,6 +1856,14 @@ async function resetMasterLock(): Promise<void> {
   color: var(--danger);
   background: rgba(255, 107, 107, 0.12);
 }
+.cl-event.transfer {
+  color: var(--accent);
+  background: rgba(96, 165, 250, 0.14);
+}
+.cl-event.forward {
+  color: var(--ok);
+  background: rgba(81, 207, 102, 0.12);
+}
 .cl-host {
   flex: 1;
   min-width: 0;
@@ -1849,5 +1872,15 @@ async function resetMasterLock(): Promise<void> {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.cl-detail {
+  flex: none;
+  font-size: 11px;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
 }
 </style>

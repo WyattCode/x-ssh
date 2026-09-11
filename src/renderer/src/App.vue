@@ -318,7 +318,7 @@ onMounted(async () => {
   })
   // Machine woke from sleep / screen unlocked: the network may have dropped while
   // suspended, so re-evaluate connectivity and let dropped sessions retry.
-  offOnlineChanged = window.api.onOnlineChanged(() => store.handleNetworkOnline())
+  offOnlineChanged = window.api.onOnlineChanged(() => store.handleWake())
   // Pull the deferred chunks in while the app is idle, so the first connection
   // never waits on them.
   const prefetch = (): void => {
