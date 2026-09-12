@@ -94,7 +94,7 @@ const activeTransfers = computed(() => store.transfers.filter((x) => !x.done && 
       @click="store.toggleForwards()"
     >
       <Icon name="split" :size="12" />
-      <span>{{ forwards }} {{ t('status.forwards') }}</span>
+      <span v-if="forwards > 0">{{ forwards }} {{ t('status.forwards') }}</span>
     </button>
     <span
       v-if="keyKnown !== undefined"
