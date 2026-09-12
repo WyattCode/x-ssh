@@ -7,6 +7,7 @@ import {
   DEFAULT_BINDINGS,
   REBINDABLE_ACTIONS,
   canonicalChord,
+  basePhysicalKey,
   type RebindableAction
 } from '../lib/shortcuts'
 import { splitShortcutChips } from '../lib/shortcutChips'
@@ -113,12 +114,22 @@ function recordChord(e: KeyboardEvent, id: RebindableAction): void {
     return
   }
   const mods = []
-  if (e.ctrlKey || e.metaKey) mods.push('Mod')
+  // Mod is ⌘ on macOS and Ctrl elsewhere. On a Mac the two must stay distinct:
+  // folding Ctrl into Mod stored a Ctrl chord as a ⌘ one, so the keys the user
+  // had just pressed then did nothing. Off macOS the old reading is kept, where
+  // Mod already matches either.
+  if (isMac ? e.metaKey : e.ctrlKey || e.metaKey) mods.push('Mod')
+  if (isMac && e.ctrlKey) mods.push('Ctrl')
   if (e.shiftKey) mods.push('Shift')
   if (e.altKey) mods.push('Alt')
   if (!mods.length) return // require at least one modifier to avoid eating typing
   let key = e.key
   if (key === ' ') key = 'Space'
+  // macOS composes Option+letter into a glyph — ⌥D arrives as "∂" — which would
+  // be stored and shown to the user in place of the letter. Take the physical
+  // key instead; chordMatches knows to fall back to it the same way.
+  const physical = basePhysicalKey(e)
+  if (isMac && e.altKey && physical) key = physical
   const chord = [...mods, key].join('+')
   // Reject a collision with another action's effective binding (a user override
   // on another action, or a default we haven't overridden). Same action is fine.

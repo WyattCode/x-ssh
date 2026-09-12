@@ -41,7 +41,6 @@ export type RebindableAction =
   | 'zoomOut'
   | 'zoomReset'
 
-/** Default chords for the rebindable actions (used when not overridden). */
 /** Windows/Linux defaults. Mod renders as Ctrl there. */
 const BASE_BINDINGS: Record<RebindableAction, string> = {
   palette: 'Mod+K',
@@ -205,6 +204,19 @@ export function canonicalChord(chord: string, isMac: boolean): string | undefine
   return [...new Set(modSet)].sort().join('+') + '+' + key.toLowerCase()
 }
 
+/**
+ * The letter or digit a key event sits on, ignoring what the modifiers composed
+ * it into. macOS turns Option+letter into a glyph — ⌥D arrives as e.key "∂" —
+ * so both recording and matching need the physical key to fall back on.
+ * Returns '' for anything that is not a plain letter or digit.
+ */
+export function basePhysicalKey(e: Pick<KeyboardEvent, 'code'>): string {
+  const code = e.code ?? ''
+  if (/^Key[A-Z]$/.test(code)) return code.slice(3)
+  if (/^Digit[0-9]$/.test(code)) return code.slice(5)
+  return ''
+}
+
 /** True when the keyboard event matches the given chord exactly. */
 export function chordMatches(e: KeyboardEvent, chord: string): boolean {
   const { mods, key } = parseChord(chord)
@@ -222,5 +234,14 @@ export function chordMatches(e: KeyboardEvent, chord: string): boolean {
   const declared = Number(Boolean(mods & 1)) + Number(Boolean(mods & 2)) + Number(Boolean(mods & 4)) + Number(Boolean(mods & 8))
   if (extras !== declared) return false
   if (!key) return true
-  return (key === '\\' ? e.key === '\\' : e.key.toLowerCase() === key.toLowerCase())
+  if (key === '\\') return e.key === '\\'
+  if (e.key.toLowerCase() === key.toLowerCase()) return true
+  // Option+letter reaches us composed (⌥D as "∂"), so a chord recorded on the
+  // physical key would never match what the user presses. Same fallback the
+  // recorder uses, and only where Option is actually held.
+  if (isMac && e.altKey) {
+    const physical = basePhysicalKey(e)
+    if (physical) return physical.toLowerCase() === key.toLowerCase()
+  }
+  return false
 }

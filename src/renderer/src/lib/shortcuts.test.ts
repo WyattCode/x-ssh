@@ -124,3 +124,32 @@ describe('macOS chords', () => {
     expect(m.chordMatches(ev({ metaKey: true, shiftKey: true, key: '}' }), 'Mod+}')).toBe(false)
   })
 })
+
+describe('Option chords on macOS', () => {
+  afterEach(() => {
+    delete (globalThis as { window?: unknown }).window
+  })
+
+  it('matches a recorded Option chord through the composed glyph', async () => {
+    const m = await loadFor('darwin')
+    // ⌥⌘D arrives as e.key "∂"; the chord stores the physical key.
+    const e = ev({ metaKey: true, altKey: true, key: '∂', code: 'KeyD' })
+    expect(m.chordMatches(e, 'Mod+Alt+D')).toBe(true)
+    expect(m.chordMatches(e, 'Mod+Alt+F')).toBe(false)
+  })
+
+  it('does not fall back to the physical key when Option is not held', async () => {
+    const m = await loadFor('darwin')
+    // A dead-key glyph without Option is just that glyph, not the letter under it.
+    const e = ev({ metaKey: true, key: '∂', code: 'KeyD' })
+    expect(m.chordMatches(e, 'Mod+D')).toBe(false)
+  })
+
+  it('reads the letter or digit off the physical key', async () => {
+    const m = await loadFor('darwin')
+    expect(m.basePhysicalKey({ code: 'KeyD' } as KeyboardEvent)).toBe('D')
+    expect(m.basePhysicalKey({ code: 'Digit7' } as KeyboardEvent)).toBe('7')
+    expect(m.basePhysicalKey({ code: 'ArrowRight' } as KeyboardEvent)).toBe('')
+    expect(m.basePhysicalKey({ code: '' } as KeyboardEvent)).toBe('')
+  })
+})
