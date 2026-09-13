@@ -365,6 +365,15 @@ function onTmuxSessionName(e: Event): void {
   void store.saveSetting('tmuxSessionName', v)
 }
 const globalHotkey = reactive({ error: '' })
+// The example has to be an Electron accelerator, and macOS spells it
+// differently — a Mac user shown "Ctrl+Alt+X" would reasonably type "⌘⌥X",
+// which Electron does not accept.
+const globalShowHidePh = computed(() =>
+  isMac ? t('set.gen.globalShowHidePhMac') : t('set.gen.globalShowHidePh')
+)
+const globalShowHideDesc = computed(() =>
+  isMac ? t('set.gen.globalShowHideDescMac') : t('set.gen.globalShowHideDesc')
+)
 async function onGlobalShowHide(e: Event): Promise<void> {
   const v = (e.target as HTMLInputElement).value
   const r = await store.setGlobalShowHide(v)
@@ -783,13 +792,13 @@ async function resetMasterLock(): Promise<void> {
                   <input
                     class="text"
                     :value="store.globalShowHide"
-                    :placeholder="t('set.gen.globalShowHidePh')"
+                    :placeholder="globalShowHidePh"
                     spellcheck="false"
                     @change="onGlobalShowHide"
                     @keyup.enter="onGlobalShowHide"
                   />
                   <span v-if="globalHotkey.error" class="sub err">{{ globalHotkey.error }}</span>
-                  <span v-else class="sub">{{ t('set.gen.globalShowHideDesc') }}</span>
+                  <span v-else class="sub">{{ globalShowHideDesc }}</span>
                 </span>
               </label>
             </div>

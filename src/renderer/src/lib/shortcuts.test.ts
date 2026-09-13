@@ -145,6 +145,14 @@ describe('Option chords on macOS', () => {
     expect(m.chordMatches(e, 'Mod+D')).toBe(false)
   })
 
+  it('rejects a chord that does not declare the Option being held', async () => {
+    const m = await loadFor('darwin')
+    // The extra-modifier check must run before the physical-key fallback, or
+    // Opt+Cmd+D would also fire whatever is bound to Cmd+D.
+    const e = ev({ metaKey: true, altKey: true, key: '∂', code: 'KeyD' })
+    expect(m.chordMatches(e, 'Mod+D')).toBe(false)
+  })
+
   it('reads the letter or digit off the physical key', async () => {
     const m = await loadFor('darwin')
     expect(m.basePhysicalKey({ code: 'KeyD' } as KeyboardEvent)).toBe('D')
