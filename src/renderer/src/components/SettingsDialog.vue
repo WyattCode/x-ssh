@@ -1568,6 +1568,30 @@ async function resetMasterLock(): Promise<void> {
 .toggle-row .sub.err {
   color: var(--danger);
 }
+.toggle-row > span:first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.toggle-row .text {
+  display: block;
+  width: 100%;
+  height: 32px;
+  margin-top: 6px;
+  padding: 0 11px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 12.5px;
+  outline: none;
+  box-sizing: border-box;
+}
+.toggle-row .text:hover {
+  border-color: var(--border-strong);
+}
+.toggle-row .text:focus {
+  border-color: var(--accent);
+}
 .switch {
   flex: none;
   position: relative;
