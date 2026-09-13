@@ -1349,13 +1349,27 @@ async function resetMasterLock(): Promise<void> {
   gap: 10px;
 }
 .accent-input {
-  width: 38px;
+  width: 40px;
   height: 34px;
-  padding: 2px;
+  padding: 3px;
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   cursor: pointer;
+}
+.accent-input::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+.accent-input::-webkit-color-swatch {
+  border: none;
+  border-radius: 4px;
+}
+.accent-input:hover {
+  border-color: var(--border-strong);
+}
+.accent-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }.path {
   flex: 1;
   min-width: 0;

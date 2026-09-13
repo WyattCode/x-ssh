@@ -308,9 +308,6 @@ async function remove(): Promise<void> {
             :style="{ background: c }"
             @click="form.color = c"
           ></button>
-          <label class="swatch custom" :style="{ background: form.color || 'transparent' }">
-            <input v-model="form.color" type="color" />
-          </label>
         </div>
       </div>
 
@@ -318,10 +315,11 @@ async function remove(): Promise<void> {
         <label class="field grow">
           <span>{{ t('host.termTheme') }}</span>
           <div class="select-wrap">
-            <select v-model="form.terminalTheme">
+            <select v-model="form.terminalTheme" class="select-in">
               <option value="">{{ t('host.termThemeSystem') }}</option>
               <option v-for="p in PRESETS" :key="p.id" :value="p.id">{{ p.label }}</option>
             </select>
+            <Icon name="chevron-down" :size="15" class="select-caret" />
           </div>
         </label>
         <label class="field grow">
@@ -929,46 +927,41 @@ button.danger:hover {
 }
 .color-row {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+  flex-wrap: nowrap;
+  gap: 5px;
   align-items: center;
 }
 .color-row .swatch {
-  width: 24px;
-  height: 24px;
-  border-radius: 6px;
+  width: 22px;
+  height: 22px;
+  flex: none;
+  border-radius: 5px;
   border: 2px solid transparent;
   cursor: pointer;
   position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.1s, border-color 0.12s, box-shadow 0.12s;
+}
+.color-row .swatch:hover {
+  transform: translateY(-1px);
 }
 .color-row .swatch.on {
-  border-color: var(--text);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
 }
 .color-row .swatch.none {
   border: 1px solid var(--border-strong);
   background: transparent;
   color: var(--text-faint);
 }
-.color-row .swatch.none::after {
-  content: '×';
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 13px;
+.color-row .swatch.none:hover {
+  color: var(--text-dim);
 }
-.color-row .swatch.custom {
-  width: 26px;
-  height: 26px;
-  overflow: hidden;
-}
-.color-row .swatch.custom input {
-  position: absolute;
-  inset: -4px;
-  width: 34px;
-  height: 34px;
-  opacity: 0;
-  cursor: pointer;
+.color-row .swatch.none.on {
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
 }
 </style>
