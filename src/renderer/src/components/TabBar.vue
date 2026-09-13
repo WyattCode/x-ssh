@@ -171,57 +171,59 @@ function cancelRename(): void {
         <span class="close" :title="t('tabbar.close')" @click.stop="store.closeTabSafe(tab.id)"><Icon name="close" :size="13" /></span>
       </div>
     </div>
-    <div v-if="filterOpen" class="filter-box">
-      <Icon name="search" :size="14" />
-      <input
-        ref="filterEl"
-        v-model="filterQuery"
-        class="filter-input"
-        :placeholder="t('tabbar.filter')"
-        spellcheck="false"
-        @keydown.esc.prevent="toggleFilter"
-      />
-      <span class="filter-count">{{ visibleTabs.length }}/{{ store.tabs.length }}</span>
-    </div>
-    <button class="tool" :class="{ on: filterOpen }" :title="t('tabbar.filter')" @click="toggleFilter">
-      <Icon name="search" :size="16" />
-    </button>
     <button class="new" :title="t('tabbar.newConn', { key: `${modKey}+K` })" @click="store.togglePalette(true)">
       <Icon name="plus" :size="17" />
     </button>
     <div class="drag-spacer" />
-    <button
-      class="tool"
-      :class="{ on: layoutMenu.open }"
-      :title="t('tabbar.layout')"
-      @click.stop="openLayoutMenu"
-    >
-      <Icon name="layout" :size="16" />
-    </button>
-    <button
-      v-if="store.activePane?.status === 'connected'"
-      class="tool"
-      :class="{ on: store.sftpOpen }"
-      :title="t('tabbar.sftp')"
-      @click="store.toggleSftp()"
-    >
-      <Icon name="folder" :size="16" />
-    </button>
-    <button
-      class="tool"
-      :class="{ on: store.settingsOpen }"
-      :title="t('tabbar.settings', { key: `${modKey}+,` })"
-      @click="store.toggleSettings()"
-    >
-      <Icon name="settings" :size="16" />
-    </button>
-    <button
-      class="tool"
-      :title="mode === 'dark' ? t('tabbar.toLight') : t('tabbar.toDark')"
-      @click="toggle"
-    >
-      <Icon :name="mode === 'dark' ? 'sun' : 'moon'" :size="16" />
-    </button>
+    <div class="right-tools">
+      <button class="tool" :class="{ on: filterOpen }" :title="t('tabbar.filter')" @click="toggleFilter">
+        <Icon name="search" :size="16" />
+      </button>
+      <div v-if="filterOpen" class="filter-box">
+        <Icon name="search" :size="14" />
+        <input
+          ref="filterEl"
+          v-model="filterQuery"
+          class="filter-input"
+          :placeholder="t('tabbar.filter')"
+          spellcheck="false"
+          @keydown.esc.prevent="toggleFilter"
+        />
+        <span class="filter-count">{{ visibleTabs.length }}/{{ store.tabs.length }}</span>
+      </div>
+      <button
+        class="tool"
+        :class="{ on: layoutMenu.open }"
+        :title="t('tabbar.layout')"
+        @click.stop="openLayoutMenu"
+      >
+        <Icon name="layout" :size="16" />
+      </button>
+      <button
+        v-if="store.activePane?.status === 'connected'"
+        class="tool"
+        :class="{ on: store.sftpOpen }"
+        :title="t('tabbar.sftp')"
+        @click="store.toggleSftp()"
+      >
+        <Icon name="folder" :size="16" />
+      </button>
+      <button
+        class="tool"
+        :class="{ on: store.settingsOpen }"
+        :title="t('tabbar.settings', { key: `${modKey}+,` })"
+        @click="store.toggleSettings()"
+      >
+        <Icon name="settings" :size="16" />
+      </button>
+      <button
+        class="tool"
+        :title="mode === 'dark' ? t('tabbar.toLight') : t('tabbar.toDark')"
+        @click="toggle"
+      >
+        <Icon :name="mode === 'dark' ? 'sun' : 'moon'" :size="16" />
+      </button>
+    </div>
   </div>
 
   <div v-if="layoutMenu.open" class="ctx-overlay" @mousedown="layoutMenu.open = false" @contextmenu.prevent="layoutMenu.open = false">
@@ -409,6 +411,13 @@ function cancelRename(): void {
   border-radius: var(--radius-sm);
   transition: background 0.14s, color 0.14s;
   -webkit-app-region: no-drag;
+}
+.right-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  -webkit-app-region: no-drag;
+  flex: none;
 }
 .new:hover,
 .tool:hover {
