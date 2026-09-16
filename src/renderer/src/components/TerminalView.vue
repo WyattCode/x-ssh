@@ -376,7 +376,16 @@ onMounted(() => {
     return true
   })
 
-  term.onData((data) => window.api.ssh.input(props.sessionId, data))
+  // Byte-identical payloads arriving in the same tick (a few ms apart) are
+  // the IME double-emit; keep the window well under OS key auto-repeat
+  // (≈33 ms at 30 cps) so holding a key never loses input.
+  let lastInput = { data: '', at: 0 }
+  term.onData((data) => {
+    const now = performance.now()
+    if (data === lastInput.data && now - lastInput.at < 10) return
+    lastInput = { data, at: now }
+    window.api.ssh.input(props.sessionId, data)
+  })
 
   offData = window.api.ssh.onData((payload) => {
     if (payload.sessionId === props.sessionId) {
