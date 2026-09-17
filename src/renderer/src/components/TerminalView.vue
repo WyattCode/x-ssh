@@ -18,6 +18,7 @@ import {
   type RebindableAction
 } from '../lib/shortcuts'
 import { sanitizePasteText } from '../../../shared/fsUtils'
+import { createImeMirror, isPlainText } from '../lib/imeSync'
 import Icon from './Icon.vue'
 
 const props = withDefaults(
@@ -80,6 +81,8 @@ let fit: FitAddon | null = null
 let search: SearchAddon | null = null
 let ro: ResizeObserver | null = null
 let offData: (() => void) | null = null
+/** Removes the IME listeners added to xterm's textarea (and cancels a pending catch-up). */
+const imeAbort = new AbortController()
 
 // ---- Clipboard actions ----
 const { confirm } = useConfirm()
@@ -376,15 +379,88 @@ onMounted(() => {
     return true
   })
 
-  // Byte-identical payloads arriving in the same tick (a few ms apart) are
-  // the IME double-emit; keep the window well under OS key auto-repeat
-  // (≈33 ms at 30 cps) so holding a key never loses input.
-  let lastInput = { data: '', at: 0 }
+  // IME text (pinyin, and especially voice input that rewrites its own
+  // draft) goes through a mirror of xterm's hidden textarea rather than
+  // straight from xterm — see lib/imeSync. The textarea is the source of
+  // truth; the flags below say which part of it is settled.
+  const ta = term.textarea
+  const ime = createImeMirror()
+  const send = (data: string): void => window.api.ssh.input(props.sessionId, data)
+  let composing = false
+  let compStart = 0
+  /** A keystroke's own character was just sent; its input event (if the
+   *  browser still inserts it) must not be sent a second time. */
+  let keyTextSent = false
+  if (ta) {
+    const signal = imeAbort.signal
+    ta.addEventListener('compositionstart', () => {
+      composing = true
+      // A reconversion starts at the replaced range, not at the end.
+      compStart = ta.selectionStart ?? ta.value.length
+    }, { signal })
+    // Catch up after each commit in case xterm emitted nothing for it (see
+    // ImeMirror.sync). Deferred so xterm's own timer-based send runs first;
+    // whatever it mirrors makes this a no-op.
+    ta.addEventListener('compositionend', () => {
+      composing = false
+      setTimeout(() => {
+        if (composing || signal.aborted) return
+        const out = ime.sync(ta.value)
+        if (out) send(out)
+      }, 0)
+    }, { signal })
+    // Same for text committed without a composition (voice input). xterm's
+    // capture listener has already handled — or silently dropped — it.
+    ta.addEventListener('input', (e) => {
+      const kind = (e as InputEvent).inputType
+      if (composing || kind === 'insertCompositionText') return
+      if ((kind === 'insertText' || kind === 'insertReplacementText') && !keyTextSent) {
+        const out = ime.sync(ta.value)
+        if (out) send(out)
+        return
+      }
+      // Anything else lands text xterm already sent or that isn't typing at
+      // all: a native paste (xterm sends it, empties the textarea, then the
+      // browser inserts it anyway), a drop, an undo, a keystroke's own
+      // character. Account for it without sending it again.
+      ime.adopt(ta.value)
+    }, { signal })
+    // Every time xterm itself rewrites the textarea — emptying it on Enter,
+    // Ctrl+C, blur and after a paste, or filling it with the selection on
+    // right-click — that text is not something the IME typed. Catch all of
+    // them at the one place they share (the value setter; IME edits never go
+    // through it) instead of listing xterm's code paths one by one.
+    const native = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')
+    if (native?.get && native.set) {
+      const { get, set } = native
+      Object.defineProperty(ta, 'value', {
+        configurable: true,
+        get(this: HTMLTextAreaElement) {
+          return get.call(this)
+        },
+        set(this: HTMLTextAreaElement, v: string) {
+          set.call(this, v)
+          ime.adopt(get.call(this))
+        }
+      })
+    }
+  }
   term.onData((data) => {
-    const now = performance.now()
-    if (data === lastInput.data && now - lastInput.at < 10) return
-    lastInput = { data, at: now }
-    window.api.ssh.input(props.sessionId, data)
+    let out = data
+    if (ta) {
+      const eventType = (window.event as Event | undefined)?.type
+      // A non-IME key during composition makes xterm finish it on the spot,
+      // so the whole textarea counts as settled then.
+      const settled = composing && eventType !== 'keydown' ? ta.value.slice(0, compStart) : ta.value
+      out = ime.input(data, { settled, eventType })
+      if ((eventType === 'keydown' || eventType === 'keypress') && isPlainText(data)) {
+        // The browser inserts a key's character (if at all) within the same
+        // task, so this only covers that key.
+        keyTextSent = true
+        setTimeout(() => { keyTextSent = false }, 0)
+      }
+    }
+    if (out) send(out)
   })
 
   offData = window.api.ssh.onData((payload) => {
@@ -475,6 +551,7 @@ defineExpose({
 })
 
 onBeforeUnmount(() => {
+  imeAbort.abort()
   offData?.()
   ro?.disconnect()
   term?.dispose()
