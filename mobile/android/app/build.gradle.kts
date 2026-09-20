@@ -41,5 +41,7 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-text")
     implementation("androidx.activity:activity-compose:1.13.0")
+    // 折叠屏:拿到铰链的真实位置与开合状态(分栏分界线要压在折痕上,半折要进桌面模式)。
+    implementation("androidx.window:window:1.5.1")
     implementation("net.java.dev.jna:jna:5.19.1@aar")
 }

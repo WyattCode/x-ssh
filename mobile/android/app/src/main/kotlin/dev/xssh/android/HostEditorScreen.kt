@@ -10,7 +10,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.OutlinedTextField
@@ -48,7 +50,7 @@ fun HostEditorScreen(
     var password by remember { mutableStateOf(initial?.password ?: "") }
     var error by remember { mutableStateOf<String?>(null) }
 
-    Column(Modifier.fillMaxSize().background(p.bg).systemBarsPadding()) {
+    Column(Modifier.fillMaxSize().background(p.bg).safeDrawingPadding().imePadding()) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -92,7 +94,13 @@ fun HostEditorScreen(
         }
 
         Column(
-            Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(14.dp),
+            Modifier
+                .weight(1f)
+                .verticalScroll(rememberScrollState())
+                // 宽屏上不要把输入框拉到 860dp —— 一行字横跨整块屏幕既难读也难点。
+                .widthIn(max = 640.dp)
+                .align(Alignment.CenterHorizontally)
+                .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             XsshCard {

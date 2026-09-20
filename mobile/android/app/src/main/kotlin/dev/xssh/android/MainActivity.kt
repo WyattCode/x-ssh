@@ -5,12 +5,12 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 
 class MainActivity : ComponentActivity() {
@@ -33,7 +33,10 @@ class MainActivity : ComponentActivity() {
         }
         setContent {
             XsshTheme {
-                App(dev)
+                // 每一帧的窗口形态(尺寸档 + 铰链)只算一次,所有界面从这里取。
+                CompositionLocalProvider(LocalAdaptive provides rememberAdaptive()) {
+                    App(dev)
+                }
             }
         }
     }
@@ -55,8 +58,7 @@ sealed interface Screen {
 }
 
 /**
- * 应用壳:主机 → 终端 / 编辑器。
- * [expanded](内屏展开,≥600dp)时主机页为左右两栏,分界线对齐折痕。
+ * 应用壳:主机 → 终端 / 编辑器。布局形态由 [LocalAdaptive] 决定,各界面自己适配。
  */
 @Composable
 fun App(devTarget: DevTarget? = null) {
@@ -65,7 +67,6 @@ fun App(devTarget: DevTarget? = null) {
     var hosts by remember { mutableStateOf(store.load()) }
     var screen by remember { mutableStateOf<Screen>(Screen.Home) }
     var selectedId by remember { mutableStateOf<String?>(null) }
-    val expanded = LocalConfiguration.current.screenWidthDp >= 600
 
     LaunchedEffect(Unit) {
         val target = devTarget ?: return@LaunchedEffect
@@ -98,7 +99,6 @@ fun App(devTarget: DevTarget? = null) {
         is Screen.Home -> HomeScreen(
             hosts = hosts,
             selectedId = selectedId,
-            expanded = expanded,
             onSelect = { selectedId = it.id },
             onConnect = { screen = Screen.Terminal(it) },
             onNew = { screen = Screen.Editor(null) },

@@ -80,3 +80,20 @@ class HostStore(context: Context) {
         const val KEY_LIST = "list"
     }
 }
+/** 界面偏好(与主机无关的小设置)。 */
+class UiPrefs(context: Context) {
+    private val prefs = context.getSharedPreferences("xssh_ui", Context.MODE_PRIVATE)
+
+    /** 终端字号。手指缩放调过之后要记住,否则每开一个会话都得重新捏一次。 */
+    var terminalFontSize: Float
+        get() = prefs.getFloat(KEY_FONT, 14f).coerceIn(FONT_MIN, FONT_MAX)
+        set(value) {
+            prefs.edit().putFloat(KEY_FONT, value.coerceIn(FONT_MIN, FONT_MAX)).apply()
+        }
+
+    companion object {
+        const val FONT_MIN = 9f
+        const val FONT_MAX = 30f
+        private const val KEY_FONT = "terminalFontSize"
+    }
+}

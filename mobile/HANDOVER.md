@@ -1,6 +1,6 @@
 # X-SSH 移动端交接文档
 
-> 更新: 2026-09-20 深夜(第四次)。项目: `mobile/`(Android + iOS 双原生 UI + 共享 Rust 核心)。
+> 更新: 2026-09-21 凌晨(第五次)。项目: `mobile/`(Android + iOS 双原生 UI + 共享 Rust 核心)。
 > 设备: Xiaomi 18 Fold(型号 2608BPX34C),已装 demo App。
 
 ## 0. 一句话状态
@@ -13,6 +13,13 @@
 第三次会话新查明: Android 16+ 的本地网络保护要求单独的 `ACCESS_LOCAL_NETWORK`
 运行时权限,manifest 里原本没有 —— 就算 MIUI 放行,连 `192.168.x.x` 仍会超时,
 且表现和现在一模一样(超时),极易误判。已补上声明与申请。
+
+**第五次会话: 整套 UI 按平板/折叠屏重做。** 三种形态各自有布局(外屏 425dp 单列 +
+拇指区悬浮按钮 / 内屏竖 608dp 双列网格 / 内屏横 860dp 列表+详情双栏),分栏的分界线
+用 `androidx.window` 的真实铰链坐标,实测压在折痕上(x=1182px,误差 0 像素);半折时
+进桌面模式(终端在折痕上方,按键与输入法在下方)。触摸目标一律 ≥48dp,方向键长按连发。
+**注意: 功能移植远未完成**,桌面端的 SFTP/端口转发/多标签/分屏等核心能力
+(`xssh-core` 只有 `ssh.rs` + `terminal.rs`)都还没有;这次做的是已有三个界面的交互。
 
 **第四次会话: 主机密钥校验已上机。** 之前 `check_server_key` 接受任意密钥(只把指纹
 记下来),等于没有中间人防护 —— 这是安全缺陷,不是缺功能。现在:核心只接受已信任的
@@ -181,6 +188,19 @@ $env:JAVA_HOME="C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot"
 - 保持亮屏: 开发者选项「充电时保持唤醒」已开(`mStayOn=true`);30s 息屏会导致截图全黑。
 - MIUI「USB 安装」确认框:屏幕要亮着,否则安装被取消(`INSTALL_FAILED_USER_RESTRICTED`)。
 
+### M2.5 平板/折叠屏交互(第五次会话,真机验证)
+- **新增 `Adaptive.kt`**: 窗口尺寸档(Compact<600≤Medium<840≤Expanded,按**窗口**不是屏幕)
+  + `androidx.window:window:1.5.1` 的 `FoldingFeature`(铰链方向/半开/位置)。
+  界面只读 `LocalAdaptive`,不判断机型 —— 平板、分屏、小窗、内外屏走同一套规则。
+- **主机页**: 窄屏单列 + 右下悬浮「新建」(顶栏单手够不着);中屏 `GridCells.Adaptive(264dp)`
+  自动两列;宽屏列表+详情,左栏宽度 = 折痕位置。详情栏给出指纹、认证方式和大号操作按钮。
+- **终端**: 窄屏一行横滚按键,宽屏 `FlowRow` 折两行**全部露出**;方向键/退格长按连发;
+  字号捏合后落盘(`UiPrefs`);画布留 8dp 边距避开 52dp 圆角;桌面模式上下分屏。
+- **触感与反馈**: 按下即时缩放 + 轻震;卡片长按出菜单;所有可点区域 ≥48dp。
+- **真机验证**(截图逐一比对): 内屏横(双栏,分界线像素级压折痕)、内屏竖(双列网格)、
+  compact(`wm size 1168x1712` 覆盖成外屏尺寸)、桌面模式(`cmd device_state state 2`)、
+  连着会话转屏后**会话存活且能继续输入**(echo 两次都回显)。
+
 ## 5. 关键坑(踩过,别再踩)
 
 1. **DSR 应答**:终端事件不回写 → 远端程序挂起(ConPTY 必现;vim 同理)。已修 + 单测。
@@ -217,7 +237,19 @@ $env:JAVA_HOME="C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot"
 18. **`uniffi(flat_error)` 只带 Display 文本过边界**,字段不过去。所以两个主机密钥错误的
     Display **就是指纹本身**,宿主直接拿来存/比;人话措辞在 Kotlin 侧拼。改这类语义时
     记得同步 `FfiError` 的注释,否则下一个人会去解析字符串。
-19. **Git Bash 会把 `/data/...` 改写成 Windows 路径**,`adb shell am start -n pkg/.Act` 也会被吃掉。
+19. **折叠形态可以用命令模拟,不必真去掰机器**:`cmd device_state print-states` 列出
+    CLOSED/HALF_OPENED/OPENED…,`cmd device_state state 2` 进半折(桌面模式),
+    `state reset` 还原;窄屏形态用 `wm size 1168x1712` 覆盖成外屏尺寸(`wm size reset` 还原)。
+    **但切到 CLOSED 后外屏是锁屏**,需要 PIN 才能进应用,远程测不了外屏真机。
+20. **铰链坐标是「窗口」坐标**:拿它做分栏时,外层容器**不能**先加 `safeDrawingPadding`,
+    否则挖孔在侧边(内屏横屏 51dp)会把分界线整体推离折痕。内边距要放进各栏自己加。
+21. **`staticCompositionLocalOf` 不比较新旧值**:提供一个每次重组都新建的 data class,
+    会让整棵树全量重组。`rememberAdaptive()` 里必须 `remember` 住。
+22. **手写 `pointerInput` 手势会丢掉点击语义**,读屏软件点不动,`uiautomator` 也看不到
+    可点节点的文字。自定义手势的控件要补 `semantics { role = Role.Button; onClick {...} }`。
+23. **终端内容是 Canvas 画的**,`uiautomator dump` 拿不到里面的字,自动化断言只能靠截图;
+    同理读屏软件目前也读不了终端输出(待办)。
+24. **Git Bash 会把 `/data/...` 改写成 Windows 路径**,`adb shell am start -n pkg/.Act` 也会被吃掉。
     所有 adb 命令前加 `export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'`。
 
 ## 6. 已知问题 / 待办
@@ -234,7 +266,10 @@ $env:JAVA_HOME="C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot"
 - [ ] 放行后回归:确认 `ACCESS_LOCAL_NETWORK` 授予流程在真机上走通(现在是 `ignore`)
 - [ ] 折叠/展开、旋转的**会话存活**(现在 `configChanges` 应急;正解: ViewModel/前台 Service 持有会话)
 - [ ] Android 前台服务保活 + HyperOS 省电白名单引导页
-- [ ] 外屏(单栏)实机走一遍
+- [x] 平板/折叠屏三形态布局 + 桌面模式(见 §2「M2.5」)
+- [ ] 外屏**实机**走一遍(本次用 `wm size` 覆盖窗口尺寸验证了 compact 布局;
+      切 CLOSED 后外屏是锁屏,远程进不去应用)
+- [ ] 终端内容的读屏支持(Canvas 绘制,TalkBack 读不到)
 
 **安全(M3)**
 - [x] **主机密钥校验**:核心只认已信任指纹,首次连接/指纹变更均拒绝握手并抛带指纹的错误;

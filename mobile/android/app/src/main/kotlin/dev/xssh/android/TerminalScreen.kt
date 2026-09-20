@@ -17,10 +17,17 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Text
@@ -49,6 +56,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
@@ -142,7 +150,7 @@ fun TerminalScreen(host: Host, onExit: () -> Unit, onTrustKey: (String) -> Unit 
 private fun HostKeyPrompt(host: Host, pending: PendingKey, onTrust: () -> Unit, onExit: () -> Unit) {
     val p = LocalXssh.current
     Column(
-        Modifier.fillMaxSize().background(p.bg).systemBarsPadding().padding(24.dp),
+        Modifier.fillMaxSize().background(p.bg).safeDrawingPadding().padding(28.dp),
         verticalArrangement = Arrangement.Center,
     ) {
         Text(
@@ -200,7 +208,7 @@ private fun Fingerprint(label: String, value: String, color: Color) {
 private fun ConnectResult(message: String, retry: (() -> Unit)?, onExit: () -> Unit) {
     val p = LocalXssh.current
     Column(
-        Modifier.fillMaxSize().background(p.bg).systemBarsPadding().padding(24.dp),
+        Modifier.fillMaxSize().background(p.bg).safeDrawingPadding().padding(24.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -219,6 +227,9 @@ private fun ConnectResult(message: String, retry: (() -> Unit)?, onExit: () -> U
 @Composable
 private fun TerminalView(live: LiveTerminal, host: Host, onExit: () -> Unit) {
     val p = LocalXssh.current
+    val adaptive = LocalAdaptive.current
+    val context = LocalContext.current
+    val prefs = remember(context) { UiPrefs(context) }
     val scope = rememberCoroutineScope()
     val keyboard = LocalSoftwareKeyboardController.current
     val focusRequester = remember { FocusRequester() }
@@ -229,10 +240,16 @@ private fun TerminalView(live: LiveTerminal, host: Host, onExit: () -> Unit) {
     var lines by remember { mutableStateOf(emptyList<String>()) }
     var cursor by remember { mutableStateOf(CursorState(0u, 0u, false)) }
     var dead by remember { mutableStateOf(false) }
-    var fontSize by remember { mutableStateOf(14f) }
+    var fontSize by remember { mutableStateOf(prefs.terminalFontSize) }
     var ctrl by remember { mutableStateOf(false) }
     var alt by remember { mutableStateOf(false) }
     var grid by remember { mutableStateOf(0 to 0) }
+
+    // 捏合调完字号要记住;等手停下来再写盘,别把每一帧都落到 SharedPreferences。
+    LaunchedEffect(fontSize) {
+        delay(400)
+        prefs.terminalFontSize = fontSize
+    }
 
     LaunchedEffect(Unit) {
         while (true) {
@@ -250,39 +267,26 @@ private fun TerminalView(live: LiveTerminal, host: Host, onExit: () -> Unit) {
     }
 
     val transformState = rememberTransformableState { zoomChange, _, _ ->
-        fontSize = (fontSize * zoomChange).coerceIn(9f, 28f)
+        fontSize = (fontSize * zoomChange).coerceIn(UiPrefs.FONT_MIN, UiPrefs.FONT_MAX)
     }
 
-    Column(Modifier.fillMaxSize().background(p.termBg).systemBarsPadding().imePadding()) {
-        Row(
-            Modifier.fillMaxWidth().background(p.bgElev).padding(horizontal = 8.dp, vertical = 2.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            StatusDot(if (dead) p.danger else p.ok)
-            Spacer(Modifier.width(8.dp))
-            Column(Modifier.weight(1f)) {
-                Text(host.label, color = p.text, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                Text(
-                    text = if (dead) "已断开" else host.subtitle,
-                    color = if (dead) p.danger else p.textFaint,
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 11.sp,
-                )
-            }
-            KeyCap("⌨") {
+    val header: @Composable () -> Unit = {
+        TerminalHeader(
+            host = host,
+            dead = dead,
+            onKeyboard = {
                 focusRequester.requestFocus()
                 keyboard?.show()
-            }
-            KeyCap("断开") {
+            },
+            onExit = {
                 scope.launch(Dispatchers.IO) { live.close() }
                 onExit()
-            }
-        }
-
-        BoxWithConstraints(
-            Modifier
-                .weight(1f)
-                .fillMaxWidth()
+            },
+        )
+    }
+    val canvas: @Composable (Modifier) -> Unit = { modifier ->
+        Box(
+            modifier
                 .transformable(transformState)
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
@@ -302,76 +306,206 @@ private fun TerminalView(live: LiveTerminal, host: Host, onExit: () -> Unit) {
                         scope.launch(Dispatchers.IO) { live.resizeGrid(cols, rows) }
                     }
                 },
-                modifier = Modifier.fillMaxSize(),
+                // 留一点边距:内屏圆角半径 52dp,贴边的字会被切掉一角。
+                modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp),
             )
         }
-
-        var sentinel by remember { mutableStateOf(0) }
-        /** 本轮(输入框还没重置成功)已经发出去的文字,用来剔除陈旧事件里的重复部分。 */
-        var sentInBurst by remember { mutableStateOf("") }
-        var field by remember {
-            mutableStateOf(TextFieldValue(SENTINELS[0], TextRange(SENTINELS[0].length)))
-        }
-        fun resetField(flip: Boolean) {
-            if (flip) sentinel = (sentinel + 1) % SENTINELS.size
-            val mark = SENTINELS[sentinel]
-            field = TextFieldValue(mark, TextRange(mark.length))
-        }
-        BasicTextField(
-            value = field,
-            onValueChange = { value ->
-                val text = value.text
-                if (text.isEmpty()) {
-                    scope.launch(Dispatchers.IO) { live.sendRaw(byteArrayOf(0x7F)) }
-                    sentInBurst = ""
-                    resetField(flip = true)
-                    return@BasicTextField
-                }
-                if (value.composition == null) {
-                    // 带当前哨兵 = 重置已生效,后面全是新输入;带上一个哨兵 = 陈旧事件,
-                    // 只发本轮还没发过的尾巴。
-                    val fresh = text.startsWith(SENTINELS[sentinel])
-                    val committed = SENTINELS.fold(text) { acc, mark -> acc.removePrefix(mark) }
-                    val pending = when {
-                        fresh -> committed
-                        committed.startsWith(sentInBurst) -> committed.removePrefix(sentInBurst)
-                        else -> committed
-                    }
-                    if (pending.isNotEmpty()) {
-                        val useCtrl = ctrl
-                        val useAlt = alt
-                        ctrl = false
-                        alt = false
-                        scope.launch(Dispatchers.IO) { live.sendText(pending, useCtrl, useAlt) }
-                    }
-                    sentInBurst = committed
-                    resetField(flip = fresh)
-                    return@BasicTextField
-                }
-                field = value
-            },
-            modifier = Modifier.size(1.dp).alpha(0f).focusRequester(focusRequester),
-            textStyle = TextStyle(color = Color.Transparent, fontSize = 1.sp),
-            cursorBrush = SolidColor(Color.Transparent),
-        )
-
-        KeyCapRow(Modifier.fillMaxWidth().background(p.bgElev)) {
-            KeyCap("Esc") { scope.launch(Dispatchers.IO) { live.sendRaw(byteArrayOf(27)) } }
-            KeyCap("Tab") { scope.launch(Dispatchers.IO) { live.sendRaw(byteArrayOf(9)) } }
-            KeyCap("Ctrl", active = ctrl) { ctrl = !ctrl }
-            KeyCap("Alt", active = alt) { alt = !alt }
-            KeyCap("←") { scope.launch(Dispatchers.IO) { live.sendRaw("\u001b[D".toByteArray()) } }
-            KeyCap("↑") { scope.launch(Dispatchers.IO) { live.sendRaw("\u001b[A".toByteArray()) } }
-            KeyCap("↓") { scope.launch(Dispatchers.IO) { live.sendRaw("\u001b[B".toByteArray()) } }
-            KeyCap("→") { scope.launch(Dispatchers.IO) { live.sendRaw("\u001b[C".toByteArray()) } }
-            KeyCap("^C") { scope.launch(Dispatchers.IO) { live.sendRaw(byteArrayOf(3)) } }
-            KeyCap("^D") { scope.launch(Dispatchers.IO) { live.sendRaw(byteArrayOf(4)) } }
-            KeyCap("|") { scope.launch(Dispatchers.IO) { live.sendRaw("|".toByteArray()) } }
-            KeyCap("~") { scope.launch(Dispatchers.IO) { live.sendRaw("~".toByteArray()) } }
-            KeyCap("/") { scope.launch(Dispatchers.IO) { live.sendRaw("/".toByteArray()) } }
-            KeyCap("-") { scope.launch(Dispatchers.IO) { live.sendRaw("-".toByteArray()) } }
-        }
     }
+    val hiddenInput: @Composable () -> Unit = {
+        HiddenImeField(
+            focusRequester = focusRequester,
+            takeModifiers = {
+                val used = ctrl to alt
+                ctrl = false
+                alt = false
+                used
+            },
+            onText = { text, useCtrl, useAlt ->
+                scope.launch(Dispatchers.IO) { live.sendText(text, useCtrl, useAlt) }
+            },
+            onBackspace = { scope.launch(Dispatchers.IO) { live.sendRaw(byteArrayOf(0x7F)) } },
+        )
+    }
+    val keys: @Composable () -> Unit = {
+        TerminalKeys(
+            // 宽屏折成两行全部露出;窄屏保持一行横滚,不跟终端抢竖向空间。
+            wrap = adaptive.roomyKeys,
+            ctrl = ctrl,
+            alt = alt,
+            onCtrl = { ctrl = !ctrl },
+            onAlt = { alt = !alt },
+            onFont = { step ->
+                fontSize = (fontSize + step).coerceIn(UiPrefs.FONT_MIN, UiPrefs.FONT_MAX)
+            },
+            send = { bytes -> scope.launch(Dispatchers.IO) { live.sendRaw(bytes) } },
+        )
+    }
+
+    val tabletop = adaptive.tabletop
+    if (tabletop != null) {
+        // 桌面模式:机器半开着立在桌上。上半屏只放要看的(终端),下半屏只放要碰的
+        // (按键与输入法),手不会伸到上半屏去挡住输出。
+        Column(Modifier.fillMaxSize().background(p.bg)) {
+            Column(
+                Modifier
+                    .height(tabletop.startDp)
+                    .fillMaxWidth()
+                    .background(p.termBg)
+                    .windowInsetsPadding(
+                        WindowInsets.safeDrawing.only(
+                            WindowInsetsSides.Top + WindowInsetsSides.Horizontal,
+                        ),
+                    ),
+            ) {
+                header()
+                canvas(Modifier.weight(1f).fillMaxWidth())
+            }
+            Box(Modifier.height(maxOf(tabletop.sizeDp, 1.dp)).fillMaxWidth().background(p.border))
+            Column(
+                Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .background(p.bgElev)
+                    .windowInsetsPadding(
+                        WindowInsets.safeDrawing.only(
+                            WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal,
+                        ),
+                    )
+                    .imePadding(),
+            ) {
+                hiddenInput()
+                keys()
+            }
+        }
+        return
+    }
+
+    Column(Modifier.fillMaxSize().background(p.termBg).safeDrawingPadding().imePadding()) {
+        header()
+        canvas(Modifier.weight(1f).fillMaxWidth())
+        hiddenInput()
+        Box(Modifier.fillMaxWidth().background(p.bgElev)) { keys() }
+    }
+}
+
+@Composable
+private fun TerminalHeader(host: Host, dead: Boolean, onKeyboard: () -> Unit, onExit: () -> Unit) {
+    val p = LocalXssh.current
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .background(p.bgElev)
+            .heightIn(min = 56.dp)
+            .padding(start = 14.dp, end = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        StatusDot(if (dead) p.danger else p.ok)
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(host.label, color = p.text, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            Text(
+                text = if (dead) "已断开" else host.subtitle,
+                color = if (dead) p.danger else p.textFaint,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 11.sp,
+            )
+        }
+        XsshIconButton("⌨") { onKeyboard() }
+        Spacer(Modifier.width(4.dp))
+        XsshButton("断开", kind = ButtonKind.Danger) { onExit() }
+    }
+}
+
+/** 终端按键条。方向键与退格可连发,按住就一直走 —— 改一条长命令时这是刚需。 */
+@Composable
+private fun TerminalKeys(
+    wrap: Boolean,
+    ctrl: Boolean,
+    alt: Boolean,
+    onCtrl: () -> Unit,
+    onAlt: () -> Unit,
+    onFont: (Float) -> Unit,
+    send: (ByteArray) -> Unit,
+) {
+    KeyCapRow(wrap = wrap) {
+        KeyCap("Esc") { send(byteArrayOf(27)) }
+        KeyCap("Tab") { send(byteArrayOf(9)) }
+        KeyCap("Ctrl", active = ctrl, onPress = onCtrl)
+        KeyCap("Alt", active = alt, onPress = onAlt)
+        KeyCap("←", repeatable = true) { send("\u001b[D".toByteArray()) }
+        KeyCap("↑", repeatable = true) { send("\u001b[A".toByteArray()) }
+        KeyCap("↓", repeatable = true) { send("\u001b[B".toByteArray()) }
+        KeyCap("→", repeatable = true) { send("\u001b[C".toByteArray()) }
+        KeyCap("⌫", repeatable = true) { send(byteArrayOf(0x7F)) }
+        KeyCap("^C") { send(byteArrayOf(3)) }
+        KeyCap("^D") { send(byteArrayOf(4)) }
+        KeyCap("^Z") { send(byteArrayOf(26)) }
+        KeyCap("^L") { send(byteArrayOf(12)) }
+        KeyCap("|") { send("|".toByteArray()) }
+        KeyCap("~") { send("~".toByteArray()) }
+        KeyCap("/") { send("/".toByteArray()) }
+        KeyCap("-") { send("-".toByteArray()) }
+        KeyCap("A−") { onFont(-1f) }
+        KeyCap("A+") { onFont(1f) }
+    }
+}
+
+/**
+ * 输入法用的隐藏输入框。哨兵逻辑是修输入法竞态的成果,别动:重置输入框是异步
+ * 生效的,输入法同帧连发时后一个事件带的仍是旧内容。
+ */
+@Composable
+private fun HiddenImeField(
+    focusRequester: FocusRequester,
+    takeModifiers: () -> Pair<Boolean, Boolean>,
+    onText: (String, Boolean, Boolean) -> Unit,
+    onBackspace: () -> Unit,
+) {
+    var sentinel by remember { mutableStateOf(0) }
+    /** 本轮(输入框还没重置成功)已经发出去的文字,用来剔除陈旧事件里的重复部分。 */
+    var sentInBurst by remember { mutableStateOf("") }
+    var field by remember {
+        mutableStateOf(TextFieldValue(SENTINELS[0], TextRange(SENTINELS[0].length)))
+    }
+    fun resetField(flip: Boolean) {
+        if (flip) sentinel = (sentinel + 1) % SENTINELS.size
+        val mark = SENTINELS[sentinel]
+        field = TextFieldValue(mark, TextRange(mark.length))
+    }
+    BasicTextField(
+        value = field,
+        onValueChange = { value ->
+            val text = value.text
+            if (text.isEmpty()) {
+                onBackspace()
+                sentInBurst = ""
+                resetField(flip = true)
+                return@BasicTextField
+            }
+            if (value.composition == null) {
+                // 带当前哨兵 = 重置已生效,后面全是新输入;带上一个哨兵 = 陈旧事件,
+                // 只发本轮还没发过的尾巴。
+                val fresh = text.startsWith(SENTINELS[sentinel])
+                val committed = SENTINELS.fold(text) { acc, mark -> acc.removePrefix(mark) }
+                val pending = when {
+                    fresh -> committed
+                    committed.startsWith(sentInBurst) -> committed.removePrefix(sentInBurst)
+                    else -> committed
+                }
+                if (pending.isNotEmpty()) {
+                    val (useCtrl, useAlt) = takeModifiers()
+                    onText(pending, useCtrl, useAlt)
+                }
+                sentInBurst = committed
+                resetField(flip = fresh)
+                return@BasicTextField
+            }
+            field = value
+        },
+        modifier = Modifier.size(1.dp).alpha(0f).focusRequester(focusRequester),
+        textStyle = TextStyle(color = Color.Transparent, fontSize = 1.sp),
+        cursorBrush = SolidColor(Color.Transparent),
+    )
 }
 
 @Composable
