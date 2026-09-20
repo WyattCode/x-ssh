@@ -181,8 +181,10 @@ $env:JAVA_HOME="C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot"
 - 型号 `2608BPX34C`,当前主用户 **User 0**(注意:曾装到 User 11「第二空间」导致 am/run-as 找不到包)。
 - 内屏 display id `4639175402683733248`(展开,2364×1672 @440dpi → 608dp),
   外屏 `4639175068132267009`(1168×1712);截图必须带 `-d`。
-- **触屏注入(tap/swipe)被 MIUI 拦截**(无 `USB调试(安全设置)` 时直接 SecurityException;
-  即便开了也不可靠)——但 **keyevent / input text 可用**,自动化走 TAB/ENTER/文本注入。
+- **触屏注入**: `tap` **会丢事件**(同一坐标连点 5 次只生效 1 次),自动化必须写成
+  「点到界面变化为止」的重试循环;`swipe` 第五次会话实测**可用且稳定**(外屏上滑动
+  按键条、来回滚动都成功)—— 早期"swipe 被拦截"的结论已作废。
+  `keyevent / input text` 一直可用。
 - App 私有目录: `/data/data/dev.xssh.android/files/`(已推入测试私钥 `xssh_dev_key`,399B);
   推法: `adb shell "run-as dev.xssh.android sh -c 'cat > files/xssh_dev_key'" < 本地私钥`。
 - 保持亮屏: 开发者选项「充电时保持唤醒」已开(`mStayOn=true`);30s 息屏会导致截图全黑。
@@ -230,6 +232,10 @@ $env:JAVA_HOME="C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot"
 - **物理圆角核对**:外屏圆角左右不对称(左 28px,右 **154px = 56dp**)。按圆心+半径算过
   所有控件的四个角,全部落在挖角内侧,悬浮按钮右下角余量 31px —— 不会被切。
   截图是帧缓冲,看不出物理挖角,这一项只能算不能看。
+- **按键条横向滚动实测可达全部 19 键**:起始 7(`↑↓←→ Tab ^C Esc`)、中段 7
+  (`Ctrl Alt ⌫ ^D ^Z ^L |`)、末段 7(`^L | ~ / - A− A+`),去重正好 19,且能滑回开头;
+  滑出来的键点下去真的发字符(终端里出现了 `~` `/`)。
+- **字号 A− / A+ 双向可用且落盘**(`xssh_ui.xml` 里 `terminalFontSize` 跟着变)。
 
 ## 5. 关键坑(踩过,别再踩)
 
@@ -306,7 +312,7 @@ $env:JAVA_HOME="C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot"
 - [ ] 折叠/展开、旋转的**会话存活**(现在 `configChanges` 应急;正解: ViewModel/前台 Service 持有会话)
 - [ ] Android 前台服务保活 + HyperOS 省电白名单引导页
 - [x] 平板/折叠屏三形态布局 + 桌面模式(见 §2「M2.5」)
-- [x] 外屏实机走一遍(见 §2「M2.7」);仅剩按键条横向滚动未验证(注入 swipe 时设备已锁屏)
+- [x] 外屏实机走一遍(见 §2「M2.7」),含按键条横向滚动
 - [ ] 终端内容的读屏支持(Canvas 绘制,TalkBack 读不到)
 
 **安全(M3)**
