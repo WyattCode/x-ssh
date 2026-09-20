@@ -72,6 +72,8 @@ class LiveTerminal(
     }
 
     fun sendRaw(bytes: ByteArray) {
+        // 一敲键盘就回到底部:翻着历史时收到自己的回显却看不见,是最让人困惑的状态。
+        term.scrollToBottom()
         shell.write(bytes)
         // 刚发出去就等着回显:标记一下,让轮询立刻从省电的低频回到 16ms。
         // 不然停顿之后敲的第一个字,回显会慢将近 100ms —— 终端里这个最容易被感觉到。
@@ -94,6 +96,21 @@ class LiveTerminal(
         if (alt) out = "\u001b$out"
         sendRaw(out.replace("\n", "\r").toByteArray())
     }
+
+    /** 往回翻 [lines] 行(正数看更早的内容)。 */
+    fun scroll(lines: Int) {
+        term.scroll(lines)
+        dirty = true
+    }
+
+    /** 回到底部。 */
+    fun scrollToBottom() {
+        term.scrollToBottom()
+        dirty = true
+    }
+
+    /** 视口离底部多少行(0 = 贴底)。 */
+    fun scrollOffset(): Int = term.scrollOffset().toInt()
 
     /** 强制下一帧取一次完整画面(界面刚回来看,或者行列变了)。 */
     fun markDirty() {

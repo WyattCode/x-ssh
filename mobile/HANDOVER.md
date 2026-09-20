@@ -319,6 +319,24 @@ $env:JAVA_HOME="C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot"
 
 实测:横屏卡片/标签/⋮ 中线同为 232.0dp;双列四个地址全部完整。
 
+### M3.4 回滚缓冲(P1,已上机)
+定位是「运维遥控器」,主要动作就是看输出,而之前**一行都翻不回去** —— 输出滚过去只剩
+最后一屏。所以把这一项提到了多会话前面。
+
+- 核心 `terminal.rs`:`scroll(lines)` / `scroll_to_bottom()` / `scroll_offset()` /
+  `history_len()`。`scrolling_history` 本来就配着(10000 行),`display_iter` 也本来就
+  跟随显示偏移 —— 取行的逻辑一行没改。两个新单测(共 17 passed)。
+- FFI + Kotlin:`TerminalFrame.scrollOffset`,界面据此显示「↓ 回到底部」。
+- 手势在**画布**上(不在外层):单指拖动翻历史;**两根手指就 break**,把事件让给外层的
+  捏合缩放;而且只在真的翻过一行时才 `consume`,轻点照样聚焦弹键盘。
+- `sendRaw` 会先 `scrollToBottom()`:翻着历史时敲键盘却看不见自己的回显,是最让人困惑的状态。
+
+**真机验收**:拖动能翻出更早内容;翻上去后跑 `ping` 持续输出 6 秒,**终端区域像素级无变化**
+(视口锚住了);「回到底部」有效;打字自动回到底部;轻点不会被误判成滚动。
+
+**测试脚本的坑(又踩一次)**:`tap_label` 原来只算一次坐标,键盘弹出导致布局移位后,
+后面几次点击全打空,看起来像「按钮没反应」。已改成每次重新定位。
+
 ## 5. 关键坑(踩过,别再踩)
 
 1. **DSR 应答**:终端事件不回写 → 远端程序挂起(ConPTY 必现;vim 同理)。已修 + 单测。
@@ -389,7 +407,11 @@ $env:JAVA_HOME="C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot"
     行盒一样高,叠在一起就显得松。要改就在 `MaterialTheme` 里面覆盖 `LocalTextStyle`。
 33. **MIUI 折叠态的通知不把操作按钮暴露给 uiautomator**,`input swipe` 也展不开;
     而服务 `exported=false`(应当如此),adb 又没法从外部触发 —— 通知动作只能人工验。
-34. **Git Bash 会把 `/data/...` 改写成 Windows 路径**,`adb shell am start -n pkg/.Act` 也会被吃掉。
+34. **自动化点击必须每次重新定位**。软键盘弹出、布局变化之后,缓存的坐标就废了;
+    连点同一个旧坐标只会一直打空,极像「按钮坏了」。
+35. **别断言 alacritty 滚动了几行**。喂进去的字节到底滚几行取决于光标状态,
+    断言「看到的内容不变」才是在测自己要保证的性质(第一版测试就因此挂了)。
+36. **Git Bash 会把 `/data/...` 改写成 Windows 路径**,`adb shell am start -n pkg/.Act` 也会被吃掉。
     所有 adb 命令前加 `export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'`。
 
 ## 6. 已知问题 / 待办
@@ -421,7 +443,8 @@ $env:JAVA_HOME="C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot"
 - [ ] 密码/私钥 zeroize(FFI 跨边界有副本)
 
 **体验**
-- [ ] 回滚条(scrollback)+ 选择/复制粘贴(需要核心暴露 `scroll_display` / 选区 API)
+- [x] 回滚缓冲(见 §2「M3.4」)
+- [ ] 选择 / 复制粘贴(核心还需暴露选区 API)
 - [ ] 多标签/多会话;标签颜色、命令片段、快照(与桌面版对齐)
 - [ ] 端口转发 / 代理跳转 / SFTP(桌面版已有,iOS/Android 待接)
 - [ ] 主机列表编辑器: 保存反馈(Toast)、名称自动填充、密钥库选择器

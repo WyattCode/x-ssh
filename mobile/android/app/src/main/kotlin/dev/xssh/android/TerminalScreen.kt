@@ -6,6 +6,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -37,6 +39,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -48,6 +51,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextRange
@@ -343,9 +348,22 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
                         scope.launch(Dispatchers.IO) { live.resizeGrid(cols, rows) }
                     }
                 },
+                onScroll = { deltaLines ->
+                    scope.launch(Dispatchers.IO) { live.scroll(deltaLines) }
+                },
                 // 留一点边距:内屏圆角半径 52dp,贴边的字会被切掉一角。
                 modifier = Modifier.fillMaxSize().padding(horizontal = Gutter),
             )
+            // 翻着历史时远端还在出新内容,得有一条路一键回到最新。
+            if (frame.scrollOffset > 0) {
+                XsshButton(
+                    "↓ 回到底部",
+                    kind = ButtonKind.Ghost,
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(Gutter),
+                ) {
+                    scope.launch(Dispatchers.IO) { live.scrollToBottom() }
+                }
+            }
         }
     }
     val hiddenInput: @Composable () -> Unit = {
@@ -555,6 +573,7 @@ private fun TerminalCanvas(
     cursor: CursorState,
     fontSize: Float,
     onGridSize: (Int, Int) -> Unit,
+    onScroll: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val p = LocalXssh.current
@@ -567,12 +586,39 @@ private fun TerminalCanvas(
         size.width.toFloat().coerceAtLeast(1f) to size.height.toFloat().coerceAtLeast(1f)
     }
 
+    val scrollBy by rememberUpdatedState(onScroll)
     BoxWithConstraints(modifier) {
         val cols = (constraints.maxWidth / cell.first).toInt().coerceAtLeast(1)
         val rows = (constraints.maxHeight / cell.second).toInt().coerceAtLeast(1)
         LaunchedEffect(cols, rows) { onGridSize(cols, rows) }
 
-        Canvas(Modifier.fillMaxSize()) {
+        // 手势放在画布上(而不是外层):它先于外层的捏合缩放拿到事件并吃掉,
+        // 否则单指拖动会被 transformable 当成平移吞掉,翻不动历史。
+        // 按行取整,余量留到下一次,慢慢拖才不会卡顿。
+        val dragModifier = Modifier.pointerInput(cell) {
+            awaitEachGesture {
+                awaitFirstDown(requireUnconsumed = false)
+                var carry = 0f
+                while (true) {
+                    val event = awaitPointerEvent()
+                    // 两根手指 = 用户在捏合缩放,让给外层的 transformable,这里不抢。
+                    if (event.changes.size > 1) break
+                    val change = event.changes.firstOrNull() ?: break
+                    if (!change.pressed) break
+                    carry += change.positionChange().y
+                    val moved = (carry / cell.second).toInt()
+                    if (moved != 0) {
+                        carry -= moved * cell.second
+                        // 只在真的翻了一行时才吃掉事件:轻点不受影响,照样聚焦弹键盘。
+                        change.consume()
+                        // 内容往下拖 = 看更早的内容。
+                        scrollBy(moved)
+                    }
+                }
+            }
+        }
+
+        Canvas(Modifier.fillMaxSize().then(dragModifier)) {
             lines.forEachIndexed { index, line ->
                 if (index < rows && line.isNotEmpty()) {
                     drawText(

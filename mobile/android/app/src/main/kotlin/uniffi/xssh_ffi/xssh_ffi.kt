@@ -697,6 +697,12 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_xssh_ffi_checksum_method_term_resize(
     ): Int
+    external fun uniffi_xssh_ffi_checksum_method_term_scroll(
+    ): Int
+    external fun uniffi_xssh_ffi_checksum_method_term_scroll_offset(
+    ): Int
+    external fun uniffi_xssh_ffi_checksum_method_term_scroll_to_bottom(
+    ): Int
     external fun uniffi_xssh_ffi_checksum_method_term_take_events(
     ): Int
     external fun uniffi_xssh_ffi_checksum_constructor_session_connect(
@@ -760,6 +766,12 @@ internal object UniffiLib {
     external fun uniffi_xssh_ffi_fn_method_term_lines(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_xssh_ffi_fn_method_term_resize(`ptr`: Long,`cols`: Int,`rows`: Int,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_xssh_ffi_fn_method_term_scroll(`ptr`: Long,`lines`: Int,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_xssh_ffi_fn_method_term_scroll_offset(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Int
+    external fun uniffi_xssh_ffi_fn_method_term_scroll_to_bottom(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     external fun uniffi_xssh_ffi_fn_method_term_take_events(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
@@ -916,6 +928,15 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_xssh_ffi_checksum_method_term_resize() and 0xFFFF) != 15757) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_xssh_ffi_checksum_method_term_scroll() and 0xFFFF) != 25424) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_xssh_ffi_checksum_method_term_scroll_offset() and 0xFFFF) != 19240) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_xssh_ffi_checksum_method_term_scroll_to_bottom() and 0xFFFF) != 32315) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_xssh_ffi_checksum_method_term_take_events() and 0xFFFF) != 33477) {
@@ -1131,6 +1152,29 @@ public object FfiConverterUInt: FfiConverter<UInt, Int> {
 
     override fun write(value: UInt, buf: ByteBuffer) {
         buf.putInt(value.toInt())
+    }
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterInt: FfiConverter<Int, Int> {
+    override fun lift(value: Int): Int {
+        return value
+    }
+
+    override fun read(buf: ByteBuffer): Int {
+        return buf.getInt()
+    }
+
+    override fun lower(value: Int): Int {
+        return value
+    }
+
+    override fun allocationSize(value: Int) = 4UL
+
+    override fun write(value: Int, buf: ByteBuffer) {
+        buf.putInt(value)
     }
 }
 
@@ -2024,6 +2068,21 @@ public interface TermInterface {
     fun `resize`(`cols`: kotlin.UInt, `rows`: kotlin.UInt)
     
     /**
+     * 往回翻 [lines] 行(正数看更早的内容);超出历史范围会被夹住。
+     */
+    fun `scroll`(`lines`: kotlin.Int)
+    
+    /**
+     * 视口离底部多少行(0 = 贴底);界面据此决定要不要显示「回到底部」。
+     */
+    fun `scrollOffset`(): kotlin.UInt
+    
+    /**
+     * 回到底部(贴着最新输出)。
+     */
+    fun `scrollToBottom`()
+    
+    /**
      * 取走终端事件(应答/标题/响铃等)。
      */
     fun `takeEvents`(): List<TerminalEvent>
@@ -2221,6 +2280,53 @@ open class Term: Disposable, AutoCloseable, TermInterface
         
         FfiConverterUInt.lower(`cols`),
         FfiConverterUInt.lower(`rows`),_status)
+}
+    }
+    
+    
+
+    
+    /**
+     * 往回翻 [lines] 行(正数看更早的内容);超出历史范围会被夹住。
+     */override fun `scroll`(`lines`: kotlin.Int)
+        = 
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_xssh_ffi_fn_method_term_scroll(
+        it,
+        
+        FfiConverterInt.lower(`lines`),_status)
+}
+    }
+    
+    
+
+    
+    /**
+     * 视口离底部多少行(0 = 贴底);界面据此决定要不要显示「回到底部」。
+     */override fun `scrollOffset`(): kotlin.UInt {
+            return FfiConverterUInt.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_xssh_ffi_fn_method_term_scroll_offset(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * 回到底部(贴着最新输出)。
+     */override fun `scrollToBottom`()
+        = 
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_xssh_ffi_fn_method_term_scroll_to_bottom(
+        it,
+        _status)
 }
     }
     

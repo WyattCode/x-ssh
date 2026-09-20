@@ -28,6 +28,8 @@ data class TerminalFrame(
     val lines: List<String> = emptyList(),
     val cursor: CursorState = CursorState(0u, 0u, false),
     val alive: Boolean = true,
+    /** 视口离底部多少行;>0 表示正在翻历史,界面要给一个「回到底部」。 */
+    val scrollOffset: Int = 0,
 )
 
 /**
@@ -59,11 +61,15 @@ class TerminalSession(
 
             val pumped = withContext(Dispatchers.IO) {
                 val p = live.pump()
-                val snapshot = if (p.changed && watched) live.term.lines() to live.term.cursor() else null
+                val snapshot = if (p.changed && watched) {
+                    Triple(live.term.lines(), live.term.cursor(), live.scrollOffset())
+                } else {
+                    null
+                }
                 p to snapshot
             }
-            pumped.second?.let { (lines, cursor) ->
-                _frame.value = TerminalFrame(lines, cursor, alive = true)
+            pumped.second?.let { (lines, cursor, offset) ->
+                _frame.value = TerminalFrame(lines, cursor, alive = true, scrollOffset = offset)
             }
             if (!pumped.first.alive) {
                 _frame.value = _frame.value.copy(alive = false)
@@ -88,6 +94,10 @@ class TerminalSession(
     fun sendText(text: String, ctrl: Boolean, alt: Boolean) = live.sendText(text, ctrl, alt)
 
     fun resizeGrid(cols: Int, rows: Int) = live.resizeGrid(cols, rows)
+
+    fun scroll(lines: Int) = live.scroll(lines)
+
+    fun scrollToBottom() = live.scrollToBottom()
 
     internal fun shutdown() {
         job.cancel()

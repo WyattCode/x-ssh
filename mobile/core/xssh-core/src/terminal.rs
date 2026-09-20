@@ -7,7 +7,7 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 use alacritty_terminal::event::{Event, EventListener};
-use alacritty_terminal::grid::Dimensions;
+use alacritty_terminal::grid::{Dimensions, Scroll};
 use alacritty_terminal::term::cell::Flags;
 use alacritty_terminal::term::{Config, Term, TermDamage, TermMode};
 use alacritty_terminal::vte::ansi::{CursorShape, Processor};
@@ -133,6 +133,29 @@ impl Terminal {
         }
     }
 
+    /// 往回翻 [lines] 行(正数向上/看更早的内容,负数往回走);会被夹在历史范围内。
+    ///
+    /// 翻上去之后**新输出不会把视口拽回底部** —— alacritty 的网格在滚动时会同步抬高
+    /// 显示偏移,视口锚在原处。看日志时这是刚需,否则远端一有输出就被弹走。
+    pub fn scroll(&mut self, lines: i32) {
+        self.term.scroll_display(Scroll::Delta(lines));
+    }
+
+    /// 回到底部(贴着最新输出)。用户一敲键盘就该回到这里。
+    pub fn scroll_to_bottom(&mut self) {
+        self.term.scroll_display(Scroll::Bottom);
+    }
+
+    /// 当前视口离底部有多少行(0 = 贴底)。
+    pub fn scroll_offset(&self) -> usize {
+        self.term.grid().display_offset()
+    }
+
+    /// 回滚缓冲里攒了多少行(备用屏下为 0)。
+    pub fn history_len(&self) -> usize {
+        self.term.grid().history_size()
+    }
+
     /// 是否处于备用屏(vim/htop 等全屏程序)。
     pub fn alt_screen(&self) -> bool {
         self.term.mode().contains(TermMode::ALT_SCREEN)
@@ -218,6 +241,52 @@ impl Terminal {
 
 #[cfg(test)]
 mod tests {
+
+    /// 往回翻之后,远端继续输出**不能**把视口拽回底部 —— 看日志时这是刚需。
+    #[test]
+    fn scrolling_back_survives_new_output() {
+        let mut term = Terminal::new(20, 4);
+        for i in 0..40 {
+            term.feed(format!("line{i}
+").as_bytes());
+        }
+        assert_eq!(term.scroll_offset(), 0, "刚喂完应该贴底");
+        assert!(term.history_len() > 0, "该攒下回滚内容");
+
+        term.scroll(10);
+        let offset = term.scroll_offset();
+        assert_eq!(offset, 10);
+        let view = term.screen_lines();
+
+        // 远端又来了几行
+        for i in 40..45 {
+            term.feed(format!("line{i}
+").as_bytes());
+        }
+        // 断言真正要保证的性质:看到的内容不变。
+        // (别去断言偏移正好涨几行 —— 那取决于喂进去的字节滚了几行,是在测 alacritty 不是测自己。)
+        assert_eq!(term.screen_lines(), view, "看到的还是同几行");
+        assert!(term.scroll_offset() > offset, "偏移随内容抬高,视口才锚得住");
+
+        term.scroll_to_bottom();
+        assert_eq!(term.scroll_offset(), 0);
+    }
+
+    /// 翻不过头:超出历史范围要被夹住,不能翻出空白。
+    #[test]
+    fn scrolling_is_clamped_to_history() {
+        let mut term = Terminal::new(20, 4);
+        for i in 0..10 {
+            term.feed(format!("line{i}
+").as_bytes());
+        }
+        let history = term.history_len();
+        term.scroll(10_000);
+        assert_eq!(term.scroll_offset(), history, "最多翻到历史顶");
+        term.scroll(-10_000);
+        assert_eq!(term.scroll_offset(), 0, "最多翻回底部");
+    }
+
     use super::*;
 
     #[test]

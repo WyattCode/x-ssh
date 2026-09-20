@@ -249,6 +249,21 @@ impl Term {
         }
     }
 
+    /// 往回翻 [lines] 行(正数看更早的内容);超出历史范围会被夹住。
+    pub fn scroll(&self, lines: i32) {
+        self.lock().scroll(lines);
+    }
+
+    /// 回到底部(贴着最新输出)。
+    pub fn scroll_to_bottom(&self) {
+        self.lock().scroll_to_bottom();
+    }
+
+    /// 视口离底部多少行(0 = 贴底);界面据此决定要不要显示「回到底部」。
+    pub fn scroll_offset(&self) -> u32 {
+        self.lock().scroll_offset() as u32
+    }
+
     /// 是否处于备用屏(全屏 TUI)。
     pub fn alt_screen(&self) -> bool {
         self.lock().alt_screen()
