@@ -237,6 +237,32 @@ $env:JAVA_HOME="C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot"
   滑出来的键点下去真的发字符(终端里出现了 `~` `/`)。
 - **字号 A− / A+ 双向可用且落盘**(`xssh_ui.xml` 里 `terminalFontSize` 跟着变)。
 
+### M2.8 二次复核(第五次会话收尾)
+把这次会话改过的代码全过了一遍,查出并修掉:
+- **[真 bug] 系统返回键不断开会话**。会话没有明确的归属人:只有「断开」按钮和 pump
+  循环里 `!alive` 分支会关。按系统返回键回主机页后,远端 shell 一直挂着,直到进程被杀。
+  A/B 实测(同一套脚本,只换 APK):改前回到主机页 15 秒后连接数仍是 1,改后是 0。
+  现在会话由 `DisposableEffect(live)` 统一持有,离开这一屏的**任何**路径都断,
+  并且用进程级的 `sessionCleanup` 作用域执行 —— `rememberCoroutineScope()` 会随界面
+  一起被取消,关闭动作可能还没调度就没了。
+- **[真 bug] 连接被取消时会话泄漏**。`connectHost` 是阻塞调用,用户在 15 秒超时内退出时
+  协程被取消,`withContext` 直接抛 CancellationException,刚建好的会话没人拿得到也没人关。
+  改成在 IO 块内检查 `isActive` 并就地关掉。
+- **[性能] 空闲终端烧掉小半个核**。实测 46% CPU(主机页基线 3-4%)。每帧都把整屏文字
+  跨 FFI 搬回来,60 次/秒。现在 `pump()` 报告屏幕有没有变,没变就不取;空闲半秒后降到
+  96ms 一帧。**46% → 12-13%**。降频会让停顿后第一次按键的回显慢近 100ms(终端里最能
+  感知的延迟),所以 `sendRaw` 会把轮询立刻拉回 16ms。
+- 去掉三处 `!!`(`onTrust` 里的 `pendingKey!!` 是稍后才执行的,等于赌它那时还非空)、
+  `KeyCap` 没人用的 `wide` 参数、4 个未使用 import;所有文件的 import 重新按字母排序;
+  `SENTINELS` 那段被存成 \uXXXX 转义、源码里根本读不了的 KDoc 改回中文。
+- Rust 侧:`cargo test` 15 通过、clippy 干净。`cargo fmt --check` 有 39 处差异,但分布在
+  6 个文件(含本次没碰的 `terminal.rs` / `devpty`)—— 是项目从没跑过 rustfmt,
+  不在这次改动范围内,建议单独做一次全量格式化。
+
+**复核中我自己判断错了两次,都靠控制变量纠正**:一是怀疑「断开」按钮有协程竞态,实测
+它一直是好的;二是第一次测返回键只按了一次 —— 那只收起了输入法,应用还在终端页,
+于是先误判「泄漏」、又误判「修复无效」。**测之前先确认当前在哪个界面**。
+
 ## 5. 关键坑(踩过,别再踩)
 
 1. **DSR 应答**:终端事件不回写 → 远端程序挂起(ConPTY 必现;vim 同理)。已修 + 单测。
@@ -294,7 +320,11 @@ $env:JAVA_HOME="C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot"
     每个角的圆心与半径;贴边内容要用「圆心+半径」算是否落在挖角外,截图看不出来。
 27. **真机会自己休眠回锁屏**,之后需要 PIN/指纹才能继续调试(外屏尤其容易)。
     长时间自动化前先确认亮屏策略,断了就得请用户解锁。
-28. **Git Bash 会把 `/data/...` 改写成 Windows 路径**,`adb shell am start -n pkg/.Act` 也会被吃掉。
+28. **终端页第一次按返回键只会收起输入法**(隐藏输入框持有焦点),第二次才回主机页。
+    任何"按返回之后怎样"的测试,每一步都要先确认当前在哪个界面,否则结论全是错的。
+29. **Compose 里关资源不能用 `rememberCoroutineScope()`**:界面离开组合时它自己先被
+    取消,`onDispose` 里 launch 的关闭动作可能还没调度就没了。要用活得更久的作用域。
+30. **Git Bash 会把 `/data/...` 改写成 Windows 路径**,`adb shell am start -n pkg/.Act` 也会被吃掉。
     所有 adb 命令前加 `export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'`。
 
 ## 6. 已知问题 / 待办
