@@ -33,6 +33,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -63,6 +64,8 @@ fun HomeScreen(
 ) {
     val adaptive = LocalAdaptive.current
     val p = LocalXssh.current
+    // 哪些主机后台还连着 —— 卡片上要看得出来,不然用户不知道有会话在跑。
+    val running by SessionRegistry.sessions.collectAsState()
     var query by remember { mutableStateOf("") }
     val filtered = remember(hosts, query) {
         if (query.isBlank()) {
@@ -100,6 +103,7 @@ fun HomeScreen(
                     onDelete = onDelete,
                     query = query,
                     onQuery = { query = it },
+                    running = running.keys,
                     columns = 1,
                     floatingNew = false,
                 )
@@ -138,6 +142,7 @@ fun HomeScreen(
                 onDelete = onDelete,
                 query = query,
                 onQuery = { query = it },
+                running = running.keys,
                 // 一列至少 264dp:外屏排一列,内屏竖屏自动变两列,不用再判断机型。
                 columns = 0,
                 floatingNew = true,
@@ -158,6 +163,7 @@ private fun HostListPane(
     onDelete: (Host) -> Unit,
     query: String,
     onQuery: (String) -> Unit,
+    running: Set<String>,
     columns: Int,
     floatingNew: Boolean,
 ) {
@@ -211,6 +217,7 @@ private fun HostListPane(
                         HostCard(
                             host = host,
                             selected = host.id == selectedId,
+                            running = host.id in running,
                             onPrimary = onPrimary,
                             onEdit = onEdit,
                             onDelete = onDelete,
@@ -267,6 +274,7 @@ private fun EmptyHosts(modifier: Modifier, searching: Boolean, onNew: () -> Unit
 private fun HostCard(
     host: Host,
     selected: Boolean,
+    running: Boolean,
     onPrimary: (Host) -> Unit,
     onEdit: (Host) -> Unit,
     onDelete: (Host) -> Unit,
@@ -299,6 +307,7 @@ private fun HostCard(
                         // 名字占满剩余宽度,把标签顶到最右 —— 标签的右边缘于是每张卡都一样。
                         modifier = Modifier.weight(1f),
                     )
+                    if (running) Chip("运行中", p.ok)
                     Chip(
                         if (host.auth == AuthKind.KEY) "私钥" else "密码",
                         if (host.auth == AuthKind.KEY) p.accent else p.warn,

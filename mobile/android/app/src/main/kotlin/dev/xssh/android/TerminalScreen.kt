@@ -1,5 +1,6 @@
 package dev.xssh.android
 
+import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
@@ -31,8 +32,8 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -60,7 +61,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import uniffi.xssh_ffi.CursorState
@@ -83,7 +83,8 @@ private data class PendingKey(val fingerprint: String, val changed: Boolean)
 @Composable
 fun TerminalScreen(host: Host, onExit: () -> Unit, onTrustKey: (String) -> Unit = {}) {
     val context = LocalContext.current
-    var live by remember(host) { mutableStateOf<LiveTerminal?>(null) }
+    // 已经连着就直接接管,不重连、也不再问一次主机密钥。
+    var live by remember(host) { mutableStateOf(SessionRegistry[host.id]) }
     var error by remember(host) { mutableStateOf<String?>(null) }
     var pendingKey by remember(host) { mutableStateOf<PendingKey?>(null) }
     var attempt by remember(host) { mutableStateOf(0) }
@@ -92,25 +93,38 @@ fun TerminalScreen(host: Host, onExit: () -> Unit, onTrustKey: (String) -> Unit 
     val askLocalNetwork = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { attempt++ }
+    // Android 13 起没有通知权限,前台服务照跑但常驻通知不显示 —— 那就成了
+    // 「后台挂着 SSH 连接却没有任何可见提示」,该问一次。
+    var askedNotify by remember(host) { mutableStateOf(false) }
+    val askNotify = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { attempt++ }
 
     LaunchedEffect(host, attempt) {
+        if (live != null) return@LaunchedEffect
         error = null
-        live = null
         pendingKey = null
+        val notifyPermission = SessionService.NOTIFICATION_PERMISSION
+        if (!askedNotify && notifyPermission != null &&
+            context.checkSelfPermission(notifyPermission) != PackageManager.PERMISSION_GRANTED
+        ) {
+            askedNotify = true
+            askNotify.launch(notifyPermission)
+            return@LaunchedEffect
+        }
         if (!askedLocalNetwork && LocalNetwork.needsPermission(context, host.address)) {
             askedLocalNetwork = true
             askLocalNetwork.launch(LocalNetwork.PERMISSION)
             return@LaunchedEffect
         }
-        val result = withContext(Dispatchers.IO) {
-            val outcome = runCatching { connectHost(host) }
-            // connectHost 是阻塞调用,这期间协程可能已经被取消(用户退出了这一屏)。
-            // 那就在这里把刚建好的会话关掉 —— 外面拿不到它,没人再关得了。
-            if (!isActive) outcome.getOrNull()?.closeAsync()
-            outcome
-        }
+        // 连上之后会话就登记在 SessionRegistry 里了 —— 哪怕这个协程随后被取消
+        // (用户退出了这一屏),它也不会丢:主机页会显示「运行中」,可以再点回来或断开。
+        val result = withContext(Dispatchers.IO) { runCatching { SessionRegistry.open(host, 80, 24) } }
         result
-            .onSuccess { live = it }
+            .onSuccess {
+                live = it
+                SessionService.ensureRunning(context)
+            }
             .onFailure { failure ->
                 // 主机密钥两种异常的 message 就是服务端指纹本身(见 FfiError 注释)。
                 val fingerprint = failure.message.orEmpty().trim()
@@ -255,7 +269,7 @@ private fun ConnectResult(message: String, retry: (() -> Unit)?, onExit: () -> U
 }
 
 @Composable
-private fun TerminalView(live: LiveTerminal, host: Host, onExit: () -> Unit) {
+private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) {
     val p = LocalXssh.current
     val adaptive = LocalAdaptive.current
     val context = LocalContext.current
@@ -267,15 +281,11 @@ private fun TerminalView(live: LiveTerminal, host: Host, onExit: () -> Unit) {
     // 才能直接输入,否则要先点一下终端。
     LaunchedEffect(Unit) { runCatching { focusRequester.requestFocus() } }
 
-    // 这一屏是会话的唯一归属人:不管从哪条路离开(断开按钮、系统返回键、主机换了),
-    // 都在这里断。实测过:少了它,按系统返回键后远端连接还活着,直到进程被杀。
-    DisposableEffect(live) {
-        onDispose { live.closeAsync() }
-    }
-
-    var lines by remember { mutableStateOf(emptyList<String>()) }
-    var cursor by remember { mutableStateOf(CursorState(0u, 0u, false)) }
-    var dead by remember { mutableStateOf(false) }
+    // 画面由会话推过来 —— 轮询循环长在会话里,这一屏只是观众,走了它照跑。
+    val frame by live.frame.collectAsState()
+    val lines = frame.lines
+    val cursor = frame.cursor
+    val dead = !frame.alive
     var fontSize by remember { mutableStateOf(prefs.terminalFontSize) }
     var ctrl by remember { mutableStateOf(false) }
     var alt by remember { mutableStateOf(false) }
@@ -287,30 +297,9 @@ private fun TerminalView(live: LiveTerminal, host: Host, onExit: () -> Unit) {
         prefs.terminalFontSize = fontSize
     }
 
-    LaunchedEffect(Unit) {
-        var idleFrames = 0
-        while (true) {
-            // 一帧只切一次线程(原来 pump / lines / cursor 各切一次),而且没有新数据时
-            // 根本不去取整屏文字 —— 空闲时这个循环原本要烧掉小半个核。
-            val frame = withContext(Dispatchers.IO) {
-                val pumped = live.pump()
-                if (pumped.changed) {
-                    Frame(pumped.alive, live.term.lines(), live.term.cursor())
-                } else {
-                    Frame(pumped.alive, null, null)
-                }
-            }
-            frame.lines?.let { if (it != lines) lines = it }
-            frame.cursor?.let { if (it != cursor) cursor = it }
-            if (!frame.alive) {
-                dead = true
-                live.closeAsync()
-                break
-            }
-            // 有输出时 16ms 保证跟手;安静半秒以上就退到 96ms,省电又看不出延迟。
-            idleFrames = if (frame.lines == null) idleFrames + 1 else 0
-            delay(if (idleFrames > 30) 96 else 16)
-        }
+    // 对端断开后把它从名单里摘掉,主机页就不会一直显示「运行中」。
+    LaunchedEffect(dead) {
+        if (dead) SessionRegistry.reap(host.id)
     }
 
     val transformState = rememberTransformableState { zoomChange, _, _ ->
@@ -325,8 +314,11 @@ private fun TerminalView(live: LiveTerminal, host: Host, onExit: () -> Unit) {
                 focusRequester.requestFocus()
                 keyboard?.show()
             },
-            // 关闭统一交给 DisposableEffect,这里只管离开。
-            onExit = onExit,
+            // 「断开」是唯一会真的关掉会话的地方(另一个是通知栏的全部断开)。
+            onExit = {
+                SessionRegistry.close(host.id)
+                onExit()
+            },
         )
     }
     val canvas: @Composable (Modifier) -> Unit = { modifier ->

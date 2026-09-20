@@ -14,6 +14,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 
 class MainActivity : ComponentActivity() {
+    override fun onStart() {
+        super.onStart()
+        AppVisibility.foreground = true
+    }
+
+    override fun onStop() {
+        AppVisibility.foreground = false
+        super.onStop()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // 开发用:adb start 带 --es devAutoConnect <地址> [--es devUser u] [--es devPassword p]

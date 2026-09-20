@@ -263,6 +263,37 @@ $env:JAVA_HOME="C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot"
 它一直是好的;二是第一次测返回键只按了一次 —— 那只收起了输入法,应用还在终端页,
 于是先误判「泄漏」、又误判「修复无效」。**测之前先确认当前在哪个界面**。
 
+### M3.1 会话存活(P0-1,已上机)
+**产品定位已定:移动端做「运维遥控器」,不做缩小版桌面。** 不与桌面端功能对齐。
+排期:会话存活 → 多会话/双终端 → 回滚缓冲 → 密钥库 → 外屏片段 → MIUI 引导(发布前收口)。
+
+会话原来归界面所有,离开那一屏就断。现在:
+- `Sessions.kt`:`SessionRegistry`(进程级单例)持有所有会话,`TerminalSession` 自带轮询
+  循环。界面只是观众 —— 来了收 `frame: StateFlow`,走了会话照跑。
+- `SessionService`:前台服务 + 常驻通知(带「全部断开」动作)。它不碰 SSH,唯一作用是
+  让系统别冻结/回收进程。第一条会话开启时拉起,最后一条关闭时自己退场。
+- 只有两处会真的关会话:终端页的「断开」、通知栏的「全部断开」(以及对端自己断)。
+- 主机卡片上加「运行中」标签;再点进去是**接管**,不重连、也不再问一次主机密钥。
+
+为什么非要前台服务:服务端数据是往 `mpsc::unbounded_channel` 里堆的,没人收就一直涨;
+而进程一被冻结,连接直接断。
+
+**真机验收(全部通过)**:
+| 场景 | 结果 |
+|---|---|
+| 连上后退回主机页 | 连接仍在,卡片显示「运行中」 |
+| 切到桌面 60 秒 | 连接仍在 |
+| 回到应用再进终端 | 接管同一会话,`KEEP-ALIVE-MARK` 输出还在,连接数不变(没重连) |
+| 点「断开」 | 连接归零,服务退出,通知消失 |
+| 后台 CPU | 8% → **3%** |
+
+后台降耗的关键:不能只看 `frame` 有没有收集者 —— Activity 只是 stopped 时组合没销毁,
+`collectAsState` 还在收,判断永远为真。加了 `AppVisibility`(Activity 的 onStart/onStop),
+真在前台才 16ms 取整屏文字,切走就退到 250ms 且只收数据不取画面。
+
+**未完**:`POST_NOTIFICATIONS` 在 Android 13+ 要运行时授权,没给的话服务照跑但常驻通知
+不显示(=后台挂着连接却没有可见提示)。连接前会弹一次请求;授权后的通知显示效果尚未验证。
+
 ## 5. 关键坑(踩过,别再踩)
 
 1. **DSR 应答**:终端事件不回写 → 远端程序挂起(ConPTY 必现;vim 同理)。已修 + 单测。
@@ -324,7 +355,12 @@ $env:JAVA_HOME="C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot"
     任何"按返回之后怎样"的测试,每一步都要先确认当前在哪个界面,否则结论全是错的。
 29. **Compose 里关资源不能用 `rememberCoroutineScope()`**:界面离开组合时它自己先被
     取消,`onDispose` 里 launch 的关闭动作可能还没调度就没了。要用活得更久的作用域。
-30. **Git Bash 会把 `/data/...` 改写成 Windows 路径**,`adb shell am start -n pkg/.Act` 也会被吃掉。
+30. **`dumpsys notification | grep <渠道ID>` 会匹配到渠道定义**,渠道在通知消失后依然
+    存在,所以那样查"通知还在不在"永远是 1。要查活动通知得用
+    `grep "NotificationRecord(.*pkg=<包名>"`。
+31. **Android 13+ 没有 `POST_NOTIFICATIONS` 时,前台服务照跑但通知不显示**。别用
+    "看不到通知"去判断服务没起来 —— 要查 `dumpsys activity services`。
+32. **Git Bash 会把 `/data/...` 改写成 Windows 路径**,`adb shell am start -n pkg/.Act` 也会被吃掉。
     所有 adb 命令前加 `export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'`。
 
 ## 6. 已知问题 / 待办
@@ -339,8 +375,9 @@ $env:JAVA_HOME="C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot"
 **必须做(M2)**
 - [ ] MIUI 联网开关 → 直连局域网(发布前必须;开发已可用 §1.0 绕开)
 - [ ] 放行后回归:确认 `ACCESS_LOCAL_NETWORK` 授予流程在真机上走通(现在是 `ignore`)
-- [ ] 折叠/展开、旋转的**会话存活**(现在 `configChanges` 应急;正解: ViewModel/前台 Service 持有会话)
-- [ ] Android 前台服务保活 + HyperOS 省电白名单引导页
+- [x] 会话存活:已由 `SessionRegistry` + 前台服务持有,不再绑在界面上
+- [x] Android 前台服务保活(见 §2「M3.1」);HyperOS 省电白名单引导页仍待做
+- [ ] 通知权限被拒时的兜底提示(现在只是通知不显示,用户不知道后台还连着)
 - [x] 平板/折叠屏三形态布局 + 桌面模式(见 §2「M2.5」)
 - [x] 外屏实机走一遍(见 §2「M2.7」),含按键条横向滚动
 - [ ] 终端内容的读屏支持(Canvas 绘制,TalkBack 读不到)

@@ -95,6 +95,11 @@ class LiveTerminal(
         sendRaw(out.replace("\n", "\r").toByteArray())
     }
 
+    /** 强制下一帧取一次完整画面(界面刚回来看,或者行列变了)。 */
+    fun markDirty() {
+        dirty = true
+    }
+
     fun resizeGrid(cols: Int, rows: Int) {
         runCatching { shell.resize(cols.toUInt(), rows.toUInt()) }
         term.resize(cols.toUInt(), rows.toUInt())
