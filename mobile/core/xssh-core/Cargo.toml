@@ -1,0 +1,10 @@
+[package]
+name = "xssh-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+alacritty_terminal = "0.26"
+russh = { version = "0.63", default-features = false, features = ["ring", "flate2", "rsa"] }
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "net", "time", "io-util", "sync"] }

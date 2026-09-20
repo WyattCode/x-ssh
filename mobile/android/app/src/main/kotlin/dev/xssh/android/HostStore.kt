@@ -1,0 +1,75 @@
+package dev.xssh.android
+
+import android.content.Context
+import org.json.JSONArray
+import org.json.JSONObject
+import java.util.UUID
+
+enum class AuthKind { KEY, PASSWORD }
+
+data class Host(
+    val id: String = UUID.randomUUID().toString(),
+    val name: String = "",
+    val address: String = "",
+    val port: Int = 22,
+    val username: String = "",
+    val auth: AuthKind = AuthKind.KEY,
+    val keyPath: String = "",
+    /** 密码认证用;仅内存保留,不落盘。 */
+    val password: String = "",
+) {
+    val label: String get() = name.ifBlank { address }
+
+    val subtitle: String
+        get() {
+            val user = username.ifBlank { "?" }
+            return "$user@$address:$port"
+        }
+}
+
+/**
+ * 主机列表持久化。第一批实现用 SharedPreferences + JSON(仅存非敏感信息;
+ * 密码不落盘,私钥以文件路径引用,后续迁移到 Rust 核心统一存储)。
+ */
+class HostStore(context: Context) {
+    private val prefs = context.getSharedPreferences("xssh_hosts", Context.MODE_PRIVATE)
+
+    fun load(): List<Host> {
+        val raw = prefs.getString(KEY_LIST, null) ?: return emptyList()
+        return runCatching {
+            val array = JSONArray(raw)
+            (0 until array.length()).map { index ->
+                val item = array.getJSONObject(index)
+                Host(
+                    id = item.optString("id", UUID.randomUUID().toString()),
+                    name = item.optString("name"),
+                    address = item.optString("address"),
+                    port = item.optInt("port", 22),
+                    username = item.optString("username"),
+                    auth = if (item.optString("auth") == "password") AuthKind.PASSWORD else AuthKind.KEY,
+                    keyPath = item.optString("keyPath"),
+                )
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    fun save(hosts: List<Host>) {
+        val array = JSONArray()
+        hosts.forEach { host ->
+            val item = JSONObject()
+            item.put("id", host.id)
+            item.put("name", host.name)
+            item.put("address", host.address)
+            item.put("port", host.port)
+            item.put("username", host.username)
+            item.put("auth", if (host.auth == AuthKind.PASSWORD) "password" else "key")
+            item.put("keyPath", host.keyPath)
+            array.put(item)
+        }
+        prefs.edit().putString(KEY_LIST, array.toString()).apply()
+    }
+
+    private companion object {
+        const val KEY_LIST = "list"
+    }
+}
