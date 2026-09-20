@@ -91,9 +91,36 @@ class UiPrefs(context: Context) {
             prefs.edit().putFloat(KEY_FONT, value.coerceIn(FONT_MIN, FONT_MAX)).apply()
         }
 
+    /**
+     * 上次量到的竖直折痕位置(dp)。
+     *
+     * 折痕信息来自 `WindowInfoTracker` 的异步回调,冷启动时第一帧还没到,分栏只能先用
+     * 百分比兜底,等回调到了再跳一次 —— 展开状态下打开应用,右栏内容会往右弹约 100dp。
+     * 同一台设备上折痕位置是固定的,记下来,下次第一帧就用对。
+     *
+     * 返回 null 表示"这个窗口宽度下还没量过",或"量过但这台设备没有折痕"。
+     */
+    fun cachedFoldStart(windowWidthDp: Int): Pair<Float, Float>? {
+        if (prefs.getInt(KEY_FOLD_WIDTH, -1) != windowWidthDp) return null
+        val start = prefs.getFloat(KEY_FOLD_START, -1f)
+        return if (start < 0f) null else start to prefs.getFloat(KEY_FOLD_SIZE, 0f)
+    }
+
+    /** [startDp] 传 null 表示这个窗口宽度下没有竖直折痕(平板、或已折叠)。 */
+    fun cacheFoldStart(windowWidthDp: Int, startDp: Float?, sizeDp: Float) {
+        prefs.edit()
+            .putInt(KEY_FOLD_WIDTH, windowWidthDp)
+            .putFloat(KEY_FOLD_START, startDp ?: -1f)
+            .putFloat(KEY_FOLD_SIZE, sizeDp)
+            .apply()
+    }
+
     companion object {
         const val FONT_MIN = 9f
         const val FONT_MAX = 30f
         private const val KEY_FONT = "terminalFontSize"
+        private const val KEY_FOLD_WIDTH = "foldWindowWidthDp"
+        private const val KEY_FOLD_START = "foldStartDp"
+        private const val KEY_FOLD_SIZE = "foldSizeDp"
     }
 }

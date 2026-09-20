@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -95,7 +96,7 @@ fun rememberAdaptive(): Adaptive {
     }
 
     val fold = layout?.displayFeatures?.filterIsInstance<FoldingFeature>()?.firstOrNull()
-    val hinge = fold?.let {
+    val observed = fold?.let {
         val vertical = it.orientation == FoldingFeature.Orientation.VERTICAL
         val bounds = it.bounds
         with(density) {
@@ -106,6 +107,28 @@ fun rememberAdaptive(): Adaptive {
                 sizeDp = (if (vertical) bounds.width() else bounds.height()).toDp(),
             )
         }
+    }
+
+    // 回调还没到之前,先用上次量到的折痕位置。
+    // 不这么做的话冷启动第一帧只能按百分比兜底摆分栏,等回调到了再跳一次 ——
+    // 实测左栏 327dp → 430dp,右栏内容整帧右移约 100dp,就是"打开应用闪一下"。
+    val prefs = remember(context) { UiPrefs(context) }
+    val cached = remember(config.screenWidthDp) {
+        prefs.cachedFoldStart(config.screenWidthDp)?.let { (start, size) ->
+            Hinge(vertical = true, halfOpen = false, startDp = start.dp, sizeDp = size.dp)
+        }
+    }
+    val hinge = if (layout != null) observed else cached
+
+    // 量到了就记下来(只记竖直折痕 —— 半折是临时状态,不该被缓存成初始值)。
+    LaunchedEffect(layout != null, observed?.startDp, config.screenWidthDp) {
+        if (layout == null) return@LaunchedEffect
+        val vertical = observed?.takeIf { it.vertical }
+        prefs.cacheFoldStart(
+            config.screenWidthDp,
+            vertical?.startDp?.value,
+            vertical?.sizeDp?.value ?: 0f,
+        )
     }
 
     val width = classify(config.screenWidthDp)
