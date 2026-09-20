@@ -56,7 +56,7 @@ fun HostEditorScreen(
     var address by remember { mutableStateOf(initial?.address ?: "") }
     var port by remember { mutableStateOf((initial?.port ?: 22).toString()) }
     var username by remember { mutableStateOf(initial?.username ?: "") }
-    var auth by remember { mutableStateOf(initial?.auth ?: AuthKind.KEY) }
+    var auth by remember { mutableStateOf(initial?.auth ?: AuthKind.PASSWORD) }
     var keyPath by remember {
         mutableStateOf(initial?.keyPath?.takeIf { it.isNotBlank() } ?: defaultKeyPath)
     }
@@ -119,28 +119,19 @@ fun HostEditorScreen(
         FormGroup(
             title = "怎么登录",
             footnote = if (auth == AuthKind.KEY) {
-                "密钥库(导入 / 生成 / 生物识别解锁)在后续版本提供。"
+                "密钥库(导入/生成/生物识别解锁)后续版本提供。"
             } else {
-                "密码只留在内存里,不写入手机。每次重开应用要重新输入。"
+                "密码只留在内存里,不写入手机;每次重开要重新输入。"
             },
         ) {
+            // 密码在前、私钥在后,新建默认密码。
             Segmented(
-                options = listOf("私钥", "密码"),
-                selectedIndex = if (auth == AuthKind.KEY) 0 else 1,
-                onSelect = { auth = if (it == 0) AuthKind.KEY else AuthKind.PASSWORD },
+                options = listOf("密码", "私钥"),
+                selectedIndex = if (auth == AuthKind.PASSWORD) 0 else 1,
+                onSelect = { auth = if (it == 0) AuthKind.PASSWORD else AuthKind.KEY },
             )
             FormDivider()
-            if (auth == AuthKind.KEY) {
-                FormField(
-                    "私钥文件",
-                    keyPath,
-                    { keyPath = it },
-                    placeholder = "私钥文件路径",
-                    mono = true,
-                    imeAction = ImeAction.Done,
-                    stacked = true,
-                )
-            } else {
+            if (auth == AuthKind.PASSWORD) {
                 FormField(
                     "密码",
                     password,
@@ -149,6 +140,16 @@ fun HostEditorScreen(
                     secret = true,
                     keyboard = KeyboardType.Password,
                     imeAction = ImeAction.Done,
+                )
+            } else {
+                FormField(
+                    "私钥文件",
+                    keyPath,
+                    { keyPath = it },
+                    placeholder = "私钥文件路径",
+                    mono = true,
+                    imeAction = ImeAction.Done,
+                    stacked = true,
                 )
             }
         }
@@ -160,22 +161,16 @@ fun HostEditorScreen(
         }
     }
 
-    Box(Modifier.fillMaxSize().background(p.bg)) {
-        BoxWithConstraints(
-            Modifier
-                .fillMaxSize()
-                .safeDrawingPadding()
-                .imePadding()
-                .padding(end = RailWidth),
-        ) {
-            // 与主机页同一条判据:够宽就分两栏,分界压在折痕上。
-            // 先把 maxWidth 存成局部量 —— 进了 Column/Row 的 lambda 之后
-            // BoxWithConstraintsScope 就被遮住了,取不到。
-            val available = maxWidth
-            val twoPane = available >= 840.dp || (adaptive.bookFold != null && available >= 600.dp)
-            val scroll = rememberScrollState()
+    // 整个页面量一次:内容和轨道用同一个 twoPane,不会一个按宽屏排、另一个按窄屏排。
+    // 量的是**整个窗口**(和主机页同一条式子、同样在加安全区内边距之前)。
+    BoxWithConstraints(Modifier.fillMaxSize().background(p.bg)) {
+        val window = maxWidth
+        val twoPane = window >= 840.dp || (adaptive.bookFold != null && window >= 600.dp)
+        val railPad = if (twoPane) RailWidth else 0.dp
+        val available = window - railPad
 
-            Column(Modifier.fillMaxSize().verticalScroll(scroll)) {
+        val body: @Composable (Modifier) -> Unit = { shell ->
+            Column(shell.verticalScroll(rememberScrollState()).padding(end = railPad)) {
                 Column(Modifier.padding(start = Gutter + BoxPad, end = Gutter, top = Gutter)) {
                     Text(
                         if (initial == null) "新建主机" else "编辑主机",
@@ -185,7 +180,7 @@ fun HostEditorScreen(
                     )
                     Spacer(Modifier.height(2.dp))
                     Text(
-                        error ?: "填完点右边的 ✓ 保存",
+                        error ?: if (twoPane) "填完点右边的 ✓ 保存" else "填完点下面的 ✓ 保存",
                         color = if (error != null) p.danger else p.textFaint,
                         fontSize = 12.5.sp,
                     )
@@ -196,11 +191,11 @@ fun HostEditorScreen(
                     val left = adaptive.listPaneWidth(available).coerceAtMost(available - 280.dp)
                     Row(Modifier.fillMaxWidth()) {
                         Column(
-                            Modifier.width(left).fillMaxHeight().padding(start = Gutter, end = Gutter),
+                            Modifier.width(left).fillMaxHeight().padding(horizontal = Gutter),
                             verticalArrangement = Arrangement.spacedBy(20.dp),
                         ) { target() }
                         Column(
-                            Modifier.weight(1f).padding(start = Gutter, end = Gutter),
+                            Modifier.weight(1f).padding(horizontal = Gutter),
                             verticalArrangement = Arrangement.spacedBy(20.dp),
                         ) {
                             credentials()
@@ -210,8 +205,9 @@ fun HostEditorScreen(
                 } else {
                     Column(
                         Modifier
+                            // 一行里标签在左、取值在右,行太宽的话视线要横跨半块屏幕。
+                            .widthIn(max = 520.dp)
                             .fillMaxWidth()
-                            .widthIn(max = 640.dp)
                             .align(Alignment.CenterHorizontally)
                             .padding(horizontal = Gutter),
                         verticalArrangement = Arrangement.spacedBy(20.dp),
@@ -221,15 +217,33 @@ fun HostEditorScreen(
                         danger()
                     }
                 }
-                Spacer(Modifier.height(40.dp))
+                // 窄屏每一dp都金贵:尾部余量给到刚好不贴边即可。
+                Spacer(Modifier.height(if (twoPane) 40.dp else 16.dp))
             }
         }
 
-        EdgeRail(
-            Modifier.align(Alignment.BottomEnd).safeDrawingPadding().imePadding().padding(bottom = 12.dp),
-        ) {
-            RailGroup { RailButton("‹", "返回") { onBack() } }
-            RailGroup { RailButton("✓", "保存", tint = p.accent) { save() } }
+        val rail: @Composable (Modifier) -> Unit = { shell ->
+            EdgeRail(shell, horizontal = !twoPane) {
+                RailGroup(horizontal = !twoPane) { RailButton("‹", "返回") { onBack() } }
+                RailGroup(horizontal = !twoPane) { RailButton("✓", "保存", tint = p.accent) { save() } }
+            }
+        }
+
+        if (twoPane) {
+            // 宽屏:内容让出右边 68dp,轨道浮在边缘。
+            body(Modifier.fillMaxSize().safeDrawingPadding().imePadding())
+            rail(Modifier.align(Alignment.BottomEnd).safeDrawingPadding().imePadding().padding(bottom = 12.dp))
+        } else {
+            // 窄屏:轨道**实实在在占一条**,不浮在内容上。
+            //
+            // 表单的取值是右对齐的,被挡住就没法确认填对没有 —— 列表卡片那套
+            // "内容从玻璃底下穿过去"在这里不适用。而给滚动区补底部 padding 也不管用:
+            // 内容不满一屏时根本不滚,最后一行的位置压根不会因此上移。
+            Column(Modifier.fillMaxSize().safeDrawingPadding().imePadding()) {
+                body(Modifier.fillMaxWidth().weight(1f))
+                // 横排的 EdgeRail 自带 bottom 12dp,这里不要再叠一层。
+                rail(Modifier.align(Alignment.End))
+            }
         }
     }
 }

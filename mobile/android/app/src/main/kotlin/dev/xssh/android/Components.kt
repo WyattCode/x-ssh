@@ -381,18 +381,6 @@ fun Chip(text: String, color: Color) {
 }
 
 @Composable
-fun SectionLabel(text: String) {
-    Text(
-        text = text,
-        color = LocalXssh.current.textFaint,
-        fontSize = 12.sp,
-        fontWeight = FontWeight.Medium,
-        // 不要额外的 start 缩进:分组标题要和它下面那排输入框的左边缘严格同线。
-        modifier = Modifier.padding(bottom = 8.dp),
-    )
-}
-
-@Composable
 fun xsshFieldColors(): TextFieldColors {
     val p = LocalXssh.current
     return OutlinedTextFieldDefaults.colors(
@@ -419,23 +407,37 @@ fun xsshFieldColors(): TextFieldColors {
    拇指不用跨过折痕。合上时同样落在拇指自然弧线上。
 */
 
-/** 轨道占的宽度(胶囊 56 + 离边 12)。内容要按这个让出位置,免得被压住。 */
+/**
+ * 轨道占的宽(竖排)或高(横排):胶囊 56 + 离边 12。内容要按这个让出位置。
+ *
+ * 排布方向跟 size class 的规矩:**compact 宽度贴底横排,regular 宽度才走侧栏**。
+ * 之前一刀切竖排,在 425dp 的外屏上立刻出事 —— 表单是右对齐取值,
+ * 竖轨道正好压在「密码」那一类值上,而且整块表单左偏(左 16dp / 右 84dp)。
+ */
 val RailWidth = 68.dp
 
-/** 一组轨道按钮:一个半透明胶囊裹住若干圆钮。 */
+/** 一组轨道按钮:一个半透明胶囊裹住若干圆钮。[horizontal] 为真时钮横着排。 */
 @Composable
-fun RailGroup(content: @Composable ColumnScope.() -> Unit) {
+fun RailGroup(horizontal: Boolean = false, content: @Composable () -> Unit) {
     val p = LocalXssh.current
-    Column(
-        Modifier
-            .clip(RoundedCornerShape(28.dp))
-            .background(p.text.copy(alpha = 0.13f))
-            .border(1.dp, p.text.copy(alpha = 0.10f), RoundedCornerShape(28.dp))
-            .padding(4.dp),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        content = content,
-    )
+    val skin = Modifier
+        .clip(RoundedCornerShape(28.dp))
+        .background(p.text.copy(alpha = 0.13f))
+        .border(1.dp, p.text.copy(alpha = 0.10f), RoundedCornerShape(28.dp))
+        .padding(4.dp)
+    if (horizontal) {
+        Row(
+            skin,
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) { content() }
+    } else {
+        Column(
+            skin,
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) { content() }
+    }
 }
 
 /** 轨道上的圆钮。[tint] 给危险/主操作上色,其余沿用前景色。 */
@@ -474,13 +476,30 @@ fun RailButton(
     }
 }
 
-/** 贴右边缘的竖向轨道;[content] 里放若干 [RailGroup]。 */
+/**
+ * 轨道本体;[content] 里放若干 [RailGroup]。
+ *
+ * [horizontal] 为真就贴底横排(窄屏),否则贴右边缘竖排(宽屏)。
+ * 窄屏为什么不竖排:425dp 宽让出 68dp 是 16%,还会压住表单的右对齐取值;
+ * 贴底只吃掉 623dp 高里的 11%,而且正落在拇指弧线上。
+ */
 @Composable
-fun EdgeRail(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
-    Column(
-        modifier.padding(end = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        content = content,
-    )
+fun EdgeRail(
+    modifier: Modifier = Modifier,
+    horizontal: Boolean = false,
+    content: @Composable () -> Unit,
+) {
+    if (horizontal) {
+        Row(
+            modifier.padding(bottom = 12.dp, end = Gutter),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) { content() }
+    } else {
+        Column(
+            modifier.padding(end = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) { content() }
+    }
 }

@@ -93,16 +93,19 @@ fun HomeScreen(
     // 看上去就是打开应用闪跳一下(录屏第 296 帧拍到的就是这个)。
     val shownHost = hosts.firstOrNull { it.id == selectedId } ?: hosts.firstOrNull()
 
-    // 仍然把选中同步回状态,让后续的编辑/删除等流程拿到一致的 selectedId。
-    LaunchedEffect(shownHost?.id) {
-        if (selectedId != shownHost?.id) shownHost?.let(onSelect)
-    }
-
     BoxWithConstraints(Modifier.fillMaxSize().background(p.bg)) {
         // 用**实测到的窗口宽度**判断分栏,不用 Configuration 的 screenWidthDp ——
         // 分屏时部分机型的 screenWidthDp 仍报整块屏幕的宽度,那样会在只有半屏宽的窗口里
         // 摆出双栏:左栏按折痕位置占满整个窗口,右栏被挤到窗口之外,看起来就是内容跑到右边。
         val twoPane = maxWidth >= 840.dp || (adaptive.bookFold != null && maxWidth >= 600.dp)
+
+        // 只有双栏才自动选中:右栏必须有东西可看。
+        // 单栏(外屏)里"选中"没有任何去处 —— 点卡片是直接连接 —— 自动选中只会让
+        // 第一张卡片一进来就带着高亮边框,看着像用户点过,实际没点过。
+        LaunchedEffect(twoPane, shownHost?.id) {
+            if (twoPane && selectedId != shownHost?.id) shownHost?.let(onSelect)
+        }
+
         if (twoPane && hosts.isNotEmpty()) {
             // 再兜一层:左栏无论如何不能吃掉整个窗口。
             val listWidth = adaptive.listPaneWidth(maxWidth).coerceAtMost(maxWidth - 280.dp)
@@ -159,7 +162,8 @@ fun HomeScreen(
                 modifier = Modifier.fillMaxSize().safeDrawingPadding(),
                 hosts = filtered,
                 total = hosts.size,
-                selectedId = selectedId,
+                // 单栏没有"当前选中"这个概念,别画高亮。
+                selectedId = null,
                 onPrimary = onConnect,
                 onNew = onNew,
                 onEdit = onEdit,
@@ -175,22 +179,24 @@ fun HomeScreen(
         }
 
         // chrome 全在这条轨道里:界面四角不再散落按钮。
+        // 窄屏贴底横排,宽屏贴右竖排。
         EdgeRail(
             Modifier
                 .align(Alignment.BottomEnd)
                 .safeDrawingPadding()
                 .padding(bottom = 12.dp),
+            horizontal = !twoPane,
         ) {
             // 一台主机都没有时不摆搜索 —— 没东西可搜,按钮只是噪音。
             if (hosts.isNotEmpty()) {
-                RailGroup {
+                RailGroup(horizontal = !twoPane) {
                     RailButton("⌕", "搜索主机") {
                         searching = !searching
                         if (!searching) query = ""
                     }
                 }
             }
-            RailGroup {
+            RailGroup(horizontal = !twoPane) {
                 RailButton("＋", "新建主机", tint = p.accent) { onNew() }
             }
         }
@@ -253,13 +259,15 @@ private fun HostListPane(
             }
 
             if (hosts.isEmpty()) {
-                EmptyHosts(Modifier.weight(1f).fillMaxWidth(), searching = query.isNotBlank(), onNew = onNew)
+                // 只可能是"搜了但没匹配上" —— 一台主机都没有时走的是整屏的 FirstRun。
+                NoMatches(Modifier.weight(1f).fillMaxWidth())
             } else {
                 LazyVerticalGrid(
                     columns = if (columns > 0) GridCells.Fixed(columns) else GridCells.Adaptive(264.dp),
                     modifier = Modifier.weight(1f).fillMaxWidth(),
                     // 底部留出悬浮按钮的位置,最后一张卡片不会被挡住。
-                    contentPadding = PaddingValues(start = Gutter, end = Gutter, bottom = 132.dp),
+                    // 底部留出轨道的位置,最后一张卡片能滚到它上面去。
+                    contentPadding = PaddingValues(start = Gutter, end = Gutter, bottom = RailWidth + Gutter),
                     horizontalArrangement = Arrangement.spacedBy(GapItem),
                     verticalArrangement = Arrangement.spacedBy(GapItem),
                 ) {
@@ -309,28 +317,16 @@ private fun FirstRun(modifier: Modifier) {
 }
 
 @Composable
-private fun EmptyHosts(modifier: Modifier, searching: Boolean, onNew: () -> Unit) {
+private fun NoMatches(modifier: Modifier) {
     val p = LocalXssh.current
     Column(
         modifier.padding(32.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        if (searching) {
-            Text("没有匹配的主机", color = p.textDim, fontSize = 16.sp)
-            Spacer(Modifier.height(6.dp))
-            Text("换个关键词试试", color = p.textFaint, fontSize = 13.sp)
-        } else {
-            Text("还没有主机", color = p.textDim, fontSize = 17.sp)
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "添加一台后,点卡片即可连接;长按卡片可以编辑或删除。",
-                color = p.textFaint,
-                fontSize = 13.sp,
-            )
-            Spacer(Modifier.height(20.dp))
-            XsshButton("＋ 新建主机") { onNew() }
-        }
+        Text("没有匹配的主机", color = p.textDim, fontSize = 16.sp)
+        Spacer(Modifier.height(6.dp))
+        Text("换个关键词试试", color = p.textFaint, fontSize = 13.sp)
     }
 }
 

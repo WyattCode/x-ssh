@@ -13,7 +13,8 @@ data class Host(
     val address: String = "",
     val port: Int = 22,
     val username: String = "",
-    val auth: AuthKind = AuthKind.KEY,
+    /** 默认密码:手机上更常见,也不需要先把私钥弄进设备。 */
+    val auth: AuthKind = AuthKind.PASSWORD,
     val keyPath: String = "",
     /**
      * 已信任的服务端主机密钥指纹(SHA256:…)。空 = 还没信任过,首次连接会弹确认框。
@@ -51,7 +52,8 @@ class HostStore(context: Context) {
                     address = item.optString("address"),
                     port = item.optInt("port", 22),
                     username = item.optString("username"),
-                    auth = if (item.optString("auth") == "password") AuthKind.PASSWORD else AuthKind.KEY,
+                    // 默认跟数据类一致(密码);只有明确存了 "key" 才是私钥。
+                    auth = if (item.optString("auth") == "key") AuthKind.KEY else AuthKind.PASSWORD,
                     keyPath = item.optString("keyPath"),
                     keyFingerprint = item.optString("keyFingerprint"),
                 )
@@ -100,27 +102,32 @@ class UiPrefs(context: Context) {
      *
      * 返回 null 表示"这个窗口宽度下还没量过",或"量过但这台设备没有折痕"。
      */
-    fun cachedFoldStart(windowWidthDp: Int): Pair<Float, Float>? {
-        if (prefs.getInt(KEY_FOLD_WIDTH, -1) != windowWidthDp) return null
-        val start = prefs.getFloat(KEY_FOLD_START, -1f)
-        return if (start < 0f) null else start to prefs.getFloat(KEY_FOLD_SIZE, 0f)
+    fun cachedFoldStart(windowWidthDp: Int, windowHeightDp: Int): Pair<Float, Float>? {
+        val raw = prefs.getString(foldKey(windowWidthDp, windowHeightDp), null) ?: return null
+        val parts = raw.split(',')
+        val start = parts.getOrNull(0)?.toFloatOrNull() ?: return null
+        return if (start < 0f) null else start to (parts.getOrNull(1)?.toFloatOrNull() ?: 0f)
     }
 
-    /** [startDp] 传 null 表示这个窗口宽度下没有竖直折痕(平板、或已折叠)。 */
-    fun cacheFoldStart(windowWidthDp: Int, startDp: Float?, sizeDp: Float) {
+    /** [startDp] 传 null 表示这个窗口形态下没有可用的竖直折痕(平板、或已折叠)。 */
+    fun cacheFoldStart(windowWidthDp: Int, windowHeightDp: Int, startDp: Float?, sizeDp: Float) {
         prefs.edit()
-            .putInt(KEY_FOLD_WIDTH, windowWidthDp)
-            .putFloat(KEY_FOLD_START, startDp ?: -1f)
-            .putFloat(KEY_FOLD_SIZE, sizeDp)
+            .putString(foldKey(windowWidthDp, windowHeightDp), "${startDp ?: -1f},$sizeDp")
             .apply()
     }
+
+    /**
+     * 每个窗口形态一个槽。
+     *
+     * 原来只有一个槽,外屏(623dp)跑一次就把内屏(860dp)量到的折痕顶掉,
+     * 再展开冷启动又得按百分比兜底 —— "打开应用闪一下"就这么回来了。
+     * 内屏竖屏 / 内屏横屏 / 外屏是三种形态,各记各的。
+     */
+    private fun foldKey(widthDp: Int, heightDp: Int) = "fold_${widthDp}x$heightDp"
 
     companion object {
         const val FONT_MIN = 9f
         const val FONT_MAX = 30f
         private const val KEY_FONT = "terminalFontSize"
-        private const val KEY_FOLD_WIDTH = "foldWindowWidthDp"
-        private const val KEY_FOLD_START = "foldStartDp"
-        private const val KEY_FOLD_SIZE = "foldSizeDp"
     }
 }

@@ -232,11 +232,14 @@ private fun HostKeyPrompt(host: Host, pending: PendingKey, onTrust: () -> Unit, 
 @Composable
 private fun Fingerprint(label: String, value: String, color: Color) {
     val p = LocalXssh.current
-    // "SHA256:<43 个 base64 字符>" 在 425dp 的外屏上会从中间断成两行,
-    // 而人要做的正是逐字符比对 —— 断行处最容易看错。
-    // 把算法名提到标签里,剩下的摘要就能完整占一行。
+    // "SHA256:<43 个 base64 字符>" 在 425dp 的外屏上放不进一行,而人要做的正是
+    // 逐字符比对 —— 让它自由折行的话,断点随字号浮动,还会从字符中间切开。
+    //
+    // 所以:算法名提到标签里,摘要**固定切成 11 字符一组**,两组一行。
+    // 断点是写死的,外屏、内屏、放大字体下看到的分组完全一样,比对时手指按着数得准。
     val algorithm = value.substringBefore(':', "")
     val digest = value.substringAfter(':', value)
+    val rows = digest.chunked(11).chunked(2).map { it.joinToString(" ") }
     Column {
         Text(
             if (algorithm.isBlank()) label else "$label · $algorithm",
@@ -244,12 +247,12 @@ private fun Fingerprint(label: String, value: String, color: Color) {
             fontSize = 11.sp,
         )
         Spacer(Modifier.height(3.dp))
-        Text(
-            digest.ifBlank { "(无)" },
-            color = color,
-            fontSize = 13.sp,
-            fontFamily = FontFamily.Monospace,
-        )
+        if (rows.isEmpty()) {
+            Text("(无)", color = color, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
+        }
+        rows.forEach { row ->
+            Text(row, color = color, fontSize = 13.sp, fontFamily = FontFamily.Monospace, softWrap = false)
+        }
     }
 }
 
@@ -378,7 +381,10 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
         }
     }
 
-    val rail: @Composable ColumnScope.() -> Unit = {
+    // 终端**不跟**主机页/编辑页改成贴底横排:
+    // 它底下已经有一条按键条了,再叠一条横轨道就是两条栏,在 623dp 高的外屏上太奢侈;
+    // 而且终端内容是左对齐的等宽字符网格,右侧让出 68dp 不会压住任何取值。
+    val rail: @Composable () -> Unit = {
         // 翻着历史时才出现,回到底部就收起 —— 不常驻,不占视线。
         if (frame.scrollOffset > 0) {
             RailGroup {

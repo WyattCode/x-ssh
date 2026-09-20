@@ -113,21 +113,26 @@ fun rememberAdaptive(): Adaptive {
     // 不这么做的话冷启动第一帧只能按百分比兜底摆分栏,等回调到了再跳一次 ——
     // 实测左栏 327dp → 430dp,右栏内容整帧右移约 100dp,就是"打开应用闪一下"。
     val prefs = remember(context) { UiPrefs(context) }
-    val cached = remember(config.screenWidthDp) {
-        prefs.cachedFoldStart(config.screenWidthDp)?.let { (start, size) ->
+    val cached = remember(config.screenWidthDp, config.screenHeightDp) {
+        prefs.cachedFoldStart(config.screenWidthDp, config.screenHeightDp)?.let { (start, size) ->
             Hinge(vertical = true, halfOpen = false, startDp = start.dp, sizeDp = size.dp)
         }
     }
     val hinge = if (layout != null) observed else cached
 
-    // 量到了就记下来(只记竖直折痕 —— 半折是临时状态,不该被缓存成初始值)。
-    LaunchedEffect(layout != null, observed?.startDp, config.screenWidthDp) {
+    // 量到了就记下来。只记竖直折痕(半折是临时状态,不该被缓存成初始值),
+    // 而且只记**真能拿来分栏**的那种 —— 折叠之后系统仍会报一条折痕,位置却落在
+    // 外屏窗口的 192dp 处,拿它摆分栏只会切出两条窄缝。判据与 listPaneWidth 同源。
+    LaunchedEffect(layout != null, observed?.startDp, config.screenWidthDp, config.screenHeightDp) {
         if (layout == null) return@LaunchedEffect
-        val vertical = observed?.takeIf { it.vertical }
+        val usable = observed?.takeIf {
+            it.vertical && it.startDp > 200.dp && it.startDp < config.screenWidthDp.dp - 200.dp
+        }
         prefs.cacheFoldStart(
             config.screenWidthDp,
-            vertical?.startDp?.value,
-            vertical?.sizeDp?.value ?: 0f,
+            config.screenHeightDp,
+            usable?.startDp?.value,
+            usable?.sizeDp?.value ?: 0f,
         )
     }
 
