@@ -337,6 +337,20 @@ $env:JAVA_HOME="C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot"
 **测试脚本的坑(又踩一次)**:`tap_label` 原来只算一次坐标,键盘弹出导致布局移位后,
 后面几次点击全打空,看起来像「按钮没反应」。已改成每次重新定位。
 
+### M3.5 安卓图标
+安卓端一直在用系统默认图标,通知栏小图标还是我当初随手占的**系统蓝牙图标**。
+沿用桌面版 `build/icon.svg` 的同一个 `>_` 标识(没有重新设计,两端保持同一个牌子):
+- `drawable/ic_launcher_background.xml` 渐变底(#2C2F35 → #141518,与桌面版一致)
+- `drawable/ic_launcher_foreground.xml` 符号层
+- `drawable/ic_launcher_monochrome.xml` 单色层(Android 13+ 主题图标)
+- `mipmap-anydpi-v26/ic_launcher{,_round}.xml` — **minSdk 26,只需自适应图标,不必出各 dpi 位图**
+- `drawable/ic_stat_session.xml` 状态栏小图标(24dp,纯白,系统自己上色)
+
+**几何要点**:符号**不能放大**。原图符号绕自身中心的外接半径是 311.7(1024 视口),
+而 Android 保证可见的是直径 66dp 的圆 —— 换算成 312.9,**原尺寸正好卡在安全线内**。
+第一版我放大了 1.18 倍(半径 368),MIUI 的 squircle 看不出问题,**圆形遮罩的启动器
+会把下划线右端切掉**。现在只做水平居中(原图符号中心在 x=557.5 而不是 512),不缩放。
+
 ## 5. 关键坑(踩过,别再踩)
 
 1. **DSR 应答**:终端事件不回写 → 远端程序挂起(ConPTY 必现;vim 同理)。已修 + 单测。
@@ -411,7 +425,11 @@ $env:JAVA_HOME="C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot"
     连点同一个旧坐标只会一直打空,极像「按钮坏了」。
 35. **别断言 alacritty 滚动了几行**。喂进去的字节到底滚几行取决于光标状态,
     断言「看到的内容不变」才是在测自己要保证的性质(第一版测试就因此挂了)。
-36. **Git Bash 会把 `/data/...` 改写成 Windows 路径**,`adb shell am start -n pkg/.Act` 也会被吃掉。
+36. **MIUI 会缓存应用图标**,`adb install -r` 换了图标也不刷新,必须卸载重装才看得到新的
+    (顺带会清掉 app 数据,测试私钥和主机要重新推)。
+37. **别拿启动器上看到的大小判断图标做得对不对**:MIUI 有"图标统一",会把自适应图标
+    再缩放一遍。要验证就按规范自己渲染一张,叠上 66dp 保证可见圈量。
+38. **Git Bash 会把 `/data/...` 改写成 Windows 路径**,`adb shell am start -n pkg/.Act` 也会被吃掉。
     所有 adb 命令前加 `export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'`。
 
 ## 6. 已知问题 / 待办

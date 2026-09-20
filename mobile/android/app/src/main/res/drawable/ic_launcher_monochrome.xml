@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  单色层(Android 13+ 主题图标):只给形状,颜色由系统按壁纸取。
+  几何与前景层逐点一致,切换主题时符号不会跳位。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="1024"
+    android:viewportHeight="1024">
+    <path
+        android:pathData="M288.5,374L494.5,512L288.5,650"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="98"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M581.5,649L739.5,649"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="90"
+        android:strokeLineCap="round" />
+</vector>

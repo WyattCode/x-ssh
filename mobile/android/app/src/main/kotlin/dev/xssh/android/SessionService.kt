@@ -79,7 +79,7 @@ class SessionService : Service() {
         return Notification.Builder(this, CHANNEL_ID)
             .setContentTitle(if (count > 1) "$count 个 SSH 会话连接中" else "SSH 会话连接中")
             .setContentText("保持连接,切到别的应用也不断")
-            .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
+            .setSmallIcon(R.drawable.ic_stat_session)
             .setContentIntent(open)
             .addAction(Notification.Action.Builder(null, "全部断开", disconnect).build())
             .setOngoing(true)

@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  前景层:终端提示符 >_ ,与桌面版 build/icon.svg 同一条路径,**不缩放**,只把它
+  水平挪到画布正中(原图的符号中心在 x=557.5,不在 512)。
+
+  为什么不放大:符号绕中心的外接半径是 311.7(1024 视口),而 Android 保证可见的
+  是直径 66dp 的圆 —— 换算过来半径 312.9。也就是说原尺寸**正好卡在安全线内**。
+  先前放大 1.18 倍后半径 368,MIUI 的 squircle 看着没事,圆形遮罩的启动器
+  会把下划线右端切掉。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="1024"
+    android:viewportHeight="1024">
+    <path
+        android:pathData="M288.5,374L494.5,512L288.5,650"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="98"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M581.5,649L739.5,649"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="90"
+        android:strokeLineCap="round" />
+</vector>
