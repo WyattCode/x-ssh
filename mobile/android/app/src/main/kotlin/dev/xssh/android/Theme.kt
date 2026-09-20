@@ -4,9 +4,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.LineHeightStyle
+import androidx.compose.ui.unit.TextUnit
 
 /**
  * X-SSH 设计令牌,与 Windows 版 `global.css` 一一对应,保证两端同一套视觉语言。
@@ -111,11 +116,32 @@ private fun lightScheme(p: XsshPalette) = lightColorScheme(
     onError = Color.White,
 )
 
+/*
+ * 文字行高的统一口径。
+ *
+ * Material 的 `bodyLarge` 上钉着 `lineHeight = 24.sp`,继承下来之后 11sp 和 14sp 的
+ * 文字**行盒一样高(实测都是 24dp)**,字形只占其中一小半,多出来的行距全变成上下两行
+ * 之间的空隙 —— 终端头部「主机名 / 地址」那道过大的缝就是这么来的,而且全应用每一处
+ * 两行文字都有同样的毛病。行高改为跟随字号,并裁掉首行上方与末行下方的多余行距。
+ */
 /** 深色是 X-SSH 的默认面目(与 Windows 版一致);浅色留作后续设置项。 */
 @Composable
 fun XsshTheme(content: @Composable () -> Unit) {
     val palette = DarkPalette
     CompositionLocalProvider(LocalXssh provides palette) {
-        MaterialTheme(colorScheme = darkScheme(palette), content = content)
+        MaterialTheme(colorScheme = darkScheme(palette)) {
+            // 必须放在 MaterialTheme **里面**:它自己会 ProvideTextStyle(bodyLarge),
+            // 在外面提供会被它盖掉(第一次就是这么改错的)。
+            // 只改行高,字号、字族这些沿用 bodyLarge。
+            val base = MaterialTheme.typography.bodyLarge.copy(
+                lineHeight = TextUnit.Unspecified,
+                platformStyle = PlatformTextStyle(includeFontPadding = false),
+                lineHeightStyle = LineHeightStyle(
+                    alignment = LineHeightStyle.Alignment.Center,
+                    trim = LineHeightStyle.Trim.Both,
+                ),
+            )
+            CompositionLocalProvider(LocalTextStyle provides base, content = content)
+        }
     }
 }

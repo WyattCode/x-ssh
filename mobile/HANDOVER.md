@@ -294,6 +294,20 @@ $env:JAVA_HOME="C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot"
 **未完**:`POST_NOTIFICATIONS` 在 Android 13+ 要运行时授权,没给的话服务照跑但常驻通知
 不显示(=后台挂着连接却没有可见提示)。连接前会弹一次请求;授权后的通知显示效果尚未验证。
 
+### M3.2 行高(全应用)
+用户发现终端头部「主机名 / 地址」之间的缝过大。量出来根因不在那一处:
+**11sp 和 14sp 的文字行盒一样高,都是 24dp** —— 继承了 Material `bodyLarge` 上钉着的
+`lineHeight = 24.sp`,我们只设了 `fontSize` 没设行高。字形只占行盒一小半,余下的
+全变成上下两行之间的空隙,**全应用每一处两行文字都有这毛病**。
+
+在 `XsshTheme` 里统一改掉:行高跟随字号(`lineHeight = Unspecified`),并用
+`LineHeightStyle(trim = Both)` 裁掉首行上方、末行下方的多余行距。
+实测 14sp 24.0→**18.5dp**,11sp 24.0→**12.7dp**;终端头部两行整体 48→31.3dp;
+主机卡片顺带 81.5→74.2dp。
+
+**坑**:这段必须写在 `MaterialTheme` **里面** —— 它自己会 `ProvideTextStyle(bodyLarge)`,
+写在外面会被它盖掉(第一次就是这么改错的,量出来毫无变化)。
+
 ## 5. 关键坑(踩过,别再踩)
 
 1. **DSR 应答**:终端事件不回写 → 远端程序挂起(ConPTY 必现;vim 同理)。已修 + 单测。
@@ -360,7 +374,11 @@ $env:JAVA_HOME="C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot"
     `grep "NotificationRecord(.*pkg=<包名>"`。
 31. **Android 13+ 没有 `POST_NOTIFICATIONS` 时,前台服务照跑但通知不显示**。别用
     "看不到通知"去判断服务没起来 —— 要查 `dumpsys activity services`。
-32. **Git Bash 会把 `/data/...` 改写成 Windows 路径**,`adb shell am start -n pkg/.Act` 也会被吃掉。
+32. **只设 `fontSize` 不设 `lineHeight`,行盒会沿用 Material 的 24sp**,不同字号的文字
+    行盒一样高,叠在一起就显得松。要改就在 `MaterialTheme` 里面覆盖 `LocalTextStyle`。
+33. **MIUI 折叠态的通知不把操作按钮暴露给 uiautomator**,`input swipe` 也展不开;
+    而服务 `exported=false`(应当如此),adb 又没法从外部触发 —— 通知动作只能人工验。
+34. **Git Bash 会把 `/data/...` 改写成 Windows 路径**,`adb shell am start -n pkg/.Act` 也会被吃掉。
     所有 adb 命令前加 `export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'`。
 
 ## 6. 已知问题 / 待办
