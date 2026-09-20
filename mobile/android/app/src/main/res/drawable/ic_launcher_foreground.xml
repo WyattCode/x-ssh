@@ -1,12 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  前景层:终端提示符 >_ ,与桌面版 build/icon.svg 同一条路径,**不缩放**,只把它
-  水平挪到画布正中(原图的符号中心在 x=557.5,不在 512)。
+  前景层:终端提示符 >_ ,与桌面版 build/icon.svg 同一个标识。
 
-  为什么不放大:符号绕中心的外接半径是 311.7(1024 视口),而 Android 保证可见的
-  是直径 66dp 的圆 —— 换算过来半径 312.9。也就是说原尺寸**正好卡在安全线内**。
-  先前放大 1.18 倍后半径 368,MIUI 的 squircle 看着没事,圆形遮罩的启动器
-  会把下划线右端切掉。
+  尺寸怎么定的(别再按"原图多大就多大"来放):
+  自适应图标的画布是 108dp,但**只有中间 72dp 是可见的**,外圈 18dp 一圈会被启动器的
+  遮罩裁掉。桌面版里符号占整块图标的 53.2%,如果在这里也按 53.2% 的画布宽度放,
+  换算到可见区域就是 53.2% x 108/72 = 79.8% —— 撑满整个图标、四周没有空隙。
+  所以要按可见区域算:符号宽 = 0.532 x 72/108 x 1024 = 363 单位(相当于原图缩放 0.666)。
+  这样看上去才和桌面版一样,四周留得出气。
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
@@ -14,14 +15,14 @@
     android:viewportWidth="1024"
     android:viewportHeight="1024">
     <path
-        android:pathData="M288.5,374L494.5,512L288.5,650"
+        android:pathData="M363.2,420.1L500.3,512L363.2,603.9"
         android:strokeColor="#FFFFFF"
-        android:strokeWidth="98"
+        android:strokeWidth="65.3"
         android:strokeLineCap="round"
         android:strokeLineJoin="round" />
     <path
-        android:pathData="M581.5,649L739.5,649"
+        android:pathData="M558.3,603.2L663.5,603.2"
         android:strokeColor="#FFFFFF"
-        android:strokeWidth="90"
+        android:strokeWidth="59.9"
         android:strokeLineCap="round" />
 </vector>

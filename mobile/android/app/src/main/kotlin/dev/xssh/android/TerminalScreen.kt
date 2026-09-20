@@ -483,8 +483,10 @@ private fun FloatingKeys(content: @Composable () -> Unit) {
     Box(
         Modifier
             .fillMaxWidth()
+            // 同心:屏幕圆角约 52dp,面板离边 10dp,内半径 = 52 - 10 = 42dp;
+            // 面板本身不高,42 会退化成整条胶囊,取 32dp —— 既贴近同心,形状又还立得住。
             .padding(start = 10.dp, end = 10.dp, bottom = 10.dp)
-            .clip(RoundedCornerShape(24.dp))
+            .clip(RoundedCornerShape(32.dp))
             .background(p.text.copy(alpha = 0.07f)),
     ) {
         content()

@@ -86,8 +86,14 @@ fun HomeScreen(
     // (内屏横屏挖孔占 51dp)分界线会整体右移,正好压不在折痕上。内边距放进各栏自己加。
     var searching by remember { mutableStateOf(false) }
 
+    // 双栏时右栏不该是一张空页:一进来就选中第一台,详情栏永远有东西可看。
+    // (参考设计里的邮件、日历,右栏从来不是空的。)
+    LaunchedEffect(adaptive.twoPane, hosts.firstOrNull()?.id) {
+        if (adaptive.twoPane && selectedId == null) hosts.firstOrNull()?.let(onSelect)
+    }
+
     BoxWithConstraints(Modifier.fillMaxSize().background(p.bg)) {
-        if (adaptive.twoPane) {
+        if (adaptive.twoPane && hosts.isNotEmpty()) {
             val listWidth = adaptive.listPaneWidth(maxWidth)
             Row(Modifier.fillMaxSize()) {
                 HostListPane(
@@ -138,9 +144,13 @@ fun HomeScreen(
                     onNew = onNew,
                 )
             }
+        } else if (hosts.isEmpty()) {
+            FirstRun(Modifier.fillMaxSize().safeDrawingPadding())
         } else {
             HostListPane(
-                modifier = Modifier.fillMaxSize().safeDrawingPadding().padding(end = RailWidth),
+                // 内容通到边缘,从右边缘玻璃层底下穿过去(规范:scroll views extend
+                // beneath floating glass)。底部多留一段,最后一张卡片能滚出轨道之外。
+                modifier = Modifier.fillMaxSize().safeDrawingPadding(),
                 hosts = filtered,
                 total = hosts.size,
                 selectedId = selectedId,
@@ -165,10 +175,13 @@ fun HomeScreen(
                 .safeDrawingPadding()
                 .padding(bottom = 12.dp),
         ) {
-            RailGroup {
-                RailButton("⌕", "搜索主机") {
-                    searching = !searching
-                    if (!searching) query = ""
+            // 一台主机都没有时不摆搜索 —— 没东西可搜,按钮只是噪音。
+            if (hosts.isNotEmpty()) {
+                RailGroup {
+                    RailButton("⌕", "搜索主机") {
+                        searching = !searching
+                        if (!searching) query = ""
+                    }
                 }
             }
             RailGroup {
@@ -204,7 +217,7 @@ private fun HostListPane(
                     .fillMaxWidth()
                     .padding(start = Gutter + BoxPad, end = Gutter, top = Gutter, bottom = GapItem),
                 "X-SSH",
-                if (total == 0) "还没有主机" else "$total 台主机",
+                if (total == 0) "还没有主机" else "$total 台主机 · 长按卡片可编辑",
             )
 
             // 搜索平时不占地方,点轨道上的放大镜才出来。
@@ -240,7 +253,7 @@ private fun HostListPane(
                     columns = if (columns > 0) GridCells.Fixed(columns) else GridCells.Adaptive(264.dp),
                     modifier = Modifier.weight(1f).fillMaxWidth(),
                     // 底部留出悬浮按钮的位置,最后一张卡片不会被挡住。
-                    contentPadding = PaddingValues(start = Gutter, end = Gutter, bottom = Gutter),
+                    contentPadding = PaddingValues(start = Gutter, end = Gutter, bottom = 132.dp),
                     horizontalArrangement = Arrangement.spacedBy(GapItem),
                     verticalArrangement = Arrangement.spacedBy(GapItem),
                 ) {
@@ -257,6 +270,35 @@ private fun HostListPane(
                 }
             }
         }
+    }
+}
+
+/**
+ * 一台主机都没有时的整屏起步面板。
+ *
+ * 不做成"左边空列表 + 右边空详情"的双栏 —— 那是两块空白拼在一起。
+ * 也不放按钮:新建就在右边缘轨道上,这里再来一个就是重复。
+ */
+@Composable
+private fun FirstRun(modifier: Modifier) {
+    val p = LocalXssh.current
+    Column(
+        modifier.padding(horizontal = Gutter + BoxPad),
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Text("X-SSH", color = p.text, fontSize = 34.sp, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(10.dp))
+        Text(
+            "还没有主机。点右下角的 ＋ 添加一台。",
+            color = p.textDim,
+            fontSize = 15.sp,
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "添加之后:点卡片直接连接,长按卡片编辑或删除。",
+            color = p.textFaint,
+            fontSize = 13.sp,
+        )
     }
 }
 
@@ -305,79 +347,47 @@ private fun HostCard(
         onLongClick = { menu = true },
         paddingVertical = 13.dp,
     ) {
-        // 卡片够宽:标签和 ⋮ 同在一条中线上(标签原来跟着名称走,比 ⋮ 高 8.4dp,
-        // 一排东西两条中线,看着就是歪的)。卡片窄(内屏竖屏双列只有 250dp 可用):
-        // 标签必须退回名称旁边,否则地址会被挤成 `ubuntu@19…` —— 地址是辨认主机的
-        // 依据,任何时候都不能截。
-        BoxWithConstraints {
-            val centeredChips = maxWidth >= 340.dp
-            val chips: @Composable () -> Unit = {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    if (running) Chip("运行中", p.ok)
-                    Chip(
-                        if (host.auth == AuthKind.KEY) "私钥" else "密码",
-                        if (host.auth == AuthKind.KEY) p.accent else p.warn,
-                    )
-                    if (host.keyFingerprint.isBlank()) Chip("密钥待确认", p.warn)
-                }
-            }
-
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    if (centeredChips) {
-                        Text(
-                            host.label,
-                            color = p.text,
-                            fontSize = 15.5.sp,
-                            fontWeight = FontWeight.Medium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    } else {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                host.label,
-                                color = p.text,
-                                fontSize = 15.5.sp,
-                                fontWeight = FontWeight.Medium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                // 名字占满剩余宽度,把标签顶到最右 —— 每张卡的标签右缘因此对齐。
-                                modifier = Modifier.weight(1f),
-                            )
-                            Spacer(Modifier.width(6.dp))
-                            chips()
-                        }
-                    }
-                    Spacer(Modifier.height(3.dp))
-                    Text(
-                        host.subtitle,
-                        color = p.textDim,
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 12.5.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                if (centeredChips) {
-                    Spacer(Modifier.width(8.dp))
-                    chips()
-                    Spacer(Modifier.width(6.dp))
-                }
-            Box {
-                XsshIconButton("⋮") { menu = true }
-                HostMenu(
-                    open = menu,
-                    onDismiss = { menu = false },
-                    onEdit = { onEdit(host) },
-                    onDelete = { onDelete(host) },
-                )
-            }
+        // 一行纯内容:名称 + 标签,地址独占一行。
+        //
+        // 行尾**不放** ⋮ —— 参考设计里的邮件行、日历行都是纯内容,没有逐行的溢出按钮,
+        // 这正是内容能从右边缘玻璃层底下穿过去的前提。编辑/删除走长按(宽屏还有详情栏)。
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                host.label,
+                color = p.text,
+                fontSize = 15.5.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            Spacer(Modifier.width(8.dp))
+            if (running) Chip("运行中", p.ok)
+            if (running) Spacer(Modifier.width(6.dp))
+            Chip(
+                if (host.auth == AuthKind.KEY) "私钥" else "密码",
+                if (host.auth == AuthKind.KEY) p.accent else p.warn,
+            )
+            if (host.keyFingerprint.isBlank()) {
+                Spacer(Modifier.width(6.dp))
+                Chip("密钥待确认", p.warn)
             }
         }
+        Spacer(Modifier.height(3.dp))
+        Text(
+            host.subtitle,
+            color = p.textDim,
+            fontFamily = FontFamily.Monospace,
+            fontSize = 12.5.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        HostMenu(
+            open = menu,
+            onDismiss = { menu = false },
+            onEdit = { onEdit(host) },
+            onDelete = { onDelete(host) },
+        )
     }
 }
 
