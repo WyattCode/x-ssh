@@ -201,6 +201,23 @@ $env:JAVA_HOME="C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot"
   compact(`wm size 1168x1712` 覆盖成外屏尺寸)、桌面模式(`cmd device_state state 2`)、
   连着会话转屏后**会话存活且能继续输入**(echo 两次都回显)。
 
+### M2.6 像素级对齐(第五次会话后半段)
+定了一套**只有两条竖线**的栅格,写在 `Components.kt` 顶部:
+- `Gutter` 16dp —— 一切**盒子**的外缘(卡片、输入框、按钮、按键条、终端画布);
+- `Gutter + BoxPad` 32dp —— 一切**文字**的左缘(盒子内缩 16,无盒子的标题直接缩到 32)。
+
+改前实测是三条线各走各的(标题 18.2 / 卡片文字 30.2 / 搜索文字 32.0),所以看着乱。
+改后 `uiautomator` 实测:
+- 主机卡片 **118.2dp → 81.5dp(−31%)**,三行压成两行(标签移到名称同排并**右对齐**,
+  于是每张卡标签的右缘都落在同一 x;地址独占一行永不被挤掉);
+- 所有文字左缘 = 32.0dp;竖向间距一律 12dp(副标题→搜索→首卡→卡间);搜索框 56.0dp;
+- 双栏两侧标题顶端 66.9dp 对 66.9dp、次行 98.2 对 98.2,文字各距外缘 32dp,
+  盒子各距外缘 16dp —— **隔着折痕镜像对称**;
+- 终端屏:画布文字、首个按键、状态圆点同在 16dp;头部标题在 32dp;
+  按键与按钮右缘同在(屏宽 − 16)dp;
+- 编辑页:顶栏收进表单那一列(返回左缘 = 卡片左缘,保存右缘 = 卡片右缘),
+  分组标题与输入框左缘严格同线。
+
 ## 5. 关键坑(踩过,别再踩)
 
 1. **DSR 应答**:终端事件不回写 → 远端程序挂起(ConPTY 必现;vim 同理)。已修 + 单测。
@@ -249,7 +266,12 @@ $env:JAVA_HOME="C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot"
     可点节点的文字。自定义手势的控件要补 `semantics { role = Role.Button; onClick {...} }`。
 23. **终端内容是 Canvas 画的**,`uiautomator dump` 拿不到里面的字,自动化断言只能靠截图;
     同理读屏软件目前也读不了终端输出(待办)。
-24. **Git Bash 会把 `/data/...` 改写成 Windows 路径**,`adb shell am start -n pkg/.Act` 也会被吃掉。
+24. **`widthIn(max=…)` 必须写在 `fillMaxWidth()` 之前**。反过来写,`fillMaxWidth` 先把
+    最小宽度钉成整屏宽,`widthIn` 的上限被最小值顶掉,等于没写(编辑页顶栏因此没收窄)。
+25. **对齐要量,不能看**。`uiautomator dump` 的 bounds 是精确像素(密度 2.75),
+    `scratchpad/measure.py` 直接打印各元素左缘/高度/间距;Canvas 内容(终端)量不到,
+    用 PIL 扫截图找最左亮像素。这次好几处 2dp 级别的偏差肉眼根本看不出来。
+26. **Git Bash 会把 `/data/...` 改写成 Windows 路径**,`adb shell am start -n pkg/.Act` 也会被吃掉。
     所有 adb 命令前加 `export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'`。
 
 ## 6. 已知问题 / 待办

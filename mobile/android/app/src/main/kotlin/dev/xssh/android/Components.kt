@@ -52,6 +52,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
@@ -64,6 +65,23 @@ import kotlinx.coroutines.launch
  */
 val TouchMin = 48.dp
 
+/**
+ * 栅格。整个应用只有两条竖线:
+ * - [Gutter] 16dp —— 所有**盒子**(卡片、输入框、按钮、按键条)的外缘;
+ * - Gutter + [BoxPad] = 32dp —— 所有**文字**的左边缘(盒子里的内容缩进 16dp,
+ *   标题这类没有盒子的文字直接缩进到 32dp,于是整列文字对成一条线)。
+ * 之前标题 18.2dp、卡片文字 30.2dp、搜索文字 32.0dp 各走各的,看着就是不齐。
+ */
+val Gutter = 16.dp
+val BoxPad = 16.dp
+
+/** 列表项之间、并排按钮之间的统一间距。 */
+val GapItem = 12.dp
+
+/** 圆角只有两档:盒子 12,小标签 8。 */
+val RadiusBox = 12.dp
+val RadiusChip = 8.dp
+
 enum class ButtonKind { Primary, Ghost, Danger }
 
 /** 卡片:与 Windows 版 `.card` 同款(圆角 10、1px 边框、elev 背景)。 */
@@ -73,6 +91,7 @@ fun XsshCard(
     highlight: Boolean = false,
     onClick: (() -> Unit)? = null,
     onLongClick: (() -> Unit)? = null,
+    paddingVertical: Dp = 14.dp,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val p = LocalXssh.current
@@ -85,12 +104,12 @@ fun XsshCard(
     Column(
         modifier
             .scale(scale)
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(RadiusBox))
             .background(if (highlight) p.rowSel else p.bgElev)
             .border(
                 1.dp,
                 if (highlight) p.accent.copy(alpha = 0.7f) else p.border,
-                RoundedCornerShape(12.dp),
+                RoundedCornerShape(RadiusBox),
             )
             .then(
                 if (onClick == null) {
@@ -108,7 +127,7 @@ fun XsshCard(
                     )
                 },
             )
-            .padding(14.dp),
+            .padding(horizontal = BoxPad, vertical = paddingVertical),
         content = content,
     )
 }
@@ -188,9 +207,9 @@ fun XsshButton(
         modifier
             .scale(scale)
             .heightIn(min = TouchMin)
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(RadiusBox))
             .background(if (enabled) background else background.copy(alpha = 0.35f))
-            .border(1.dp, if (enabled) borderColor else borderColor.copy(alpha = 0.4f), RoundedCornerShape(12.dp))
+            .border(1.dp, if (enabled) borderColor else borderColor.copy(alpha = 0.4f), RoundedCornerShape(RadiusBox))
             .clickable(interactionSource = interaction, indication = null, enabled = enabled) {
                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 onClick()
@@ -223,7 +242,7 @@ fun XsshIconButton(
     Box(
         modifier
             .size(TouchMin)
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(RadiusBox))
             .background(if (pressed) p.bgElev2 else Color.Transparent)
             .clickable(interactionSource = interaction, indication = null) {
                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -258,7 +277,7 @@ fun KeyCap(
         modifier
             .heightIn(min = TouchMin)
             .defaultMinSize(minWidth = if (wide) 72.dp else 52.dp)
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(RadiusBox))
             .background(
                 when {
                     active -> p.accentSoft
@@ -266,7 +285,7 @@ fun KeyCap(
                     else -> p.bgElev2
                 },
             )
-            .border(1.dp, if (active) p.accent else p.border, RoundedCornerShape(10.dp))
+            .border(1.dp, if (active) p.accent else p.border, RoundedCornerShape(RadiusBox))
             // 手势是自己写的(为了连发),点击语义得手动补上,不然读屏用户点不动。
             .semantics {
                 role = Role.Button
@@ -318,7 +337,7 @@ fun KeyCap(
 @Composable
 fun KeyCapRow(modifier: Modifier = Modifier, wrap: Boolean, content: @Composable RowScope.() -> Unit) {
     val scroll = rememberScrollState()
-    val pad = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 6.dp)
+    val pad = Modifier.fillMaxWidth().padding(horizontal = Gutter, vertical = 8.dp)
     if (wrap) {
         FlowRow(
             modifier.then(pad),
@@ -330,7 +349,7 @@ fun KeyCapRow(modifier: Modifier = Modifier, wrap: Boolean, content: @Composable
         }
     } else {
         Row(
-            modifier.fillMaxWidth().horizontalScroll(scroll).padding(horizontal = 6.dp, vertical = 6.dp),
+            modifier.fillMaxWidth().horizontalScroll(scroll).padding(horizontal = Gutter, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             content = content,
@@ -353,11 +372,11 @@ fun StatusDot(color: Color) {
 fun Chip(text: String, color: Color) {
     Box(
         Modifier
-            .clip(RoundedCornerShape(6.dp))
+            .clip(RoundedCornerShape(RadiusChip))
             .background(color.copy(alpha = 0.14f))
-            .padding(horizontal = 8.dp, vertical = 3.dp),
+            .padding(horizontal = 7.dp, vertical = 2.dp),
     ) {
-        Text(text, color = color, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+        Text(text, color = color, fontSize = 10.5.sp, fontWeight = FontWeight.Medium)
     }
 }
 
@@ -368,7 +387,8 @@ fun SectionLabel(text: String) {
         color = LocalXssh.current.textFaint,
         fontSize = 12.sp,
         fontWeight = FontWeight.Medium,
-        modifier = Modifier.padding(start = 2.dp, bottom = 6.dp),
+        // 不要额外的 start 缩进:分组标题要和它下面那排输入框的左边缘严格同线。
+        modifier = Modifier.padding(bottom = 8.dp),
     )
 }
 

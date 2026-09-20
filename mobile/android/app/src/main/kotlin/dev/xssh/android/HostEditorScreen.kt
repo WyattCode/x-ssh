@@ -31,6 +31,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import java.util.UUID
 
+/** 表单最大宽度:再宽就成了横跨整屏的一行字,既难读也难点。 */
+private val FormMaxWidth = 640.dp
+
 @Composable
 fun HostEditorScreen(
     initial: Host?,
@@ -52,7 +55,15 @@ fun HostEditorScreen(
 
     Column(Modifier.fillMaxSize().background(p.bg).safeDrawingPadding().imePadding()) {
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
+            // 顶栏必须和表单同宽同列:表单在宽屏是收窄居中的,顶栏若横跨整屏,
+            // 「返回 / 保存」就会孤零零地悬在表单外面,左右都对不上。
+            // 顺序要紧:widthIn 必须在 fillMaxWidth 之前,否则 fillMaxWidth 先把最小宽度
+            // 钉成整屏宽,widthIn 的上限就被最小值顶掉,等于没写。
+            Modifier
+                .widthIn(max = FormMaxWidth)
+                .fillMaxWidth()
+                .align(Alignment.CenterHorizontally)
+                .padding(horizontal = Gutter, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             XsshButton("‹ 返回", kind = ButtonKind.Ghost) { onBack() }
@@ -100,8 +111,8 @@ fun HostEditorScreen(
                 // 宽屏上不要把输入框拉到 860dp —— 一行字横跨整块屏幕既难读也难点。
                 .widthIn(max = 640.dp)
                 .align(Alignment.CenterHorizontally)
-                .padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+                .padding(horizontal = Gutter, vertical = Gutter),
+            verticalArrangement = Arrangement.spacedBy(GapItem),
         ) {
             XsshCard {
                 SectionLabel("基础")
@@ -114,7 +125,7 @@ fun HostEditorScreen(
                     colors = xsshFieldColors(),
                     modifier = Modifier.fillMaxWidth(),
                 )
-                Spacer(Modifier.height(10.dp))
+                Spacer(Modifier.height(GapItem))
                 OutlinedTextField(
                     value = address,
                     onValueChange = { address = it },
@@ -124,8 +135,8 @@ fun HostEditorScreen(
                     colors = xsshFieldColors(),
                     modifier = Modifier.fillMaxWidth(),
                 )
-                Spacer(Modifier.height(10.dp))
-                Row {
+                Spacer(Modifier.height(GapItem))
+                Row(horizontalArrangement = Arrangement.spacedBy(GapItem)) {
                     OutlinedTextField(
                         value = port,
                         onValueChange = { port = it.filter(Char::isDigit) },
@@ -134,7 +145,6 @@ fun HostEditorScreen(
                         colors = xsshFieldColors(),
                         modifier = Modifier.weight(1f),
                     )
-                    Spacer(Modifier.width(10.dp))
                     OutlinedTextField(
                         value = username,
                         onValueChange = { username = it },
@@ -148,7 +158,10 @@ fun HostEditorScreen(
 
             XsshCard {
                 SectionLabel("认证")
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     KeyCap("私钥", active = auth == AuthKind.KEY) { auth = AuthKind.KEY }
                     KeyCap("密码", active = auth == AuthKind.PASSWORD) { auth = AuthKind.PASSWORD }
                 }

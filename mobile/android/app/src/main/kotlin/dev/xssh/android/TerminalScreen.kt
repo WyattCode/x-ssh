@@ -307,7 +307,7 @@ private fun TerminalView(live: LiveTerminal, host: Host, onExit: () -> Unit) {
                     }
                 },
                 // 留一点边距:内屏圆角半径 52dp,贴边的字会被切掉一角。
-                modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp),
+                modifier = Modifier.fillMaxSize().padding(horizontal = Gutter),
             )
         }
     }
@@ -396,11 +396,12 @@ private fun TerminalHeader(host: Host, dead: Boolean, onKeyboard: () -> Unit, on
             .fillMaxWidth()
             .background(p.bgElev)
             .heightIn(min = 56.dp)
-            .padding(start = 14.dp, end = 8.dp),
+            .padding(horizontal = Gutter),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        // 圆点占住 16dp 那条线(与终端文字、第一个按键同缘),标题正好落在 32dp 文字线上。
         StatusDot(if (dead) p.danger else p.ok)
-        Spacer(Modifier.width(10.dp))
+        Spacer(Modifier.width(7.dp))
         Column(Modifier.weight(1f)) {
             Text(host.label, color = p.text, fontSize = 14.sp, fontWeight = FontWeight.Medium)
             Text(
@@ -411,7 +412,7 @@ private fun TerminalHeader(host: Host, dead: Boolean, onKeyboard: () -> Unit, on
             )
         }
         XsshIconButton("⌨") { onKeyboard() }
-        Spacer(Modifier.width(4.dp))
+        Spacer(Modifier.width(8.dp))
         XsshButton("断开", kind = ButtonKind.Danger) { onExit() }
     }
 }

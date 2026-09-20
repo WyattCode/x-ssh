@@ -41,6 +41,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -165,17 +166,13 @@ private fun HostListPane(
     Box(modifier) {
         Column(Modifier.fillMaxSize()) {
             Row(
-                Modifier.fillMaxWidth().padding(start = 18.dp, end = 10.dp, top = 12.dp, bottom = 4.dp),
+                Modifier
+                    .fillMaxWidth()
+                    .padding(start = Gutter + BoxPad, end = Gutter, top = Gutter, bottom = GapItem),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column(Modifier.weight(1f)) {
-                    Text("X-SSH", color = p.text, fontSize = 23.sp, fontWeight = FontWeight.SemiBold)
-                    Text(
-                        if (total == 0) "还没有主机" else "$total 台主机",
-                        color = p.textFaint,
-                        fontSize = 12.sp,
-                    )
-                }
+                // 与详情栏用同一套字号,两栏的两行标题基线才能横跨折痕对齐。
+                PaneTitle(Modifier.weight(1f), "X-SSH", if (total == 0) "还没有主机" else "$total 台主机")
                 if (!floatingNew) XsshButton("＋ 新建", kind = ButtonKind.Ghost) { onNew() }
             }
 
@@ -192,8 +189,9 @@ private fun HostListPane(
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(min = 56.dp)
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                    .padding(horizontal = Gutter),
             )
+            Spacer(Modifier.height(GapItem))
 
             if (hosts.isEmpty()) {
                 EmptyHosts(Modifier.weight(1f).fillMaxWidth(), searching = query.isNotBlank(), onNew = onNew)
@@ -203,13 +201,12 @@ private fun HostListPane(
                     modifier = Modifier.weight(1f).fillMaxWidth(),
                     // 底部留出悬浮按钮的位置,最后一张卡片不会被挡住。
                     contentPadding = PaddingValues(
-                        start = 16.dp,
-                        end = 16.dp,
-                        top = 4.dp,
-                        bottom = if (floatingNew) 96.dp else 20.dp,
+                        start = Gutter,
+                        end = Gutter,
+                        bottom = if (floatingNew) 96.dp else Gutter,
                     ),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(GapItem),
+                    verticalArrangement = Arrangement.spacedBy(GapItem),
                 ) {
                     items(hosts, key = { it.id }) { host ->
                         HostCard(
@@ -226,7 +223,7 @@ private fun HostListPane(
 
         // 窄屏把新建放右下角:单手握持时拇指正好落在这里,顶栏够不着。
         // 宽屏不用悬浮按钮 —— 它会压住卡片右侧的 ⋮,而标题栏有的是地方。
-        if (floatingNew) NewHostFab(Modifier.align(Alignment.BottomEnd).padding(20.dp), onNew)
+        if (floatingNew) NewHostFab(Modifier.align(Alignment.BottomEnd).padding(Gutter), onNew)
     }
 }
 
@@ -275,29 +272,45 @@ private fun HostCard(
     var menu by remember { mutableStateOf(false) }
 
     XsshCard(
-        modifier = Modifier.fillMaxWidth().heightIn(min = 96.dp),
+        modifier = Modifier.fillMaxWidth(),
         highlight = selected,
         onClick = { onPrimary(host) },
         onLongClick = { menu = true },
+        paddingVertical = 13.dp,
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text(host.label, color = p.text, fontSize = 17.sp, fontWeight = FontWeight.Medium)
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    host.subtitle,
-                    color = p.textDim,
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 13.sp,
-                )
-                Spacer(Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                // 标签跟名称同排:名称本来就短,这样省掉整整一行,卡片矮三成。
+                // 地址是辨认主机的关键,给它独占一行,永远不被挤掉。
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(
+                        host.label,
+                        color = p.text,
+                        fontSize = 15.5.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        // 名字占满剩余宽度,把标签顶到最右 —— 标签的右边缘于是每张卡都一样。
+                        modifier = Modifier.weight(1f),
+                    )
                     Chip(
                         if (host.auth == AuthKind.KEY) "私钥" else "密码",
                         if (host.auth == AuthKind.KEY) p.accent else p.warn,
                     )
                     if (host.keyFingerprint.isBlank()) Chip("密钥待确认", p.warn)
                 }
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    host.subtitle,
+                    color = p.textDim,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 12.5.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
             Box {
                 XsshIconButton("⋮") { menu = true }
@@ -341,7 +354,7 @@ private fun HostDetailPane(
     val p = LocalXssh.current
     if (host == null) {
         Column(
-            modifier.padding(32.dp),
+            modifier.padding(Gutter + BoxPad),
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
@@ -355,13 +368,22 @@ private fun HostDetailPane(
     }
 
     Column(
-        modifier.verticalScroll(rememberScrollState()).padding(horizontal = 32.dp, vertical = 28.dp),
+        modifier
+            .verticalScroll(rememberScrollState())
+            // 左右两栏的文字各距自己的外缘 32dp —— 关于折痕镜像对称。
+            .padding(horizontal = Gutter, vertical = Gutter),
     ) {
-        Text(host.label, color = p.text, fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
-        Spacer(Modifier.height(8.dp))
-        Text(host.subtitle, color = p.textDim, fontFamily = FontFamily.Monospace, fontSize = 15.sp)
-        Spacer(Modifier.height(12.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        PaneTitle(
+            Modifier.fillMaxWidth().padding(horizontal = BoxPad),
+            host.label,
+            host.subtitle,
+            monoSubtitle = true,
+        )
+        Spacer(Modifier.height(GapItem))
+        Row(
+            Modifier.padding(horizontal = BoxPad),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             Chip(
                 if (host.auth == AuthKind.KEY) "私钥认证" else "密码认证",
                 if (host.auth == AuthKind.KEY) p.accent else p.warn,
@@ -373,26 +395,59 @@ private fun HostDetailPane(
         }
 
         Spacer(Modifier.height(24.dp))
-        DetailRow("认证", if (host.auth == AuthKind.KEY) host.keyPath.ifBlank { "(未指定私钥)" } else "密码(不落盘)")
+        DetailRow(
+            "认证",
+            if (host.auth == AuthKind.KEY) host.keyPath.ifBlank { "(未指定私钥)" } else "密码(不落盘)",
+        )
         if (host.keyFingerprint.isNotBlank()) {
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(GapItem))
             DetailRow("已信任的主机密钥", host.keyFingerprint)
         }
 
-        Spacer(Modifier.height(28.dp))
+        Spacer(Modifier.height(24.dp))
         XsshButton("连接", modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)) { onConnect(host) }
-        Spacer(Modifier.height(12.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Spacer(Modifier.height(GapItem))
+        Row(horizontalArrangement = Arrangement.spacedBy(GapItem)) {
             XsshButton("编辑", kind = ButtonKind.Ghost, modifier = Modifier.weight(1f)) { onEdit(host) }
             XsshButton("删除", kind = ButtonKind.Danger, modifier = Modifier.weight(1f)) { onDelete(host) }
         }
     }
 }
 
+/** 栏标题(大标题 + 一行说明)。两栏共用同一套字号,基线才能横跨折痕对齐。 */
+@Composable
+private fun PaneTitle(
+    modifier: Modifier,
+    title: String,
+    subtitle: String,
+    monoSubtitle: Boolean = false,
+) {
+    val p = LocalXssh.current
+    Column(modifier) {
+        Text(
+            title,
+            color = p.text,
+            fontSize = 22.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Spacer(Modifier.height(2.dp))
+        Text(
+            subtitle,
+            color = if (monoSubtitle) p.textDim else p.textFaint,
+            fontFamily = if (monoSubtitle) FontFamily.Monospace else FontFamily.Default,
+            fontSize = 12.5.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
 @Composable
 private fun DetailRow(label: String, value: String) {
     val p = LocalXssh.current
-    Column {
+    Column(Modifier.padding(horizontal = BoxPad)) {
         Text(label, color = p.textFaint, fontSize = 12.sp)
         Spacer(Modifier.height(4.dp))
         Text(value, color = p.text, fontFamily = FontFamily.Monospace, fontSize = 13.sp)
