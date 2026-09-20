@@ -406,6 +406,25 @@ $env:JAVA_HOME="C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot"
   (MIUI 下 `--windowingMode 6` 只是把窗口标成 `mInSplitScreen=true`,bounds 仍是全屏;
   `--activity-launch-adjacent` 被系统拒绝)。需要人工进分屏验证。
 
+### M3.10 冷启动闪跳(定位过程值得看)
+现象:内屏展开、应用完全关闭时打开,右栏内容会闪跳一下才正常。
+
+**两次错误假设,都被录屏否掉**:
+1. 以为是 Android 分屏下 `screenWidthDp` 报整屏宽导致摆错双栏 —— 改成用实测窗口宽度
+   (这个改动本身是对的,留着),但**不是本症的成因**。
+2. 以为是 `WindowInfoTracker` 异步,第一帧 hinge 为 null 走了 38% 兜底宽 —— 录屏显示
+   应用出现的第一帧右栏左缘就是 465dp,和稳定态一致,**没有这个跳变**。
+
+**真正的成因**(靠逐帧录屏拍到):自动选中第一台写在 `LaunchedEffect` 里,而副作用要等
+第一次组合**之后**才跑。于是冷启动时右栏先渲染一帧「选择左边的主机」的空状态,
+下一帧才换成真内容 —— 录屏第 296 帧拍得清清楚楚。
+改成在**组合期间**就算出要显示哪台:`hosts.firstOrNull { it.id == selectedId } ?: hosts.firstOrNull()`。
+改后重录:右栏一出现就是主机详情,全程没有空状态。
+
+**方法**:一帧的闪跳用 `uiautomator` 追不上(每次 ~1 秒)。用
+`adb shell "nohup screenrecord --time-limit N ... &"` 在**设备侧脱离**启动
+(放在后台任务里跑会随 shell 一起被杀,只录到 4 帧),再用 PyAV 逐帧解。
+
 ## 5. 关键坑(踩过,别再踩)
 
 1. **DSR 应答**:终端事件不回写 → 远端程序挂起(ConPTY 必现;vim 同理)。已修 + 单测。
@@ -496,7 +515,13 @@ $env:JAVA_HOME="C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot"
     `pm install` 都一样;要开「USB 调试(安全设置)/通过 USB 安装」。**卸载之前先确认能装回去**。
 42. **`drive.dump()` 在 uiautomator 失败时会读到上一次的 /sdcard/ui.xml**,于是拿到一份
     陈旧界面还以为是当前的(包已卸载却"看到"应用在跑)。
-43. **Git Bash 会把 `/data/...` 改写成 Windows 路径**,`adb shell am start -n pkg/.Act` 也会被吃掉。
+43. **`LaunchedEffect` 里做"自动选中/自动跳转"会闪一帧**。副作用在第一次组合之后才跑,
+    那一帧界面显示的是没选中时的样子。要在组合期间就把值算出来。
+44. **抓一帧级别的闪跳只能靠录屏**:`screenrecord` 必须用 `nohup ... &` 在设备侧脱离启动,
+    否则 adb shell 一断就停;PC 上用 PyAV(`av`)解帧,本机没有 ffmpeg/cv2。
+45. **逐帧分析的亮度/位置启发式很容易误判**(把桌面图标、蓝色按钮当成目标内容)。
+    先用亮度均值切出"应用可见"的帧区间,再导出几帧**用眼睛确认**,别只信数字。
+46. **Git Bash 会把 `/data/...` 改写成 Windows 路径**,`adb shell am start -n pkg/.Act` 也会被吃掉。
     所有 adb 命令前加 `export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'`。
 
 ## 6. 已知问题 / 待办

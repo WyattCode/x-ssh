@@ -86,10 +86,16 @@ fun HomeScreen(
     // (内屏横屏挖孔占 51dp)分界线会整体右移,正好压不在折痕上。内边距放进各栏自己加。
     var searching by remember { mutableStateOf(false) }
 
-    // 双栏时右栏不该是一张空页:一进来就选中第一台,详情栏永远有东西可看。
-    // (参考设计里的邮件、日历,右栏从来不是空的。)
-    LaunchedEffect(hosts.firstOrNull()?.id) {
-        if (selectedId == null) hosts.firstOrNull()?.let(onSelect)
+    // 右栏要显示哪台:**在组合期间就算出来**,不能等副作用。
+    //
+    // 原来是用 LaunchedEffect 去"自动选中第一台",而副作用要等第一次组合之后才跑 ——
+    // 于是冷启动时右栏先渲染一帧「选择左边的主机」的空状态,下一帧才换成真内容,
+    // 看上去就是打开应用闪跳一下(录屏第 296 帧拍到的就是这个)。
+    val shownHost = hosts.firstOrNull { it.id == selectedId } ?: hosts.firstOrNull()
+
+    // 仍然把选中同步回状态,让后续的编辑/删除等流程拿到一致的 selectedId。
+    LaunchedEffect(shownHost?.id) {
+        if (selectedId != shownHost?.id) shownHost?.let(onSelect)
     }
 
     BoxWithConstraints(Modifier.fillMaxSize().background(p.bg)) {
@@ -112,7 +118,7 @@ fun HomeScreen(
                         ),
                     hosts = filtered,
                     total = hosts.size,
-                    selectedId = selectedId,
+                    selectedId = shownHost?.id,
                     onPrimary = onSelect,
                     onNew = onNew,
                     onEdit = onEdit,
@@ -137,7 +143,7 @@ fun HomeScreen(
                                 WindowInsetsSides.Vertical + WindowInsetsSides.End,
                             ),
                         ),
-                    host = hosts.firstOrNull { it.id == selectedId },
+                    host = shownHost,
                     onConnect = onConnect,
                     onEdit = onEdit,
                     onDelete = onDelete,
