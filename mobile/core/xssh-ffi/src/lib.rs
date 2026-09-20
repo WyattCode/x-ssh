@@ -19,6 +19,9 @@ pub struct HostConfig {
     pub port: u16,
     pub username: String,
     pub auth: AuthMethod,
+    /// 已信任的主机密钥指纹(SHA256)。为空表示还没信任过 —— 连接会被拒绝并
+    /// 抛出 HostKeyUnknown,异常文本就是服务端这次的指纹,由界面让用户确认。
+    pub known_key: Option<String>,
 }
 
 /// 认证方式。
@@ -58,24 +61,38 @@ pub struct CursorState {
     pub visible: bool,
 }
 
-/// 错误(以 Display 文本跨边界)。
+/// 错误(flat_error:只有变体名和 Display 文本跨边界,字段不过去)。
+///
+/// 两个主机密钥变体的 Display **就是服务端指纹本身**,不加任何说明文字 ——
+/// 宿主要拿它去存/去比对,掺了人话就得反过来解析字符串。给人看的措辞由 UI 拼,
+/// 已信任的那个指纹本来就在宿主手里。
 #[derive(Debug, uniffi::Error)]
 #[uniffi(flat_error)]
 pub enum FfiError {
     Message { message: String },
+    /// 首次见到这台主机的密钥,需要用户确认。
+    HostKeyUnknown { fingerprint: String },
+    /// 主机密钥与已信任的不一致,连接已拒绝。
+    HostKeyChanged { actual: String },
 }
 
 impl std::fmt::Display for FfiError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Message { message } => write!(f, "{message}"),
+            Self::HostKeyUnknown { fingerprint } => write!(f, "{fingerprint}"),
+            Self::HostKeyChanged { actual } => write!(f, "{actual}"),
         }
     }
 }
 
 impl From<ssh::SshError> for FfiError {
     fn from(err: ssh::SshError) -> Self {
-        Self::Message { message: err.to_string() }
+        match err {
+            ssh::SshError::HostKeyUnknown { fingerprint } => Self::HostKeyUnknown { fingerprint },
+            ssh::SshError::HostKeyChanged { actual, .. } => Self::HostKeyChanged { actual },
+            other => Self::Message { message: other.to_string() },
+        }
     }
 }
 
@@ -101,6 +118,7 @@ impl Session {
             port: config.port,
             username: config.username,
             auth,
+            known_key: config.known_key,
         };
         let ssh = Ssh::connect(&target)?;
         Ok(Arc::new(Self { inner: Mutex::new(ssh) }))

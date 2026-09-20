@@ -127,6 +127,17 @@ fun App(devTarget: DevTarget? = null) {
             },
         )
 
-        is Screen.Terminal -> TerminalScreen(current.host, onExit = { screen = Screen.Home })
+        is Screen.Terminal -> TerminalScreen(
+            host = current.host,
+            onExit = { screen = Screen.Home },
+            onTrustKey = { fingerprint ->
+                // 换一个 Host 实例 → 终端屏的 remember(host) 失效 → 带着新指纹重连。
+                val trusted = current.host.copy(keyFingerprint = fingerprint)
+                if (hosts.any { it.id == trusted.id }) {
+                    persist(hosts.map { if (it.id == trusted.id) it.copy(keyFingerprint = fingerprint) else it })
+                }
+                screen = Screen.Terminal(trusted)
+            },
+        )
     }
 }

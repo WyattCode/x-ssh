@@ -33,6 +33,30 @@ pub struct Target {
     pub port: u16,
     pub username: String,
     pub auth: Auth,
+    /// 已信任的服务端主机密钥指纹(SHA256)。None = 还没信任过任何密钥。
+    pub known_key: Option<String>,
+}
+
+/// 服务端主机密钥的校验结论。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HostKeyVerdict {
+    /// 与已信任的指纹一致。
+    Trusted,
+    /// 还没有信任过这台主机的任何密钥(首次连接)。
+    Unknown,
+    /// 与已信任的指纹不一致 —— 服务器重装,或者有人在中间。
+    Changed,
+}
+
+/// 纯函数:拿实际指纹和已信任的比对。指纹比较不区分大小写与首尾空白。
+pub fn verify_host_key(known: Option<&str>, actual: &str) -> HostKeyVerdict {
+    match known.map(str::trim).filter(|k| !k.is_empty()) {
+        None => HostKeyVerdict::Unknown,
+        // 指纹是 "SHA256:" + base64,base64 大小写有意义 —— 必须逐字节相等。
+        // 忽略大小写会让两把不同的密钥被判成同一把,是白送出去的安全余量。
+        Some(known) if known == actual.trim() => HostKeyVerdict::Trusted,
+        Some(_) => HostKeyVerdict::Changed,
+    }
 }
 
 /// 服务端消息(按通道标注,为将来的端口转发复用)。
@@ -57,6 +81,10 @@ pub enum SshError {
     Timeout,
     /// 本连接已有通道占用事件流(当前每个连接只支持一个通道)。
     ChannelInUse,
+    /// 首次见到这台主机的密钥,需要用户确认后再连。
+    HostKeyUnknown { fingerprint: String },
+    /// 主机密钥与已信任的不一致,连接已拒绝。
+    HostKeyChanged { expected: String, actual: String },
     Russh(russh::Error),
 }
 
@@ -68,6 +96,12 @@ impl fmt::Display for SshError {
             Self::AuthFailed => write!(f, "authentication failed"),
             Self::Timeout => write!(f, "connection timed out"),
             Self::ChannelInUse => write!(f, "connection already has an active channel"),
+            Self::HostKeyUnknown { fingerprint } => {
+                write!(f, "unknown host key {fingerprint}")
+            }
+            Self::HostKeyChanged { expected, actual } => {
+                write!(f, "host key changed: expected {expected}, got {actual}")
+            }
             Self::Russh(err) => write!(f, "ssh: {err}"),
         }
     }
@@ -91,6 +125,9 @@ impl From<russh::Error> for SshError {
 struct Handler {
     tx: mpsc::UnboundedSender<ServerMsg>,
     server_key: Arc<Mutex<Option<String>>>,
+    /// 已信任的指纹;None 表示首次连接,握手会被拒绝并交给上层确认。
+    known_key: Option<String>,
+    verdict: Arc<Mutex<Option<HostKeyVerdict>>>,
 }
 
 impl client::Handler for Handler {
@@ -100,12 +137,17 @@ impl client::Handler for Handler {
         &mut self,
         server_public_key: &PublicKeyOrCertificate,
     ) -> Result<bool, Self::Error> {
-        // M1: 记录指纹并接受。M3 起接入 known_hosts 校验与首次信任确认。
+        // 只接受已信任的密钥。首次连接与指纹变更都在这里拒绝握手,由 connect()
+        // 翻译成带指纹的错误交给 UI 确认 —— 免得默默信任任何服务器。
         let fingerprint = server_key_fingerprint(server_public_key);
+        let verdict = verify_host_key(self.known_key.as_deref(), &fingerprint);
         if let Ok(mut slot) = self.server_key.lock() {
             *slot = Some(fingerprint);
         }
-        Ok(true)
+        if let Ok(mut slot) = self.verdict.lock() {
+            *slot = Some(verdict.clone());
+        }
+        Ok(verdict == HostKeyVerdict::Trusted)
     }
 
     async fn data(
@@ -191,6 +233,7 @@ impl Ssh {
 
         let (tx, rx) = mpsc::unbounded_channel();
         let server_key = Arc::new(Mutex::new(None));
+        let verdict = Arc::new(Mutex::new(None));
 
         let config = Arc::new(client::Config {
             inactivity_timeout: None,
@@ -199,7 +242,12 @@ impl Ssh {
             ..Default::default()
         });
 
-        let handler = Handler { tx, server_key: server_key.clone() };
+        let handler = Handler {
+            tx,
+            server_key: server_key.clone(),
+            known_key: target.known_key.clone(),
+            verdict: verdict.clone(),
+        };
         let handle = runtime.block_on(async {
             tokio::time::timeout(CONNECT_TIMEOUT, async {
                 let mut handle =
@@ -233,10 +281,28 @@ impl Ssh {
             })
             .await
             .map_err(|_| SshError::Timeout)?
-        })?;
+        });
 
-        let server_key = server_key.lock().map(|slot| slot.clone()).unwrap_or_default();
-        Ok(Self { runtime, handle, events: Some(rx), server_key: server_key.unwrap_or_default() })
+        let fingerprint = server_key.lock().ok().and_then(|slot| slot.clone()).unwrap_or_default();
+        // 握手被我们自己拒掉时,russh 只会报一个笼统的错;换成带指纹的具体原因。
+        let handle = match handle {
+            Ok(handle) => handle,
+            Err(err) => {
+                let verdict = verdict.lock().ok().and_then(|slot| slot.clone());
+                return Err(match verdict {
+                    Some(HostKeyVerdict::Unknown) => {
+                        SshError::HostKeyUnknown { fingerprint }
+                    }
+                    Some(HostKeyVerdict::Changed) => SshError::HostKeyChanged {
+                        expected: target.known_key.clone().unwrap_or_default(),
+                        actual: fingerprint,
+                    },
+                    _ => err,
+                });
+            }
+        };
+
+        Ok(Self { runtime, handle, events: Some(rx), server_key: fingerprint })
     }
 
     /// 服务端主机密钥指纹(SHA256)。
@@ -330,5 +396,42 @@ impl Shell {
     pub fn close(&self) -> Result<(), SshError> {
         self.runtime.block_on(self.channel.close())?;
         Ok(())
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::{verify_host_key, HostKeyVerdict};
+
+    #[test]
+    fn first_connection_is_unknown() {
+        assert_eq!(verify_host_key(None, "SHA256:aaa"), HostKeyVerdict::Unknown);
+        // 空字符串等同于"没存过",别把它当成一个要比对的指纹。
+        assert_eq!(verify_host_key(Some(""), "SHA256:aaa"), HostKeyVerdict::Unknown);
+        assert_eq!(verify_host_key(Some("  "), "SHA256:aaa"), HostKeyVerdict::Unknown);
+    }
+
+    #[test]
+    fn same_fingerprint_is_trusted() {
+        assert_eq!(verify_host_key(Some("SHA256:aaa"), "SHA256:aaa"), HostKeyVerdict::Trusted);
+        // 只忽略首尾空白(存取时容易混进来),内容本身一个字符都不能差。
+        assert_eq!(
+            verify_host_key(Some(" SHA256:aaa "), "SHA256:aaa
+"),
+            HostKeyVerdict::Trusted
+        );
+        // base64 是大小写敏感的:换了大小写就是另一把密钥。
+        assert_eq!(
+            verify_host_key(Some("SHA256:aaa"), "SHA256:AAA"),
+            HostKeyVerdict::Changed
+        );
+    }
+
+    #[test]
+    fn different_fingerprint_is_a_change() {
+        assert_eq!(verify_host_key(Some("SHA256:aaa"), "SHA256:bbb"), HostKeyVerdict::Changed);
+        // 前缀相同也不算通过。
+        assert_eq!(verify_host_key(Some("SHA256:aaa"), "SHA256:aaab"), HostKeyVerdict::Changed);
     }
 }

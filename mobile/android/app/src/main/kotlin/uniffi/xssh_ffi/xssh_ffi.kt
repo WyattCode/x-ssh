@@ -2339,6 +2339,12 @@ data class HostConfig (
     var `username`: kotlin.String
     , 
     var `auth`: AuthMethod
+    , 
+    /**
+     * 已信任的主机密钥指纹(SHA256)。为空表示还没信任过 —— 连接会被拒绝并
+     * 抛出 HostKeyUnknown,异常文本就是服务端这次的指纹,由界面让用户确认。
+     */
+    var `knownKey`: kotlin.String?
     
 ){
     
@@ -2359,6 +2365,7 @@ public object FfiConverterTypeHostConfig: FfiConverterRustBuffer<HostConfig> {
             FfiConverterUShort.read(buf),
             FfiConverterString.read(buf),
             FfiConverterTypeAuthMethod.read(buf),
+            FfiConverterOptionalString.read(buf),
         )
     }
 
@@ -2366,7 +2373,8 @@ public object FfiConverterTypeHostConfig: FfiConverterRustBuffer<HostConfig> {
             FfiConverterString.allocationSize(value.`host`) +
             FfiConverterUShort.allocationSize(value.`port`) +
             FfiConverterString.allocationSize(value.`username`) +
-            FfiConverterTypeAuthMethod.allocationSize(value.`auth`)
+            FfiConverterTypeAuthMethod.allocationSize(value.`auth`) +
+            FfiConverterOptionalString.allocationSize(value.`knownKey`)
     )
 
     override fun write(value: HostConfig, buf: ByteBuffer) {
@@ -2374,6 +2382,7 @@ public object FfiConverterTypeHostConfig: FfiConverterRustBuffer<HostConfig> {
             FfiConverterUShort.write(value.`port`, buf)
             FfiConverterString.write(value.`username`, buf)
             FfiConverterTypeAuthMethod.write(value.`auth`, buf)
+            FfiConverterOptionalString.write(value.`knownKey`, buf)
     }
 }
 
@@ -2472,11 +2481,25 @@ public object FfiConverterTypeAuthMethod : FfiConverterRustBuffer<AuthMethod>{
 
 
 /**
- * 错误(以 Display 文本跨边界)。
+ * 错误(flat_error:只有变体名和 Display 文本跨边界,字段不过去)。
+ *
+ * 两个主机密钥变体的 Display **就是服务端指纹本身**,不加任何说明文字 ——
+ * 宿主要拿它去存/去比对,掺了人话就得反过来解析字符串。给人看的措辞由 UI 拼,
+ * 已信任的那个指纹本来就在宿主手里。
  */
 sealed class FfiException(message: String): kotlin.Exception(message) {
         
         class Message(message: String) : FfiException(message)
+        
+    /**
+     * 首次见到这台主机的密钥,需要用户确认。
+     */
+        class HostKeyUnknown(message: String) : FfiException(message)
+        
+    /**
+     * 主机密钥与已信任的不一致,连接已拒绝。
+     */
+        class HostKeyChanged(message: String) : FfiException(message)
         
 
     companion object ErrorHandler : UniffiRustCallStatusErrorHandler<FfiException> {
@@ -2492,6 +2515,8 @@ public object FfiConverterTypeFfiError : FfiConverterRustBuffer<FfiException> {
         
             return when(buf.getInt()) {
             1 -> FfiException.Message(FfiConverterString.read(buf))
+            2 -> FfiException.HostKeyUnknown(FfiConverterString.read(buf))
+            3 -> FfiException.HostKeyChanged(FfiConverterString.read(buf))
             else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
         }
         
@@ -2505,6 +2530,14 @@ public object FfiConverterTypeFfiError : FfiConverterRustBuffer<FfiException> {
         when(value) {
             is FfiException.Message -> {
                 buf.putInt(1)
+                Unit
+            }
+            is FfiException.HostKeyUnknown -> {
+                buf.putInt(2)
+                Unit
+            }
+            is FfiException.HostKeyChanged -> {
+                buf.putInt(3)
                 Unit
             }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }

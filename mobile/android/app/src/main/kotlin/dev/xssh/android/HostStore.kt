@@ -15,6 +15,11 @@ data class Host(
     val username: String = "",
     val auth: AuthKind = AuthKind.KEY,
     val keyPath: String = "",
+    /**
+     * 已信任的服务端主机密钥指纹(SHA256:…)。空 = 还没信任过,首次连接会弹确认框。
+     * 存了之后每次连接都比对,不一致就拒绝 —— 这是防中间人的唯一一道关。
+     */
+    val keyFingerprint: String = "",
     /** 密码认证用;仅内存保留,不落盘。 */
     val password: String = "",
 ) {
@@ -48,6 +53,7 @@ class HostStore(context: Context) {
                     username = item.optString("username"),
                     auth = if (item.optString("auth") == "password") AuthKind.PASSWORD else AuthKind.KEY,
                     keyPath = item.optString("keyPath"),
+                    keyFingerprint = item.optString("keyFingerprint"),
                 )
             }
         }.getOrDefault(emptyList())
@@ -64,6 +70,7 @@ class HostStore(context: Context) {
             item.put("username", host.username)
             item.put("auth", if (host.auth == AuthKind.PASSWORD) "password" else "key")
             item.put("keyPath", host.keyPath)
+            item.put("keyFingerprint", host.keyFingerprint)
             array.put(item)
         }
         prefs.edit().putString(KEY_LIST, array.toString()).apply()

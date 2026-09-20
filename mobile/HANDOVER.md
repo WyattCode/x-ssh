@@ -1,6 +1,6 @@
 # X-SSH 移动端交接文档
 
-> 更新: 2026-09-20 深夜(第三次)。项目: `mobile/`(Android + iOS 双原生 UI + 共享 Rust 核心)。
+> 更新: 2026-09-20 深夜(第四次)。项目: `mobile/`(Android + iOS 双原生 UI + 共享 Rust 核心)。
 > 设备: Xiaomi 18 Fold(型号 2608BPX34C),已装 demo App。
 
 ## 0. 一句话状态
@@ -13,6 +13,11 @@
 第三次会话新查明: Android 16+ 的本地网络保护要求单独的 `ACCESS_LOCAL_NETWORK`
 运行时权限,manifest 里原本没有 —— 就算 MIUI 放行,连 `192.168.x.x` 仍会超时,
 且表现和现在一模一样(超时),极易误判。已补上声明与申请。
+
+**第四次会话: 主机密钥校验已上机。** 之前 `check_server_key` 接受任意密钥(只把指纹
+记下来),等于没有中间人防护 —— 这是安全缺陷,不是缺功能。现在:核心只接受已信任的
+指纹,首次连接与指纹变更都在握手处拒绝,再由 UI 让人裁决;信任结果按「地址:端口」
+存在主机记录里。五种情况都在真机上验过(见 §2「M2」)。
 
 ## 1. 下一步(精确操作)
 
@@ -95,6 +100,22 @@ $adb = "D:\Android\sdk\platform-tools\adb.exe"
 - **验证**: `xssh-devssh` 连 `192.168.1.101`(Ubuntu)成功执行 `journalctl` 并渲染;
   连本机 Windows OpenSSH 靶机(localhost)成功(exec + 交互 shell)。
 - **Android 交叉编译**: `cargo ndk -t arm64-v8a -P 26 build -p xssh-core` 通过。
+
+### M2 主机密钥校验(第四次会话,真机验证)
+- **核心** `xssh-core/src/ssh.rs`: `Target.known_key` + `verify_host_key()` → `HostKeyVerdict::{Trusted,Unknown,Changed}`;
+  `check_server_key` 只对 `Trusted` 返回 `true`,其余拒绝握手;`connect()` 把 russh 的笼统错误换成
+  `SshError::HostKeyUnknown{fingerprint}` / `HostKeyChanged{expected,actual}`。3 个单测(共 15 passed)。
+  **指纹逐字节比对**:`SHA256:` 后面是 base64,大小写有意义,只 `trim()` 首尾空白。
+- **FFI**: `HostConfig.known_key`;`FfiError::{HostKeyUnknown,HostKeyChanged}`,
+  Display **就是指纹**(`flat_error` 只带文本过边界,见坑 18)。
+- **Kotlin**: `Host.keyFingerprint` 落 SharedPreferences;`TerminalScreen` 出确认页/告警页;
+  `App` 的 `onTrustKey` 写回主机并换新 `Host` 实例触发重连;
+  `HostEditorScreen` 保存时**同端点保留、改了地址或端口则清空**指纹。
+- **真机验证**(`adb reverse tcp:2222 tcp:22` → 本机 OpenSSH):
+  ① 没信任过 → 弹「首次连接这台主机」+ 指纹,不连;② 点信任 → 连上,指纹落盘;
+  ③ 存了错指纹 → 「主机密钥已改变」并列出两个指纹,不连;④ 点「仍然信任新密钥」→ 连上并覆盖;
+  ⑤ 指纹正确 → 静默直连。另验证:改名保存后指纹还在;端口 2222→2223 保存后指纹清空。
+- 桌面版 CLI `xssh-devssh --known-key <指纹>` 同样走这条路径(三种结果均已手验)。
 
 ### Android App(UI v2 已上机)
 - 设计令牌与 Windows 版 `global.css` 一一对应(#0e0f12 / #16181d / #262a33 / #6ea8fe),
@@ -186,6 +207,18 @@ $env:JAVA_HOME="C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot"
     字符重复发出("echo"→"echoo")。改成两个零宽字符轮换,用哨兵区分「重置生效」与「陈旧事件」。
 15. **终端要主动抢焦点**(已修):连上后若不点一下屏幕,隐藏输入框没有焦点
     (`dumpsys input_method` 里 `mServedView=null`),外接键盘和 `input text` 都进不去。
+16. **`input tap` 在 MIUI 上会丢事件**(实测同一坐标连点 5 次只生效 1 次)。表现是
+    「按钮点了没反应」,极易误判成代码 bug —— 本次就为此查了一轮。自动化里一律写成
+    **点到界面变化为止**的重试循环,并用 `uiautomator dump` 判读结果,别只点一次就下结论。
+    判断注入本身是否还活着: 点另一个按钮(如「返回」)看界面是否变。
+17. **`am start` 要带 `-S`**:App 已在前台时同一 component 的 intent 走 `onNewIntent`,
+    而 `MainActivity` 只在 `onCreate` 读 `devAutoConnect`,于是调试参数被静默忽略
+    (只在输出里留一句 `Warning: Activity not started`)。
+18. **`uniffi(flat_error)` 只带 Display 文本过边界**,字段不过去。所以两个主机密钥错误的
+    Display **就是指纹本身**,宿主直接拿来存/比;人话措辞在 Kotlin 侧拼。改这类语义时
+    记得同步 `FfiError` 的注释,否则下一个人会去解析字符串。
+19. **Git Bash 会把 `/data/...` 改写成 Windows 路径**,`adb shell am start -n pkg/.Act` 也会被吃掉。
+    所有 adb 命令前加 `export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'`。
 
 ## 6. 已知问题 / 待办
 
@@ -204,7 +237,11 @@ $env:JAVA_HOME="C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot"
 - [ ] 外屏(单栏)实机走一遍
 
 **安全(M3)**
-- [ ] **主机密钥校验**(现在"接受任意、只记指纹")+ 首次信任弹窗 + known_hosts 持久化
+- [x] **主机密钥校验**:核心只认已信任指纹,首次连接/指纹变更均拒绝握手并抛带指纹的错误;
+      UI 出确认页(首次)与告警页(变更,列出「已信任」与「本次收到」);指纹随主机落盘。
+- [ ] 主机密钥改为一台主机可信任多把(现在一条记录只存一个指纹,服务端轮换要重新确认)
+- [ ] 桌面版是 TOFU(首次静默记下,变更才拦;`src/main/ssh.ts` 的 `hostVerifier`)——
+      与移动端现在的「首次也要人确认」不一致,发布前统一
 - [ ] 密钥库: 导入/生成/生物识别解锁(uniffi 已有 `AuthMethod::KeyFile`)
 - [ ] 密码/私钥 zeroize(FFI 跨边界有副本)
 

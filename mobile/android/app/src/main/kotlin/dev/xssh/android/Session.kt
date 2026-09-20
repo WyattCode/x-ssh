@@ -73,7 +73,13 @@ fun connectHost(host: Host, cols: Int = 80, rows: Int = 24): LiveTerminal {
         AuthKind.PASSWORD -> AuthMethod.Password(host.password)
         AuthKind.KEY -> AuthMethod.KeyFile(host.keyPath, null)
     }
-    val config = HostConfig(host.address, host.port.toUShort(), host.username, auth)
+    val config = HostConfig(
+        host.address,
+        host.port.toUShort(),
+        host.username,
+        auth,
+        knownKey = host.keyFingerprint.ifBlank { null },
+    )
     val session = Session.connect(config)
     val shell = session.openShell(cols.toUInt(), rows.toUInt(), "xterm-256color")
     return LiveTerminal(session, shell, Term(cols.toUInt(), rows.toUInt()), cols, rows)

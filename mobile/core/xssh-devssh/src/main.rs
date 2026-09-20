@@ -30,7 +30,14 @@ fn main() -> anyhow::Result<()> {
         anyhow::bail!("need --key <path> or --password <pw>");
     };
 
-    let target = Target { host: cli.host, port: cli.port, username: cli.user, auth };
+    let target = Target {
+        host: cli.host,
+        port: cli.port,
+        username: cli.user,
+        auth,
+        // 调试工具:不校验主机密钥(首次握手会被拒,重试时带上打印出来的指纹)。
+        known_key: cli.known_key.clone(),
+    };
     let mut ssh = Ssh::connect(&target)?;
     eprintln!("[devssh] connected; server key {}", ssh.server_key());
 
@@ -123,6 +130,8 @@ struct Cli {
     cols: usize,
     rows: usize,
     command: Option<String>,
+    /// 已信任的主机密钥指纹;不传则首次握手被拒并打印指纹。
+    known_key: Option<String>,
 }
 
 fn parse_args() -> Cli {
@@ -135,6 +144,7 @@ fn parse_args() -> Cli {
         cols: 120,
         rows: 30,
         command: None,
+        known_key: None,
     };
 
     let mut args = std::env::args().skip(1);
@@ -156,6 +166,7 @@ fn parse_args() -> Cli {
                 }
             }
             "--key" => cli.key = args.next().map(PathBuf::from),
+            "--known-key" => cli.known_key = args.next(),
             "--password" => cli.password = args.next(),
             "--cols" => {
                 if let Some(value) = args.next() {

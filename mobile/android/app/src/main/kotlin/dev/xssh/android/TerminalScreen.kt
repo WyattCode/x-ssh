@@ -56,6 +56,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import uniffi.xssh_ffi.CursorState
+import uniffi.xssh_ffi.FfiException
 
 /**
  * \u9690\u85cf\u8f93\u5165\u6846\u91cc\u7684\u54e8\u5175\u5b57\u7b26\u3002\u6bcf\u6b21\u63d0\u4ea4\u540e\u8981\u628a\u8f93\u5165\u6846\u91cd\u7f6e\u56de\u54e8\u5175,\u4f46\u91cd\u7f6e\u662f\u5f02\u6b65\u751f\u6548\u7684:
@@ -65,11 +66,15 @@ import uniffi.xssh_ffi.CursorState
  */
 private val SENTINELS = arrayOf("\u200b", "\u200c")
 
+/** 等用户裁决的主机密钥:[fingerprint] 是服务端这次给出的指纹。 */
+private data class PendingKey(val fingerprint: String, val changed: Boolean)
+
 @Composable
-fun TerminalScreen(host: Host, onExit: () -> Unit) {
+fun TerminalScreen(host: Host, onExit: () -> Unit, onTrustKey: (String) -> Unit = {}) {
     val context = LocalContext.current
     var live by remember(host) { mutableStateOf<LiveTerminal?>(null) }
     var error by remember(host) { mutableStateOf<String?>(null) }
+    var pendingKey by remember(host) { mutableStateOf<PendingKey?>(null) }
     var attempt by remember(host) { mutableStateOf(0) }
     // 局域网权限只问一次:拒绝了也照常尝试连接,失败提示里会说明原因。
     var askedLocalNetwork by remember(host) { mutableStateOf(false) }
@@ -80,6 +85,7 @@ fun TerminalScreen(host: Host, onExit: () -> Unit) {
     LaunchedEffect(host, attempt) {
         error = null
         live = null
+        pendingKey = null
         if (!askedLocalNetwork && LocalNetwork.needsPermission(context, host.address)) {
             askedLocalNetwork = true
             askLocalNetwork.launch(LocalNetwork.PERMISSION)
@@ -88,15 +94,105 @@ fun TerminalScreen(host: Host, onExit: () -> Unit) {
         val result = withContext(Dispatchers.IO) { runCatching { connectHost(host) } }
         result
             .onSuccess { live = it }
-            .onFailure {
-                error = LocalNetwork.hintFor(context, host.address, it.message ?: it.toString())
+            .onFailure { failure ->
+                // 主机密钥两种异常的 message 就是服务端指纹本身(见 FfiError 注释)。
+                val fingerprint = failure.message.orEmpty().trim()
+                when {
+                    // 指纹为空就没得信任 —— 真让用户点下去只会存个空值、再弹一次同样的框。
+                    fingerprint.isEmpty() &&
+                        (failure is FfiException.HostKeyUnknown ||
+                            failure is FfiException.HostKeyChanged) ->
+                        error = "服务端密钥校验未通过,但没拿到指纹(${failure.javaClass.simpleName})。"
+
+                    failure is FfiException.HostKeyUnknown ->
+                        pendingKey = PendingKey(fingerprint, changed = false)
+
+                    failure is FfiException.HostKeyChanged ->
+                        pendingKey = PendingKey(fingerprint, changed = true)
+
+                    else -> error = LocalNetwork.hintFor(
+                        context,
+                        host.address,
+                        failure.message?.ifBlank { null } ?: failure.toString(),
+                    )
+                }
             }
     }
 
     when {
+        pendingKey != null -> HostKeyPrompt(
+            host = host,
+            pending = pendingKey!!,
+            // 信任后由上层把指纹写回主机并换一个新的 Host 实例,本屏随之重连。
+            onTrust = { onTrustKey(pendingKey!!.fingerprint) },
+            onExit = onExit,
+        )
+
         error != null -> ConnectResult(error!!, retry = { attempt++ }, onExit = onExit)
         live == null -> ConnectResult("连接 ${host.subtitle} …", retry = null, onExit = onExit)
         else -> TerminalView(live!!, host, onExit)
+    }
+}
+
+/**
+ * 首次连接要用户确认主机密钥;密钥变了则是明确的告警 —— 可能是服务端重装,
+ * 也可能是有人在中间。两种情况都必须由人点一下,程序不替用户决定。
+ */
+@Composable
+private fun HostKeyPrompt(host: Host, pending: PendingKey, onTrust: () -> Unit, onExit: () -> Unit) {
+    val p = LocalXssh.current
+    Column(
+        Modifier.fillMaxSize().background(p.bg).systemBarsPadding().padding(24.dp),
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Text(
+            if (pending.changed) "主机密钥已改变" else "首次连接这台主机",
+            color = if (pending.changed) p.danger else p.text,
+            fontSize = 17.sp,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Spacer(Modifier.height(10.dp))
+        Text(
+            if (pending.changed) {
+                "${host.subtitle} 这次出示的密钥与已信任的不一致。若不是你自己重装了服务端," +
+                    "连接可能被人劫持 —— 先弄清原因再继续。"
+            } else {
+                "确认 ${host.subtitle} 的指纹与服务端一致后再信任。" +
+                    "服务端上可用 ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub 查看。"
+            },
+            color = p.textDim,
+            fontSize = 13.sp,
+        )
+        Spacer(Modifier.height(16.dp))
+        if (pending.changed) {
+            Fingerprint("已信任", host.keyFingerprint, p.textDim)
+            Spacer(Modifier.height(8.dp))
+        }
+        Fingerprint("本次收到", pending.fingerprint, if (pending.changed) p.danger else p.text)
+        Spacer(Modifier.height(20.dp))
+        Row {
+            XsshButton(
+                if (pending.changed) "仍然信任新密钥" else "信任并连接",
+                kind = if (pending.changed) ButtonKind.Danger else ButtonKind.Primary,
+            ) { onTrust() }
+            Spacer(Modifier.width(10.dp))
+            XsshButton("返回", kind = ButtonKind.Ghost) { onExit() }
+        }
+    }
+}
+
+@Composable
+private fun Fingerprint(label: String, value: String, color: Color) {
+    val p = LocalXssh.current
+    Column {
+        Text(label, color = p.textFaint, fontSize = 11.sp)
+        Spacer(Modifier.height(3.dp))
+        Text(
+            value.ifBlank { "(无)" },
+            color = color,
+            fontSize = 13.sp,
+            fontFamily = FontFamily.Monospace,
+        )
     }
 }
 

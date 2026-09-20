@@ -67,15 +67,23 @@ fun HostEditorScreen(
                     error = "地址不能为空"
                 } else {
                     error = null
+                    val newAddress = address.trim()
+                    val newPort = (port.toIntOrNull() ?: 22).coerceIn(1, 65535)
+                    // 已信任的指纹是绑在「地址:端口」上的:改了目标就等于换了一台主机,
+                    // 旧指纹不能跟着走(否则新主机会被误报成「密钥已改变」);没改就必须留下,
+                    // 不然编辑一下备注就把信任关系抹了,下次连接又退回首次确认。
+                    val sameEndpoint = initial != null &&
+                        initial.address == newAddress && initial.port == newPort
                     onSave(
                         Host(
                             id = initial?.id ?: UUID.randomUUID().toString(),
                             name = name.trim(),
-                            address = address.trim(),
-                            port = (port.toIntOrNull() ?: 22).coerceIn(1, 65535),
+                            address = newAddress,
+                            port = newPort,
                             username = username.trim(),
                             auth = auth,
                             keyPath = keyPath.trim(),
+                            keyFingerprint = if (sameEndpoint) initial.keyFingerprint else "",
                             password = password,
                         ),
                     )
