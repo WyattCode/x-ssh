@@ -13,10 +13,10 @@ import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.defaultMinSize
@@ -264,7 +264,6 @@ fun KeyCap(
     modifier: Modifier = Modifier,
     active: Boolean = false,
     repeatable: Boolean = false,
-    wide: Boolean = false,
     onPress: () -> Unit,
 ) {
     val p = LocalXssh.current
@@ -276,7 +275,7 @@ fun KeyCap(
     Box(
         modifier
             .heightIn(min = TouchMin)
-            .defaultMinSize(minWidth = if (wide) 72.dp else 52.dp)
+            .defaultMinSize(minWidth = 52.dp)
             .clip(RoundedCornerShape(RadiusBox))
             .background(
                 when {

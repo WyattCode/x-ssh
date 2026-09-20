@@ -14,24 +14,24 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.safeDrawingPadding
-import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -56,23 +56,26 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.rememberTextMeasurer
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import uniffi.xssh_ffi.CursorState
 import uniffi.xssh_ffi.FfiException
 
 /**
- * \u9690\u85cf\u8f93\u5165\u6846\u91cc\u7684\u54e8\u5175\u5b57\u7b26\u3002\u6bcf\u6b21\u63d0\u4ea4\u540e\u8981\u628a\u8f93\u5165\u6846\u91cd\u7f6e\u56de\u54e8\u5175,\u4f46\u91cd\u7f6e\u662f\u5f02\u6b65\u751f\u6548\u7684:
- * \u8f93\u5165\u6cd5\u5728\u540c\u4e00\u5e27\u91cc\u8fde\u7740\u63d0\u4ea4\u65f6,\u540e\u4e00\u4e2a\u4e8b\u4ef6\u5e26\u7684\u4ecd\u662f\u91cd\u7f6e\u524d\u7684\u5185\u5bb9,\u53ea\u6309\u56fa\u5b9a\u54e8\u5175\u88c1\u524d\u7f00
- * \u4f1a\u628a\u4e0a\u4e00\u4e2a\u5b57\u7b26\u518d\u53d1\u4e00\u904d(\u5b9e\u6d4b "echo" \u53d8 "echoo")\u3002\u4e24\u4e2a\u96f6\u5bbd\u5b57\u7b26\u8f6e\u6362\u4f7f\u7528 \u2014\u2014
- * \u4e8b\u4ef6\u91cc\u5e26\u7684\u662f\u54ea\u4e2a\u54e8\u5175,\u5c31\u77e5\u9053\u91cd\u7f6e\u751f\u6548\u4e86\u6ca1\u6709\u3002
+ * 隐藏输入框里的哨兵字符。每次提交后要把输入框重置回哨兵,但重置是异步生效的:
+ * 输入法在同一帧里连着提交时,后一个事件带的仍是重置前的内容,只按固定哨兵裁前缀
+ * 会把上一个字符再发一遍(实测 "echo" 变 "echoo")。两个零宽字符轮换使用 ——
+ * 事件里带的是哪个哨兵,就知道重置生效了没有。
  */
 private val SENTINELS = arrayOf("\u200b", "\u200c")
+
+/** 一帧取回的画面;[lines] 为 null 表示这一帧屏幕没变,不用动 UI。 */
+private class Frame(val alive: Boolean, val lines: List<String>?, val cursor: CursorState?)
 
 /** 等用户裁决的主机密钥:[fingerprint] 是服务端这次给出的指纹。 */
 private data class PendingKey(val fingerprint: String, val changed: Boolean)
@@ -99,7 +102,13 @@ fun TerminalScreen(host: Host, onExit: () -> Unit, onTrustKey: (String) -> Unit 
             askLocalNetwork.launch(LocalNetwork.PERMISSION)
             return@LaunchedEffect
         }
-        val result = withContext(Dispatchers.IO) { runCatching { connectHost(host) } }
+        val result = withContext(Dispatchers.IO) {
+            val outcome = runCatching { connectHost(host) }
+            // connectHost 是阻塞调用,这期间协程可能已经被取消(用户退出了这一屏)。
+            // 那就在这里把刚建好的会话关掉 —— 外面拿不到它,没人再关得了。
+            if (!isActive) outcome.getOrNull()?.closeAsync()
+            outcome
+        }
         result
             .onSuccess { live = it }
             .onFailure { failure ->
@@ -127,18 +136,22 @@ fun TerminalScreen(host: Host, onExit: () -> Unit, onTrustKey: (String) -> Unit 
             }
     }
 
+    // 先绑成局部变量:onTrust 是稍后才执行的,直接在里面 pendingKey!! 等于赌它那时还不是 null。
+    val pending = pendingKey
+    val failure = error
+    val session = live
     when {
-        pendingKey != null -> HostKeyPrompt(
+        pending != null -> HostKeyPrompt(
             host = host,
-            pending = pendingKey!!,
+            pending = pending,
             // 信任后由上层把指纹写回主机并换一个新的 Host 实例,本屏随之重连。
-            onTrust = { onTrustKey(pendingKey!!.fingerprint) },
+            onTrust = { onTrustKey(pending.fingerprint) },
             onExit = onExit,
         )
 
-        error != null -> ConnectResult(error!!, retry = { attempt++ }, onExit = onExit)
-        live == null -> ConnectResult("连接 ${host.subtitle} …", retry = null, onExit = onExit)
-        else -> TerminalView(live!!, host, onExit)
+        failure != null -> ConnectResult(failure, retry = { attempt++ }, onExit = onExit)
+        session == null -> ConnectResult("连接 ${host.subtitle} …", retry = null, onExit = onExit)
+        else -> TerminalView(session, host, onExit)
     }
 }
 
@@ -187,7 +200,7 @@ private fun HostKeyPrompt(host: Host, pending: PendingKey, onTrust: () -> Unit, 
                 if (pending.changed) "仍然信任新密钥" else "信任并连接",
                 kind = if (pending.changed) ButtonKind.Danger else ButtonKind.Primary,
             ) { onTrust() }
-            Spacer(Modifier.width(10.dp))
+            Spacer(Modifier.width(GapItem))
             XsshButton("返回", kind = ButtonKind.Ghost) { onExit() }
         }
     }
@@ -234,7 +247,7 @@ private fun ConnectResult(message: String, retry: (() -> Unit)?, onExit: () -> U
         Row {
             if (retry != null) {
                 XsshButton("重试") { retry() }
-                Spacer(Modifier.width(10.dp))
+                Spacer(Modifier.width(GapItem))
             }
             XsshButton("返回", kind = ButtonKind.Ghost) { onExit() }
         }
@@ -254,6 +267,12 @@ private fun TerminalView(live: LiveTerminal, host: Host, onExit: () -> Unit) {
     // 才能直接输入,否则要先点一下终端。
     LaunchedEffect(Unit) { runCatching { focusRequester.requestFocus() } }
 
+    // 这一屏是会话的唯一归属人:不管从哪条路离开(断开按钮、系统返回键、主机换了),
+    // 都在这里断。实测过:少了它,按系统返回键后远端连接还活着,直到进程被杀。
+    DisposableEffect(live) {
+        onDispose { live.closeAsync() }
+    }
+
     var lines by remember { mutableStateOf(emptyList<String>()) }
     var cursor by remember { mutableStateOf(CursorState(0u, 0u, false)) }
     var dead by remember { mutableStateOf(false) }
@@ -269,17 +288,28 @@ private fun TerminalView(live: LiveTerminal, host: Host, onExit: () -> Unit) {
     }
 
     LaunchedEffect(Unit) {
+        var idleFrames = 0
         while (true) {
-            val alive = withContext(Dispatchers.IO) { live.pump() }
-            val snapshot = withContext(Dispatchers.IO) { live.term.lines() to live.term.cursor() }
-            if (snapshot.first != lines) lines = snapshot.first
-            if (snapshot.second != cursor) cursor = snapshot.second
-            if (!alive) {
+            // 一帧只切一次线程(原来 pump / lines / cursor 各切一次),而且没有新数据时
+            // 根本不去取整屏文字 —— 空闲时这个循环原本要烧掉小半个核。
+            val frame = withContext(Dispatchers.IO) {
+                val pumped = live.pump()
+                if (pumped.changed) {
+                    Frame(pumped.alive, live.term.lines(), live.term.cursor())
+                } else {
+                    Frame(pumped.alive, null, null)
+                }
+            }
+            frame.lines?.let { if (it != lines) lines = it }
+            frame.cursor?.let { if (it != cursor) cursor = it }
+            if (!frame.alive) {
                 dead = true
-                withContext(Dispatchers.IO) { live.close() }
+                live.closeAsync()
                 break
             }
-            delay(16)
+            // 有输出时 16ms 保证跟手;安静半秒以上就退到 96ms,省电又看不出延迟。
+            idleFrames = if (frame.lines == null) idleFrames + 1 else 0
+            delay(if (idleFrames > 30) 96 else 16)
         }
     }
 
@@ -295,10 +325,8 @@ private fun TerminalView(live: LiveTerminal, host: Host, onExit: () -> Unit) {
                 focusRequester.requestFocus()
                 keyboard?.show()
             },
-            onExit = {
-                scope.launch(Dispatchers.IO) { live.close() }
-                onExit()
-            },
+            // 关闭统一交给 DisposableEffect,这里只管离开。
+            onExit = onExit,
         )
     }
     val canvas: @Composable (Modifier) -> Unit = { modifier ->

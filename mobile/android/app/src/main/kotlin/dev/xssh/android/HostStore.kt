@@ -1,9 +1,9 @@
 package dev.xssh.android
 
 import android.content.Context
+import java.util.UUID
 import org.json.JSONArray
 import org.json.JSONObject
-import java.util.UUID
 
 enum class AuthKind { KEY, PASSWORD }
 
