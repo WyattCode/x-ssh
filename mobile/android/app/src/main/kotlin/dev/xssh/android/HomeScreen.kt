@@ -223,7 +223,11 @@ private fun HostListPane(
 
         // 窄屏把新建放右下角:单手握持时拇指正好落在这里,顶栏够不着。
         // 宽屏不用悬浮按钮 —— 它会压住卡片右侧的 ⋮,而标题栏有的是地方。
-        if (floatingNew) NewHostFab(Modifier.align(Alignment.BottomEnd).padding(Gutter), onNew)
+        // 列表为空时也不要:空状态是居中的一段字,浮按钮正好压在上面;
+        // 而且「还没有主机」那一屏自己就带了新建按钮,浮一个是重复。
+        if (floatingNew && hosts.isNotEmpty()) {
+            NewHostFab(Modifier.align(Alignment.BottomEnd).padding(Gutter), onNew)
+        }
     }
 }
 

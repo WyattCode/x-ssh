@@ -150,7 +150,11 @@ fun TerminalScreen(host: Host, onExit: () -> Unit, onTrustKey: (String) -> Unit 
 private fun HostKeyPrompt(host: Host, pending: PendingKey, onTrust: () -> Unit, onExit: () -> Unit) {
     val p = LocalXssh.current
     Column(
-        Modifier.fillMaxSize().background(p.bg).safeDrawingPadding().padding(28.dp),
+        Modifier
+            .fillMaxSize()
+            .background(p.bg)
+            .safeDrawingPadding()
+            .padding(Gutter + BoxPad),
         verticalArrangement = Arrangement.Center,
     ) {
         Text(
@@ -192,11 +196,20 @@ private fun HostKeyPrompt(host: Host, pending: PendingKey, onTrust: () -> Unit, 
 @Composable
 private fun Fingerprint(label: String, value: String, color: Color) {
     val p = LocalXssh.current
+    // "SHA256:<43 个 base64 字符>" 在 425dp 的外屏上会从中间断成两行,
+    // 而人要做的正是逐字符比对 —— 断行处最容易看错。
+    // 把算法名提到标签里,剩下的摘要就能完整占一行。
+    val algorithm = value.substringBefore(':', "")
+    val digest = value.substringAfter(':', value)
     Column {
-        Text(label, color = p.textFaint, fontSize = 11.sp)
+        Text(
+            if (algorithm.isBlank()) label else "$label · $algorithm",
+            color = p.textFaint,
+            fontSize = 11.sp,
+        )
         Spacer(Modifier.height(3.dp))
         Text(
-            value.ifBlank { "(无)" },
+            digest.ifBlank { "(无)" },
             color = color,
             fontSize = 13.sp,
             fontFamily = FontFamily.Monospace,
@@ -208,7 +221,11 @@ private fun Fingerprint(label: String, value: String, color: Color) {
 private fun ConnectResult(message: String, retry: (() -> Unit)?, onExit: () -> Unit) {
     val p = LocalXssh.current
     Column(
-        Modifier.fillMaxSize().background(p.bg).safeDrawingPadding().padding(24.dp),
+        Modifier
+            .fillMaxSize()
+            .background(p.bg)
+            .safeDrawingPadding()
+            .padding(Gutter + BoxPad),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -428,17 +445,20 @@ private fun TerminalKeys(
     onFont: (Float) -> Unit,
     send: (ByteArray) -> Unit,
 ) {
+    // 顺序按使用频率排,不按键盘习惯排:外屏(425dp)一行只露得出 7 个键,
+    // 露出来的必须是上下翻历史、左右改命令、Tab 补全和 ^C —— 之前 ^C 排在第 10 位,
+    // 想中断一条命令还得先横向滚一段。宽屏会折行全部露出,顺序不影响。
     KeyCapRow(wrap = wrap) {
-        KeyCap("Esc") { send(byteArrayOf(27)) }
-        KeyCap("Tab") { send(byteArrayOf(9)) }
-        KeyCap("Ctrl", active = ctrl, onPress = onCtrl)
-        KeyCap("Alt", active = alt, onPress = onAlt)
-        KeyCap("←", repeatable = true) { send("\u001b[D".toByteArray()) }
         KeyCap("↑", repeatable = true) { send("\u001b[A".toByteArray()) }
         KeyCap("↓", repeatable = true) { send("\u001b[B".toByteArray()) }
+        KeyCap("←", repeatable = true) { send("\u001b[D".toByteArray()) }
         KeyCap("→", repeatable = true) { send("\u001b[C".toByteArray()) }
-        KeyCap("⌫", repeatable = true) { send(byteArrayOf(0x7F)) }
+        KeyCap("Tab") { send(byteArrayOf(9)) }
         KeyCap("^C") { send(byteArrayOf(3)) }
+        KeyCap("Esc") { send(byteArrayOf(27)) }
+        KeyCap("Ctrl", active = ctrl, onPress = onCtrl)
+        KeyCap("Alt", active = alt, onPress = onAlt)
+        KeyCap("⌫", repeatable = true) { send(byteArrayOf(0x7F)) }
         KeyCap("^D") { send(byteArrayOf(4)) }
         KeyCap("^Z") { send(byteArrayOf(26)) }
         KeyCap("^L") { send(byteArrayOf(12)) }
