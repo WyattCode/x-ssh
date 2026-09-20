@@ -151,6 +151,13 @@ fun connectHost(host: Host, cols: Int = 80, rows: Int = 24): LiveTerminal {
         knownKey = host.keyFingerprint.ifBlank { null },
     )
     val session = Session.connect(config)
-    val shell = session.openShell(cols.toUInt(), rows.toUInt(), "xterm-256color")
+    // 连接已经建立了,再开 shell 才失败(服务端不给 pty、通道数满了)的话,
+    // 这条连接就没人认领了 —— 调用方只看到异常,拿不到 session,关不掉。
+    val shell = try {
+        session.openShell(cols.toUInt(), rows.toUInt(), "xterm-256color")
+    } catch (e: Throwable) {
+        runCatching { session.disconnect() }
+        throw e
+    }
     return LiveTerminal(session, shell, Term(cols.toUInt(), rows.toUInt()), cols, rows)
 }

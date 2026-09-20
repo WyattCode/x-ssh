@@ -98,13 +98,16 @@ fun TerminalScreen(host: Host, onExit: () -> Unit, onTrustKey: (String) -> Unit 
     var pendingKey by remember(host) { mutableStateOf<PendingKey?>(null) }
     var attempt by remember(host) { mutableStateOf(0) }
     // 局域网权限只问一次:拒绝了也照常尝试连接,失败提示里会说明原因。
-    var askedLocalNetwork by remember(host) { mutableStateOf(false) }
+    var askedLocalNetwork by remember { mutableStateOf(PermissionAsked.localNetwork) }
     val askLocalNetwork = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { attempt++ }
     // Android 13 起没有通知权限,前台服务照跑但常驻通知不显示 —— 那就成了
     // 「后台挂着 SSH 连接却没有任何可见提示」,该问一次。
-    var askedNotify by remember(host) { mutableStateOf(false) }
+    //
+    // "问过了"必须记在**进程级**:原来用 `remember(host)`,一离开终端屏就清零,
+    // 于是每连一次就被拦一次。只问一次,之后不给就算了(前台服务照样跑)。
+    var askedNotify by remember { mutableStateOf(PermissionAsked.notifications) }
     val askNotify = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { attempt++ }
@@ -118,22 +121,29 @@ fun TerminalScreen(host: Host, onExit: () -> Unit, onTrustKey: (String) -> Unit 
             context.checkSelfPermission(notifyPermission) != PackageManager.PERMISSION_GRANTED
         ) {
             askedNotify = true
+            PermissionAsked.notifications = true
             askNotify.launch(notifyPermission)
             return@LaunchedEffect
         }
         if (!askedLocalNetwork && LocalNetwork.needsPermission(context, host.address)) {
             askedLocalNetwork = true
+            PermissionAsked.localNetwork = true
             askLocalNetwork.launch(LocalNetwork.PERMISSION)
             return@LaunchedEffect
         }
         // 连上之后会话就登记在 SessionRegistry 里了 —— 哪怕这个协程随后被取消
         // (用户退出了这一屏),它也不会丢:主机页会显示「运行中」,可以再点回来或断开。
-        val result = withContext(Dispatchers.IO) { runCatching { SessionRegistry.open(host, 80, 24) } }
-        result
-            .onSuccess {
-                live = it
-                SessionService.ensureRunning(context)
+        // 前台服务必须和登记**在同一个不可取消的步骤里**起来。
+        // 放在 onSuccess 里的话,用户在连上的那一瞬间按了返回,协程被取消,
+        // onSuccess 就不跑了 —— 会话已经登记在册,却没有任何东西托着进程,
+        // 系统一冻结连接就悄悄没了,而主机页还写着「运行中」。
+        val result = withContext(Dispatchers.IO) {
+            runCatching {
+                SessionRegistry.open(host, 80, 24).also { SessionService.ensureRunning(context) }
             }
+        }
+        result
+            .onSuccess { live = it }
             .onFailure { failure ->
                 // 主机密钥两种异常的 message 就是服务端指纹本身(见 FfiError 注释)。
                 val fingerprint = failure.message.orEmpty().trim()
@@ -307,11 +317,6 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
     LaunchedEffect(fontSize) {
         delay(400)
         prefs.terminalFontSize = fontSize
-    }
-
-    // 对端断开后把它从名单里摘掉,主机页就不会一直显示「运行中」。
-    LaunchedEffect(dead) {
-        if (dead) SessionRegistry.reap(host.id)
     }
 
     val transformState = rememberTransformableState { zoomChange, _, _ ->

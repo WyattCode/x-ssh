@@ -3,6 +3,7 @@ package dev.xssh.android
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -21,6 +22,20 @@ import uniffi.xssh_ffi.CursorState
 object AppVisibility {
     @Volatile
     var foreground: Boolean = false
+}
+
+/**
+ * 运行时权限这一趟进程里问过没有。
+ *
+ * 不能用 `remember` 记 —— 那是跟着某一屏活的,离开终端再进来就又问一遍。
+ * 给了最好,不给也照常连(前台服务照跑,只是没有常驻通知)。
+ */
+object PermissionAsked {
+    @Volatile
+    var notifications: Boolean = false
+
+    @Volatile
+    var localNetwork: Boolean = false
 }
 
 /** 终端某一刻的画面。 */
@@ -73,7 +88,14 @@ class TerminalSession(
             }
             if (!pumped.first.alive) {
                 _frame.value = _frame.value.copy(alive = false)
-                withContext(Dispatchers.IO) { live.close() }
+                withContext(NonCancellable + Dispatchers.IO) { live.close() }
+                // 对端断了就自己从名单上摘掉。
+                //
+                // 原来这件事是终端界面用 `LaunchedEffect(dead)` 做的 —— 那就要求
+                // 用户**正好开着那一屏**。切出去之后服务器挂了,回到主机页还写着
+                // 「运行中」,状态栏的常驻通知也一直挂着,而连接早就没了。
+                // 这一屏自己 remember 着 session 引用,摘牌不影响它继续显示最后的输出。
+                SessionRegistry.forget(this@TerminalSession)
                 break
             }
             idle = if (pumped.first.changed) 0 else idle + 1
@@ -114,6 +136,16 @@ class TerminalSession(
 object SessionRegistry {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
+    /**
+     * 名单的改动一律在这把锁里做。
+     *
+     * `_sessions.value = _sessions.value + x` 是读-改-写,不是原子的;而 [open] 中间
+     * 还夹着一次要好几秒的真实连接。两次并发的 open(连点两下卡片、信任密钥后重连
+     * 撞上原来那次)会各连一条,后一条把前一条挤出名单 —— 被挤掉的那条谁也关不掉,
+     * 它的轮询循环就在进程级作用域里一直跑。
+     */
+    private val lock = Any()
+
     private val _sessions = MutableStateFlow<Map<String, TerminalSession>>(emptyMap())
     val sessions: StateFlow<Map<String, TerminalSession>> = _sessions
 
@@ -121,31 +153,46 @@ object SessionRegistry {
 
     /** 连接并登记(阻塞,在 IO 线程调用)。已经有会话就直接复用。 */
     fun open(host: Host, cols: Int, rows: Int): TerminalSession {
-        _sessions.value[host.id]?.let { return it }
+        synchronized(lock) { _sessions.value[host.id] }?.let { return it }
+        // 真正的连接不能放在锁里 —— 它要好几秒,会把 close / 通知栏的全部断开一起堵死。
         val live = connectHost(host, cols, rows)
-        val session = TerminalSession(host.id, host.label, host.subtitle, live, scope)
-        _sessions.value = _sessions.value + (host.id to session)
-        return session
+        synchronized(lock) {
+            _sessions.value[host.id]?.let { existing ->
+                // 这段时间里别人先连上了:把自己这条多余的连接关掉,别让它漏在外面。
+                live.closeAsync()
+                return existing
+            }
+            val session = TerminalSession(host.id, host.label, host.subtitle, live, scope)
+            _sessions.value = _sessions.value + (host.id to session)
+            return session
+        }
     }
 
     fun close(hostId: String) {
-        val session = _sessions.value[hostId] ?: return
-        _sessions.value = _sessions.value - hostId
+        val session = synchronized(lock) {
+            _sessions.value[hostId]?.also { _sessions.value = _sessions.value - hostId }
+        } ?: return
         session.shutdown()
     }
 
     fun closeAll() {
-        val all = _sessions.value
-        _sessions.value = emptyMap()
+        val all = synchronized(lock) {
+            _sessions.value.also { _sessions.value = emptyMap() }
+        }
         all.values.forEach { it.shutdown() }
     }
 
-    /** 对端断开后把它从名单里摘掉,免得主机页一直显示「运行中」。 */
-    fun reap(hostId: String) {
-        val session = _sessions.value[hostId] ?: return
-        if (!session.frame.value.alive) {
-            _sessions.value = _sessions.value - hostId
-            session.shutdown()
+    /**
+     * 对端断开后把它从名单上摘掉。由会话自己的轮询循环调用 —— 连接它已经关过了,
+     * 这里只改名单,不再 shutdown(那会在协程里取消它自己)。
+     *
+     * 比对的是**实例**而不是 id:万一同一台主机已经有了新会话,别把新的摘掉。
+     */
+    internal fun forget(session: TerminalSession) {
+        synchronized(lock) {
+            if (_sessions.value[session.hostId] === session) {
+                _sessions.value = _sessions.value - session.hostId
+            }
         }
     }
 }

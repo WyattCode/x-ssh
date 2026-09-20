@@ -10,6 +10,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 
@@ -75,8 +76,21 @@ fun App(devTarget: DevTarget? = null) {
     val context = LocalContext.current
     val store = remember { HostStore(context) }
     var hosts by remember { mutableStateOf(store.load()) }
-    var screen by remember { mutableStateOf<Screen>(Screen.Home) }
-    var selectedId by remember { mutableStateOf<String?>(null) }
+
+    // 正开着的是哪条会话 —— 这一项要活过 Activity 重建。
+    //
+    // `configChanges` 挡掉了折叠、旋转、改字号这些,但挡不掉全部(系统语言、
+    // 分屏进出的某些路径都会重建)。重建之后 SSH 会话在 SessionRegistry 里还活着,
+    // 丢的只是"我刚才在哪一屏" —— 表现就是正敲着命令突然被踢回主机列表。
+    var termHostId by rememberSaveable { mutableStateOf<String?>(null) }
+    var screen by remember {
+        // 在**第一次组合时**就算出来,不要等副作用 —— 否则会先渲染一帧主机页再跳走。
+        val restored = termHostId
+            ?.takeIf { SessionRegistry[it] != null }
+            ?.let { id -> hosts.firstOrNull { it.id == id } }
+        mutableStateOf<Screen>(if (restored != null) Screen.Terminal(restored) else Screen.Home)
+    }
+    var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
         val target = devTarget ?: return@LaunchedEffect
@@ -93,6 +107,7 @@ fun App(devTarget: DevTarget? = null) {
             password = target.password.orEmpty(),
         )
         selectedId = host.id
+        termHostId = host.id
         screen = Screen.Terminal(host)
     }
 
@@ -102,6 +117,8 @@ fun App(devTarget: DevTarget? = null) {
     }
 
     BackHandler(enabled = screen != Screen.Home) {
+        // 返回只是离开这一屏,会话照跑(主机页会显示「运行中」)。
+        termHostId = null
         screen = Screen.Home
     }
 
@@ -110,7 +127,10 @@ fun App(devTarget: DevTarget? = null) {
             hosts = hosts,
             selectedId = selectedId,
             onSelect = { selectedId = it.id },
-            onConnect = { screen = Screen.Terminal(it) },
+            onConnect = {
+                termHostId = it.id
+                screen = Screen.Terminal(it)
+            },
             onNew = { screen = Screen.Editor(null) },
             onEdit = { screen = Screen.Editor(it) },
             onDelete = { host ->
@@ -139,7 +159,10 @@ fun App(devTarget: DevTarget? = null) {
 
         is Screen.Terminal -> TerminalScreen(
             host = current.host,
-            onExit = { screen = Screen.Home },
+            onExit = {
+                termHostId = null
+                screen = Screen.Home
+            },
             onTrustKey = { fingerprint ->
                 // 换一个 Host 实例 → 终端屏的 remember(host) 失效 → 带着新指纹重连。
                 val trusted = current.host.copy(keyFingerprint = fingerprint)
