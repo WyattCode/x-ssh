@@ -289,24 +289,17 @@ private fun HostCard(
         onLongClick = { menu = true },
         paddingVertical = 13.dp,
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                // 标签跟名称同排:名称本来就短,这样省掉整整一行,卡片矮三成。
-                // 地址是辨认主机的关键,给它独占一行,永远不被挤掉。
+        // 卡片够宽:标签和 ⋮ 同在一条中线上(标签原来跟着名称走,比 ⋮ 高 8.4dp,
+        // 一排东西两条中线,看着就是歪的)。卡片窄(内屏竖屏双列只有 250dp 可用):
+        // 标签必须退回名称旁边,否则地址会被挤成 `ubuntu@19…` —— 地址是辨认主机的
+        // 依据,任何时候都不能截。
+        BoxWithConstraints {
+            val centeredChips = maxWidth >= 340.dp
+            val chips: @Composable () -> Unit = {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    Text(
-                        host.label,
-                        color = p.text,
-                        fontSize = 15.5.sp,
-                        fontWeight = FontWeight.Medium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        // 名字占满剩余宽度,把标签顶到最右 —— 标签的右边缘于是每张卡都一样。
-                        modifier = Modifier.weight(1f),
-                    )
                     if (running) Chip("运行中", p.ok)
                     Chip(
                         if (host.auth == AuthKind.KEY) "私钥" else "密码",
@@ -314,16 +307,50 @@ private fun HostCard(
                     )
                     if (host.keyFingerprint.isBlank()) Chip("密钥待确认", p.warn)
                 }
-                Spacer(Modifier.height(3.dp))
-                Text(
-                    host.subtitle,
-                    color = p.textDim,
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 12.5.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
             }
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    if (centeredChips) {
+                        Text(
+                            host.label,
+                            color = p.text,
+                            fontSize = 15.5.sp,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    } else {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                host.label,
+                                color = p.text,
+                                fontSize = 15.5.sp,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                // 名字占满剩余宽度,把标签顶到最右 —— 每张卡的标签右缘因此对齐。
+                                modifier = Modifier.weight(1f),
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            chips()
+                        }
+                    }
+                    Spacer(Modifier.height(3.dp))
+                    Text(
+                        host.subtitle,
+                        color = p.textDim,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 12.5.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                if (centeredChips) {
+                    Spacer(Modifier.width(8.dp))
+                    chips()
+                    Spacer(Modifier.width(6.dp))
+                }
             Box {
                 XsshIconButton("⋮") { menu = true }
                 HostMenu(
@@ -332,6 +359,7 @@ private fun HostCard(
                     onEdit = { onEdit(host) },
                     onDelete = { onDelete(host) },
                 )
+            }
             }
         }
     }
