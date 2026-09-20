@@ -396,6 +396,16 @@ $env:JAVA_HOME="C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot"
 真机渲染几乎没变(80% vs 81%)。判断图标做得对不对**不能看 MIUI 桌面**,要按规范自己渲染:
 裁出中间 72dp、套遮罩,再看符号占比。
 
+### M3.9 分栏判据改用实测宽度 + 去掉中线
+- 两栏之间**不再画线**:折痕本身就是分界,再补一条是多余的。
+- 分栏判据从 `Configuration.screenWidthDp` 改成 **BoxWithConstraints 实测到的窗口宽度**。
+  分屏时部分机型的 `screenWidthDp` 仍报整块屏幕的宽度,那样会在只有半屏宽的窗口里摆双栏:
+  左栏按折痕位置占满整个窗口,右栏被挤出窗口 —— 表现就是"内容跑到右边"。
+  另加一道兜底:左栏宽度 `coerceAtMost(窗口宽 - 280dp)`,无论如何吃不掉整个窗口。
+  **注意:这条是按代码推断做的防御性修复,未能在真机上复现分屏场景**
+  (MIUI 下 `--windowingMode 6` 只是把窗口标成 `mInSplitScreen=true`,bounds 仍是全屏;
+  `--activity-launch-adjacent` 被系统拒绝)。需要人工进分屏验证。
+
 ## 5. 关键坑(踩过,别再踩)
 
 1. **DSR 应答**:终端事件不回写 → 远端程序挂起(ConPTY 必现;vim 同理)。已修 + 单测。

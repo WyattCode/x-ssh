@@ -88,13 +88,18 @@ fun HomeScreen(
 
     // 双栏时右栏不该是一张空页:一进来就选中第一台,详情栏永远有东西可看。
     // (参考设计里的邮件、日历,右栏从来不是空的。)
-    LaunchedEffect(adaptive.twoPane, hosts.firstOrNull()?.id) {
-        if (adaptive.twoPane && selectedId == null) hosts.firstOrNull()?.let(onSelect)
+    LaunchedEffect(hosts.firstOrNull()?.id) {
+        if (selectedId == null) hosts.firstOrNull()?.let(onSelect)
     }
 
     BoxWithConstraints(Modifier.fillMaxSize().background(p.bg)) {
-        if (adaptive.twoPane && hosts.isNotEmpty()) {
-            val listWidth = adaptive.listPaneWidth(maxWidth)
+        // 用**实测到的窗口宽度**判断分栏,不用 Configuration 的 screenWidthDp ——
+        // 分屏时部分机型的 screenWidthDp 仍报整块屏幕的宽度,那样会在只有半屏宽的窗口里
+        // 摆出双栏:左栏按折痕位置占满整个窗口,右栏被挤到窗口之外,看起来就是内容跑到右边。
+        val twoPane = maxWidth >= 840.dp || (adaptive.bookFold != null && maxWidth >= 600.dp)
+        if (twoPane && hosts.isNotEmpty()) {
+            // 再兜一层:左栏无论如何不能吃掉整个窗口。
+            val listWidth = adaptive.listPaneWidth(maxWidth).coerceAtMost(maxWidth - 280.dp)
             Row(Modifier.fillMaxSize()) {
                 HostListPane(
                     modifier = Modifier
@@ -119,13 +124,8 @@ fun HomeScreen(
                     running = running.keys,
                     columns = 1,
                 )
-                // 折痕:让它成为可见的分界,而不是从内容中间穿过去的一道暗缝。
-                Box(
-                    Modifier
-                        .width(maxOf(1.dp, adaptive.bookFold?.sizeDp ?: 1.dp))
-                        .fillMaxHeight()
-                        .background(p.border),
-                )
+                // 两栏之间不画线:折痕本身就是分界,再补一条反而多余。
+                Spacer(Modifier.width(maxOf(1.dp, adaptive.bookFold?.sizeDp ?: 0.dp)))
                 HostDetailPane(
                     modifier = Modifier
                         .weight(1f)
