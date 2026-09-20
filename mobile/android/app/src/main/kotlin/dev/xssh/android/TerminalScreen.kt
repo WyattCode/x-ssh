@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -45,6 +46,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
@@ -58,9 +60,11 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -311,21 +315,7 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
         fontSize = (fontSize * zoomChange).coerceIn(UiPrefs.FONT_MIN, UiPrefs.FONT_MAX)
     }
 
-    val header: @Composable () -> Unit = {
-        TerminalHeader(
-            host = host,
-            dead = dead,
-            onKeyboard = {
-                focusRequester.requestFocus()
-                keyboard?.show()
-            },
-            // 「断开」是唯一会真的关掉会话的地方(另一个是通知栏的全部断开)。
-            onExit = {
-                SessionRegistry.close(host.id)
-                onExit()
-            },
-        )
-    }
+    val header: @Composable () -> Unit = { HostLine(host = host, dead = dead) }
     val canvas: @Composable (Modifier) -> Unit = { modifier ->
         Box(
             modifier
@@ -354,16 +344,6 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
                 // 留一点边距:内屏圆角半径 52dp,贴边的字会被切掉一角。
                 modifier = Modifier.fillMaxSize().padding(horizontal = Gutter),
             )
-            // 翻着历史时远端还在出新内容,得有一条路一键回到最新。
-            if (frame.scrollOffset > 0) {
-                XsshButton(
-                    "↓ 回到底部",
-                    kind = ButtonKind.Ghost,
-                    modifier = Modifier.align(Alignment.BottomEnd).padding(Gutter),
-                ) {
-                    scope.launch(Dispatchers.IO) { live.scrollToBottom() }
-                }
-            }
         }
     }
     val hiddenInput: @Composable () -> Unit = {
@@ -382,25 +362,52 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
         )
     }
     val keys: @Composable () -> Unit = {
-        TerminalKeys(
-            // 宽屏折成两行全部露出;窄屏保持一行横滚,不跟终端抢竖向空间。
-            wrap = adaptive.roomyKeys,
-            ctrl = ctrl,
-            alt = alt,
-            onCtrl = { ctrl = !ctrl },
-            onAlt = { alt = !alt },
-            onFont = { step ->
-                fontSize = (fontSize + step).coerceIn(UiPrefs.FONT_MIN, UiPrefs.FONT_MAX)
-            },
-            send = { bytes -> scope.launch(Dispatchers.IO) { live.sendRaw(bytes) } },
-        )
+        FloatingKeys {
+            TerminalKeys(
+                // 宽屏折成两行全部露出;窄屏保持一行横滚,不跟终端抢竖向空间。
+                wrap = adaptive.roomyKeys,
+                ctrl = ctrl,
+                alt = alt,
+                onCtrl = { ctrl = !ctrl },
+                onAlt = { alt = !alt },
+                onFont = { step ->
+                    fontSize = (fontSize + step).coerceIn(UiPrefs.FONT_MIN, UiPrefs.FONT_MAX)
+                },
+                send = { bytes -> scope.launch(Dispatchers.IO) { live.sendRaw(bytes) } },
+            )
+        }
+    }
+
+    val rail: @Composable ColumnScope.() -> Unit = {
+        // 翻着历史时才出现,回到底部就收起 —— 不常驻,不占视线。
+        if (frame.scrollOffset > 0) {
+            RailGroup {
+                RailButton("↓", "回到底部") {
+                    scope.launch(Dispatchers.IO) { live.scrollToBottom() }
+                }
+            }
+        }
+        // 键盘与断开都是"这条会话"的操作,归进同一个胶囊 —— 参考里也是按功能成组,
+        // 不是一颗一颗散着摆。
+        RailGroup {
+            RailButton("⌨", "调出键盘") {
+                focusRequester.requestFocus()
+                keyboard?.show()
+            }
+            // ⏻ 字体里没有,会渲染成豆腐块;✕ 是一定有的字形。
+            RailButton("✕", "断开连接", tint = p.danger) {
+                SessionRegistry.close(host.id)
+                onExit()
+            }
+        }
     }
 
     val tabletop = adaptive.tabletop
     if (tabletop != null) {
         // 桌面模式:机器半开着立在桌上。上半屏只放要看的(终端),下半屏只放要碰的
         // (按键与输入法),手不会伸到上半屏去挡住输出。
-        Column(Modifier.fillMaxSize().background(p.bg)) {
+        Box(Modifier.fillMaxSize().background(p.bg)) {
+        Column(Modifier.fillMaxSize()) {
             Column(
                 Modifier
                     .height(tabletop.startDp)
@@ -420,7 +427,7 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
                 Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    .background(p.bgElev)
+                    .background(p.bg)
                     .windowInsetsPadding(
                         WindowInsets.safeDrawing.only(
                             WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal,
@@ -432,43 +439,84 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
                 keys()
             }
         }
+        EdgeRail(
+            Modifier
+                .align(Alignment.BottomEnd)
+                .safeDrawingPadding()
+                .imePadding()
+                .padding(bottom = 12.dp),
+            content = rail,
+        )
+        }
         return
     }
 
-    Column(Modifier.fillMaxSize().background(p.termBg).safeDrawingPadding().imePadding()) {
-        header()
-        canvas(Modifier.weight(1f).fillMaxWidth())
-        hiddenInput()
-        Box(Modifier.fillMaxWidth().background(p.bgElev)) { keys() }
+    Box(Modifier.fillMaxSize().background(p.termBg)) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .safeDrawingPadding()
+                .imePadding()
+                // 内容让出右边缘轨道的位置,终端文字不会被按钮压住。
+                .padding(end = RailWidth),
+        ) {
+            header()
+            canvas(Modifier.weight(1f).fillMaxWidth())
+            hiddenInput()
+            keys()
+        }
+        EdgeRail(
+            Modifier
+                .align(Alignment.BottomEnd)
+                .safeDrawingPadding()
+                .imePadding()
+                .padding(bottom = 12.dp),
+            content = rail,
+        )
     }
 }
 
+/** 浮起的按键条:不再是贴底的整条横栏,而是一块带圆角、留出边距的面板。 */
 @Composable
-private fun TerminalHeader(host: Host, dead: Boolean, onKeyboard: () -> Unit, onExit: () -> Unit) {
+private fun FloatingKeys(content: @Composable () -> Unit) {
     val p = LocalXssh.current
-    Row(
+    Box(
         Modifier
             .fillMaxWidth()
-            .background(p.bgElev)
-            .heightIn(min = 56.dp)
-            .padding(horizontal = Gutter),
+            .padding(start = 10.dp, end = 10.dp, bottom = 10.dp)
+            .clip(RoundedCornerShape(24.dp))
+            .background(p.text.copy(alpha = 0.07f)),
+    ) {
+        content()
+    }
+}
+
+/**
+ * 会话信息:一行内容,不是一条栏。
+ *
+ * 参考折叠屏的做法 —— 界面上不留固定高度的横条,信息跟着内容走,操作全在右边缘轨道里。
+ * 原来这里是一条 56dp 的 bgElev 横条,还塞着键盘和断开两个按钮,把终端从顶上压掉一块。
+ */
+@Composable
+private fun HostLine(host: Host, dead: Boolean) {
+    val p = LocalXssh.current
+    Row(
+        Modifier.fillMaxWidth().padding(start = Gutter, end = Gutter, top = 10.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // 圆点占住 16dp 那条线(与终端文字、第一个按键同缘),标题正好落在 32dp 文字线上。
+        // 圆点占住 16dp 那条线(与终端文字、第一个按键同缘),名字落在 32dp 文字线上。
         StatusDot(if (dead) p.danger else p.ok)
         Spacer(Modifier.width(7.dp))
-        Column(Modifier.weight(1f)) {
-            Text(host.label, color = p.text, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-            Text(
-                text = if (dead) "已断开" else host.subtitle,
-                color = if (dead) p.danger else p.textFaint,
-                fontFamily = FontFamily.Monospace,
-                fontSize = 11.sp,
-            )
-        }
-        XsshIconButton("⌨") { onKeyboard() }
-        Spacer(Modifier.width(8.dp))
-        XsshButton("断开", kind = ButtonKind.Danger) { onExit() }
+        Text(host.label, color = p.text, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+        Spacer(Modifier.width(10.dp))
+        Text(
+            text = if (dead) "已断开" else host.subtitle,
+            color = if (dead) p.danger else p.textFaint,
+            fontFamily = FontFamily.Monospace,
+            fontSize = 11.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 

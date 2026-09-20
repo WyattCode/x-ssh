@@ -46,6 +46,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription as contentDescriptionProperty
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
@@ -404,5 +405,82 @@ fun xsshFieldColors(): TextFieldColors {
         unfocusedLabelColor = p.textFaint,
         focusedContainerColor = p.bg,
         unfocusedContainerColor = p.bg,
+    )
+}
+
+/* ────────────────────────── 边缘轨道(参考折叠屏的 chrome 组织方式) ──────────────────────────
+
+   规则只有三条,别再往界面四角散按钮:
+   1. 内容通到边缘,不被任何栏夹住;标题是内容的一部分,不是"标题栏"。
+   2. 所有 chrome 收进**右边缘一条竖向轨道**,浮在内容之上。
+   3. 轨道里是圆形按钮,按功能分组,每组一个半透明胶囊;组与组之间留空。
+
+   为什么是右边:这台机器展开后铰链在正中,左手托住、右手操作;轨道贴右边缘,
+   拇指不用跨过折痕。合上时同样落在拇指自然弧线上。
+*/
+
+/** 轨道占的宽度(胶囊 56 + 离边 12)。内容要按这个让出位置,免得被压住。 */
+val RailWidth = 68.dp
+
+/** 一组轨道按钮:一个半透明胶囊裹住若干圆钮。 */
+@Composable
+fun RailGroup(content: @Composable ColumnScope.() -> Unit) {
+    val p = LocalXssh.current
+    Column(
+        Modifier
+            .clip(RoundedCornerShape(28.dp))
+            .background(p.text.copy(alpha = 0.13f))
+            .border(1.dp, p.text.copy(alpha = 0.10f), RoundedCornerShape(28.dp))
+            .padding(4.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        content = content,
+    )
+}
+
+/** 轨道上的圆钮。[tint] 给危险/主操作上色,其余沿用前景色。 */
+@Composable
+fun RailButton(
+    glyph: String,
+    contentDescription: String,
+    tint: Color? = null,
+    filled: Boolean = false,
+    onClick: () -> Unit,
+) {
+    val p = LocalXssh.current
+    val haptic = LocalHapticFeedback.current
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val fg = tint ?: p.text
+    Box(
+        Modifier
+            .size(TouchMin)
+            .clip(CircleShape)
+            .background(
+                when {
+                    filled -> fg
+                    pressed -> p.text.copy(alpha = 0.16f)
+                    else -> Color.Transparent
+                },
+            )
+            .clickable(interactionSource = interaction, indication = null) {
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                onClick()
+            }
+            .semantics { role = Role.Button; contentDescriptionProperty = contentDescription },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(glyph, color = if (filled) p.bg else fg, fontSize = 18.sp)
+    }
+}
+
+/** 贴右边缘的竖向轨道;[content] 里放若干 [RailGroup]。 */
+@Composable
+fun EdgeRail(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+    Column(
+        modifier.padding(end = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        content = content,
     )
 }

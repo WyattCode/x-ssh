@@ -36,10 +36,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -81,6 +84,8 @@ fun HomeScreen(
 
     // 注意:折痕位置是**窗口**坐标,所以这一层不能先加安全区内边距 —— 否则挖孔在侧边时
     // (内屏横屏挖孔占 51dp)分界线会整体右移,正好压不在折痕上。内边距放进各栏自己加。
+    var searching by remember { mutableStateOf(false) }
+
     BoxWithConstraints(Modifier.fillMaxSize().background(p.bg)) {
         if (adaptive.twoPane) {
             val listWidth = adaptive.listPaneWidth(maxWidth)
@@ -103,9 +108,10 @@ fun HomeScreen(
                     onDelete = onDelete,
                     query = query,
                     onQuery = { query = it },
+                    searching = searching,
+                    onSearching = { searching = it },
                     running = running.keys,
                     columns = 1,
-                    floatingNew = false,
                 )
                 // 折痕:让它成为可见的分界,而不是从内容中间穿过去的一道暗缝。
                 Box(
@@ -118,6 +124,8 @@ fun HomeScreen(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxHeight()
+                        // 详情栏靠右,给边缘轨道让出位置。
+                        .padding(end = RailWidth)
                         .windowInsetsPadding(
                             WindowInsets.safeDrawing.only(
                                 WindowInsetsSides.Vertical + WindowInsetsSides.End,
@@ -132,7 +140,7 @@ fun HomeScreen(
             }
         } else {
             HostListPane(
-                modifier = Modifier.fillMaxSize().safeDrawingPadding(),
+                modifier = Modifier.fillMaxSize().safeDrawingPadding().padding(end = RailWidth),
                 hosts = filtered,
                 total = hosts.size,
                 selectedId = selectedId,
@@ -142,11 +150,30 @@ fun HomeScreen(
                 onDelete = onDelete,
                 query = query,
                 onQuery = { query = it },
+                searching = searching,
+                onSearching = { searching = it },
                 running = running.keys,
                 // 一列至少 264dp:外屏排一列,内屏竖屏自动变两列,不用再判断机型。
                 columns = 0,
-                floatingNew = true,
             )
+        }
+
+        // chrome 全在这条轨道里:界面四角不再散落按钮。
+        EdgeRail(
+            Modifier
+                .align(Alignment.BottomEnd)
+                .safeDrawingPadding()
+                .padding(bottom = 12.dp),
+        ) {
+            RailGroup {
+                RailButton("⌕", "搜索主机") {
+                    searching = !searching
+                    if (!searching) query = ""
+                }
+            }
+            RailGroup {
+                RailButton("＋", "新建主机", tint = p.accent) { onNew() }
+            }
         }
     }
 }
@@ -163,40 +190,48 @@ private fun HostListPane(
     onDelete: (Host) -> Unit,
     query: String,
     onQuery: (String) -> Unit,
+    searching: Boolean,
+    onSearching: (Boolean) -> Unit,
     running: Set<String>,
     columns: Int,
-    floatingNew: Boolean,
 ) {
     val p = LocalXssh.current
     Box(modifier) {
         Column(Modifier.fillMaxSize()) {
-            Row(
+            // 标题是内容的一部分,不是一条"标题栏" —— 它跟着列表一起,不占固定高度的横条。
+            PaneTitle(
                 Modifier
                     .fillMaxWidth()
                     .padding(start = Gutter + BoxPad, end = Gutter, top = Gutter, bottom = GapItem),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                // 与详情栏用同一套字号,两栏的两行标题基线才能横跨折痕对齐。
-                PaneTitle(Modifier.weight(1f), "X-SSH", if (total == 0) "还没有主机" else "$total 台主机")
-                if (!floatingNew) XsshButton("＋ 新建", kind = ButtonKind.Ghost) { onNew() }
-            }
-
-            OutlinedTextField(
-                value = query,
-                onValueChange = onQuery,
-                placeholder = { Text("搜索名称 / 地址 / 用户", color = p.textFaint) },
-                singleLine = true,
-                colors = xsshFieldColors(),
-                shape = RoundedCornerShape(12.dp),
-                trailingIcon = {
-                    if (query.isNotEmpty()) XsshIconButton("✕") { onQuery("") }
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 56.dp)
-                    .padding(horizontal = Gutter),
+                "X-SSH",
+                if (total == 0) "还没有主机" else "$total 台主机",
             )
-            Spacer(Modifier.height(GapItem))
+
+            // 搜索平时不占地方,点轨道上的放大镜才出来。
+            if (searching) {
+                val focus = remember { FocusRequester() }
+                LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = onQuery,
+                    placeholder = { Text("搜索名称 / 地址 / 用户", color = p.textFaint) },
+                    singleLine = true,
+                    colors = xsshFieldColors(),
+                    shape = RoundedCornerShape(28.dp),
+                    trailingIcon = {
+                        XsshIconButton("✕") {
+                            onQuery("")
+                            onSearching(false)
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 56.dp)
+                        .padding(horizontal = Gutter)
+                        .focusRequester(focus),
+                )
+                Spacer(Modifier.height(GapItem))
+            }
 
             if (hosts.isEmpty()) {
                 EmptyHosts(Modifier.weight(1f).fillMaxWidth(), searching = query.isNotBlank(), onNew = onNew)
@@ -205,11 +240,7 @@ private fun HostListPane(
                     columns = if (columns > 0) GridCells.Fixed(columns) else GridCells.Adaptive(264.dp),
                     modifier = Modifier.weight(1f).fillMaxWidth(),
                     // 底部留出悬浮按钮的位置,最后一张卡片不会被挡住。
-                    contentPadding = PaddingValues(
-                        start = Gutter,
-                        end = Gutter,
-                        bottom = if (floatingNew) 96.dp else Gutter,
-                    ),
+                    contentPadding = PaddingValues(start = Gutter, end = Gutter, bottom = Gutter),
                     horizontalArrangement = Arrangement.spacedBy(GapItem),
                     verticalArrangement = Arrangement.spacedBy(GapItem),
                 ) {
@@ -226,21 +257,6 @@ private fun HostListPane(
                 }
             }
         }
-
-        // 窄屏把新建放右下角:单手握持时拇指正好落在这里,顶栏够不着。
-        // 宽屏不用悬浮按钮 —— 它会压住卡片右侧的 ⋮,而标题栏有的是地方。
-        // 列表为空时也不要:空状态是居中的一段字,浮按钮正好压在上面;
-        // 而且「还没有主机」那一屏自己就带了新建按钮,浮一个是重复。
-        if (floatingNew && hosts.isNotEmpty()) {
-            NewHostFab(Modifier.align(Alignment.BottomEnd).padding(Gutter), onNew)
-        }
-    }
-}
-
-@Composable
-private fun NewHostFab(modifier: Modifier, onNew: () -> Unit) {
-    Box(modifier) {
-        XsshButton("＋ 新建主机", modifier = Modifier.heightIn(min = 56.dp)) { onNew() }
     }
 }
 
@@ -398,11 +414,11 @@ private fun HostDetailPane(
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
+            // 空态只说话,不放按钮 —— 新建已经在右边缘轨道上,这里再来一个就是重复,
+            // 而且一个方按钮浮在空白里正是之前那种割裂感的来源。
             Text("选择左边的主机", color = p.textDim, fontSize = 15.sp)
             Spacer(Modifier.height(6.dp))
             Text("这里会显示它的详情和操作", color = p.textFaint, fontSize = 13.sp)
-            Spacer(Modifier.height(20.dp))
-            XsshButton("＋ 新建主机", kind = ButtonKind.Ghost) { onNew() }
         }
         return
     }
@@ -467,7 +483,7 @@ private fun PaneTitle(
         Text(
             title,
             color = p.text,
-            fontSize = 22.sp,
+            fontSize = 28.sp,
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
