@@ -1,5 +1,7 @@
 package dev.xssh.android
 
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.Crossfade
 import dev.chrisbanes.haze.hazeEffect
 import dev.chrisbanes.haze.HazeTint
 import dev.chrisbanes.haze.HazeStyle
@@ -507,7 +509,10 @@ fun RailButton(
             .semantics { role = Role.Button; contentDescriptionProperty = contentDescription },
         contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, contentDescription = null, tint = tint ?: p.text, modifier = Modifier.size(23.dp))
+        // 图标换了就淡入淡出地换(外观按钮每点一下图标都会变),不是生硬地一跳。
+        Crossfade(targetState = icon, animationSpec = tween(180), label = "railIcon") { shown ->
+            Icon(shown, contentDescription = null, tint = tint ?: p.text, modifier = Modifier.size(23.dp))
+        }
     }
 }
 

@@ -4,12 +4,7 @@ import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.animation.scaleOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.fadeIn
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.AnimatedVisibility
 import dev.chrisbanes.haze.rememberHazeState
 import dev.chrisbanes.haze.hazeSource
 import androidx.compose.ui.text.TextStyle
@@ -235,39 +230,11 @@ fun HomeScreen(
 
         // chrome 全在这条轨道里:界面四角不再散落按钮。轨道是毛玻璃,列表从它底下滚过去。
         val theme = LocalThemeControl.current
-        var themeMenu by remember { mutableStateOf(false) }
         CompositionLocalProvider(LocalHaze provides haze) {
-            // 外观面板:从主题按钮左侧弹出,点外面收起。
-            if (themeMenu) {
-                Box(
-                    Modifier
-                        .fillMaxSize()
-                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
-                            themeMenu = false
-                        },
-                )
-            }
-            AnimatedVisibility(
-                visible = themeMenu,
-                enter = fadeIn(tween(140)) + scaleIn(tween(180), initialScale = 0.85f, transformOrigin = TransformOrigin(1f, 1f)),
-                exit = fadeOut(tween(110)) + scaleOut(tween(140), targetScale = 0.9f, transformOrigin = TransformOrigin(1f, 1f)),
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.displayCutout))
-                    // 面板底边和主题按钮的底边对齐,右边留在轨道左侧:
-                    // 轨道离底 16,下面依次是 ＋(56)、⌕(56,没有主机时不显示),组间 14。
-                    .padding(
-                        end = RailWidth + 6.dp,
-                        bottom = Gutter + (56.dp + 14.dp) * (if (hosts.isNotEmpty()) 2 else 1),
-                    ),
-            ) {
-                ThemeMenu(theme.mode) {
-                    theme.onChange(it)
-                    themeMenu = false
-                }
-            }
             EdgeRail(Modifier.align(Alignment.BottomEnd)) {
                 // 外观放最上面一格:轨道从底部往上排,加在上面,下面的 ⌕ ＋ 一像素都不动。
+                // 点一下切到下一个模式(跟随系统 → 浅色 → 深色 → …),不弹窗 ——
+                // 界面和图标当场就变,这本身就是反馈。
                 RailGroup {
                     RailButton(
                         when (theme.mode) {
@@ -276,7 +243,15 @@ fun HomeScreen(
                             ThemeMode.System -> XIcons.Auto
                         },
                         "外观:${theme.mode.label}",
-                    ) { themeMenu = !themeMenu }
+                    ) {
+                        theme.onChange(
+                            when (theme.mode) {
+                                ThemeMode.System -> ThemeMode.Light
+                                ThemeMode.Light -> ThemeMode.Dark
+                                ThemeMode.Dark -> ThemeMode.System
+                            },
+                        )
+                    }
                 }
                 // 一台主机都没有时不摆搜索 —— 没东西可搜,按钮只是噪音。
                 if (hosts.isNotEmpty()) {
@@ -584,53 +559,6 @@ private fun HostCard(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-    }
-}
-
-/**
- * 外观面板:三项竖排,当前项右侧打勾。点选即生效。
- *
- * 不做成"点一下按钮循环切换":三个状态循环着切,用户预料不到下一下会变成什么,
- * 想从深色回到跟随系统还得多点一圈。
- */
-@Composable
-private fun ThemeMenu(current: ThemeMode, onPick: (ThemeMode) -> Unit) {
-    val p = LocalXssh.current
-    Column(
-        Modifier
-            .width(212.dp)
-            .glass(RoundedCornerShape(RadiusBox + 4.dp))
-            .padding(vertical = 6.dp),
-    ) {
-        ThemeMode.entries.forEachIndexed { index, mode ->
-            if (index > 0) {
-                Box(Modifier.fillMaxWidth().padding(start = 50.dp).height(0.5.dp).background(p.border))
-            }
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = TouchMin)
-                    .clickable { onPick(mode) }
-                    .padding(horizontal = 16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(
-                    when (mode) {
-                        ThemeMode.Light -> XIcons.Sun
-                        ThemeMode.Dark -> XIcons.Moon
-                        ThemeMode.System -> XIcons.Auto
-                    },
-                    contentDescription = null,
-                    tint = p.text,
-                    modifier = Modifier.size(20.dp),
-                )
-                Spacer(Modifier.width(14.dp))
-                Text(mode.label, color = p.text, fontSize = 16.sp, modifier = Modifier.weight(1f))
-                if (mode == current) {
-                    Icon(XIcons.Check, contentDescription = "当前", tint = p.accent, modifier = Modifier.size(18.dp))
-                }
-            }
-        }
     }
 }
 
