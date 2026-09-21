@@ -544,7 +544,7 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
             header()
             canvas(Modifier.weight(1f).fillMaxWidth())
             hiddenInput()
-            AnimatedVisibility(showKeys, enter = Motion.revealIn, exit = Motion.revealOut) { keys() }
+            AnimatedVisibility(showKeys, enter = Motion.keyboardIn, exit = Motion.keyboardOut) { keys() }
         }
         if (!topBar) {
             CompositionLocalProvider(LocalBackdrop provides backdrop) {

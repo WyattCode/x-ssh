@@ -1,5 +1,9 @@
 package dev.xssh.android
 
+import androidx.compose.ui.Alignment
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.EnterTransition
@@ -50,6 +54,20 @@ object Motion {
     fun <T> snappy(): SpringSpec<T> = spring(dampingRatio = 0.86f, stiffness = 520f)
     fun <T> page(): SpringSpec<T> = spring(dampingRatio = 1f, stiffness = 420f)
     fun <T> reveal(): SpringSpec<T> = spring(dampingRatio = 1f, stiffness = Spring.StiffnessMediumLow)
+
+    /**
+     * 终端快捷键面板的出现 / 收起:照系统键盘的样子 —— 从屏幕底边升上来,不淡入;
+     * 上面的终端同步让出高度。曲线和时长取自 Android 的输入法动画
+     * (InsetsController:弹出 275ms、PathInterpolator(0.2, 0, 0, 1);收起走加速曲线)。
+     */
+    private val imeShow = CubicBezierEasing(0.2f, 0f, 0f, 1f)
+    private val imeHide = CubicBezierEasing(0.4f, 0f, 1f, 1f)
+    val keyboardIn: EnterTransition =
+        slideInVertically(tween(275, easing = imeShow)) { it } +
+            expandVertically(tween(275, easing = imeShow), expandFrom = Alignment.Top)
+    val keyboardOut: ExitTransition =
+        slideOutVertically(tween(220, easing = imeHide)) { it } +
+            shrinkVertically(tween(220, easing = imeHide), shrinkTowards = Alignment.Top)
 
     /** 页面里一块内容出现:从上往下展开 + 淡入。 */
     val revealIn: EnterTransition = expandVertically(reveal()) + fadeIn(reveal())
