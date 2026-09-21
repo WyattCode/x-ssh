@@ -404,7 +404,7 @@ private fun HostListPane(
                             .fillMaxWidth()
                             .padding(start = BoxPad, top = Gutter, bottom = 2.dp),
                         "X-SSH",
-                        if (total == 0) "还没有主机" else "$total 台主机 · 左滑可编辑或删除",
+                        if (total == 0) "还没有主机" else "$total 台主机",
                     )
                     // 搜索平时不占地方,点轨道上的放大镜才展开出来。
                     AnimatedVisibility(searching, enter = Motion.revealIn, exit = Motion.revealOut) {
@@ -529,17 +529,7 @@ private fun FirstRun(modifier: Modifier) {
     ) {
         Text("X-SSH", color = p.text, fontSize = 34.sp, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(10.dp))
-        Text(
-            "还没有主机。点右下角的 ＋ 添加一台。",
-            color = p.textDim,
-            fontSize = 15.sp,
-        )
-        Spacer(Modifier.height(6.dp))
-        Text(
-            "添加之后:点一张卡片直接连接,左滑编辑或删除。",
-            color = p.textFaint,
-            fontSize = 13.sp,
-        )
+        Text("还没有主机", color = p.textDim, fontSize = 15.sp)
     }
     }
 }
@@ -553,8 +543,6 @@ private fun NoMatches(modifier: Modifier) {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text("没有匹配的主机", color = p.textDim, fontSize = 16.sp)
-        Spacer(Modifier.height(6.dp))
-        Text("换个关键词试试", color = p.textFaint, fontSize = 13.sp)
     }
 }
 
@@ -609,12 +597,8 @@ private fun HostCard(
                         Chip("运行中", p.ok)
                         Spacer(Modifier.width(6.dp))
                     }
-                    Chip(
-                        if (host.auth == AuthKind.KEY) "私钥" else "密码",
-                        if (host.auth == AuthKind.KEY) p.accent else p.warn,
-                    )
+                    // 只标需要注意的状态;"密码登录""已信任"这类常态不贴标签。
                     if (host.keyFingerprint.isBlank()) {
-                        Spacer(Modifier.width(6.dp))
                         Chip("密钥待确认", p.warn)
                     }
                 }
@@ -810,8 +794,6 @@ private fun HostDetailPane(
             // 空态只说话,不放按钮 —— 新建已经在右边缘轨道上,这里再来一个就是重复,
             // 而且一个方按钮浮在空白里正是之前那种割裂感的来源。
             Text("选择左边的主机", color = p.textDim, fontSize = 15.sp)
-            Spacer(Modifier.height(6.dp))
-            Text("这里会显示它的详情和操作", color = p.textFaint, fontSize = 13.sp)
         }
         return
     }
@@ -833,32 +815,20 @@ private fun HostDetailPane(
             host.subtitle,
             monoSubtitle = true,
         )
-        Spacer(Modifier.height(GapItem))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Chip(
-                if (host.auth == AuthKind.KEY) "私钥认证" else "密码认证",
-                if (host.auth == AuthKind.KEY) p.accent else p.warn,
-            )
-            Chip(
-                if (host.keyFingerprint.isBlank()) "主机密钥未确认" else "主机密钥已信任",
-                if (host.keyFingerprint.isBlank()) p.warn else p.ok,
-            )
-        }
-
-        Spacer(Modifier.height(24.dp))
-        DetailRow(
-            "认证",
-            when {
-                host.auth == AuthKind.KEY -> host.keyPath.ifBlank { "(未指定私钥)" }
-                host.password.isEmpty() -> "密码(未保存,连接前请先编辑填入)"
-                else -> "密码(已加密保存在本机)"
-            },
-        )
-        if (host.keyFingerprint.isNotBlank()) {
+        // 只说需要注意的事:主机密钥还没确认、密码还没保存。一切正常就什么都不写。
+        if (host.keyFingerprint.isBlank()) {
             Spacer(Modifier.height(GapItem))
+            Chip("主机密钥未确认", p.warn)
+        }
+        if (host.auth == AuthKind.PASSWORD && host.password.isEmpty()) {
+            Spacer(Modifier.height(24.dp))
+            DetailRow("密码", "未保存")
+        }
+        if (host.keyFingerprint.isNotBlank()) {
+            Spacer(Modifier.height(24.dp))
             val (algorithm, rows) = fingerprintRows(host.keyFingerprint)
             DetailRow(
-                if (algorithm.isBlank()) "已信任的主机密钥" else "已信任的主机密钥 · $algorithm",
+                if (algorithm.isBlank()) "主机密钥" else "主机密钥 · $algorithm",
                 rows.joinToString("\n"),
             )
         }

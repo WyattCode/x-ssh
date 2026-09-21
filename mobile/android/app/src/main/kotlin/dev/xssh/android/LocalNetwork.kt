@@ -52,7 +52,7 @@ object LocalNetwork {
     /** 连接失败后补一句原因,区分「没权限」和「真连不上」。 */
     fun hintFor(context: Context, address: String, error: String): String =
         if (needsPermission(context, address)) {
-            "$error\n\n没有本地网络权限,连接局域网地址会直接超时。请在系统设置里允许本应用访问本地网络后重试。"
+            "$error\n\n没有本地网络权限,请在系统设置里允许后重试。"
         } else {
             error
         }

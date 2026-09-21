@@ -47,7 +47,11 @@ import java.util.UUID
  *
  * 排法和其余界面一致:标题是内容不是栏,操作在右边缘轨道,字段用分组行式列表。
  * 展开的内屏不把表单拉成一条 860dp 宽的长行,而是**按折痕分成两栏**:
- * 左边填"连到哪台",右边填"怎么登录" —— 一眼能看完,也不用来回滚。
+ * 左边是连到哪台,右边是密码 —— 一眼能看完,也不用来回滚。
+ *
+ * 只有密码登录。私钥还没有导入的办法(只能填应用内部的文件路径),普通用户用不了,
+ * 界面上干脆不出现;数据模型和连接层仍然支持私钥,老数据照常能连。
+ * 页面上不写操作说明、存储说明、"后续版本"之类的话 —— 用户都知道怎么用。
  */
 @Composable
 fun HostEditorScreen(
@@ -58,16 +62,11 @@ fun HostEditorScreen(
 ) {
     val p = LocalXssh.current
     val adaptive = LocalAdaptive.current
-    val defaultKeyPath = LocalContext.current.filesDir.resolve("xssh_dev_key").absolutePath
 
     var name by remember { mutableStateOf(initial?.name ?: "") }
     var address by remember { mutableStateOf(initial?.address ?: "") }
     var port by remember { mutableStateOf((initial?.port ?: 22).toString()) }
     var username by remember { mutableStateOf(initial?.username ?: "") }
-    var auth by remember { mutableStateOf(initial?.auth ?: AuthKind.PASSWORD) }
-    var keyPath by remember {
-        mutableStateOf(initial?.keyPath?.takeIf { it.isNotBlank() } ?: defaultKeyPath)
-    }
     var password by remember { mutableStateOf(initial?.password ?: "") }
     var error by remember { mutableStateOf<String?>(null) }
 
@@ -89,17 +88,16 @@ fun HostEditorScreen(
                 address = newAddress,
                 port = newPort,
                 username = username.trim(),
-                auth = auth,
-                keyPath = keyPath.trim(),
+                auth = AuthKind.PASSWORD,
+                keyPath = "",
                 keyFingerprint = if (sameEndpoint) initial.keyFingerprint else "",
-                // 改成私钥认证就把密码丢掉:用不到的密码不该还加密躺在磁盘上。
-                password = if (auth == AuthKind.PASSWORD) password else "",
+                password = password,
             ),
         )
     }
 
     val target: @Composable () -> Unit = {
-        FormGroup(title = "连到哪台") {
+        FormGroup {
             FormField("名称", name, { name = it }, placeholder = "生产 Web")
             FormDivider()
             FormField(
@@ -125,42 +123,16 @@ fun HostEditorScreen(
     }
 
     val credentials: @Composable () -> Unit = {
-        FormGroup(
-            title = "怎么登录",
-            footnote = if (auth == AuthKind.KEY) {
-                "密钥导入与指纹解锁将在后续版本提供。"
-            } else {
-                "密码经系统密钥库加密,只存在本机。"
-            },
-        ) {
-            // 密码在前、私钥在后,新建默认密码。
-            Segmented(
-                options = listOf("密码", "私钥"),
-                selectedIndex = if (auth == AuthKind.PASSWORD) 0 else 1,
-                onSelect = { auth = if (it == 0) AuthKind.PASSWORD else AuthKind.KEY },
+        FormGroup {
+            FormField(
+                "密码",
+                password,
+                { password = it },
+                placeholder = "输入密码",
+                secret = true,
+                keyboard = KeyboardType.Password,
+                imeAction = ImeAction.Done,
             )
-            FormDivider()
-            if (auth == AuthKind.PASSWORD) {
-                FormField(
-                    "密码",
-                    password,
-                    { password = it },
-                    placeholder = "输入密码",
-                    secret = true,
-                    keyboard = KeyboardType.Password,
-                    imeAction = ImeAction.Done,
-                )
-            } else {
-                FormField(
-                    "私钥文件",
-                    keyPath,
-                    { keyPath = it },
-                    placeholder = "私钥文件路径",
-                    mono = true,
-                    imeAction = ImeAction.Done,
-                    stacked = true,
-                )
-            }
         }
     }
 
@@ -168,7 +140,7 @@ fun HostEditorScreen(
         if (initial != null && onDelete != null) {
             // 点两下才删,和主机页左滑、详情栏一致。
             var confirming by remember { mutableStateOf(false) }
-            FormGroup(footnote = if (confirming) "已信任的指纹和保存的密码会一起删掉。" else null) {
+            FormGroup {
                 FormAction(if (confirming) "确认删除这台主机" else "删除这台主机", danger = true) {
                     if (confirming) onDelete(initial) else confirming = true
                 }
@@ -195,7 +167,7 @@ fun HostEditorScreen(
                 .layerBackdrop(backdrop)
                 .background(p.groupedBg)
                 // safeDrawing 含输入法 inset:键盘一弹,可滚动区域缩到键盘上方,
-                // 聚焦的那一行会被自动滚进视野。(轨道不跟着动,见 EdgeRail。)
+                // 聚焦的那一行会被自动滚进视野。(轨道也随键盘升上来,见 EdgeRail。)
                 //
                 // **左侧不在这里加**:折痕位置是窗口坐标,整页先右移 51dp 的话,
                 // 左栏宽度仍按折痕算,分界就落到折痕右边 51dp —— 表单面板跨在折痕上。
@@ -218,12 +190,11 @@ fun HostEditorScreen(
                     fontSize = 34.sp,
                     fontWeight = FontWeight.Bold,
                 )
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    error ?: if (topBar) "填完点右上角的 ✓ 保存" else "填完点右边的 ✓ 保存",
-                    color = if (error != null) p.danger else p.textDim,
-                    fontSize = 12.5.sp,
-                )
+                // 标题下面只在出错时说话(比如地址没填),平时不放操作说明。
+                error?.let {
+                    Spacer(Modifier.height(2.dp))
+                    Text(it, color = p.danger, fontSize = 12.5.sp)
+                }
             }
             Spacer(Modifier.height(GapItem + 4.dp))
 

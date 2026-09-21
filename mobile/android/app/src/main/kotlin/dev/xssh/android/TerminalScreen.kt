@@ -139,7 +139,7 @@ fun TerminalScreen(host: Host, onExit: () -> Unit, onTrustKey: (String) -> Unit 
         // 服务端只会回一句笼统的认证失败,用户看不出是"没填"还是"填错"。
         // 也不要先弹权限框再失败 —— 在这里就说清楚。
         if (host.auth == AuthKind.PASSWORD && host.password.isEmpty()) {
-            error = "这台主机还没有保存密码。\n回到主机页,左滑这台主机 → 编辑,填入密码并保存。"
+            error = "这台主机还没有保存密码。"
             return@LaunchedEffect
         }
         val notifyPermission = SessionService.NOTIFICATION_PERMISSION
@@ -255,18 +255,11 @@ private fun HostKeyPrompt(host: Host, pending: PendingKey, onTrust: () -> Unit, 
             fontSize = 17.sp,
             fontWeight = FontWeight.SemiBold,
         )
-        Spacer(Modifier.height(10.dp))
-        Text(
-            if (pending.changed) {
-                "${host.subtitle} 这次出示的密钥与已信任的不一致。若不是你自己重装了服务端," +
-                    "连接可能被人劫持 —— 先弄清原因再继续。"
-            } else {
-                "确认 ${host.subtitle} 的指纹与服务端一致后再信任。" +
-                    "服务端上可用 ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub 查看。"
-            },
-            color = p.textDim,
-            fontSize = 13.sp,
-        )
+        // 首次连接只摆指纹,不写"怎么核对"的教程;密钥变了才多说一句 —— 那是真的危险。
+        if (pending.changed) {
+            Spacer(Modifier.height(10.dp))
+            Text("与已信任的密钥不一致,连接可能被劫持。", color = p.textDim, fontSize = 13.sp)
+        }
         Spacer(Modifier.height(16.dp))
         if (pending.changed) {
             Fingerprint("已信任", host.keyFingerprint, p.textDim)
