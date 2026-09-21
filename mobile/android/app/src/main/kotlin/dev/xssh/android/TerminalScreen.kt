@@ -347,9 +347,8 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
     // 进来**不抢焦点**,也就不弹键盘。
     //
     // 原来一连上就 requestFocus(),焦点落到输入框上系统立刻弹键盘(实测连接后 100ms)。
-    // 外屏只有 623dp 高,一进来就被键盘吃掉一半,轨道上的 ⌨ ✕ 也被盖住 ——
-    // 盖住的 ✕ 正好和输入法的回车键在同一个位置,想断开却会按成回车。
-    // 要打字时点终端或 ⌨,那两处会显式拿焦点并弹键盘。
+    // 外屏只有 623dp 高,一进来就被键盘吃掉一半,还没看清输出就要先收键盘。
+    // 要打字时点终端或 ⌨(再点一下 ⌨ 收起)。
 
     val backdrop = rememberLayerBackdrop()
 
@@ -445,8 +444,7 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
         }
     }
 
-    // 和主机页、编辑页同一条右侧竖轨道、同一个位置(见 EdgeRail)。
-    // 终端内容是左对齐的等宽字符网格,右侧让出轨道宽度不会压住任何取值。
+    // 和主机页、编辑页同一条右侧竖轨道、同一个位置(见 EdgeRail),悬浮在终端上面。
     val actions: @Composable () -> Unit = {
         // 输入相关的操作装进同一枚胶囊:键盘常驻在下(和主机页的搜索同一个位置),
         // 快捷键面板的开关在它上面(开着时图标变蓝);回到底部只在翻历史时出现,加在最上面 ——
