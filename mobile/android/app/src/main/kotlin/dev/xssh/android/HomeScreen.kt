@@ -260,9 +260,8 @@ fun HomeScreen(
                         }
                     }
                 }
-                // 无色玻璃 + 蓝色图标(参考图里"写邮件""+"都是无色玻璃)。
-                // 原来是蓝色染色玻璃:内屏双栏同一屏上有选中行、「连接」按钮、＋ 三块实心蓝在抢注意力。
-                GlassButton(XIcons.Plus, "新建主机", tint = p.accent) { onNew() }
+                // 和上面胶囊里的图标同一种样式:无色玻璃、正文色图标(参考图里"+"就是这样)。
+                GlassButton(XIcons.Plus, "新建主机") { onNew() }
             }
         }
     }
@@ -511,9 +510,9 @@ private fun HostCard(
     onLongPress: () -> Unit,
 ) {
     val p = LocalXssh.current
-    // 选中行是强调色底:文字、标签一律换成白色系,标签用半透明白底。
-    val title = if (selected) p.onAccent else p.text
-    val detail = if (selected) p.onAccent.copy(alpha = 0.82f) else p.textDim
+    // 选中行只是浅浅一层强调色底,文字和标签保持原来的颜色。
+    val title = p.text
+    val detail = p.textDim
 
     XsshCard(
         modifier = Modifier.fillMaxWidth(),
@@ -535,20 +534,16 @@ private fun HostCard(
             )
             Spacer(Modifier.width(8.dp))
             if (running) {
-                Chip("运行中", if (selected) p.onAccent else p.ok)
+                Chip("运行中", p.ok)
                 Spacer(Modifier.width(6.dp))
             }
             Chip(
                 if (host.auth == AuthKind.KEY) "私钥" else "密码",
-                when {
-                    selected -> p.onAccent
-                    host.auth == AuthKind.KEY -> p.accent
-                    else -> p.warn
-                },
+                if (host.auth == AuthKind.KEY) p.accent else p.warn,
             )
             if (host.keyFingerprint.isBlank()) {
                 Spacer(Modifier.width(6.dp))
-                Chip("密钥待确认", if (selected) p.onAccent else p.warn)
+                Chip("密钥待确认", p.warn)
             }
         }
         Spacer(Modifier.height(if (large) 4.dp else 3.dp))

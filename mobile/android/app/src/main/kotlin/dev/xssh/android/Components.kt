@@ -135,7 +135,7 @@ fun XsshCard(
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     // 列表行,不是卡片:没有边框、没有底色,行与行之间一道细线(参考图的收件箱)。
-    // 选中时整块填强调色、白字;按下时浅填充 —— 手指盖住的地方要有反馈。
+    // 选中时浅浅一层强调色底;按下时浅填充 —— 手指盖住的地方要有反馈。
     Column(
         modifier
             .clip(RoundedCornerShape(RadiusBox))
@@ -223,14 +223,16 @@ fun XsshButton(
     val pressed by interaction.collectIsPressedAsState()
     val scale by animateFloatAsState(if (pressed && enabled) 0.97f else 1f, label = "btnPress")
 
-    // iOS 的做法:主操作实心强调色;次要操作用浅填充,文字决定语义(删除就是红字),没有描边。
+    // 全部用浅填充,没有实心蓝:主操作是浅蓝底 + 蓝字(iOS 的 tinted 样式),
+    // 次要操作是浅灰底 + 正文色,危险操作是浅灰底 + 红字。
+    // 原来主操作是实心蓝白字,和选中行、回车键的实心蓝叠在一起,整屏蓝得很重。
     val background = when (kind) {
-        ButtonKind.Primary -> p.accent
+        ButtonKind.Primary -> p.accentSoft
         ButtonKind.Ghost, ButtonKind.Danger -> p.bgElev2
     }
     val foreground = when (kind) {
-        ButtonKind.Primary -> p.onAccent
-        ButtonKind.Ghost -> p.accent
+        ButtonKind.Primary -> p.accent
+        ButtonKind.Ghost -> p.text
         ButtonKind.Danger -> p.danger
     }
     Box(
@@ -279,15 +281,16 @@ fun KeyCap(
     val scope = rememberCoroutineScope()
     val shape = RoundedCornerShape(RadiusBox)
 
-    // 照系统键盘:浅色是白键,深色是灰键;按下变暗一档;粘滞修饰键和回车用强调色。
+    // 照系统键盘:浅色是白键,深色是灰键;按下变暗一档。
+    // 粘滞修饰键和回车用浅蓝底 + 蓝字,一眼能认出来,但不是一块实心蓝。
     val filled = active || emphasis
     val keyBg = when {
-        filled && pressed -> p.accent.copy(alpha = 0.8f)
-        filled -> p.accent
+        filled && pressed -> p.accent.copy(alpha = 0.34f)
+        filled -> p.accentSoft
         pressed -> if (p.dark) Color(0xFF545456) else Color(0xFFD1D1D6)
         else -> if (p.dark) Color(0xFF3A3A3C) else Color.White
     }
-    val fg = if (filled) p.onAccent else p.text
+    val fg = if (filled) p.accent else p.text
 
     Box(
         modifier
@@ -414,7 +417,8 @@ val RailClearance = 56.dp * 3 + 14.dp + 16.dp + Gutter
  * - 模糊背后的内容,并叠一层亮度层保证上面的图标清晰(regular 变体);
  * - vibrancy:透过来的颜色更饱和("映出周围的颜色");
  * - lens:边缘实时折射背后的画面(Android 13+),加镜面高光和阴影;
- * - 颜色克制:玻璃一律无色,主操作只给图标上强调色(参考图里"写邮件""+"都是无色玻璃)。
+ * - 颜色克制:玻璃一律无色,图标用正文色,只有危险操作(✕)的图标是红色
+ *   (参考图里"写邮件""+"都是无色玻璃、黑色图标)。
  *   试过给主操作用强调色染色的玻璃:内屏双栏同一屏上选中行、「连接」按钮、＋ 三块实心蓝抢注意力。
  * [press] 0..1 驱动整块玻璃的弹性缩放;[glow] 在亮度层上画按压时"从内部亮起"的光。
  */
@@ -516,7 +520,7 @@ private fun DrawScope.pressGlow(press: Press, dark: Boolean) {
 }
 
 /**
- * 单独一颗 Liquid Glass 圆钮(56dp)。每页的主操作(＋ / ✓,蓝色图标)和危险操作(✕,红色图标)
+ * 单独一颗 Liquid Glass 圆钮(56dp)。每页的主操作(＋ / ✓)和危险操作(✕,红色图标)
  * 用它,放在轨道最下面 —— 参考图里"写邮件""+"都是这样单独一颗无色玻璃。
  */
 @Composable

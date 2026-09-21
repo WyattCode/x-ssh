@@ -47,7 +47,10 @@ data class XsshPalette(
     /** 强调色上的文字/图标。 */
     val onAccent: Color,
     val accentSoft: Color,
-    /** 列表选中行:整块填强调色(参考图收件箱里的选中邮件)。 */
+    /**
+     * 列表选中行:浅浅一层强调色。试过参考图那种整块实心蓝 + 白字,
+     * 和「连接」按钮、回车键的实心蓝叠在一起太重,用户直说"很重的蓝色"。
+     */
     val rowSel: Color,
     val danger: Color,
     val ok: Color,
@@ -79,7 +82,7 @@ val DarkPalette = XsshPalette(
     accent = Color(0xFF0A84FF),
     onAccent = Color(0xFFFFFFFF),
     accentSoft = Color(0x330A84FF),
-    rowSel = Color(0xFF0A84FF),
+    rowSel = Color(0x380A84FF),
     danger = Color(0xFFFF453A),
     ok = Color(0xFF30D158),
     warn = Color(0xFFFF9F0A),
@@ -115,7 +118,7 @@ val LightPalette = XsshPalette(
     accent = Color(0xFF007AFF),
     onAccent = Color(0xFFFFFFFF),
     accentSoft = Color(0x26007AFF),
-    rowSel = Color(0xFF007AFF),
+    rowSel = Color(0x1F007AFF),
     danger = Color(0xFFFF3B30),
     ok = Color(0xFF34C759),
     warn = Color(0xFFFF9500),
