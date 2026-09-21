@@ -51,8 +51,9 @@ data class XsshPalette(
     /** 主机卡片的底色。深色下比分组块(bgElev)再暗一档,按用户要求更贴近黑底。 */
     val cardBg: Color,
     /**
-     * 列表选中行:浅浅一层强调色。试过参考图那种整块实心蓝 + 白字,
-     * 和「连接」按钮、回车键的实心蓝叠在一起太重,用户直说"很重的蓝色"。
+     * 列表选中的卡片:比普通卡片亮一档的**中性灰**,不带蓝。
+     * 试过整块实心蓝(太重)和浅蓝(深色下是一块发闷的藏青,挨着右边亮蓝的「连接」很不搭)。
+     * 蓝色只留给「连接」这一个按钮:左边灰色告诉你选的是哪台,右边蓝色告诉你下一步点哪里。
      */
     val rowSel: Color,
     val danger: Color,
@@ -86,7 +87,7 @@ val DarkPalette = XsshPalette(
     onAccent = Color(0xFFFFFFFF),
     accentSoft = Color(0x330A84FF),
     cardBg = Color(0xFF161618),
-    rowSel = Color(0x380A84FF),
+    rowSel = Color(0xFF2C2C2E),
     danger = Color(0xFFFF453A),
     ok = Color(0xFF30D158),
     warn = Color(0xFFFF9F0A),
@@ -123,7 +124,7 @@ val LightPalette = XsshPalette(
     onAccent = Color(0xFFFFFFFF),
     accentSoft = Color(0x26007AFF),
     cardBg = Color(0xFFF2F2F7),
-    rowSel = Color(0x1F007AFF),
+    rowSel = Color(0xFFE3E3E8),
     danger = Color(0xFFFF3B30),
     ok = Color(0xFF34C759),
     warn = Color(0xFFFF9500),
