@@ -1,5 +1,10 @@
 package dev.xssh.android
 
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.ui.platform.LocalFocusManager
@@ -342,8 +347,6 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
     val keyboard = LocalSoftwareKeyboardController.current
     val focusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
-    @OptIn(ExperimentalLayoutApi::class)
-    val imeVisible = WindowInsets.isImeVisible
     // 进来**不抢焦点**,也就不弹键盘。
     //
     // 原来一连上就 requestFocus(),焦点落到输入框上系统立刻弹键盘(实测连接后 100ms)。
@@ -461,6 +464,9 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
                 tint = if (showKeys) p.accent else null,
             ) { showKeys = !showKeys }
             // 键盘按钮是开关:没弹出就弹出,弹着就收起(和 ⌘ 一样,开着时图标变蓝)。
+            // 在这里读键盘状态:只有这颗按钮随它重组,不牵动整屏终端。
+            @OptIn(ExperimentalLayoutApi::class)
+            val imeVisible = WindowInsets.isImeVisible
             GlassItem(
                 XIcons.Keyboard,
                 if (imeVisible) "收起键盘" else "调出键盘",
@@ -859,10 +865,25 @@ private fun TerminalCanvas(
     }
 
     val scrollBy by rememberUpdatedState(onScroll)
-    BoxWithConstraints(modifier) {
+    BoxWithConstraints(modifier.clipToBounds()) {
+        // 画布的高度**等停下来再跟**。键盘 / 快捷键面板升起的 300ms 里可用高度每帧都在变,
+        // 原来画布跟着每帧变高变矮,每一帧都要把整屏几千个字重画一遍,动画一路掉帧(实测
+        // 90% 的帧 16~21ms,120Hz 的预算是 8ms)。现在画布保持原尺寸、多出来的部分被裁掉,
+        // 自己一层单独缓存,动画期间一笔不重画;尺寸停稳 120ms 后才换成新高度、画一次。
+        val liveHeight = constraints.maxHeight
+        var height by remember { mutableIntStateOf(liveHeight) }
+        LaunchedEffect(liveHeight) {
+            if (liveHeight != height) {
+                delay(120)
+                height = liveHeight
+            }
+        }
         val cols = (constraints.maxWidth / cell.first).toInt().coerceAtLeast(1)
-        val gridRows = (constraints.maxHeight / cell.second).toInt().coerceAtLeast(1)
+        val gridRows = (height / cell.second).toInt().coerceAtLeast(1)
+        // 行列也等停下来再改:原来每变一行就让核心重排一次、给服务端发一次窗口大小
+        // (远端全屏程序跟着整屏重画)。LaunchedEffect 换了键就会取消上一次,天然就是防抖。
         LaunchedEffect(cols, gridRows) {
+            delay(120)
             onGridSize(cols, gridRows, cell.first.roundToInt(), cell.second.roundToInt())
         }
 
@@ -892,7 +913,15 @@ private fun TerminalCanvas(
             }
         }
 
-        Canvas(Modifier.fillMaxSize().then(dragModifier)) {
+        val heightDp = with(LocalDensity.current) { height.toDp() }
+        Canvas(
+            Modifier
+                .fillMaxWidth()
+                .wrapContentHeight(align = Alignment.Top, unbounded = true)
+                .height(heightDp)
+                .graphicsLayer()
+                .then(dragModifier),
+        ) {
             val cw = cell.first
             val ch = cell.second
             rows.forEachIndexed { r, row ->

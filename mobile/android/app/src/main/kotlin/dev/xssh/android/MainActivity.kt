@@ -28,11 +28,11 @@ import androidx.compose.ui.platform.LocalWindowInfo
 class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
-        AppVisibility.foreground = true
+        AppVisibility.onStart()
     }
 
     override fun onStop() {
-        AppVisibility.foreground = false
+        AppVisibility.onStop()
         super.onStop()
     }
 

@@ -22,8 +22,20 @@ import uniffi.xssh_ffi.ScreenRow
  * `collectAsState` 还在收,于是"有人看"永远为真,后台照样按 16ms 取整屏文字。
  */
 object AppVisibility {
-    @Volatile
-    var foreground: Boolean = false
+    // 计数而不是布尔:Activity 重建(旋转、折叠切换的某些路径)时,新实例的 onStart
+    // 先到、旧实例的 onStop 后到。用布尔的话最后一步把它写成 false,应用明明在前台,
+    // 会话却以为没人看、不再往界面送画面 —— 终端整屏空白,只剩顶上的主机名。
+    private val started = java.util.concurrent.atomic.AtomicInteger(0)
+
+    val foreground: Boolean get() = started.get() > 0
+
+    fun onStart() {
+        started.incrementAndGet()
+    }
+
+    fun onStop() {
+        started.updateAndGet { (it - 1).coerceAtLeast(0) }
+    }
 }
 
 /**

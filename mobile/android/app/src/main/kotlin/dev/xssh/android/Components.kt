@@ -1,5 +1,12 @@
 package dev.xssh.android
 
+import android.hardware.display.DisplayManager
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.layout.layout
 import androidx.compose.foundation.layout.imeAnimationTarget
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.Density
@@ -686,56 +693,72 @@ fun TopBar(
  */
 @Composable
 fun EdgeRail(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    val insets = stableSafeDrawing()
+    val camera = rememberCornerCamera()
+    val gap = with(LocalDensity.current) { 8.dp.roundToPx() }
     Column(
         modifier
-            .windowInsetsPadding(stableSafeDrawing().only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom))
-            .padding(end = Gutter, bottom = Gutter),
+            .windowInsetsPadding(insets.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom))
+            .padding(end = Gutter, bottom = Gutter)
+            // 摄像头挖孔落在右下角(小米 Fold 内屏倒着拿横屏)时,整条轨道往上让开,
+            // 底边停在挖孔上方 8dp。键盘弹起来盖住了那一角就不用让。
+            // 在布局阶段算,键盘动画的每一帧只重新摆放,不重组。
+            .layout { measurable, constraints ->
+                val placeable = measurable.measure(constraints)
+                val rest = insets.getBottom(this) + Gutter.roundToPx()
+                val lift = if (camera > 0) (camera + gap - rest).coerceAtLeast(0) else 0
+                layout(placeable.width, placeable.height) { placeable.place(0, -lift) }
+            },
         verticalArrangement = Arrangement.spacedBy(14.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) { content() }
 }
 
 /**
- * `safeDrawing`,但**键盘弹出 / 收起的整个过程中,左右两边沿用键盘动起来之前的值**。
+ * 页面要避开的系统区域:状态栏、导航栏、输入法 —— **不含挖孔**。
  *
- * 小米 Fold 内屏横屏实测:没有键盘时右侧 inset 是 0;一请求键盘,系统立刻把右侧报成 140px,
- * 键盘升到顶后又变回 0。于是整页先往左挤一截,紧接着又往右弹回去(用户看到的"先压缩再突然往右")。
- * 键盘并不改变屏幕左右可用的区域,左右边距不该跟着它变;上下(含键盘高度)照常取实时值。
- *
- * "键盘在动"用 [imeAnimationTarget] 判断:请求键盘的第一帧它就有值,比键盘自己的 inset 早。
+ * 小米 Fold 内屏横屏实测:平时系统报的挖孔 inset 是 0,一请求键盘就报成 140px,
+ * 动画结束又变回 0(倒着拿时在右边,正着拿时在左边)。照单全收的话,整页内容和右侧按钮
+ * 跟着键盘先横着挤一下、再弹回去,就是用户看到的"卡一下、跳一下"。
+ * 挖孔在所有形态下都落在状态栏里或某个角上:角上的那个只会碰到右下角的轨道,
+ * 由 [EdgeRail] 按屏幕真实的挖孔位置单独避让([rememberCornerCamera])。
  */
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun stableSafeDrawing(): WindowInsets {
-    val base = WindowInsets.safeDrawing
+    val bars = WindowInsets.systemBars
     val ime = WindowInsets.ime
-    val target = WindowInsets.imeAnimationTarget
-    return remember(base, ime, target) { ImeStableInsets(base, ime, target) }
+    return remember(bars, ime) { bars.union(ime) }
 }
 
-private class ImeStableInsets(
-    private val base: WindowInsets,
-    private val ime: WindowInsets,
-    private val target: WindowInsets,
-) : WindowInsets {
-    private var left = -1
-    private var right = -1
-
-    private fun settled(density: Density) = ime.getBottom(density) == 0 && target.getBottom(density) == 0
-
-    override fun getLeft(density: Density, layoutDirection: LayoutDirection): Int {
-        val now = base.getLeft(density, layoutDirection)
-        if (left < 0 || settled(density)) left = now
-        return left
+/**
+ * 摄像头挖孔如果落在屏幕右下角(轨道所在的角),返回轨道底边至少要离屏幕底边多少像素;否则 0。
+ *
+ * 取的是**屏幕**的挖孔(`Display.getCutout()`,随当前旋转方向),不看窗口 inset —— 后者在 MIUI 上
+ * 会随键盘忽有忽无。倒着拿横屏不会触发配置变更(宽高没变),所以另外监听屏幕旋转。
+ */
+@Composable
+fun rememberCornerCamera(): Int {
+    val view = LocalView.current
+    val context = LocalContext.current
+    var rotation by remember { mutableStateOf(view.display?.rotation ?: 0) }
+    DisposableEffect(context) {
+        val manager = context.getSystemService(DisplayManager::class.java)
+        val listener = object : DisplayManager.DisplayListener {
+            override fun onDisplayAdded(displayId: Int) {}
+            override fun onDisplayRemoved(displayId: Int) {}
+            override fun onDisplayChanged(displayId: Int) {
+                view.display?.let { if (it.displayId == displayId) rotation = it.rotation }
+            }
+        }
+        manager?.registerDisplayListener(listener, null)
+        onDispose { manager?.unregisterDisplayListener(listener) }
     }
-
-    override fun getRight(density: Density, layoutDirection: LayoutDirection): Int {
-        val now = base.getRight(density, layoutDirection)
-        if (right < 0 || settled(density)) right = now
-        return right
+    val size = LocalWindowInfo.current.containerSize
+    return remember(rotation, size) {
+        val rects = view.display?.cutout?.boundingRects.orEmpty()
+        val railZone = size.width * 0.8f
+        rects
+            .filter { it.left > railZone && it.top > size.height / 2 }
+            .maxOfOrNull { size.height - it.top } ?: 0
     }
-
-    override fun getTop(density: Density): Int = base.getTop(density)
-
-    override fun getBottom(density: Density): Int = base.getBottom(density)
 }
