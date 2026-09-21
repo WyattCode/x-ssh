@@ -1,5 +1,6 @@
 package dev.xssh.android
 
+import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.unit.Dp
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -570,6 +571,7 @@ private val KeyGap = 6.dp
 @Composable
 private fun FloatingKeys(columns: Int, content: @Composable (keyWidth: Dp) -> Unit) {
     val p = LocalXssh.current
+    val rail = LocalChrome.current == Chrome.Rail
     BoxWithConstraints(
         Modifier
             .fillMaxWidth()
@@ -577,8 +579,13 @@ private fun FloatingKeys(columns: Int, content: @Composable (keyWidth: Dp) -> Un
         contentAlignment = Alignment.Center,
     ) {
         val keyWidth = ((maxWidth - KeyGap * 2 - KeyGap * (columns - 1)) / columns).coerceAtMost(KeyMaxWidth)
+        // 这一栏右边让出了轨道的宽度,只在栏里居中的话,面板看上去偏左。
+        // 两边空得够时往右挪半条轨道,落在整块屏幕的正中;空间不够(外屏)就留在栏里。
+        val panel = keyWidth * columns + KeyGap * (columns + 1)
+        val shift = if (rail) minOf(RailWidth / 2, (maxWidth - panel) / 2).coerceAtLeast(0.dp) else 0.dp
         Box(
             Modifier
+                .offset(x = shift)
                 // 圆角和里面的按键同一个量级(按键 12dp,面板 16dp)。
                 .clip(RoundedCornerShape(RadiusBox + 4.dp))
                 // 照系统键盘:浅色是浅灰底上的白键,深色是深灰底上的灰键。
