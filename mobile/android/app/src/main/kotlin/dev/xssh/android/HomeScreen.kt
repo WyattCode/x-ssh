@@ -402,48 +402,51 @@ private fun HostListPane(
                         // 细线画在两行之间;选中行(整块强调色)上下都不画,免得在色块边上多出一道。
                         val next = hosts.getOrNull(index + 1)
                         val divider = next != null && host.id != selectedId && next.id != selectedId
-                        val open = host.id == openId
-                        SwipeActions(
-                            open = open,
-                            // 删掉一张之后,下面的卡片滑上来补位,而不是瞬间跳上来。
-                            modifier = Modifier.animateItem(),
-                            onDragStart = { if (openId != host.id) openId = null },
-                            onOpenChange = { nowOpen ->
-                                openId = if (nowOpen) host.id else null
-                                if (nowOpen) revealAboveRail(host.id)
-                            },
-                            onEdit = {
-                                openId = null
-                                onEdit(host)
-                            },
-                            onDelete = {
-                                openId = null
-                                onDelete(host)
-                            },
-                        ) {
-                            HostCard(
-                                host = host,
-                                large = large,
-                                selected = host.id == selectedId,
-                                running = host.id in running,
-                                // 开着的时候点卡片是"合上",不是连接 —— 和 iOS 一致。
-                                onPrimary = { if (openId != null) openId = null else onPrimary(it) },
-                                // 长按也能打开,给不知道要左滑的人一条路(不再弹那个菜单)。
-                                onLongPress = {
-                                    openId = host.id
-                                    revealAboveRail(host.id)
+                        // 行和分隔线要**上下排**。网格的每一项默认是叠放(Box),不包一层 Column 的话,
+                        // 分隔线会画到每一行的顶部:标题下面多一条,最后两行之间反而少一条。
+                        // 删掉一行之后,下面的行滑上来补位 —— animateItem 要挂在每一项的最外层。
+                        Column(Modifier.animateItem()) {
+                            val open = host.id == openId
+                            SwipeActions(
+                                open = open,
+                                onDragStart = { if (openId != host.id) openId = null },
+                                onOpenChange = { nowOpen ->
+                                    openId = if (nowOpen) host.id else null
+                                    if (nowOpen) revealAboveRail(host.id)
                                 },
-                            )
-                        }
-                        if (divider) {
-                            // 从文字起点开始,和参考图一样左侧内缩。
-                            Box(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .padding(start = BoxPad)
-                                    .height(0.5.dp)
-                                    .background(p.border),
-                            )
+                                onEdit = {
+                                    openId = null
+                                    onEdit(host)
+                                },
+                                onDelete = {
+                                    openId = null
+                                    onDelete(host)
+                                },
+                            ) {
+                                HostCard(
+                                    host = host,
+                                    large = large,
+                                    selected = host.id == selectedId,
+                                    running = host.id in running,
+                                    // 开着的时候点卡片是"合上",不是连接 —— 和 iOS 一致。
+                                    onPrimary = { if (openId != null) openId = null else onPrimary(it) },
+                                    // 长按也能打开,给不知道要左滑的人一条路(不再弹那个菜单)。
+                                    onLongPress = {
+                                        openId = host.id
+                                        revealAboveRail(host.id)
+                                    },
+                                )
+                            }
+                            if (divider) {
+                                // 从文字起点开始,和参考图一样左侧内缩。
+                                Box(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .padding(start = BoxPad)
+                                        .height(0.5.dp)
+                                        .background(p.border),
+                                )
+                            }
                         }
                     }
                 }
