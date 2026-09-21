@@ -218,7 +218,7 @@ fun HomeScreen(
                 searching = searching,
                 onSearching = { searching = it },
                 running = running.keys,
-                // 单栏(外屏、内屏竖屏)一律单列大卡片。
+                // 单栏(外屏、内屏竖屏)一律单列、大号的行。
                 // 原来按 264dp 自适应,竖屏排成两列,每张卡片只有 280dp 宽、57dp 高,
                 // 在 860dp 高的屏幕上缩在左上角,七成空着。
                 columns = 1,
@@ -228,7 +228,7 @@ fun HomeScreen(
             )
         }
 
-        // chrome 全在这条轨道里:界面四角不再散落按钮。轨道是毛玻璃,列表从它底下滚过去。
+        // chrome 全在这条轨道里:界面四角不再散落按钮。轨道是 Liquid Glass,列表从它底下滚过去。
         val theme = LocalThemeControl.current
         CompositionLocalProvider(LocalBackdrop provides backdrop) {
             EdgeRail(Modifier.align(Alignment.BottomEnd)) {
@@ -283,7 +283,7 @@ private fun HostListPane(
     onSearching: (Boolean) -> Unit,
     running: Set<String>,
     columns: Int,
-    /** 单栏用大卡片:外屏和竖屏上一张卡片就是一个手指目标,不该是一行小字。 */
+    /** 单栏用大号的行:外屏和竖屏上一行就是一个手指目标,不该是一行小字。 */
     large: Boolean,
     /** 靠折痕(或屏幕右缘)那一侧的留白。 */
     creaseGap: Dp,
@@ -337,7 +337,7 @@ private fun HostListPane(
                     .fillMaxWidth()
                     .padding(start = Gutter + BoxPad, end = creaseGap, top = Gutter, bottom = GapItem),
                 "X-SSH",
-                if (total == 0) "还没有主机" else "$total 台主机 · 左滑卡片可编辑或删除",
+                if (total == 0) "还没有主机" else "$total 台主机 · 左滑可编辑或删除",
             )
 
             // 搜索平时不占地方,点轨道上的放大镜才出来。
@@ -479,7 +479,7 @@ private fun FirstRun(modifier: Modifier) {
         )
         Spacer(Modifier.height(6.dp))
         Text(
-            "添加之后:点卡片直接连接,左滑卡片编辑或删除。",
+            "添加之后:点一行直接连接,左滑编辑或删除。",
             color = p.textFaint,
             fontSize = 13.sp,
         )

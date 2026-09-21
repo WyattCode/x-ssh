@@ -198,7 +198,7 @@ fun FormAction(label: String, danger: Boolean = false, onClick: () -> Unit) {
 }
 
 /**
- * 分段选择(私钥 / 密码)。
+ * 分段选择(密码 / 私钥)。
  *
  * 比两个并排的按钮好在:它是一个整体,一眼看得出"这几个里选一个",
  * 而不是"两个都能按"。

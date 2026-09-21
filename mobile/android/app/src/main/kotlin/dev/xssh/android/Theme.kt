@@ -52,16 +52,15 @@ data class XsshPalette(
     val danger: Color,
     val ok: Color,
     val warn: Color,
-    /** 毛玻璃:叠在模糊背景上的那层底色。 */
+    /** Liquid Glass 的亮度层:叠在模糊背景上,保证上面的图标在任何底色上都读得出。 */
     val glassTint: Color,
-    /** 毛玻璃的描边 —— 浅色是一道亮边,深色是一道极淡的白边,勾出玻璃的轮廓。 */
+    /** 没有背景源时玻璃的细边,以及按键面板的描边。 */
     val glassBorder: Color,
-    /** 毛玻璃的投影。深色模式下投影看不见,干脆不画。 */
+    /** Liquid Glass 的投影。 */
     val glassShadow: Color,
     val termBg: Color,
     val termFg: Color,
     val termCursor: Color,
-    val termSel: Color,
     /** 终端 16 色(ANSI 0..15),交给 Rust 解析颜色时用。浅色底上不能沿用深色那套。 */
     val term16: List<Long>,
 )
@@ -84,13 +83,12 @@ val DarkPalette = XsshPalette(
     danger = Color(0xFFFF453A),
     ok = Color(0xFF30D158),
     warn = Color(0xFFFF9F0A),
-    glassTint = Color(0x8C2C2C2E),
+    glassTint = Color(0x5C121214),
     glassBorder = Color(0x24FFFFFF),
-    glassShadow = Color(0x00000000),
+    glassShadow = Color(0x66000000),
     termBg = Color(0xFF000000),
     termFg = Color(0xFFF2F2F7),
     termCursor = Color(0xFF0A84FF),
-    termSel = Color(0x660A84FF),
     // 与 Rust 核心的默认 16 色一致(深色底上对比度够的一组)。
     term16 = listOf(
         0x000000, 0xCD3131, 0x0DBC79, 0xE5E510, 0x2472C8, 0xBC3FBC, 0x11A8CD, 0xE5E5E5,
@@ -121,15 +119,13 @@ val LightPalette = XsshPalette(
     danger = Color(0xFFFF3B30),
     ok = Color(0xFF34C759),
     warn = Color(0xFFFF9500),
-    // 浅色玻璃不能是白的:白底上白色亮边等于没有,轨道按钮只剩一点阴影,像悬在空中。
-    // 用浅灰半透明底色 + 一道很淡的深色细边,轮廓才出得来(iOS 的玻璃在白底上也是灰的)。
-    glassTint = Color(0xD1F2F2F5),
+    // 浅色玻璃:白色亮度层 + 投影;轮廓靠 Liquid Glass 的边缘折射和高光勾出来。
+    glassTint = Color(0x94FFFFFF),
     glassBorder = Color(0x1A000000),
     glassShadow = Color(0x24000000),
     termBg = Color(0xFFFFFFFF),
     termFg = Color(0xFF1C1C1E),
     termCursor = Color(0xFF007AFF),
-    termSel = Color(0x40007AFF),
     // 白底终端配色:"白色"文字在白底上看不见,换成中灰;黄色压暗。
     term16 = listOf(
         0x000000, 0xCD3131, 0x00A000, 0x949800, 0x0451A5, 0xBC05BC, 0x0598BC, 0x555555,

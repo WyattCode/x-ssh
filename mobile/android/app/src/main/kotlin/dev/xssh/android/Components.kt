@@ -169,7 +169,7 @@ fun XsshCard(
 
 /**
  * 点击 + 长按。用 `combinedClickable` 会把长按也报成一次点击前的按下态,这里手写
- * 手势以便长按后**不再**触发点击(卡片长按出菜单,松手不应该顺带连上主机)。
+ * 手势以便长按后**不再**触发点击(长按打开左滑按钮,松手不应该顺带连上主机)。
  */
 @Composable
 private fun combinedTap(
@@ -253,33 +253,6 @@ fun XsshButton(
             fontWeight = FontWeight.SemiBold,
             textAlign = TextAlign.Center,
         )
-    }
-}
-
-/** 只有一个符号的按钮(⋮、⌨ 之类)。符号再小,可点区域也必须是整整 48dp。 */
-@Composable
-fun XsshIconButton(
-    glyph: String,
-    modifier: Modifier = Modifier,
-    tint: Color? = null,
-    onClick: () -> Unit,
-) {
-    val p = LocalXssh.current
-    val haptic = LocalHapticFeedback.current
-    val interaction = remember { MutableInteractionSource() }
-    val pressed by interaction.collectIsPressedAsState()
-    Box(
-        modifier
-            .size(TouchMin)
-            .clip(RoundedCornerShape(RadiusBox))
-            .background(if (pressed) p.bgElev2 else Color.Transparent)
-            .clickable(interactionSource = interaction, indication = null) {
-                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                onClick()
-            },
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(glyph, color = tint ?: p.textDim, fontSize = 18.sp)
     }
 }
 
@@ -406,28 +379,14 @@ fun Chip(text: String, color: Color) {
     }
 }
 
-@Composable
-fun xsshFieldColors(): TextFieldColors {
-    val p = LocalXssh.current
-    return OutlinedTextFieldDefaults.colors(
-        focusedBorderColor = p.accent,
-        unfocusedBorderColor = p.borderStrong,
-        focusedTextColor = p.text,
-        unfocusedTextColor = p.text,
-        cursorColor = p.accent,
-        focusedLabelColor = p.accent,
-        unfocusedLabelColor = p.textFaint,
-        focusedContainerColor = p.bg,
-        unfocusedContainerColor = p.bg,
-    )
-}
 
 /* ────────────────────────── 边缘轨道(参考折叠屏的 chrome 组织方式) ──────────────────────────
 
    规则只有三条,别再往界面四角散按钮:
    1. 内容通到边缘,不被任何栏夹住;标题是内容的一部分,不是"标题栏"。
    2. 所有 chrome 收进**右边缘一条竖向轨道**,浮在内容之上。
-   3. 轨道里是圆形按钮,按功能分组,每组一个半透明胶囊;组与组之间留空。
+   3. 相关的按钮装进同一枚 Liquid Glass 胶囊(GlassGroup),主操作单独一颗圆(GlassButton)
+      放在最下面;组与组之间留空。
 
    为什么是右边:这台机器展开后铰链在正中,左手托住、右手操作;轨道贴右边缘,
    拇指不用跨过折痕。合上时同样落在拇指自然弧线上。
@@ -467,11 +426,7 @@ private fun Modifier.liquidGlass(
 ): Modifier {
     val p = LocalXssh.current
     val backdrop = LocalBackdrop.current
-    val surface = when {
-        prominent -> p.accent.copy(alpha = if (p.dark) 0.78f else 0.86f)
-        p.dark -> Color(0xFF121214).copy(alpha = 0.36f)
-        else -> Color.White.copy(alpha = 0.58f)
-    }
+    val surface = if (prominent) p.accent.copy(alpha = if (p.dark) 0.78f else 0.86f) else p.glassTint
     return if (backdrop != null) {
         drawBackdrop(
             backdrop = backdrop,
@@ -482,7 +437,7 @@ private fun Modifier.liquidGlass(
                 lens(refractionHeight = 10.dp.toPx(), refractionAmount = 20.dp.toPx(), depthEffect = true)
             },
             highlight = { Highlight.Default.copy(alpha = if (p.dark) 0.6f else 1f) },
-            shadow = { Shadow(radius = 16.dp, color = Color.Black.copy(alpha = if (p.dark) 0.4f else 0.14f)) },
+            shadow = { Shadow(radius = 16.dp, color = p.glassShadow) },
             layerBlock = {
                 val s = 1f + 0.08f * press()
                 scaleX = s

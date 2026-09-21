@@ -130,7 +130,7 @@ fun TerminalScreen(host: Host, onExit: () -> Unit, onTrustKey: (String) -> Unit 
         // 服务端只会回一句笼统的认证失败,用户看不出是"没填"还是"填错"。
         // 也不要先弹权限框再失败 —— 在这里就说清楚。
         if (host.auth == AuthKind.PASSWORD && host.password.isEmpty()) {
-            error = "这台主机还没有保存密码。\n回到主机页,长按卡片 → 编辑,填入密码并保存。"
+            error = "这台主机还没有保存密码。\n回到主机页,左滑这台主机 → 编辑,填入密码并保存。"
             return@LaunchedEffect
         }
         val notifyPermission = SessionService.NOTIFICATION_PERMISSION
@@ -365,7 +365,7 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
         prefs.terminalFontSize = fontSize
     }
 
-    val transformState = rememberTransformableState { zoomChange, _, _ ->
+    val transformState = rememberTransformableState { _: Offset, zoomChange: Float, _: Offset, _: Float ->
         fontSize = (fontSize * zoomChange).coerceIn(UiPrefs.FONT_MIN, UiPrefs.FONT_MAX)
     }
 
@@ -531,7 +531,10 @@ private fun FloatingKeys(content: @Composable () -> Unit) {
     Box(
         Modifier
             .fillMaxWidth()
-            .padding(start = 10.dp, end = 10.dp, bottom = 10.dp)
+            // 三边都是 16dp:左缘和全应用所有面板、卡片同一条线;离底和右侧轨道一样高,
+            // 面板底边和 ✕ 按钮底边齐平;右边和轨道之间也留 16dp,跟编辑页的表单一致。
+            // 原来是 10dp,左边比别处的面板多出去 6dp,底边比 ✕ 低 6dp。
+            .padding(start = Gutter, end = Gutter, bottom = Gutter)
             // 圆角和里面的按键同一个量级(按键 12dp,面板 16dp)。
             // 原来 32dp 按"跟屏幕圆角同心"来算,面板不高,看上去就是一条胶囊,
             // 和里面方正的按键不是一家人 —— 用户明确要求改成跟按键差不多。
