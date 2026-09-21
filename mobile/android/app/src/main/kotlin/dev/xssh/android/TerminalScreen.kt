@@ -1,5 +1,11 @@
 package dev.xssh.android
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.runtime.SideEffect
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.Crossfade
@@ -239,7 +245,7 @@ private fun HostKeyPrompt(host: Host, pending: PendingKey, onTrust: () -> Unit, 
         Modifier
             .fillMaxSize()
             .background(p.bg)
-            .safeDrawingPadding()
+            .windowInsetsPadding(stableSafeDrawing())
             .padding(Gutter + BoxPad),
         verticalArrangement = Arrangement.Center,
     ) {
@@ -311,7 +317,7 @@ private fun ConnectResult(message: String, retry: (() -> Unit)?, onExit: () -> U
         Modifier
             .fillMaxSize()
             .background(p.bg)
-            .safeDrawingPadding()
+            .windowInsetsPadding(stableSafeDrawing())
             .padding(Gutter + BoxPad),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -359,6 +365,8 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
     val dead = !frame.alive
     var fontSize by remember { mutableStateOf(prefs.terminalFontSize) }
     var ctrl by remember { mutableStateOf(false) }
+    // 快捷键面板默认收起,终端多出两行;点轨道上的 ⌘ 才出来。
+    var showKeys by remember { mutableStateOf(false) }
     var alt by remember { mutableStateOf(false) }
     var grid by remember { mutableStateOf(0 to 0) }
 
@@ -438,14 +446,20 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
     // 和主机页、编辑页同一条右侧竖轨道、同一个位置(见 EdgeRail)。
     // 终端内容是左对齐的等宽字符网格,右侧让出轨道宽度不会压住任何取值。
     val actions: @Composable () -> Unit = {
-        // "看"的两个操作装进同一枚胶囊:键盘常驻在下(和主机页的搜索同一个位置),
-        // 回到底部只在翻历史时出现,加在键盘上面 —— 胶囊往上长,键盘不动。
+        // 输入相关的操作装进同一枚胶囊:键盘常驻在下(和主机页的搜索同一个位置),
+        // 快捷键面板的开关在它上面(开着时图标变蓝);回到底部只在翻历史时出现,加在最上面 ——
+        // 胶囊往上长,键盘不动。
         GlassGroup {
             if (frame.scrollOffset > 0) {
                 GlassItem(XIcons.ArrowDown, "回到底部") {
                     scope.launch(Dispatchers.IO) { live.scrollToBottom() }
                 }
             }
+            GlassItem(
+                XIcons.Command,
+                if (showKeys) "收起快捷键" else "显示快捷键",
+                tint = if (showKeys) p.accent else null,
+            ) { showKeys = !showKeys }
             GlassItem(XIcons.Keyboard, "调出键盘") {
                 Log.i(TAG, "keyboard: rail button")
                 focusRequester.requestFocus()
@@ -490,7 +504,7 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
                     .fillMaxWidth()
                     .background(p.termBg)
                     .windowInsetsPadding(
-                        WindowInsets.safeDrawing.only(
+                        stableSafeDrawing().only(
                             WindowInsetsSides.Top + WindowInsetsSides.Horizontal,
                         ),
                     ),
@@ -505,7 +519,7 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
                     .fillMaxWidth()
                     .background(p.bg)
                     .windowInsetsPadding(
-                        WindowInsets.safeDrawing.only(
+                        stableSafeDrawing().only(
                             WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal,
                         ),
                     )
@@ -529,7 +543,7 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
                 // 玻璃按钮背后的内容(先垫终端底色,录下来的画面才不是透明的)。
                 .layerBackdrop(backdrop)
                 .background(p.termBg)
-                .safeDrawingPadding()
+                .windowInsetsPadding(stableSafeDrawing())
                 .imePadding()
                 // 内容让出右边缘轨道的位置,终端文字不会被按钮压住(直板机没有轨道)。
                 .padding(end = if (topBar) 0.dp else RailWidth),
@@ -537,7 +551,7 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
             header()
             canvas(Modifier.weight(1f).fillMaxWidth())
             hiddenInput()
-            keys()
+            AnimatedVisibility(showKeys, enter = Motion.revealIn, exit = Motion.revealOut) { keys() }
         }
         if (!topBar) {
             CompositionLocalProvider(LocalBackdrop provides backdrop) {

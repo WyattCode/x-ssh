@@ -35,6 +35,15 @@ object XIcons {
         moveTo(12.5f, 16.5f); lineTo(18f, 16.5f)
     }
 
+    /** 快捷键面板:⌘(和 Mac 键盘上的 command 同一个符号)。 */
+    val Command = icon("command") {
+        moveTo(9f, 9f); lineTo(15f, 9f); lineTo(15f, 15f); lineTo(9f, 15f); close()
+        moveTo(9f, 9f); lineTo(9f, 6.5f); arcTo(2.5f, 2.5f, 0f, true, false, 6.5f, 9f); lineTo(9f, 9f)
+        moveTo(15f, 9f); lineTo(15f, 6.5f); arcTo(2.5f, 2.5f, 0f, true, true, 17.5f, 9f); lineTo(15f, 9f)
+        moveTo(15f, 15f); lineTo(17.5f, 15f); arcTo(2.5f, 2.5f, 0f, true, true, 15f, 17.5f); lineTo(15f, 15f)
+        moveTo(9f, 15f); lineTo(9f, 17.5f); arcTo(2.5f, 2.5f, 0f, true, true, 6.5f, 15f); lineTo(9f, 15f)
+    }
+
     val Search = icon("search") {
         // 放大镜:圆 + 斜柄
         moveTo(17f, 10.5f)

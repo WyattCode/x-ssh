@@ -185,7 +185,7 @@ fun HostEditorScreen(
         val window = maxWidth
         val twoPane = window >= 840.dp || (adaptive.bookFold != null && window >= 600.dp)
         // 左侧安全区(横屏时挖孔可能在左边,约 51dp)单独拿出来,不放进整页的 padding。
-        val startInset = WindowInsets.safeDrawing.asPaddingValues()
+        val startInset = stableSafeDrawing().asPaddingValues()
             .calculateStartPadding(LocalLayoutDirection.current)
 
         Column(
@@ -201,7 +201,7 @@ fun HostEditorScreen(
                 // 左栏宽度仍按折痕算,分界就落到折痕右边 51dp —— 表单面板跨在折痕上。
                 // 主机页早就是这么处理的(内边距放进各栏自己加),这里补上。
                 .windowInsetsPadding(
-                    WindowInsets.safeDrawing.only(WindowInsetsSides.Vertical + WindowInsetsSides.End),
+                    stableSafeDrawing().only(WindowInsetsSides.Vertical + WindowInsetsSides.End),
                 )
                 .bounce()
                 .verticalScroll(rememberScrollState())

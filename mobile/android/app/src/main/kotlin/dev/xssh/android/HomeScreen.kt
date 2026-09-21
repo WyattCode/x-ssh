@@ -170,7 +170,7 @@ fun HomeScreen(
                         .width(listWidth)
                         .fillMaxHeight()
                         .windowInsetsPadding(
-                            WindowInsets.safeDrawing.only(
+                            stableSafeDrawing().only(
                                 WindowInsetsSides.Vertical + WindowInsetsSides.Start,
                             ),
                         ),
@@ -211,7 +211,7 @@ fun HomeScreen(
                         // 详情栏靠右,给边缘轨道(直板机是右下角的 ＋)让出位置。
                         .padding(end = RailWidth)
                         .windowInsetsPadding(
-                            WindowInsets.safeDrawing.only(
+                            stableSafeDrawing().only(
                                 WindowInsetsSides.Vertical + WindowInsetsSides.End,
                             ),
                         ),
@@ -230,12 +230,12 @@ fun HomeScreen(
                 }
             }
         } else if (hosts.isEmpty()) {
-            FirstRun(Modifier.fillMaxSize().safeDrawingPadding().padding(top = barPad))
+            FirstRun(Modifier.fillMaxSize().windowInsetsPadding(stableSafeDrawing()).padding(top = barPad))
         } else {
             HostListPane(
                 // 内容通到边缘,从右边缘玻璃层底下穿过去(规范:scroll views extend
                 // beneath floating glass)。底部多留一段,最后一张卡片能滚出轨道之外。
-                modifier = Modifier.fillMaxSize().layerBackdrop(backdrop).safeDrawingPadding(),
+                modifier = Modifier.fillMaxSize().layerBackdrop(backdrop).windowInsetsPadding(stableSafeDrawing()),
                 hosts = filtered,
                 total = hosts.size,
                 // 单栏没有"当前选中"这个概念,别画高亮。

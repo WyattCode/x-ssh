@@ -1,5 +1,9 @@
 package dev.xssh.android
 
+import androidx.compose.foundation.layout.imeAnimationTarget
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.Density
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.CompositionLocalProvider
@@ -588,7 +592,7 @@ fun GlassGroup(content: @Composable () -> Unit) {
 
 /** 胶囊里的一个按钮:按下时图标弹一下、按下的位置亮起。 */
 @Composable
-fun GlassItem(icon: ImageVector, contentDescription: String, onClick: () -> Unit) {
+fun GlassItem(icon: ImageVector, contentDescription: String, tint: Color? = null, onClick: () -> Unit) {
     val p = LocalXssh.current
     val press = rememberPress()
     val size = LocalGlassSize.current
@@ -603,7 +607,7 @@ fun GlassItem(icon: ImageVector, contentDescription: String, onClick: () -> Unit
             Icon(
                 shown,
                 contentDescription = null,
-                tint = p.text,
+                tint = tint ?: p.text,
                 modifier = Modifier
                     .size(glassIconSize(size))
                     .graphicsLayer {
@@ -616,16 +620,6 @@ fun GlassItem(icon: ImageVector, contentDescription: String, onClick: () -> Unit
     }
 }
 
-/**
- * 轨道本体;[content] 里放若干 [GlassButton]。调用方只传 `Modifier.align(Alignment.BottomEnd)`,
- * 离边、避让系统栏全在这里定 —— **每一屏的轨道因此落在完全相同的像素上**。
- *
- * 原来每一屏各自拼 `safeDrawingPadding().padding(bottom = …)`,拼出来不一样:
- * 主机页离底叠了两层 12dp、新建页只有一层,点 ＋ 进新建页按钮就往下跳 12dp。
- *
- * 也**不能**用 safeDrawing:它包含输入法 inset,键盘一弹轨道就被整个顶上去。
- * 按钮的位置必须固定;键盘开着时它被盖住,收起键盘它还在原处。
- */
 /** 玻璃按钮的直径:轨道里 56dp,顶栏里 44dp(由 [TopBar] 提供)。 */
 val LocalGlassSize = compositionLocalOf { 56.dp }
 
@@ -665,7 +659,7 @@ fun TopBar(
                 // 铺了底色的顶栏要把触摸"吃掉":它盖在列表 / 表单上面,不拦的话点顶栏的空白处
                 // 会点到压在底下看不见的卡片或输入框。
                 .then(if (solid) Modifier.background(p.bg).pointerInput(Unit) { detectTapGestures() } else Modifier)
-                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
+                .windowInsetsPadding(stableSafeDrawing().only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
                 .height(TopBarHeight)
                 .padding(horizontal = Gutter),
             verticalAlignment = Alignment.CenterVertically,
@@ -678,13 +672,66 @@ fun TopBar(
     }
 }
 
+/**
+ * 右侧边缘的按钮轨道(折叠屏);[content] 里放若干 [GlassButton]。调用方只传
+ * `Modifier.align(Alignment.BottomEnd)`,离边、避让系统栏全在这里定 ——
+ * **每一屏的轨道因此落在完全相同的像素上**(原来每屏各自拼 padding,换页时按钮会跳 12dp)。
+ *
+ * 轨道**跟着界面走**:键盘弹出来,它和内容一起升到键盘上面(用户要求按钮跟随界面变化,
+ * 不要钉在原处被键盘盖住)。左右边距取 [stableSafeDrawing],键盘弹起时不会横向跳。
+ */
 @Composable
 fun EdgeRail(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     Column(
         modifier
-            .windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.displayCutout))
+            .windowInsetsPadding(stableSafeDrawing().only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom))
             .padding(end = Gutter, bottom = Gutter),
         verticalArrangement = Arrangement.spacedBy(14.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) { content() }
+}
+
+/**
+ * `safeDrawing`,但**键盘弹出 / 收起的整个过程中,左右两边沿用键盘动起来之前的值**。
+ *
+ * 小米 Fold 内屏横屏实测:没有键盘时右侧 inset 是 0;一请求键盘,系统立刻把右侧报成 140px,
+ * 键盘升到顶后又变回 0。于是整页先往左挤一截,紧接着又往右弹回去(用户看到的"先压缩再突然往右")。
+ * 键盘并不改变屏幕左右可用的区域,左右边距不该跟着它变;上下(含键盘高度)照常取实时值。
+ *
+ * "键盘在动"用 [imeAnimationTarget] 判断:请求键盘的第一帧它就有值,比键盘自己的 inset 早。
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun stableSafeDrawing(): WindowInsets {
+    val base = WindowInsets.safeDrawing
+    val ime = WindowInsets.ime
+    val target = WindowInsets.imeAnimationTarget
+    return remember(base, ime, target) { ImeStableInsets(base, ime, target) }
+}
+
+private class ImeStableInsets(
+    private val base: WindowInsets,
+    private val ime: WindowInsets,
+    private val target: WindowInsets,
+) : WindowInsets {
+    private var left = -1
+    private var right = -1
+
+    private fun settled(density: Density) = ime.getBottom(density) == 0 && target.getBottom(density) == 0
+
+    override fun getLeft(density: Density, layoutDirection: LayoutDirection): Int {
+        val now = base.getLeft(density, layoutDirection)
+        if (left < 0 || settled(density)) left = now
+        return left
+    }
+
+    override fun getRight(density: Density, layoutDirection: LayoutDirection): Int {
+        val now = base.getRight(density, layoutDirection)
+        if (right < 0 || settled(density)) right = now
+        return right
+    }
+
+    override fun getTop(density: Density): Int = base.getTop(density)
+
+    override fun getBottom(density: Density): Int = base.getBottom(density)
 }
