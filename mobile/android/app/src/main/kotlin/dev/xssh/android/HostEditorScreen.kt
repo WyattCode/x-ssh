@@ -163,7 +163,13 @@ fun HostEditorScreen(
 
     val danger: @Composable () -> Unit = {
         if (initial != null && onDelete != null) {
-            FormGroup { FormAction("删除这台主机", danger = true) { onDelete(initial) } }
+            // 点两下才删,和主机页左滑、详情栏一致。
+            var confirming by remember { mutableStateOf(false) }
+            FormGroup(footnote = if (confirming) "已信任的指纹和保存的密码会一起删掉。" else null) {
+                FormAction(if (confirming) "确认删除这台主机" else "删除这台主机", danger = true) {
+                    if (confirming) onDelete(initial) else confirming = true
+                }
+            }
         }
     }
 

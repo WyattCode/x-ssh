@@ -1,5 +1,28 @@
 package dev.xssh.android
 
+import androidx.compose.ui.layout.layout
+import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.clickable
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -28,8 +51,6 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -138,6 +159,8 @@ fun HomeScreen(
                     // 原来左边卡片一路铺到折痕前 16dp,右栏又被轨道吃掉 72dp,
                     // 看上去左边长、右边短。
                     creaseGap = Gutter * 2,
+                    // 双栏时轨道在右栏上方,不压列表。
+                    underRail = false,
                 )
                 // 两栏之间不画线:折痕本身就是分界,再补一条反而多余。
                 Spacer(Modifier.width(maxOf(1.dp, adaptive.bookFold?.sizeDp ?: 0.dp)))
@@ -185,6 +208,7 @@ fun HomeScreen(
                 columns = 1,
                 large = true,
                 creaseGap = Gutter,
+                underRail = true,
             )
         }
 
@@ -226,8 +250,48 @@ private fun HostListPane(
     large: Boolean,
     /** 靠折痕(或屏幕右缘)那一侧的留白。 */
     creaseGap: Dp,
+    /** 列表是否从右侧轨道底下穿过(单栏为真):左滑露出的按钮不能落在轨道底下。 */
+    underRail: Boolean,
 ) {
     val p = LocalXssh.current
+    val grid = rememberLazyGridState()
+    val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    // 同一时刻只开一张:开一张,别的自动合上。
+    var openId by remember { mutableStateOf<String?>(null) }
+    var autoScrolling by remember { mutableStateOf(false) }
+    // 用户自己滚动列表就合上(自动避让轨道那一下不算)。
+    LaunchedEffect(grid.isScrollInProgress) {
+        if (grid.isScrollInProgress && !autoScrolling) openId = null
+    }
+    // 列表里的主机没了(刚删掉)就别再记着它。
+    LaunchedEffect(hosts) {
+        if (openId != null && hosts.none { it.id == openId }) openId = null
+    }
+
+    /**
+     * 打开的那张卡片如果停在轨道所在的那一段(列表底部约 150dp),右端露出的「删除」
+     * 就正好压在轨道按钮底下,点下去点的是 ＋ 或 ⌕。先把它往上滚出来。
+     */
+    fun revealAboveRail(id: String) {
+        if (!underRail) return
+        val info = grid.layoutInfo
+        val item = info.visibleItemsInfo.firstOrNull { it.key == id } ?: return
+        val band = with(density) { (RailClearance - Gutter + 8.dp).toPx() }
+        val limit = info.viewportEndOffset - band
+        val bottom = (item.offset.y + item.size.height).toFloat()
+        if (bottom > limit) {
+            scope.launch {
+                autoScrolling = true
+                try {
+                    grid.animateScrollBy(bottom - limit)
+                } finally {
+                    autoScrolling = false
+                }
+            }
+        }
+    }
+
     Box(modifier) {
         Column(Modifier.fillMaxSize()) {
             // 标题是内容的一部分,不是一条"标题栏" —— 它跟着列表一起,不占固定高度的横条。
@@ -236,7 +300,7 @@ private fun HostListPane(
                     .fillMaxWidth()
                     .padding(start = Gutter + BoxPad, end = creaseGap, top = Gutter, bottom = GapItem),
                 "X-SSH",
-                if (total == 0) "还没有主机" else "$total 台主机 · 长按卡片可编辑",
+                if (total == 0) "还没有主机" else "$total 台主机 · 左滑卡片可编辑或删除",
             )
 
             // 搜索平时不占地方,点轨道上的放大镜才出来。
@@ -271,6 +335,7 @@ private fun HostListPane(
             } else {
                 LazyVerticalGrid(
                     columns = if (columns > 0) GridCells.Fixed(columns) else GridCells.Adaptive(264.dp),
+                    state = grid,
                     modifier = Modifier.weight(1f).fillMaxWidth(),
                     // 底部留出轨道的高度,最后一张卡片能滚到它上面去。
                     contentPadding = PaddingValues(start = Gutter, end = creaseGap, bottom = RailClearance),
@@ -278,15 +343,39 @@ private fun HostListPane(
                     verticalArrangement = Arrangement.spacedBy(GapItem),
                 ) {
                     items(hosts, key = { it.id }) { host ->
-                        HostCard(
-                            host = host,
-                            large = large,
-                            selected = host.id == selectedId,
-                            running = host.id in running,
-                            onPrimary = onPrimary,
-                            onEdit = onEdit,
-                            onDelete = onDelete,
-                        )
+                        val open = host.id == openId
+                        SwipeActions(
+                            open = open,
+                            // 删掉一张之后,下面的卡片滑上来补位,而不是瞬间跳上来。
+                            modifier = Modifier.animateItem(),
+                            onDragStart = { if (openId != host.id) openId = null },
+                            onOpenChange = { nowOpen ->
+                                openId = if (nowOpen) host.id else null
+                                if (nowOpen) revealAboveRail(host.id)
+                            },
+                            onEdit = {
+                                openId = null
+                                onEdit(host)
+                            },
+                            onDelete = {
+                                openId = null
+                                onDelete(host)
+                            },
+                        ) {
+                            HostCard(
+                                host = host,
+                                large = large,
+                                selected = host.id == selectedId,
+                                running = host.id in running,
+                                // 开着的时候点卡片是"合上",不是连接 —— 和 iOS 一致。
+                                onPrimary = { if (openId != null) openId = null else onPrimary(it) },
+                                // 长按也能打开,给不知道要左滑的人一条路(不再弹那个菜单)。
+                                onLongPress = {
+                                    openId = host.id
+                                    revealAboveRail(host.id)
+                                },
+                            )
+                        }
                     }
                 }
             }
@@ -316,7 +405,7 @@ private fun FirstRun(modifier: Modifier) {
         )
         Spacer(Modifier.height(6.dp))
         Text(
-            "添加之后:点卡片直接连接,长按卡片编辑或删除。",
+            "添加之后:点卡片直接连接,左滑卡片编辑或删除。",
             color = p.textFaint,
             fontSize = 13.sp,
         )
@@ -344,24 +433,22 @@ private fun HostCard(
     selected: Boolean,
     running: Boolean,
     onPrimary: (Host) -> Unit,
-    onEdit: (Host) -> Unit,
-    onDelete: (Host) -> Unit,
+    onLongPress: () -> Unit,
 ) {
     val p = LocalXssh.current
-    var menu by remember { mutableStateOf(false) }
 
     XsshCard(
         modifier = Modifier.fillMaxWidth(),
         highlight = selected,
         onClick = { onPrimary(host) },
-        onLongClick = { menu = true },
+        onLongClick = onLongPress,
         // 大卡片约 84dp 高(原来 57dp):单栏里它是主要的手指目标。
         paddingVertical = if (large) 18.dp else 13.dp,
     ) {
         // 一行纯内容:名称 + 标签,地址独占一行。
         //
         // 行尾**不放** ⋮ —— 参考设计里的邮件行、日历行都是纯内容,没有逐行的溢出按钮,
-        // 这正是内容能从右边缘玻璃层底下穿过去的前提。编辑/删除走长按(宽屏还有详情栏)。
+        // 这正是内容能从右边缘玻璃层底下穿过去的前提。编辑/删除走左滑(宽屏还有详情栏)。
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 host.label,
@@ -393,29 +480,165 @@ private fun HostCard(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        HostMenu(
-            open = menu,
-            onDismiss = { menu = false },
-            onEdit = { onEdit(host) },
-            onDelete = { onDelete(host) },
-        )
     }
 }
 
+/** 左滑露出的按钮:一个"编辑"、一个"删除",各 72dp,彼此之间、和卡片之间各留 8dp。 */
+private val ActionTile = 72.dp
+private val ActionGap = 8.dp
+private val RevealWidth = ActionTile * 2 + ActionGap * 2
+
+/**
+ * 左滑露出「编辑」「删除」(iOS 邮件/微信会话列表那种)。
+ *
+ * - 滑过一半松手就停在打开位置,不到一半弹回;快速甩一下按速度判断;
+ * - 删除要点两下:第一下变成「确认删除」并铺满两格,第二下才删 —— 主机记录里有
+ *   已信任的指纹和加密存着的密码,误删了要全部重填;
+ * - 同一时刻只开一张,滚动列表或点卡片本身都会合上。
+ *
+ * 为什么不沿用长按菜单:长按是看不见的操作,弹出来的系统菜单又和卡片没有视觉关系。
+ * 这个手势在国内安卓上本来就是日常(微信、QQ、短信的会话列表),不算照搬 iOS。
+ * 注意别从屏幕最右边缘起手 —— 那一条归系统的返回手势,卡片离边 16dp 正好让开。
+ */
 @Composable
-private fun HostMenu(open: Boolean, onDismiss: () -> Unit, onEdit: () -> Unit, onDelete: () -> Unit) {
+private fun SwipeActions(
+    open: Boolean,
+    modifier: Modifier = Modifier,
+    onDragStart: () -> Unit,
+    onOpenChange: (Boolean) -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+    content: @Composable () -> Unit,
+) {
     val p = LocalXssh.current
-    DropdownMenu(expanded = open, onDismissRequest = onDismiss) {
-        DropdownMenuItem(
-            text = { Text("编辑", fontSize = 15.sp) },
-            modifier = Modifier.heightIn(min = TouchMin),
-            onClick = { onDismiss(); onEdit() },
-        )
-        DropdownMenuItem(
-            text = { Text("删除", color = p.danger, fontSize = 15.sp) },
-            modifier = Modifier.heightIn(min = TouchMin),
-            onClick = { onDismiss(); onDelete() },
-        )
+    val haptic = LocalHapticFeedback.current
+    val density = LocalDensity.current
+    val scope = rememberCoroutineScope()
+    val reveal = with(density) { RevealWidth.toPx() }
+    val offset = remember { Animatable(0f) }
+    var confirming by remember { mutableStateOf(false) }
+    val motion = spring<Float>(dampingRatio = 0.86f, stiffness = 520f)
+
+    // 外部改了开合(别的卡片被打开、列表滚动)就跟着动。
+    LaunchedEffect(open) {
+        if (!open) confirming = false
+        offset.animateTo(if (open) -reveal else 0f, motion)
+    }
+
+    fun settle(position: Float, velocity: Float) {
+        val shouldOpen = when {
+            velocity < -900f -> true
+            velocity > 900f -> false
+            else -> -position > reveal / 2
+        }
+        scope.launch { offset.animateTo(if (shouldOpen) -reveal else 0f, motion, initialVelocity = velocity) }
+        if (shouldOpen != open) onOpenChange(shouldOpen)
+    }
+
+    val progress = (-offset.value / reveal).coerceIn(0f, 1f)
+    Box(
+        modifier
+            .fillMaxWidth()
+            .height(IntrinsicSize.Min)
+            .semantics {
+                // 读屏用户做不了滑动手势,给同样的两个操作。
+                customActions = listOf(
+                    CustomAccessibilityAction("编辑") { onEdit(); true },
+                    CustomAccessibilityAction("删除") { onDelete(); true },
+                )
+            },
+    ) {
+        Row(
+            Modifier
+                .matchParentSize()
+                .graphicsLayer {
+                    alpha = progress
+                    // 从右边稍微"长"出来,而不是一块死板的底色被揭开。
+                    val s = 0.9f + 0.1f * progress
+                    scaleX = s
+                    scaleY = s
+                    transformOrigin = TransformOrigin(1f, 0.5f)
+                },
+            horizontalArrangement = Arrangement.End,
+        ) {
+            Spacer(Modifier.width(ActionGap))
+            if (confirming) {
+                SwipeTile("确认删除", p.bg, p.danger, Modifier.width(ActionTile * 2 + ActionGap)) {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onDelete()
+                }
+            } else {
+                SwipeTile("编辑", p.accent, p.accentSoft, Modifier.width(ActionTile)) { onEdit() }
+                Spacer(Modifier.width(ActionGap))
+                SwipeTile("删除", p.danger, p.danger.copy(alpha = 0.16f), Modifier.width(ActionTile)) {
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    confirming = true
+                }
+            }
+        }
+        Box(
+            Modifier
+                // 卡片**从右边往回收窄**,不是整块平移。
+                //
+                // 平移是 iOS 通栏列表的做法 —— 那种行本来就贴着屏幕两边。我们的是带边框的
+                // 圆角卡片,整块往左推 160dp,名字被推出屏幕、边框被切掉一截,看着像坏了
+                // (外屏实测:「local-test」整个看不见,只剩 ":2222" 露在左边)。
+                // 收窄的话,左缘和名字原地不动,右边让出的位置正好放按钮。
+                .layout { measurable, constraints ->
+                    val full = constraints.maxWidth
+                    val width = (full + offset.value.roundToInt()).coerceIn(0, full)
+                    val placeable = measurable.measure(constraints.copy(minWidth = width, maxWidth = width))
+                    layout(full, placeable.height) { placeable.place(0, 0) }
+                }
+                .pointerInput(Unit) {
+                    val tracker = VelocityTracker()
+                    var crossed = false
+                    // 拖动期间自己累计手指位置。不能每帧读 offset.value 再加:snapTo 是异步
+                    // 生效的,读到的常是上一帧的旧值,快拖时卡片会跟不上手指。
+                    var finger = 0f
+                    var shown = 0f
+                    detectHorizontalDragGestures(
+                        onDragStart = {
+                            tracker.resetTracking()
+                            finger = offset.value
+                            shown = offset.value
+                            crossed = -finger > reveal / 2
+                            onDragStart()
+                        },
+                        onDragEnd = { settle(shown, tracker.calculateVelocity().x) },
+                        onDragCancel = { settle(shown, 0f) },
+                    ) { change, dx ->
+                        change.consume()
+                        tracker.addPosition(change.uptimeMillis, change.position)
+                        finger = (finger + dx).coerceAtMost(0f)
+                        // 往左拉过头带阻尼(只跟 30%),最多多出 15%;往右不能超过原位。
+                        val next = if (finger < -reveal) -reveal + (finger + reveal) * 0.3f else finger
+                        shown = next.coerceIn(-reveal * 1.15f, 0f)
+                        scope.launch { offset.snapTo(shown) }
+                        // 越过"松手就会打开"的那条线时轻震一下,手指知道到位了。
+                        val nowCrossed = -next > reveal / 2
+                        if (nowCrossed != crossed) {
+                            crossed = nowCrossed
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        }
+                    }
+                },
+        ) { content() }
+    }
+}
+
+/** 左滑露出的一格按钮。形状和卡片同一圆角(12dp),高度跟卡片一样。 */
+@Composable
+private fun SwipeTile(label: String, fg: Color, bg: Color, modifier: Modifier, onClick: () -> Unit) {
+    Box(
+        modifier
+            .fillMaxHeight()
+            .clip(RoundedCornerShape(RadiusBox))
+            .background(bg)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(label, color = fg, fontSize = 14.sp, fontWeight = FontWeight.Medium)
     }
 }
 
@@ -494,9 +717,17 @@ private fun HostDetailPane(
         // 和编辑/删除同高(48dp):三颗按钮是一组,不该有一颗特别胖。
         XsshButton("连接", modifier = Modifier.fillMaxWidth()) { onConnect(host) }
         Spacer(Modifier.height(GapItem))
+        // 删除要点两下,和左滑一致:第一下变「确认删除」,换一台主机就复位。
+        var confirming by remember(host.id) { mutableStateOf(false) }
         Row(horizontalArrangement = Arrangement.spacedBy(GapItem)) {
             XsshButton("编辑", kind = ButtonKind.Ghost, modifier = Modifier.weight(1f)) { onEdit(host) }
-            XsshButton("删除", kind = ButtonKind.Danger, modifier = Modifier.weight(1f)) { onDelete(host) }
+            XsshButton(
+                if (confirming) "确认删除" else "删除",
+                kind = ButtonKind.Danger,
+                modifier = Modifier.weight(1f),
+            ) {
+                if (confirming) onDelete(host) else confirming = true
+            }
         }
     }
 }
