@@ -66,6 +66,42 @@ fn shell_round_trip_and_clean_disconnect() {
     let text = String::from_utf8_lossy(&seen);
     assert!(text.contains("xssh-live-"), "没收到回显,收到的是:\n{text}");
 
+    // 连续收 100 条以上的消息之后连接还得活着。
+    //
+    // russh 每个通道内部有一个容量 100 的消息队列(channel_buffer_size),收到数据先
+    // `send().await` 塞进去,再调回调。我们只用回调、从不读那个队列,第 100 条之后
+    // send 就永远等下去,整条连接冻住 —— Codex 恢复历史会话时刚好在第 99 条停住。
+    // 每敲一个字符服务端回显一次,就是一条单独的消息。
+    let mut messages = 0usize;
+    for _ in 0..400 {
+        shell.write(b"x").expect("写单个字符");
+        std::thread::sleep(Duration::from_millis(15));
+        while shell.poll_msg().is_some() {
+            messages += 1;
+        }
+    }
+    eprintln!("连敲 400 个字符期间收到 {messages} 条消息");
+    shell.write(b"\x03").expect("Ctrl+C 清掉这一行");
+    std::thread::sleep(Duration::from_millis(300));
+    shell.write(b"echo xssh-final-$((6*7))\r").expect("最后一条命令");
+    let mut tail = Vec::new();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline {
+        while let Some(msg) = shell.poll_msg() {
+            if let ServerMsg::Data { data, .. } = msg {
+                tail.extend_from_slice(&data);
+            }
+        }
+        if String::from_utf8_lossy(&tail).contains("xssh-final-") {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(
+        String::from_utf8_lossy(&tail).contains("xssh-final-"),
+        "收了 100 多条消息之后连接冻住了,最后一条命令没有回显"
+    );
+
     let started = Instant::now();
     ssh.disconnect();
     assert!(started.elapsed() < Duration::from_secs(4), "断开被卡住了");

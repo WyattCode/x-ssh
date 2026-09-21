@@ -27,6 +27,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // 调试录制只在可调试的包里可用(还要有 files/record 标记文件才真的录)。
+        if (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0) {
+            DebugRecorder.dir = filesDir
+        }
         // 开发用:adb start 带 --es devAutoConnect <地址> [--es devUser u] [--es devPassword p]
         // 可直接进入终端联调/自动化;正式版本不带这些 extra 时行为不变。
         val dev = intent?.getStringExtra("devAutoConnect")?.takeIf { it.isNotBlank() }?.let { address ->

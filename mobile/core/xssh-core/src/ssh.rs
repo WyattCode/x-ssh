@@ -355,7 +355,21 @@ impl Ssh {
             .await
         });
         let channel = channel.map_err(|_| SshError::Timeout)??;
-        Ok(Shell { runtime: self.runtime.handle().clone(), channel, events })
+
+        // russh 收到通道数据时,先 `send().await` 塞进通道**自己的**消息队列(容量
+        // channel_buffer_size,默认 100),然后才调我们 Handler 的回调。我们只用回调,
+        // 从不读那个队列 —— 第 100 条消息之后 send 就永远等下去,russh 的会话循环整个卡住:
+        // 收不到数据、发不出按键、保活和断开也都处理不了。
+        //
+        // 实测:Codex 恢复历史会话,输出正好在第 99 条停住,输入框再也画不出来;
+        // 本机连敲 400 个字符,写到一百多个时超时。平时 shell 里每一次回显、每一段输出
+        // 都是一条消息,所以**任何会话**用上一阵子都会冻住 —— "连过几次就卡住"也是它。
+        //
+        // 拆成读写两半,读的那一半交给后台任务一直读空(内容丢掉,数据走回调那条路)。
+        let (mut reader, writer) = channel.split();
+        self.runtime.spawn(async move { while reader.wait().await.is_some() {} });
+
+        Ok(Shell { runtime: self.runtime.handle().clone(), channel: writer, events })
     }
 
     /// 断开连接。
@@ -376,7 +390,7 @@ impl Ssh {
 /// 一个已开启的通道(shell 或 exec)。
 pub struct Shell {
     runtime: tokio::runtime::Handle,
-    channel: russh::Channel<client::Msg>,
+    channel: russh::ChannelWriteHalf<client::Msg>,
     events: mpsc::UnboundedReceiver<ServerMsg>,
 }
 

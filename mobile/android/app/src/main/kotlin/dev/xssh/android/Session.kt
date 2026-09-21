@@ -50,6 +50,9 @@ class LiveTerminal(
     @Volatile
     private var closed = false
 
+    /** 调试录制(默认关,见 [DebugRecorder])。 */
+    private val recording: Recording? = DebugRecorder.open()?.also { it.resize(cols, rows) }
+
     /**
      * 收服务端消息 → 喂终端 → 回写终端应答。
      *
@@ -80,6 +83,7 @@ class LiveTerminal(
         for (event in shell.poll()) {
             when (event) {
                 is ServerEvent.Data -> {
+                    recording?.data(event.data)
                     term.feed(event.data)
                     changed = true
                 }
@@ -155,6 +159,7 @@ class LiveTerminal(
         if (closed) return
         runCatching { shell.resize(cols.toUInt(), rows.toUInt()) }
         runCatching { term.resize(cols.toUInt(), rows.toUInt()) }
+        recording?.resize(cols, rows)
         // 回答"窗口多大(像素)"这类查询时要用。
         runCatching { term.setCellPixels(cellWidthPx.toUInt(), cellHeightPx.toUInt()) }
         // 行列变了,即使没有新数据,整屏的折行结果也不一样了。
@@ -177,6 +182,7 @@ class LiveTerminal(
         runCatching { shell.destroy() }
         runCatching { session.destroy() }
         runCatching { term.destroy() }
+        recording?.close()
         Log.i(TAG, "session closed and released")
     }
 
