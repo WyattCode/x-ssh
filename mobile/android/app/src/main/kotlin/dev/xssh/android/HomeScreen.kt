@@ -232,10 +232,11 @@ fun HomeScreen(
         val theme = LocalThemeControl.current
         CompositionLocalProvider(LocalBackdrop provides backdrop) {
             EdgeRail(Modifier.align(Alignment.BottomEnd)) {
-                // 外观放最上面一格:轨道从底部往上排,加在上面,下面的 ⌕ ＋ 一像素都不动。
-                // 点一下切到下一个模式(跟随系统 → 浅色 → 深色 → …),不弹窗 ——
-                // 界面和图标当场就变,这本身就是反馈。
-                GlassButton(
+                // 外观和搜索是"调整这一页怎么看"的两个操作,装进同一枚胶囊;
+                // 胶囊从底部往上长,搜索在下(和编辑页的 ‹、终端页的键盘同一个位置),外观在上。
+                // 外观点一下切到下一个模式(跟随系统 → 浅色 → 深色 → …),不弹窗。
+                GlassGroup {
+                    GlassItem(
                         when (theme.mode) {
                             ThemeMode.Light -> XIcons.Sun
                             ThemeMode.Dark -> XIcons.Moon
@@ -251,11 +252,12 @@ fun HomeScreen(
                             },
                         )
                     }
-                // 一台主机都没有时不摆搜索 —— 没东西可搜,按钮只是噪音。
-                if (hosts.isNotEmpty()) {
-                    GlassButton(XIcons.Search, "搜索主机") {
-                        searching = !searching
-                        if (!searching) query = ""
+                    // 一台主机都没有时不摆搜索 —— 没东西可搜。
+                    if (hosts.isNotEmpty()) {
+                        GlassItem(XIcons.Search, "搜索主机") {
+                            searching = !searching
+                            if (!searching) query = ""
+                        }
                     }
                 }
                 // 这一页的主操作:染色玻璃(HIG:颜色只给最重要的那个操作)。

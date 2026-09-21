@@ -50,6 +50,10 @@ class MainActivity : ComponentActivity() {
             )
         }
         val prefs = UiPrefs(this)
+        // 让系统也知道 app 选的是哪种外观。点开 app 的第一帧是**系统画的启动窗口**,
+        // 那时这里的代码还没跑,系统只看夜间模式配置来挑 values / values-night 的底色 ——
+        // 不告诉它,app 里选了深色而手机是浅色时,启动还是会先闪一下白。
+        applyNightMode(this, prefs.themeMode)
         // 冷启动底色要和选中的外观一致:选了深色而系统是浅色时,
         // 资源里的 windowBackground 是白的,不在这里改就会先闪一下白。
         val systemDark = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
@@ -70,6 +74,7 @@ class MainActivity : ComponentActivity() {
                     LocalThemeControl provides ThemeControl(mode) {
                         mode = it
                         prefs.themeMode = it
+                        applyNightMode(this, it)
                     },
                 ) {
                     App(dev)
@@ -77,6 +82,21 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+}
+
+/**
+ * 按 app 设置夜间模式(Android 12+,系统会记住)。之后系统画这个 app 的启动窗口时,
+ * 就按这里的选择去挑浅色 / 深色的底色。跟随系统就交还给系统(AUTO)。
+ */
+private fun applyNightMode(context: android.content.Context, mode: ThemeMode) {
+    if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S) return
+    val manager = context.getSystemService(android.app.UiModeManager::class.java) ?: return
+    val target = when (mode) {
+        ThemeMode.Light -> android.app.UiModeManager.MODE_NIGHT_NO
+        ThemeMode.Dark -> android.app.UiModeManager.MODE_NIGHT_YES
+        ThemeMode.System -> android.app.UiModeManager.MODE_NIGHT_AUTO
+    }
+    runCatching { manager.setApplicationNightMode(target) }
 }
 
 /** 开发联调用目标(仅来自 adb intent extra,不落盘)。 */

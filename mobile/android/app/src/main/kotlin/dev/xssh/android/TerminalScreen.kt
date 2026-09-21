@@ -436,20 +436,21 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
     // 和主机页、编辑页同一条右侧竖轨道、同一个位置(见 EdgeRail)。
     // 终端内容是左对齐的等宽字符网格,右侧让出轨道宽度不会压住任何取值。
     val rail: @Composable () -> Unit = {
-        // 翻着历史时才出现,回到底部就收起 —— 不常驻,不占视线。
-        if (frame.scrollOffset > 0) {
-            GlassButton(XIcons.ArrowDown, "回到底部") {
-                scope.launch(Dispatchers.IO) { live.scrollToBottom() }
+        // "看"的两个操作装进同一枚胶囊:键盘常驻在下(和主机页的搜索同一个位置),
+        // 回到底部只在翻历史时出现,加在键盘上面 —— 胶囊往上长,键盘不动。
+        GlassGroup {
+            if (frame.scrollOffset > 0) {
+                GlassItem(XIcons.ArrowDown, "回到底部") {
+                    scope.launch(Dispatchers.IO) { live.scrollToBottom() }
+                }
             }
-        }
-        // 两颗钮**各占一个胶囊**,和主机页的 ⌕ ＋、编辑页的 ‹ ✓ 槽位完全一致。
-        // 原来 ⌨ ✕ 装在同一个胶囊里,胶囊内间距 2dp、胶囊之间 14dp,于是从主机页
-        // 点卡片进终端,上面那颗钮会错开 20dp —— 换页按钮不能动。
-        GlassButton(XIcons.Keyboard, "调出键盘") {
+            GlassItem(XIcons.Keyboard, "调出键盘") {
                 Log.i(TAG, "keyboard: rail button")
                 focusRequester.requestFocus()
                 keyboard?.show()
+            }
         }
+        // 断开是危险操作,单独一颗、红色图标,放在最下面(和 ＋ / ✓ 同一个位置)。
         GlassButton(XIcons.Close, "断开连接", tint = p.danger) {
                 SessionRegistry.close(host.id)
                 onExit()

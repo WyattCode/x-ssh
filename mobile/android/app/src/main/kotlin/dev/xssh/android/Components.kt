@@ -1,5 +1,8 @@
 package dev.xssh.android
 
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.foundation.layout.width
 import com.kyant.backdrop.shadow.Shadow
 import com.kyant.backdrop.highlight.Highlight
 import com.kyant.backdrop.effects.vibrancy
@@ -441,22 +444,125 @@ fun xsshFieldColors(): TextFieldColors {
 val RailWidth = 72.dp
 
 /**
- * 列表底部要留出的高度:主机页轨道三组单钮胶囊(外观、搜索、新建:56 × 3 + 14 × 2)
- * + 离底 16 + 一条间距。留够了,最后一张卡片才能滚到轨道上方,而不是永远被它压着一角。
+ * 列表底部要留出的高度:主机页轨道 = 胶囊(外观、搜索:56 × 2)+ 间距 14 + 单独的 ＋(56)
+ * + 离底 16 + 一条间距。留够了,最后一行才能滚到轨道上方,而不是永远被它压着一角。
  */
-val RailClearance = 56.dp * 3 + 14.dp * 2 + 16.dp + Gutter
+val RailClearance = 56.dp * 3 + 14.dp + 16.dp + Gutter
 
 /**
- * 轨道上的 Liquid Glass 圆钮(56dp,和原来"胶囊 + 圆钮"的外形尺寸完全一样,轨道位置不变)。
- *
- * 照 Apple 对 Liquid Glass 的定义逐条做(HIG「Materials」、SwiftUI「Applying Liquid Glass
- * to custom views」):
- * - **模糊背后的内容,并调整亮度**保证图标清晰(regular 变体):blur + 一层半透明亮度层;
- * - **映出周围的颜色**:vibrancy,背景透过来时饱和度提高;
- * - **边缘的光学感**:lens,玻璃边缘实时折射背后的画面(Android 13+);再加一道镜面高光;
- * - **实时响应触摸**(interactive):按下时弹性放大、按下的位置从内部亮起,松手回弹;
- * - **颜色克制**:只有主操作用染色玻璃([prominent],强调色玻璃 + 白色图标),其余是无色玻璃。
- * 只用在功能层(右侧轨道),不用在列表、详情按钮这类内容层 —— HIG 明确说别把玻璃放进内容层。
+ * Liquid Glass 材质本体。照 Apple 的定义(HIG「Materials」、SwiftUI「Applying Liquid Glass
+ * to custom views」)逐条做:
+ * - 模糊背后的内容,并叠一层亮度层保证上面的图标清晰(regular 变体);
+ * - vibrancy:透过来的颜色更饱和("映出周围的颜色");
+ * - lens:边缘实时折射背后的画面(Android 13+),加镜面高光和阴影;
+ * - 颜色克制:只有主操作用染色玻璃([prominent]),其余无色。
+ * [press] 0..1 驱动整块玻璃的弹性缩放;[glow] 在亮度层上画按压时"从内部亮起"的光。
+ */
+@Composable
+private fun Modifier.liquidGlass(
+    shape: Shape,
+    prominent: Boolean,
+    press: () -> Float,
+    glow: (DrawScope.() -> Unit)? = null,
+): Modifier {
+    val p = LocalXssh.current
+    val backdrop = LocalBackdrop.current
+    val surface = when {
+        prominent -> p.accent.copy(alpha = if (p.dark) 0.78f else 0.86f)
+        p.dark -> Color(0xFF121214).copy(alpha = 0.36f)
+        else -> Color.White.copy(alpha = 0.58f)
+    }
+    return if (backdrop != null) {
+        drawBackdrop(
+            backdrop = backdrop,
+            shape = { shape },
+            effects = {
+                vibrancy()
+                blur(4.dp.toPx())
+                lens(refractionHeight = 10.dp.toPx(), refractionAmount = 20.dp.toPx(), depthEffect = true)
+            },
+            highlight = { Highlight.Default.copy(alpha = if (p.dark) 0.6f else 1f) },
+            shadow = { Shadow(radius = 16.dp, color = Color.Black.copy(alpha = if (p.dark) 0.4f else 0.14f)) },
+            layerBlock = {
+                val s = 1f + 0.08f * press()
+                scaleX = s
+                scaleY = s
+            },
+            onDrawSurface = {
+                drawRect(surface)
+                glow?.invoke(this)
+            },
+        )
+    } else {
+        // 这一页没提供背景源(或系统太老):半透明底色 + 细边,形状和交互不变。
+        graphicsLayer {
+            val s = 1f + 0.08f * press()
+            scaleX = s
+            scaleY = s
+        }
+            .clip(shape)
+            .background(surface)
+            .border(0.8.dp, p.glassBorder, shape)
+    }
+}
+
+/** 按压状态:弹簧驱动的 0..1,外加按下的位置(光从那里亮起来)。 */
+private class Press(val amount: Animatable<Float, *>) {
+    var at by mutableStateOf(Offset.Unspecified)
+}
+
+@Composable
+private fun rememberPress() = remember { Press(Animatable(0f)) }
+
+/** 点击手势 + 按压动画 + 读屏语义,单独圆钮和胶囊里的按钮共用。 */
+@Composable
+private fun Modifier.glassTap(press: Press, contentDescription: String, onClick: () -> Unit): Modifier {
+    val haptic = LocalHapticFeedback.current
+    val scope = rememberCoroutineScope()
+    val action by rememberUpdatedState(onClick)
+    return semantics {
+        role = Role.Button
+        contentDescriptionProperty = contentDescription
+        onClick {
+            action()
+            true
+        }
+    }.pointerInput(Unit) {
+        detectTapGestures(
+            onPress = { position ->
+                press.at = position
+                // 按下时略冲过头再回来,松手回弹 —— 玻璃的"液态"就在这里。
+                scope.launch { press.amount.animateTo(1f, spring(dampingRatio = 0.55f, stiffness = 600f)) }
+                tryAwaitRelease()
+                scope.launch { press.amount.animateTo(0f, spring(dampingRatio = 0.45f, stiffness = 320f)) }
+            },
+            onTap = {
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                action()
+            },
+        )
+    }
+}
+
+/** 按下的位置"从内部亮起"。 */
+private fun DrawScope.pressGlow(press: Press, dark: Boolean) {
+    val t = press.amount.value
+    if (t <= 0.01f || !press.at.isSpecified) return
+    val r = size.maxDimension
+    drawCircle(
+        Brush.radialGradient(
+            listOf(Color.White.copy(alpha = (if (dark) 0.22f else 0.4f) * t), Color.Transparent),
+            center = press.at,
+            radius = r,
+        ),
+        radius = r,
+        center = press.at,
+    )
+}
+
+/**
+ * 单独一颗 Liquid Glass 圆钮(56dp)。每页的主操作(＋ / ✓)和危险操作(✕)用它,
+ * 放在轨道最下面 —— 参考图里"写邮件""+"都是这样单独一颗。
  */
 @Composable
 fun GlassButton(
@@ -467,101 +573,70 @@ fun GlassButton(
     onClick: () -> Unit,
 ) {
     val p = LocalXssh.current
-    val backdrop = LocalBackdrop.current
-    val haptic = LocalHapticFeedback.current
-    val scope = rememberCoroutineScope()
-    val action by rememberUpdatedState(onClick)
-    // 0 = 静止,1 = 按到底。弹簧驱动:按下时略冲过头再回来,松手回弹 —— 玻璃的"液态"就在这里。
-    val press = remember { Animatable(0f) }
-    var touch by remember { mutableStateOf(Offset.Unspecified) }
-    val shape = CircleShape
-
-    // 亮度层:浅色偏白、深色偏暗,保证上面的图标在任何背景上都读得出;染色玻璃用强调色。
-    val surface = when {
-        prominent -> p.accent.copy(alpha = if (p.dark) 0.78f else 0.86f)
-        p.dark -> Color(0xFF121214).copy(alpha = 0.36f)
-        else -> Color.White.copy(alpha = 0.58f)
-    }
-    val iconColor = if (prominent) p.onAccent else (tint ?: p.text)
-
-    val gesture = Modifier
-        .size(56.dp)
-        .semantics {
-            role = Role.Button
-            contentDescriptionProperty = contentDescription
-            onClick {
-                action()
-                true
-            }
-        }
-        .pointerInput(Unit) {
-            detectTapGestures(
-                onPress = { position ->
-                    touch = position
-                    scope.launch { press.animateTo(1f, spring(dampingRatio = 0.55f, stiffness = 600f)) }
-                    tryAwaitRelease()
-                    scope.launch { press.animateTo(0f, spring(dampingRatio = 0.45f, stiffness = 320f)) }
-                },
-                onTap = {
-                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    action()
-                },
+    val press = rememberPress()
+    Box(
+        Modifier
+            .size(56.dp)
+            .glassTap(press, contentDescription, onClick)
+            .liquidGlass(CircleShape, prominent, { press.amount.value }) { pressGlow(press, p.dark) },
+        contentAlignment = Alignment.Center,
+    ) {
+        Crossfade(targetState = icon, animationSpec = tween(180), label = "glassIcon") { shown ->
+            Icon(
+                shown,
+                contentDescription = null,
+                tint = if (prominent) p.onAccent else (tint ?: p.text),
+                modifier = Modifier.size(23.dp),
             )
         }
-
-    val glass = if (backdrop != null) {
-        gesture.drawBackdrop(
-            backdrop = backdrop,
-            shape = { shape },
-            effects = {
-                vibrancy()
-                blur(4.dp.toPx())
-                lens(refractionHeight = 10.dp.toPx(), refractionAmount = 20.dp.toPx(), depthEffect = true)
-            },
-            highlight = { Highlight.Default.copy(alpha = if (p.dark) 0.6f else 1f) },
-            shadow = {
-                Shadow(radius = 16.dp, color = Color.Black.copy(alpha = if (p.dark) 0.4f else 0.14f))
-            },
-            layerBlock = {
-                val s = 1f + 0.1f * press.value
-                scaleX = s
-                scaleY = s
-            },
-            onDrawSurface = {
-                drawRect(surface)
-                // 按下的位置从内部亮起。
-                val t = press.value
-                if (t > 0.01f && touch.isSpecified) {
-                    val r = size.maxDimension
-                    drawCircle(
-                        Brush.radialGradient(
-                            listOf(Color.White.copy(alpha = (if (p.dark) 0.22f else 0.4f) * t), Color.Transparent),
-                            center = touch,
-                            radius = r,
-                        ),
-                        radius = r,
-                        center = touch,
-                    )
-                }
-            },
-        )
-    } else {
-        // 这一页没提供背景源(或系统太老):半透明底色 + 细边,形状和交互不变。
-        gesture
-            .graphicsLayer {
-                val s = 1f + 0.1f * press.value
-                scaleX = s
-                scaleY = s
-            }
-            .clip(shape)
-            .background(surface)
-            .border(0.8.dp, p.glassBorder, shape)
     }
+}
 
-    Box(glass, contentAlignment = Alignment.Center) {
-        // 图标换了就淡入淡出地换(外观按钮每点一下都会变)。
-        Crossfade(targetState = icon, animationSpec = tween(180), label = "glassIcon") { shown ->
-            Icon(shown, contentDescription = null, tint = iconColor, modifier = Modifier.size(23.dp))
+/**
+ * 一枚 Liquid Glass 胶囊,把**相关的**几个按钮装在一起(参考图:日历 / 收件箱 / 搜索同在一枚胶囊)。
+ * 原来每个按钮各自一颗圆,竖着排成一串珠子,看不出哪些是一组。
+ *
+ * 胶囊里每个按钮占 56dp,和单独圆钮等高 —— 所以胶囊最下面那个按钮和"单独一颗圆"落在同一个位置,
+ * 换页时按钮不会跳。胶囊从底部往上长:新加的按钮(比如翻历史时才出现的"回到底部")加在上面。
+ */
+@Composable
+fun GlassGroup(content: @Composable () -> Unit) {
+    val shape = RoundedCornerShape(28.dp)
+    Column(
+        Modifier
+            .width(56.dp)
+            .liquidGlass(shape, prominent = false, press = { 0f })
+            // 组内按钮按下时的光要被胶囊的圆头裁住。
+            .clip(shape),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) { content() }
+}
+
+/** 胶囊里的一个按钮:按下时图标弹一下、按下的位置亮起。 */
+@Composable
+fun GlassItem(icon: ImageVector, contentDescription: String, tint: Color? = null, onClick: () -> Unit) {
+    val p = LocalXssh.current
+    val press = rememberPress()
+    Box(
+        Modifier
+            .size(56.dp)
+            .glassTap(press, contentDescription, onClick)
+            .drawBehind { pressGlow(press, p.dark) },
+        contentAlignment = Alignment.Center,
+    ) {
+        Crossfade(targetState = icon, animationSpec = tween(180), label = "glassItemIcon") { shown ->
+            Icon(
+                shown,
+                contentDescription = null,
+                tint = tint ?: p.text,
+                modifier = Modifier
+                    .size(23.dp)
+                    .graphicsLayer {
+                        val s = 1f + 0.16f * press.amount.value
+                        scaleX = s
+                        scaleY = s
+                    },
+            )
         }
     }
 }
