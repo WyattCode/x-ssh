@@ -1,5 +1,8 @@
 package dev.xssh.android
 
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.Crossfade
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import com.kyant.backdrop.backdrops.layerBackdrop
 import androidx.compose.runtime.CompositionLocalProvider
@@ -635,34 +638,39 @@ private fun CompactKeys(k: KeyActions) {
         Modifier.fillMaxWidth().padding(6.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            val key = Modifier.weight(1f)
-            if (!more) {
-                KeyCap("Esc", key) { k.bytes(27) }
-                KeyCap("Tab", key) { k.bytes(9) }
-                KeyCap("^C", key) { k.bytes(3) }
-                KeyCap("↑", key, repeatable = true) { k.text("\u001b[A") }
-            } else {
-                KeyCap("Alt", key, active = k.alt, onPress = k.onAlt)
-                KeyCap("^D", key) { k.bytes(4) }
-                KeyCap("^Z", key) { k.bytes(26) }
-                KeyCap("⌫", key, repeatable = true) { k.bytes(0x7F) }
+        // 翻页的那几格淡入淡出换过去,不是一帧跳变;不动的三颗(Ctrl ⋯ ⏎)原地不闪。
+        @Composable
+        fun RowScope.Flip(first: @Composable () -> Unit, second: @Composable () -> Unit) {
+            Crossfade(more, Modifier.weight(1f), animationSpec = tween(140), label = "keyFlip") {
+                if (it) second() else first()
             }
-            KeyCap("回车", key, emphasis = true, icon = XIcons.Return) { k.bytes(13) }
+        }
+        val cell = Modifier.fillMaxWidth()
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Flip({ KeyCap("Esc", cell) { k.bytes(27) } }, { KeyCap("Alt", cell, active = k.alt, onPress = k.onAlt) })
+            Flip({ KeyCap("Tab", cell) { k.bytes(9) } }, { KeyCap("^D", cell) { k.bytes(4) } })
+            Flip({ KeyCap("^C", cell) { k.bytes(3) } }, { KeyCap("^Z", cell) { k.bytes(26) } })
+            Flip(
+                { KeyCap("↑", cell, repeatable = true) { k.text("\u001b[A") } },
+                { KeyCap("⌫", cell, repeatable = true) { k.bytes(0x7F) } },
+            )
+            KeyCap("回车", Modifier.weight(1f), emphasis = true, icon = XIcons.Return) { k.bytes(13) }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            val key = Modifier.weight(1f)
-            KeyCap("Ctrl", key, active = k.ctrl, onPress = k.onCtrl)
-            KeyCap("⋯", key, active = more) { more = !more }
-            if (!more) {
-                KeyCap("←", key, repeatable = true) { k.text("\u001b[D") }
-                KeyCap("↓", key, repeatable = true) { k.text("\u001b[B") }
-                KeyCap("→", key, repeatable = true) { k.text("\u001b[C") }
-            } else {
-                KeyCap("^L", key) { k.bytes(12) }
-                KeyCap("|", key) { k.text("|") }
-                KeyCap("/", key) { k.text("/") }
-            }
+            KeyCap("Ctrl", Modifier.weight(1f), active = k.ctrl, onPress = k.onCtrl)
+            KeyCap("⋯", Modifier.weight(1f), active = more) { more = !more }
+            Flip(
+                { KeyCap("←", cell, repeatable = true) { k.text("\u001b[D") } },
+                { KeyCap("^L", cell) { k.bytes(12) } },
+            )
+            Flip(
+                { KeyCap("↓", cell, repeatable = true) { k.text("\u001b[B") } },
+                { KeyCap("|", cell) { k.text("|") } },
+            )
+            Flip(
+                { KeyCap("→", cell, repeatable = true) { k.text("\u001b[C") } },
+                { KeyCap("/", cell) { k.text("/") } },
+            )
         }
     }
 }

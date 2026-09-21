@@ -316,6 +316,10 @@ private fun HostListPane(
     LaunchedEffect(grid.isScrollInProgress) {
         if (grid.isScrollInProgress && !autoScrolling) openId = null
     }
+    // 打开搜索时列表可能正滚在中间,搜索框在最上面看不见 —— 先滚回顶上。
+    LaunchedEffect(searching) {
+        if (searching) grid.animateScrollToItem(0)
+    }
     // 列表里的主机没了(刚删掉)就别再记着它。
     LaunchedEffect(hosts) {
         if (openId != null && hosts.none { it.id == openId }) openId = null
