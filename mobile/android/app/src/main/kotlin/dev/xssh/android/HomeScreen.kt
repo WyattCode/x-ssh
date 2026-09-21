@@ -1,5 +1,11 @@
 package dev.xssh.android
 
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.animation.AnimatedVisibility
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import com.kyant.backdrop.backdrops.layerBackdrop
 import androidx.compose.foundation.layout.union
@@ -180,7 +186,11 @@ fun HomeScreen(
                 )
                 // 两栏之间不画线:折痕本身就是分界,再补一条反而多余。
                 Spacer(Modifier.width(maxOf(1.dp, adaptive.bookFold?.sizeDp ?: 0.dp)))
-                HostDetailPane(
+                // 换一台主机时详情淡入淡出,不是生硬地一帧换掉。
+                AnimatedContent(
+                    targetState = shownHost,
+                    contentKey = { it?.id },
+                    transitionSpec = { fadeIn(Motion.reveal()) togetherWith fadeOut(Motion.reveal()) },
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxHeight()
@@ -191,12 +201,17 @@ fun HomeScreen(
                                 WindowInsetsSides.Vertical + WindowInsetsSides.End,
                             ),
                         ),
-                    host = shownHost,
-                    onConnect = onConnect,
-                    onEdit = onEdit,
-                    onDelete = onDelete,
-                    onNew = onNew,
-                )
+                    label = "detail",
+                ) { host ->
+                    HostDetailPane(
+                        modifier = Modifier.fillMaxSize(),
+                        host = host,
+                        onConnect = onConnect,
+                        onEdit = onEdit,
+                        onDelete = onDelete,
+                        onNew = onNew,
+                    )
+                }
             }
         } else if (hosts.isEmpty()) {
             FirstRun(Modifier.fillMaxSize().safeDrawingPadding())
@@ -330,114 +345,125 @@ private fun HostListPane(
     }
 
     Box(modifier) {
-        Column(Modifier.fillMaxSize()) {
-            // 标题是内容的一部分,不是一条"标题栏" —— 它跟着列表一起,不占固定高度的横条。
-            PaneTitle(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(start = Gutter + BoxPad, end = creaseGap, top = Gutter, bottom = GapItem),
-                "X-SSH",
-                if (total == 0) "还没有主机" else "$total 台主机 · 左滑可编辑或删除",
-            )
-
-            // 搜索平时不占地方,点轨道上的放大镜才出来。
-            if (searching) {
-                val focus = remember { FocusRequester() }
-                LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
-                // iOS 的搜索框:浅填充的胶囊,左边放大镜、右边清除,没有描边。
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(start = Gutter, end = creaseGap)
-                        .height(TouchMin)
-                        .clip(RoundedCornerShape(TouchMin / 2))
-                        .background(p.bgElev2)
-                        .padding(start = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(XIcons.Search, null, tint = p.textDim, modifier = Modifier.size(19.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
-                        if (query.isEmpty()) {
-                            Text("搜索名称 / 地址 / 用户", color = p.textFaint, fontSize = 16.sp)
-                        }
-                        BasicTextField(
-                            value = query,
-                            onValueChange = onQuery,
-                            singleLine = true,
-                            textStyle = TextStyle(color = p.text, fontSize = 16.sp),
-                            cursorBrush = SolidColor(p.accent),
-                            modifier = Modifier.fillMaxWidth().focusRequester(focus),
-                        )
-                    }
-                    Box(
+        LazyVerticalGrid(
+            columns = if (columns > 0) GridCells.Fixed(columns) else GridCells.Adaptive(264.dp),
+            state = grid,
+            modifier = Modifier.fillMaxSize().bounce(),
+            // 底部留出轨道的高度,最后一张卡片能滚到它上面去。
+            contentPadding = PaddingValues(start = Gutter, end = creaseGap, bottom = RailClearance),
+            horizontalArrangement = Arrangement.spacedBy(GapItem),
+            // 一台主机一张卡片,卡片之间留缝。
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            // 标题和搜索框也是列表的一项(iOS 的大标题就是这样):整页一起滚、一起回弹,
+            // 在标题上往下拖也有反应,而不是只有卡片那一截能动。
+            item(key = "header", span = { GridItemSpan(maxLineSpan) }) {
+                Column {
+                    PaneTitle(
                         Modifier
-                            .size(TouchMin)
-                            .clickable {
+                            .fillMaxWidth()
+                            .padding(start = BoxPad, top = Gutter, bottom = 2.dp),
+                        "X-SSH",
+                        if (total == 0) "还没有主机" else "$total 台主机 · 左滑可编辑或删除",
+                    )
+                    // 搜索平时不占地方,点轨道上的放大镜才展开出来。
+                    AnimatedVisibility(searching, enter = Motion.revealIn, exit = Motion.revealOut) {
+                        SearchField(
+                            Modifier.padding(top = GapItem),
+                            query = query,
+                            onQuery = onQuery,
+                            onClose = {
                                 onQuery("")
                                 onSearching(false)
-                            }
-                            .semantics { contentDescription = "关闭搜索" },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(XIcons.Close, null, tint = p.textDim, modifier = Modifier.size(17.dp))
+                            },
+                        )
                     }
                 }
-                Spacer(Modifier.height(GapItem))
             }
-
             if (hosts.isEmpty()) {
                 // 只可能是"搜了但没匹配上" —— 一台主机都没有时走的是整屏的 FirstRun。
-                NoMatches(Modifier.weight(1f).fillMaxWidth())
-            } else {
-                LazyVerticalGrid(
-                    columns = if (columns > 0) GridCells.Fixed(columns) else GridCells.Adaptive(264.dp),
-                    state = grid,
-                    modifier = Modifier.weight(1f).fillMaxWidth(),
-                    // 底部留出轨道的高度,最后一张卡片能滚到它上面去。
-                    contentPadding = PaddingValues(start = Gutter, end = creaseGap, bottom = RailClearance),
-                    horizontalArrangement = Arrangement.spacedBy(GapItem),
-                    // 一台主机一张卡片,卡片之间留缝。
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    itemsIndexed(hosts, key = { _, it -> it.id }) { _, host ->
-                        // 删掉一张之后,下面的卡片滑上来补位 —— animateItem 要挂在每一项的最外层。
-                        Box(Modifier.animateItem()) {
-                            val open = host.id == openId
-                            SwipeActions(
-                                open = open,
-                                onDragStart = { if (openId != host.id) openId = null },
-                                onOpenChange = { nowOpen ->
-                                    openId = if (nowOpen) host.id else null
-                                    if (nowOpen) revealAboveRail(host.id)
-                                },
-                                onEdit = {
-                                    openId = null
-                                    onEdit(host)
-                                },
-                                onDelete = {
-                                    openId = null
-                                    onDelete(host)
-                                },
-                            ) {
-                                HostCard(
-                                    host = host,
-                                    large = large,
-                                    selected = host.id == selectedId,
-                                    running = host.id in running,
-                                    // 开着的时候点卡片是"合上",不是连接 —— 和 iOS 一致。
-                                    onPrimary = { if (openId != null) openId = null else onPrimary(it) },
-                                    // 长按也能打开,给不知道要左滑的人一条路(不再弹那个菜单)。
-                                    onLongPress = {
-                                        openId = host.id
-                                        revealAboveRail(host.id)
-                                    },
-                                )
-                            }
-                        }
+                item(key = "none", span = { GridItemSpan(maxLineSpan) }) {
+                    NoMatches(Modifier.fillMaxWidth().padding(top = 48.dp).animateItem())
+                }
+            }
+            itemsIndexed(hosts, key = { _, it -> it.id }) { _, host ->
+                // 删掉一张之后,下面的卡片滑上来补位 —— animateItem 要挂在每一项的最外层。
+                Box(Modifier.animateItem()) {
+                    val open = host.id == openId
+                    SwipeActions(
+                        open = open,
+                        onDragStart = { if (openId != host.id) openId = null },
+                        onOpenChange = { nowOpen ->
+                            openId = if (nowOpen) host.id else null
+                            if (nowOpen) revealAboveRail(host.id)
+                        },
+                        onEdit = {
+                            openId = null
+                            onEdit(host)
+                        },
+                        onDelete = {
+                            openId = null
+                            onDelete(host)
+                        },
+                    ) {
+                        HostCard(
+                            host = host,
+                            large = large,
+                            selected = host.id == selectedId,
+                            running = host.id in running,
+                            // 开着的时候点卡片是"合上",不是连接 —— 和 iOS 一致。
+                            onPrimary = { if (openId != null) openId = null else onPrimary(it) },
+                            // 长按也能打开,给不知道要左滑的人一条路(不再弹那个菜单)。
+                            onLongPress = {
+                                openId = host.id
+                                revealAboveRail(host.id)
+                            },
+                        )
                     }
                 }
             }
+        }
+    }
+}
+
+/** iOS 的搜索框:浅填充的胶囊,左边放大镜、右边清除,没有描边。 */
+@Composable
+private fun SearchField(modifier: Modifier, query: String, onQuery: (String) -> Unit, onClose: () -> Unit) {
+    val p = LocalXssh.current
+    val focus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+    Row(
+        modifier
+            .fillMaxWidth()
+            .height(TouchMin)
+            .clip(RoundedCornerShape(TouchMin / 2))
+            .background(p.bgElev2)
+            .padding(start = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(XIcons.Search, null, tint = p.textDim, modifier = Modifier.size(19.dp))
+        Spacer(Modifier.width(8.dp))
+        Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+            if (query.isEmpty()) {
+                Text("搜索名称 / 地址 / 用户", color = p.textFaint, fontSize = 16.sp)
+            }
+            BasicTextField(
+                value = query,
+                onValueChange = onQuery,
+                singleLine = true,
+                textStyle = TextStyle(color = p.text, fontSize = 16.sp),
+                cursorBrush = SolidColor(p.accent),
+                modifier = Modifier.fillMaxWidth().focusRequester(focus),
+            )
+        }
+        Box(
+            Modifier
+                .size(TouchMin)
+                .clickable(onClick = onClose)
+                .semantics { contentDescription = "关闭搜索" },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(XIcons.Close, null, tint = p.textDim, modifier = Modifier.size(17.dp))
         }
     }
 }
@@ -451,8 +477,14 @@ private fun HostListPane(
 @Composable
 private fun FirstRun(modifier: Modifier) {
     val p = LocalXssh.current
+    // 内容不满一屏也包在滚动容器里:往下拖有回弹,不会像卡死一样纹丝不动。
+    BoxWithConstraints(modifier) {
     Column(
-        modifier.padding(horizontal = Gutter + BoxPad),
+        Modifier
+            .bounce()
+            .verticalScroll(rememberScrollState())
+            .heightIn(min = maxHeight)
+            .padding(horizontal = Gutter + BoxPad),
         verticalArrangement = Arrangement.Center,
     ) {
         Text("X-SSH", color = p.text, fontSize = 34.sp, fontWeight = FontWeight.SemiBold)
@@ -464,10 +496,11 @@ private fun FirstRun(modifier: Modifier) {
         )
         Spacer(Modifier.height(6.dp))
         Text(
-            "添加之后:点一行直接连接,左滑编辑或删除。",
+            "添加之后:点一张卡片直接连接,左滑编辑或删除。",
             color = p.textFaint,
             fontSize = 13.sp,
         )
+    }
     }
 }
 
@@ -593,7 +626,7 @@ private fun SwipeActions(
     val reveal = with(density) { RevealWidth.toPx() }
     val offset = remember { Animatable(0f) }
     var confirming by remember { mutableStateOf(false) }
-    val motion = spring<Float>(dampingRatio = 0.86f, stiffness = 520f)
+    val motion = Motion.snappy<Float>()
 
     // 外部改了开合(别的卡片被打开、列表滚动)就跟着动。
     LaunchedEffect(open) {
@@ -750,6 +783,7 @@ private fun HostDetailPane(
     // 让它按盒子的 16dp 线走,只会显得比文字宽出一截。
     Column(
         modifier
+            .bounce()
             .verticalScroll(rememberScrollState())
             .padding(start = Gutter * 2, end = Gutter, top = Gutter, bottom = Gutter),
     ) {

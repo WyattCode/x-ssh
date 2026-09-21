@@ -1,5 +1,7 @@
 package dev.xssh.android
 
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import androidx.compose.animation.AnimatedContent
 import android.graphics.drawable.ColorDrawable
 import android.graphics.Color
 import android.content.res.Configuration
@@ -168,7 +170,25 @@ fun App(devTarget: DevTarget? = null) {
         screen = Screen.Home
     }
 
-    when (val current = screen) {
+    // 页面切换:iOS 的导航推入 —— 进编辑页 / 终端从右边推进来,返回主机页时滑出去。
+    // 同一台主机的终端换了实例(信任新指纹后重连)不算换页,不做动画。
+    // 每页的 rememberSaveable(列表滚到哪、搜索词)存在 holder 里,推进去再回来还在。
+    val pages = rememberSaveableStateHolder()
+    AnimatedContent(
+        targetState = screen,
+        contentKey = {
+            when (it) {
+                Screen.Home -> "home"
+                is Screen.Editor -> "editor"
+                is Screen.Terminal -> "term:" + it.host.id
+            }
+        },
+        transitionSpec = { with(Motion) { push(forward = targetState != Screen.Home) } },
+        label = "page",
+    ) { current ->
+      // 只有主机页需要"回来时还在原处";编辑页和终端每次都是新开的。
+      pages.SaveableStateProvider(if (current == Screen.Home) "home" else "page:" + System.identityHashCode(current)) {
+       when (current) {
         is Screen.Home -> HomeScreen(
             hosts = hosts,
             selectedId = selectedId,
@@ -218,5 +238,7 @@ fun App(devTarget: DevTarget? = null) {
                 screen = Screen.Terminal(trusted)
             },
         )
+       }
+      }
     }
 }

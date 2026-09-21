@@ -201,6 +201,7 @@ fun HostEditorScreen(
                 .windowInsetsPadding(
                     WindowInsets.safeDrawing.only(WindowInsetsSides.Vertical + WindowInsetsSides.End),
                 )
+                .bounce()
                 .verticalScroll(rememberScrollState())
                 // 所有形态都给右侧轨道让位 —— 表单是右对齐取值,不能让按钮压在值上。
                 .padding(end = RailWidth),

@@ -1,5 +1,6 @@
 package dev.xssh.android
 
+import androidx.compose.foundation.LocalOverscrollFactory
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
@@ -47,6 +48,8 @@ data class XsshPalette(
     /** 强调色上的文字/图标。 */
     val onAccent: Color,
     val accentSoft: Color,
+    /** 主机卡片的底色。深色下比分组块(bgElev)再暗一档,按用户要求更贴近黑底。 */
+    val cardBg: Color,
     /**
      * 列表选中行:浅浅一层强调色。试过参考图那种整块实心蓝 + 白字,
      * 和「连接」按钮、回车键的实心蓝叠在一起太重,用户直说"很重的蓝色"。
@@ -82,6 +85,7 @@ val DarkPalette = XsshPalette(
     accent = Color(0xFF0A84FF),
     onAccent = Color(0xFFFFFFFF),
     accentSoft = Color(0x330A84FF),
+    cardBg = Color(0xFF161618),
     rowSel = Color(0x380A84FF),
     danger = Color(0xFFFF453A),
     ok = Color(0xFF30D158),
@@ -118,6 +122,7 @@ val LightPalette = XsshPalette(
     accent = Color(0xFF007AFF),
     onAccent = Color(0xFFFFFFFF),
     accentSoft = Color(0x26007AFF),
+    cardBg = Color(0xFFF2F2F7),
     rowSel = Color(0x1F007AFF),
     danger = Color(0xFFFF3B30),
     ok = Color(0xFF34C759),
@@ -237,7 +242,12 @@ fun XsshTheme(mode: ThemeMode = ThemeMode.System, content: @Composable () -> Uni
                     trim = LineHeightStyle.Trim.Both,
                 ),
             )
-            CompositionLocalProvider(LocalTextStyle provides base, content = content)
+            // 关掉 Android 的拉伸效果:滚动页一律用 iOS 的橡皮筋回弹(Motion.kt 的 bounce),两个叠在一起会打架。
+            CompositionLocalProvider(
+                LocalTextStyle provides base,
+                LocalOverscrollFactory provides null,
+                content = content,
+            )
         }
     }
 }
