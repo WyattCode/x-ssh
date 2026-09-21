@@ -522,7 +522,8 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
                     .imePadding(),
             ) {
                 hiddenInput()
-                keys()
+                // 桌面模式也听 ⌘ 的:收起时下半屏只留给输入法。
+                AnimatedVisibility(showKeys, enter = Motion.keyboardIn, exit = Motion.keyboardOut) { keys() }
             }
         }
         CompositionLocalProvider(LocalBackdrop provides backdrop) {

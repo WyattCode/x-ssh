@@ -81,6 +81,7 @@ fun HostEditorScreen(
         // 已信任的指纹绑在「地址:端口」上:改了目标就是另一台机器,旧指纹不能跟着走;
         // 没改就必须留下,否则编辑一下备注就把信任关系抹了。
         val sameEndpoint = initial != null && initial.address == newAddress && initial.port == newPort
+        val keepKey = initial?.auth == AuthKind.KEY && password.isEmpty()
         onSave(
             Host(
                 id = initial?.id ?: UUID.randomUUID().toString(),
@@ -88,8 +89,10 @@ fun HostEditorScreen(
                 address = newAddress,
                 port = newPort,
                 username = username.trim(),
-                auth = AuthKind.PASSWORD,
-                keyPath = "",
+                // 界面上只有密码。老数据里用私钥登录、又没填密码的主机,保存时别悄悄改成密码登录 ——
+                // 那样它就再也连不上了。
+                auth = if (keepKey) AuthKind.KEY else AuthKind.PASSWORD,
+                keyPath = if (keepKey) initial?.keyPath.orEmpty() else "",
                 keyFingerprint = if (sameEndpoint) initial.keyFingerprint else "",
                 password = password,
             ),
