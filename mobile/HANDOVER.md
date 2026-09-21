@@ -1,77 +1,66 @@
 # X-SSH 移动端交接文档
 
-> 更新: 2026-09-21 凌晨(第五次)。项目: `mobile/`(Android + iOS 双原生 UI + 共享 Rust 核心)。
-> 设备: Xiaomi 18 Fold(型号 2608BPX34C),已装 demo App。
+> 更新: 2026-09-22(第六次会话收尾)。项目: `mobile/`(共享 Rust 核心 + Android 原生 UI;iOS 未开工)。
+> 设备: Xiaomi 18 Fold(`2608BPX34C`,折叠屏,主测)、Xiaomi 17 Ultra(`25128PNA1C`,直板机)。
+> 最新提交以 `git log` 为准;本文 §0/§1/§6/§7 是现状,§2 起是按时间记的过程与原因(改代码前先读相关小节)。
 
 ## 0. 一句话状态
 
-**真机 SSH 全链路已经跑通**(私钥认证 → PTY → 终端渲染 → 键盘输入 → 远端回显),
-走的是 `adb reverse` 的回环隧道 —— App UID 的**回环不受限**,所以 MIUI 那道封锁
-不再挡开发。MIUI 仍然禁着 App 直连局域网/公网(WLAN 页签开关还没打开),那是
-**发布前要解决的问题,不是每天开发的前置条件**。
+**可以日常当"运维遥控器"用了:** 密码登录(系统密钥库加密存本机)→ 主机密钥校验(首次/变更都要人确认)
+→ PTY 终端(Codex 这类全屏 TUI 能用,2000+ 条消息不冻)→ 后台前台服务保活。
+App 已能**直连局域网**(`192.168.1.100`,早期 MIUI 联网拦截的问题已不存在)。
 
-第三次会话新查明: Android 16+ 的本地网络保护要求单独的 `ACCESS_LOCAL_NETWORK`
-运行时权限,manifest 里原本没有 —— 就算 MIUI 放行,连 `192.168.x.x` 仍会超时,
-且表现和现在一模一样(超时),极易误判。已补上声明与申请。
+**界面(第六次会话重做,见 M3.13–M3.23):**
+- 视觉:iPhone Duo / iOS 17 风格。每台主机一张实底圆角卡片;Liquid Glass 按钮(`io.github.kyant0:backdrop`);
+  日夜主题(外观按钮点一下切 跟随系统→浅色→深色);**蓝色只给「连接/重试」这一个实心按钮**。
+- 按钮位置分两种模式(`Chrome`,M3.21):
+  - **折叠屏 = 右侧悬浮竖轨道**:三种形态(外屏 / 内屏竖 / 内屏横)同一个落点;内容铺满到右边缘从玻璃底下穿过;
+    键盘弹出时轨道随内容升到键盘上方;倒着拿内屏竖屏时抬到摄像头上方。
+  - **直板机 / 平板 = 安卓惯例**:顶栏放页面操作,新建主机是右下角悬浮 ＋。
+- 动效:iOS 橡皮筋回弹(任何长度的列表都能拖)、推入式换页、跟手的返回手势(`PredictiveBackHandler`)、
+  快捷键面板像系统键盘一样从底边升起。
+- 终端:快捷键面板**默认收起**(⌘ 开关);⌨ 按钮点一下弹键盘、再点收起;按键保持键帽比例(≤58dp)居中。
+- 文案:**不写任何操作说明 / 存储说明 / "后续版本"**,只标需要注意的状态(主机密钥未确认、密码未保存)。
+- 登录:**界面只有密码**。私钥连接层仍支持,但还没有导入入口,所以界面上不出现(M3.22)。
 
-**第五次会话: 整套 UI 按平板/折叠屏重做。** 三种形态各自有布局(外屏 425dp 单列 +
-拇指区悬浮按钮 / 内屏竖 608dp 双列网格 / 内屏横 860dp 列表+详情双栏),分栏的分界线
-用 `androidx.window` 的真实铰链坐标,实测压在折痕上(x=1182px,误差 0 像素);半折时
-进桌面模式(终端在折痕上方,按键与输入法在下方)。触摸目标一律 ≥48dp,方向键长按连发。
-**注意: 功能移植远未完成**,桌面端的 SFTP/端口转发/多标签/分屏等核心能力
-(`xssh-core` 只有 `ssh.rs` + `terminal.rs`)都还没有;这次做的是已有三个界面的交互。
+**还没有的核心能力**(桌面版有):SFTP、端口转发、多标签、选择复制、片段、快照;iOS 轨未开工。
 
-**第四次会话: 主机密钥校验已上机。** 之前 `check_server_key` 接受任意密钥(只把指纹
-记下来),等于没有中间人防护 —— 这是安全缺陷,不是缺功能。现在:核心只接受已信任的
-指纹,首次连接与指纹变更都在握手处拒绝,再由 UI 让人裁决;信任结果按「地址:端口」
-存在主机记录里。五种情况都在真机上验过(见 §2「M2」)。
+## 1. 下一步(建议顺序)
 
-## 1. 下一步(精确操作)
+1. **私钥导入**(系统文件选择器 → 复制进 App 私有目录 → Keystore 保护),做完再把"密码 / 私钥"切换放回编辑页。
+2. **选择 / 复制粘贴**(核心要先暴露选区 API;终端是 Canvas 画的)。
+3. 多会话 / 标签;SFTP;端口转发(与桌面版对齐)。
+4. 发布前:HyperOS 省电白名单引导、通知权限被拒的兜底、TOFU 策略与桌面版统一、密码 zeroize。
 
-### 1.0 不必等 MIUI:用 adb reverse 直接联调(已验证)
+### 1.0 本机联调(不碰用户服务器时)
 
-App UID 连局域网/公网全超时,但**回环正常**(实测得到的是 `Connection refused`
-而不是 `Timeout`)。所以把 PC 的 sshd 反向映射到手机回环口即可:
+用户的真服务器 `192.168.1.100`(主机名 DGX Node 0)**只点界面、不在里面敲命令**。要测输入就用本地靶机:
 
-```powershell
-$adb = "D:\Android\sdk\platform-tools\adb.exe"
-& $adb reverse tcp:2222 tcp:22      # 手机 127.0.0.1:2222 → PC 22;插拔 USB 后要重设
-& $adb shell am force-stop dev.xssh.android
-& $adb shell am start -n dev.xssh.android/.MainActivity `
-    --es devAutoConnect 127.0.0.1 --ei devPort 2222 --es devUser user `
-    --es devKeyPath /data/data/dev.xssh.android/files/xssh_dev_key
+```bash
+# 1) PC 上起便携 sshd(配置文件必须给绝对路径,否则 "sshd_config: No such file")
+cd /c/Users/user/AppData/Local/Temp/opencode/xssh-sshd && ./OpenSSH-Win64/sshd.exe -D \
+  -f 'C:\Users\user\AppData\Local\Temp\opencode\xssh-sshd\sshd_config' -o Port=2222 -o ListenAddress=127.0.0.1
+# 2) 手机回环 → PC
+adb reverse tcp:2222 tcp:2222
+# 3) 私钥推进 App 私有目录(私钥主机只能这样造,界面上没有入口)
+adb push id_xssh_dev /data/local/tmp/k && adb shell "run-as dev.xssh.android sh -c 'cat /data/local/tmp/k > files/xssh_dev_key'"
 ```
+测试主机可以直接写 `shared_prefs/xssh_hosts.xml`(JSON 列表,字段见 `HostStore.kt`)。
+**用户设备上已有真实主机(含加密密码)时,先原样备份该文件,测完字节级还原。** 测完关 sshd、`adb reverse --remove-all`。
 
-实测:进终端、显示 Windows 提示符、`input text` 输入命令、远端回显,全部正常。
-(`devPort` / `devKeyPath` 是第三次会话新增的调试参数。)
+### 1.1 验证手法(第六次会话沉淀)
 
-### 1.1 打开 MIUI 联网控制页(已验证可行)
-```powershell
-$adb = "D:\Android\sdk\platform-tools\adb.exe"
-& $adb shell am start -n com.miui.securitycenter/com.miui.networkassistant.ui.activity.FirewallActivity
-```
-页面结构(内屏 2364×1672 横屏下的坐标,供 `input tap` 用):
-- 页签行:`数据-卡1` [150,291]-[838,373] / `数据-卡2` [838,291]-[1526,373] / **`WLAN` [1526,291]-[2214,373]**(中心约 1870, 332)
-- 搜索框:中心约 (1181, 458);输入 `X-SSH` 搜索
-- 当前观察:在「数据-卡1」页签下搜索 X-SSH,条目**名字是红色**(MIUI 语义:受限),
-  但开关显示为开(蓝色)—— 需要用 **WLAN 页签** 再确认一次(手机走 Wi-Fi,起决定作用的是 WLAN)。
-- 若 WLAN 下开关是关的 → 点开;顺手也检查「数据-卡1/卡2」是否被关。
+- 两台手机同时插着时,所有 adb 命令前设 `ANDROID_SERIAL=<序列号>`。
+- 点击:MIUI 会吞 `input tap`,用 80ms 的零长度 `input swipe x y x y 80`,并"点到界面变化为止"重试。
+- 找控件:`uiautomator dump` 读 `content-desc`(轨道按钮的读屏名:搜索主机 / 新建主机 / 外观:… / 返回 / 保存 /
+  显示快捷键 / 收起快捷键 / 调出键盘 / 收起键盘 / 断开连接 / 回到底部)。
+- 截图带 `-d <display>`;**聚焦密码框时 MIUI 安全键盘会让截图整屏发黑**,验布局请聚焦别的字段。
+- 动画:设备端循环 `screencap` 抓帧;卡顿用 `dumpsys gfxinfo dev.xssh.android reset` → 操作 → 读 90/95/99 分位
+  (120Hz 预算 8ms;键盘开合目前 p90 约 11~13ms)。
+- 旋转:`settings put system accelerometer_rotation 0` + `user_rotation 0..3`,测完恢复为自动旋转。
+- 用户手机锁屏时**不输入锁屏密码**,请用户解锁;运行时权限弹窗(通知 / 本地网络)也让用户自己点。
 
-### 1.2 放行后立即验证
-```powershell
-& $adb shell am force-stop dev.xssh.android
-& $adb shell am start -n dev.xssh.android/.MainActivity --es devAutoConnect <目标IP> --es devUser <user> --es devPassword <pw>
-# 等 3~5 秒截图;成功=进入终端并显示提示符,失败=connection timed out / authentication failed
-```
-注意:设备上当前的主机条目已被改成 `192.168.10.106`(见 §7),先确认该地址是否是当前想连的服务器。
-
-### 1.3 之后的 M2 清单
-- 折叠外屏适配验证(合上手机:应自动变单栏,连接不断)
-- 屏幕切换不断连(`configChanges` 只是应急;正解 ViewModel/前台 Service 持有会话)
-- 键盘条/IME 实机打磨(中文 IME、Ctrl 组合、方向键)
-- 前台服务保活 + HyperOS 省电白名单引导
-
-## 2. 今日完成(按里程碑)
+## 2. 过程记录(按里程碑,越往下越新)
 
 ### 调研(设备)
 - Xiaomi 18 Fold 兼容性文档: `docs/android/xiaomi-18-fold-compat.md`
@@ -141,7 +130,7 @@ $adb = "D:\Android\sdk\platform-tools\adb.exe"
   手机 shell UID `nc` 也通,唯独 App UID 全超时 → 判定为 MIUI 应用级防火墙,而非协议/服务端问题。
 - 已确认 App 的 `INTERNET` 权限已授予、AOSP netpolicy 无限制(排除普通权限问题)。
 
-## 3. 环境速查(今日安装)
+## 3. 环境速查
 
 | 组件 | 位置/版本 |
 | --- | --- |
@@ -152,8 +141,8 @@ $adb = "D:\Android\sdk\platform-tools\adb.exe"
 | Android SDK | `D:\Android\sdk`(platform-tools / platforms;android-37.0 / build-tools;37.0.0 / ndk;28.2.13676358) |
 | Gradle | `D:\Android\gradle-9.7.1`(不用 wrapper) |
 | 本地 SSH 靶机 | 便携 OpenSSH,配置 `%LOCALAPPDATA%\Temp\opencode\xssh-sshd\`(0.0.0.0:22,私钥 `id_xssh_dev`,防火墙规则 "OpenSSH dev 22") |
-| 用户测试服务器 | `192.168.1.101`(Ubuntu,OpenSSH 10.2;**密码不写进仓库**) |
-| 网络 | PC `192.168.10.153`,手机 `192.168.10.150` |
+| 用户服务器 | `192.168.1.100`(DGX Node 0,用户 user;**密码不写进仓库**;只点界面不敲命令) |
+| 网络 | PC 与手机同一局域网 `192.168.10.x`(手机曾为 `.150`) |
 
 ### 常用命令
 ```powershell
@@ -187,7 +176,7 @@ $env:JAVA_HOME="C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot"
   `keyevent / input text` 一直可用。
 - App 私有目录: `/data/data/dev.xssh.android/files/`(已推入测试私钥 `xssh_dev_key`,399B);
   推法: `adb shell "run-as dev.xssh.android sh -c 'cat > files/xssh_dev_key'" < 本地私钥`。
-- 保持亮屏: 开发者选项「充电时保持唤醒」已开(`mStayOn=true`);30s 息屏会导致截图全黑。
+- 保持亮屏: 测试时 `adb shell svc power stayon true`,**测完改回 false**;息屏会导致截图全黑。
 - MIUI「USB 安装」确认框:屏幕要亮着,否则安装被取消(`INSTALL_FAILED_USER_RESTRICTED`)。
 
 ### M2.5 平板/折叠屏交互(第五次会话,真机验证)
@@ -823,61 +812,56 @@ M3.17 修掉同步刷新之后,Codex 能出内容但仍不完整、输入框不�
     (作用域被遮住),要先存成局部变量。
 50. **Git Bash 会把 `/data/...` 改写成 Windows 路径**,`adb shell am start -n pkg/.Act` 也会被吃掉。
     所有 adb 命令前加 `export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'`。
+51. **MIUI 的挖孔 inset 不可信**:Fold 内屏平时报 0,键盘动画前后报 140px。页面 inset 用 systemBars ∪ ime,
+    挖孔只按 `Display.getCutout()`(API 29+,随旋转)单独避让。180° 翻转不触发配置变更,要监听 DisplayListener。
+52. **Activity 重建时旧实例的 onStop 晚于新实例的 onStart**。任何"前台与否"的布尔都会被写错,用计数。
+53. **Compose 的 OverscrollEffect 在内容不满一屏时不会被调用**(scrollable 不分发越界);回弹要自己接 nestedScroll。
+54. **`BackEventCompat.progress` 在 MIUI 上带缓动**(拉到 1/3 屏就 0.95);跟手的返回用 `touchX` 自己算。
+    拖动期间用匀速 tween,弹簧按时间取进度同样不跟手。
+55. **键盘动画期间别让重活跟着每帧跑**:画布变尺寸 = 整屏重画,行列变更 = PTY resize + 远端重画。都要等停稳再做。
+56. **Python 脚本改 Kotlin 时别在普通字符串里写 ``**,会被写成真正的 ESC 字节;改完 `grep -c $''` 查一遍。
 
 ## 6. 已知问题 / 待办
 
-**第三次会话已完成**
-- [x] 真机 SSH 全链路验证(经 `adb reverse`,见 §1.0)
-- [x] `ACCESS_LOCAL_NETWORK` 声明 + 连内网前申请 + 失败提示(`LocalNetwork.kt`)
-- [x] 修复输入重复(哨兵竞态)与终端自动聚焦
-- [x] 调试参数支持 `devPort` / `devKeyPath`
-- [x] `mobile/` 与 `docs/` 纳入 git(之前两天的成果一直是未跟踪状态)
+**已知问题**
+- [ ] 17 Ultra 横屏时小米输入法默认是**悬浮小键盘**,不报 inset,会盖住快捷键面板;应用无从避让(用户可拖开或切回普通键盘)。
+- [ ] 键盘开合停稳后有一帧 ~22ms(画布换新高度重画 + 行列变更);动画过程本身已不掉帧。
+- [ ] 生成的 UniFFI 绑定用了 `java.lang.ref.Cleaner`(API 33),lint 报 NewApi;运行时有 `ClassNotFoundException` 回退到 JNA Cleaner,不会崩。
+- [ ] 终端 Canvas 绘制,TalkBack 读不到内容。
 
-**必须做(M2)**
-- [ ] MIUI 联网开关 → 直连局域网(发布前必须;开发已可用 §1.0 绕开)
-- [ ] 放行后回归:确认 `ACCESS_LOCAL_NETWORK` 授予流程在真机上走通(现在是 `ignore`)
-- [x] 会话存活:已由 `SessionRegistry` + 前台服务持有,不再绑在界面上
-- [x] Android 前台服务保活(见 §2「M3.1」);HyperOS 省电白名单引导页仍待做
-- [ ] 通知权限被拒时的兜底提示(现在只是通知不显示,用户不知道后台还连着)
-- [x] 平板/折叠屏三形态布局 + 桌面模式(见 §2「M2.5」)
-- [x] 外屏实机走一遍(见 §2「M2.7」),含按键条横向滚动
-- [ ] 终端内容的读屏支持(Canvas 绘制,TalkBack 读不到)
+**功能(按优先级)**
+- [ ] 私钥导入 / 生成 / 生物识别解锁(做完恢复编辑页的「密码 / 私钥」切换;uniffi 已有 `AuthMethod::KeyFile`)
+- [ ] 选择 / 复制粘贴(核心需暴露选区 API)
+- [ ] 多标签 / 多会话;SFTP;端口转发 / 跳板;命令片段;快照(与桌面版对齐)
+- [ ] 终端配色方案(Nord / Dracula… 与桌面版同名)
+- [ ] 一台主机信任多把主机密钥(现在一条记录一个指纹,服务端轮换要重新确认)
 
-**安全(M3)**
-- [x] **主机密钥校验**:核心只认已信任指纹,首次连接/指纹变更均拒绝握手并抛带指纹的错误;
-      UI 出确认页(首次)与告警页(变更,列出「已信任」与「本次收到」);指纹随主机落盘。
-- [ ] 主机密钥改为一台主机可信任多把(现在一条记录只存一个指纹,服务端轮换要重新确认)
-- [ ] 桌面版是 TOFU(首次静默记下,变更才拦;`src/main/ssh.ts` 的 `hostVerifier`)——
-      与移动端现在的「首次也要人确认」不一致,发布前统一
-- [ ] 密钥库: 导入/生成/生物识别解锁(uniffi 已有 `AuthMethod::KeyFile`)
-- [ ] 密码/私钥 zeroize(FFI 跨边界有副本)
-
-**体验**
-- [x] 回滚缓冲(见 §2「M3.4」)
-- [ ] 选择 / 复制粘贴(核心还需暴露选区 API)
-- [ ] 多标签/多会话;标签颜色、命令片段、快照(与桌面版对齐)
-- [ ] 端口转发 / 代理跳转 / SFTP(桌面版已有,iOS/Android 待接)
-- [ ] 主机列表编辑器: 保存反馈(Toast)、名称自动填充、密钥库选择器
-- [ ] 头部「＋ 新建」按钮样式核对(疑与 Ghost 预期不符,截图看清再定)
-- [ ] 终端主题切按(Nord/Dracula/... 与桌面版同名系统)
+**发布前**
+- [ ] HyperOS 省电白名单引导;通知权限被拒时的兜底(现在只是通知不显示)
+- [ ] 桌面版是 TOFU(首次静默记下),移动端首次也要人确认 —— 统一策略
+- [ ] 密码 / 私钥 zeroize(FFI 跨边界有副本)
 
 **工程**
-- [ ] `jniLibs/*.so` 已 gitignore;应挂到 Gradle 任务里自动 `cargo ndk`(换机一键构建)
+- [ ] `jniLibs/*.so` 已 gitignore;挂到 Gradle 任务里自动 `cargo ndk`(换机一键构建)
 - [ ] 主机存储从 SharedPreferences 迁到 Rust 核心(与桌面版数据模型统一,便于导入导出)
-- [ ] i18n: 把 `src/renderer/src/lib/i18n.ts` 的 zh/en 字典脚本化转 `strings.xml`
-- [ ] iOS 轨(共享核心已就绪;需要 Mac/云 CI)
+- [ ] i18n:桌面版 `src/renderer/src/lib/i18n.ts` 的 zh/en 字典转 `strings.xml`
+- [ ] iOS 轨(共享核心已就绪;需要 Mac / 云 CI)
 
-## 7. 设备遗留状态(2026-09-20 第二次更新)
+**用户定下的设计规矩(改界面前必读)**
+- 回复要极短;界面不写说明性文案;未开发的功能直接不出现。
+- 不要大块实心蓝;轨道 ＋ ✓ 是无色玻璃(只有 ✕ 红),开关类按钮打开时图标变蓝。
+- 折叠屏按钮在右侧竖排、换页落点不变、随键盘上移、避开摄像头(往上让,不往左);直板机走顶栏 + 悬浮 ＋。
+- 主机列表必须有卡片框;快捷键默认收起、按键不拉伸;动效统一用 `Motion.kt` 的曲线。
+- 每次改完都要真机复核(外屏 / 内屏竖 / 内屏横,必要时直板机),并在深浅两种主题下看。
 
-- App(debug)已装 **User 0**;主机列表里已有一条测试主机,当前显示目标是 `user@192.168.10.106:22`(用户手动改过;原测试主机为 `dev / user@192.168.10.153:22 / 私钥`)。
-- 排查确认:App 的 `android.permission.INTERNET` 已授予;AOSP netpolicy 无限制;
-  **以 App UID 执行 `run-as dev.xssh.android ... nc` 连任何目标都超时**,而 shell UID 正常
-  → 结论:MIUI 应用级联网控制拦住了该 App。
-- 「联网控制」页已能通过 adb 打开(见 §1.1),X-SSH 在「数据-卡1」页签下名字为红(受限);
-  **WLAN 页签的开关状态尚未确认/未打开**(下一步就干这个)。
-- 手机屏幕**常亮**已开(`mStayOn=true`);开发者选项「USB 调试(安全设置)」状态未知
-  (tap 注入仍不可靠,自动化请走 keyevent / input text)。
-- 双屏:内屏 display id `4639175402683733248`,外屏 `4639175068132267009`;截图必须带 `-d`。
-- PC 上: 便携版 sshd 在跑(0.0.0.0:22);Gradle 用 `--no-daemon` 构建(无残留进程);
-  本地靶机私钥 `%LOCALAPPDATA%\Temp\opencode\xssh-sshd\id_xssh_dev`。
-- 截图与日志在 `%LOCALAPPDATA%\Temp\opencode\`(重启可能被清,重要结论已进本文档)。
+## 7. 设备现状(2026-09-22)
+
+- **18 Fold**(`SERIAL0000000002`):App(debug)最新版,User 0。主机列表只有用户的
+  `DGX Node 0 — user@192.168.1.100:22`(密码已由 Keystore 加密保存,**不要改动**);主题:深色;
+  自动旋转已恢复;常亮已关。内屏 display `4639175402683733248`(2364×1672 @440dpi,摄像头在自然竖屏左上角 164×140px),
+  外屏 `4639175068132267009`(1168×1712,摄像头顶部居中)。
+- **17 Ultra**(`4ba14696`):App 最新版;主机列表为空(测试主机和测试私钥已删);主题:跟随系统;
+  单屏 display `4630946639341352083`(1200×2608 @480dpi → 400×869dp);MIUI 装包时要在手机上点「继续安装」(6 秒倒计时)。
+- **PC**:测试 sshd 已关;`adb reverse` 已清。本地靶机私钥 `%LOCALAPPDATA%\Temp\opencode\xssh-sshd\id_xssh_dev`。
+- 构建:`JAVA_HOME=C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot`,
+  `D:\Android\gradle-9.7.1\bin\gradle.bat -p mobile\android :app:installDebug`(本次会话没有改 Rust 核心,不需要重编 .so)。
