@@ -221,15 +221,16 @@ fun XsshButton(
     val pressed by interaction.collectIsPressedAsState()
     val scale by animateFloatAsState(if (pressed && enabled) 0.97f else 1f, label = "btnPress")
 
-    // 全部用浅填充,没有实心蓝:主操作是浅蓝底 + 蓝字(iOS 的 tinted 样式),
+    // 主操作(连接 / 重试 / 信任)是实心蓝白字 —— 一屏只有这一块实心蓝,一眼就知道能点。
+    // 试过浅蓝底 + 蓝字:深色下像一块标签,用户说"不像是可以点的按钮"。
+    // (当初"蓝得很重"是选中行、回车键、＋ 也都是实心蓝;那些已经改浅,这里不受影响。)
     // 次要操作是浅灰底 + 正文色,危险操作是浅灰底 + 红字。
-    // 原来主操作是实心蓝白字,和选中行、回车键的实心蓝叠在一起,整屏蓝得很重。
     val background = when (kind) {
-        ButtonKind.Primary -> p.accentSoft
+        ButtonKind.Primary -> p.accent
         ButtonKind.Ghost, ButtonKind.Danger -> p.bgElev2
     }
     val foreground = when (kind) {
-        ButtonKind.Primary -> p.accent
+        ButtonKind.Primary -> p.onAccent
         ButtonKind.Ghost -> p.text
         ButtonKind.Danger -> p.danger
     }
