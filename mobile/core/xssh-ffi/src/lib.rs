@@ -265,6 +265,11 @@ impl Term {
         self.lock().set_theme(terminal::Theme { foreground, background, cursor });
     }
 
+    /// ANSI 0..15 的颜色(`0xRRGGBB`),跟着界面的深浅色主题换。
+    pub fn set_palette(&self, colors: Vec<u32>) {
+        self.lock().set_palette(&colors);
+    }
+
     /// 单元格像素尺寸(回答窗口尺寸查询用)。
     pub fn set_cell_pixels(&self, width: u32, height: u32) {
         self.lock().set_cell_pixels(width.min(u16::MAX as u32) as u16, height.min(u16::MAX as u32) as u16);

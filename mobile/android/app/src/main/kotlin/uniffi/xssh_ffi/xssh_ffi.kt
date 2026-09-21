@@ -707,6 +707,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_xssh_ffi_checksum_method_term_set_cell_pixels(
     ): Int
+    external fun uniffi_xssh_ffi_checksum_method_term_set_palette(
+    ): Int
     external fun uniffi_xssh_ffi_checksum_method_term_set_theme(
     ): Int
     external fun uniffi_xssh_ffi_checksum_method_term_take_events(
@@ -784,6 +786,8 @@ internal object UniffiLib {
     external fun uniffi_xssh_ffi_fn_method_term_scroll_to_bottom(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     external fun uniffi_xssh_ffi_fn_method_term_set_cell_pixels(`ptr`: Long,`width`: Int,`height`: Int,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_xssh_ffi_fn_method_term_set_palette(`ptr`: Long,`colors`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     external fun uniffi_xssh_ffi_fn_method_term_set_theme(`ptr`: Long,`foreground`: Int,`background`: Int,`cursor`: Int,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
@@ -959,6 +963,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_xssh_ffi_checksum_method_term_set_cell_pixels() and 0xFFFF) != 65465) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_xssh_ffi_checksum_method_term_set_palette() and 0xFFFF) != 25763) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_xssh_ffi_checksum_method_term_set_theme() and 0xFFFF) != 27876) {
@@ -2149,6 +2156,11 @@ public interface TermInterface {
     fun `setCellPixels`(`width`: kotlin.UInt, `height`: kotlin.UInt)
     
     /**
+     * ANSI 0..15 的颜色(`0xRRGGBB`),跟着界面的深浅色主题换。
+     */
+    fun `setPalette`(`colors`: List<kotlin.UInt>)
+    
+    /**
      * 回答颜色查询用的主题色(`0xRRGGBB`)。
      */
     fun `setTheme`(`foreground`: kotlin.UInt, `background`: kotlin.UInt, `cursor`: kotlin.UInt)
@@ -2437,6 +2449,22 @@ open class Term: Disposable, AutoCloseable, TermInterface
         
         FfiConverterUInt.lower(`width`),
         FfiConverterUInt.lower(`height`),_status)
+}
+    }
+    
+    
+
+    
+    /**
+     * ANSI 0..15 的颜色(`0xRRGGBB`),跟着界面的深浅色主题换。
+     */override fun `setPalette`(`colors`: List<kotlin.UInt>)
+        = 
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_xssh_ffi_fn_method_term_set_palette(
+        it,
+        
+        FfiConverterSequenceUInt.lower(`colors`),_status)
 }
     }
     
@@ -3202,6 +3230,34 @@ public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?>
         } else {
             buf.put(1)
             FfiConverterString.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceUInt: FfiConverterRustBuffer<List<kotlin.UInt>> {
+    override fun read(buf: ByteBuffer): List<kotlin.UInt> {
+        val len = buf.getInt()
+        return List<kotlin.UInt>(len) {
+            FfiConverterUInt.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<kotlin.UInt>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterUInt.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<kotlin.UInt>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterUInt.write(it, buf)
         }
     }
 }

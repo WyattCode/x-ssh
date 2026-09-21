@@ -1,5 +1,6 @@
 package dev.xssh.android
 
+import androidx.compose.ui.draw.shadow
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -53,10 +54,9 @@ fun FormGroup(
         if (title != null) {
             Text(
                 title,
-                color = p.textFaint,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier.padding(start = BoxPad, bottom = 8.dp),
+                color = p.textDim,
+                fontSize = 13.sp,
+                modifier = Modifier.padding(start = BoxPad, bottom = 7.dp),
             )
         }
         Column(
@@ -69,9 +69,9 @@ fun FormGroup(
         if (footnote != null) {
             Text(
                 footnote,
-                color = p.textFaint,
-                fontSize = 12.sp,
-                modifier = Modifier.padding(start = BoxPad, top = 8.dp),
+                color = p.textDim,
+                fontSize = 13.sp,
+                modifier = Modifier.padding(start = BoxPad, end = BoxPad, top = 7.dp),
             )
         }
     }
@@ -144,17 +144,18 @@ fun FormField(
         return
     }
     Row(
-        Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = BoxPad),
+        Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(horizontal = BoxPad),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(label, color = p.textDim, fontSize = 14.sp)
+        // 标签用主文字色、取值右对齐 —— iOS 设置页的写法。
+        Text(label, color = p.text, fontSize = 16.sp)
         Spacer(Modifier.width(GapItem))
         Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
             if (value.isEmpty() && placeholder.isNotEmpty()) {
                 Text(
                     placeholder,
                     color = p.textFaint,
-                    fontSize = 15.sp,
+                    fontSize = 16.sp,
                     fontFamily = if (mono) FontFamily.Monospace else FontFamily.Default,
                     textAlign = TextAlign.End,
                 )
@@ -165,7 +166,7 @@ fun FormField(
                 singleLine = true,
                 textStyle = TextStyle(
                     color = p.text,
-                    fontSize = 15.sp,
+                    fontSize = 16.sp,
                     fontFamily = if (mono) FontFamily.Monospace else FontFamily.Default,
                     textAlign = TextAlign.End,
                 ),
@@ -191,7 +192,7 @@ fun FormAction(label: String, danger: Boolean = false, onClick: () -> Unit) {
             .padding(horizontal = BoxPad),
         contentAlignment = Alignment.CenterStart,
     ) {
-        Text(label, color = if (danger) p.danger else p.text, fontSize = 15.sp)
+        Text(label, color = if (danger) p.danger else p.accent, fontSize = 16.sp)
     }
 }
 
@@ -204,6 +205,9 @@ fun FormAction(label: String, danger: Boolean = false, onClick: () -> Unit) {
 @Composable
 fun Segmented(options: List<String>, selectedIndex: Int, onSelect: (Int) -> Unit) {
     val p = LocalXssh.current
+    // iOS 分段控件:浅灰轨道上一块滑块(浅色是白、深色是灰),带一点投影;文字都用主文字色,
+    // 选中的加粗 —— 而不是给选中项换一种强调色,那样看着像两个独立按钮。
+    val thumb = if (p.dark) androidx.compose.ui.graphics.Color(0xFF636366) else androidx.compose.ui.graphics.Color.White
     Row(
         Modifier
             .fillMaxWidth()
@@ -218,17 +222,18 @@ fun Segmented(options: List<String>, selectedIndex: Int, onSelect: (Int) -> Unit
             Box(
                 Modifier
                     .weight(1f)
-                    .heightIn(min = 42.dp)
-                    .clip(RoundedCornerShape(RadiusChip + 2.dp))
-                    .background(if (on) p.accentSoft else androidx.compose.ui.graphics.Color.Transparent)
+                    .heightIn(min = 40.dp)
+                    .then(if (on) Modifier.shadow(1.5.dp, RoundedCornerShape(RadiusChip + 1.dp)) else Modifier)
+                    .clip(RoundedCornerShape(RadiusChip + 1.dp))
+                    .background(if (on) thumb else androidx.compose.ui.graphics.Color.Transparent)
                     .clickable { onSelect(index) },
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
                     label,
-                    color = if (on) p.accent else p.textDim,
-                    fontSize = 14.sp,
-                    fontWeight = if (on) FontWeight.Medium else FontWeight.Normal,
+                    color = p.text,
+                    fontSize = 15.sp,
+                    fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
                 )
             }
         }

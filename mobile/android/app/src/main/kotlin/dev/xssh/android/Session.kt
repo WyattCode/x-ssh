@@ -150,6 +150,17 @@ class LiveTerminal(
         dirty = true
     }
 
+    /** 终端配色:16 色 + 前景/背景/光标。换了之后整屏重新解析颜色。 */
+    fun applyTheme(p: XsshPalette) {
+        if (closed) return
+        fun rgb(c: androidx.compose.ui.graphics.Color) = (c.value shr 32).toInt().toUInt() and 0xFFFFFFu
+        runCatching {
+            term.setPalette(p.term16.map { it.toUInt() })
+            term.setTheme(rgb(p.termFg), rgb(p.termBg), rgb(p.termCursor))
+        }
+        dirty = true
+    }
+
     /** 强制下一帧取一次完整画面(界面刚回来看,或者行列变了)。 */
     fun markDirty() {
         dirty = true

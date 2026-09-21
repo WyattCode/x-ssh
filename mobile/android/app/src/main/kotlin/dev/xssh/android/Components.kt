@@ -1,5 +1,14 @@
 package dev.xssh.android
 
+import dev.chrisbanes.haze.hazeEffect
+import dev.chrisbanes.haze.HazeTint
+import dev.chrisbanes.haze.HazeStyle
+import dev.chrisbanes.haze.HazeState
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.draw.shadow
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.material3.Icon
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -90,6 +99,49 @@ val RadiusChip = 8.dp
 
 enum class ButtonKind { Primary, Ghost, Danger }
 
+/**
+ * 当前页面里"可以被毛玻璃模糊"的内容。每一页把自己的可滚动内容标成 `hazeSource`,
+ * 再通过它提供给浮在上面的玻璃件。没有提供时(null),玻璃件退化成纯半透明底色。
+ */
+val LocalHaze = staticCompositionLocalOf<HazeState?> { null }
+
+/**
+ * 毛玻璃:模糊背后的内容 + 一层底色 + 一道细边(+ 浅色模式下的柔和投影)。
+ *
+ * 参考图里所有浮在内容上的东西(右侧轨道、底部搜索条、播放条)都是这种材质:
+ * 内容从底下滚过去时透出来、被虚化 —— 这比一块不透明的色块更轻,也更能看出"它浮在上面"。
+ */
+@Composable
+fun Modifier.glass(shape: Shape): Modifier {
+    val p = LocalXssh.current
+    val haze = LocalHaze.current
+    return this
+        .then(
+            if (p.glassShadow.alpha > 0f) {
+                Modifier.shadow(8.dp, shape, ambientColor = p.glassShadow, spotColor = p.glassShadow)
+            } else {
+                Modifier
+            },
+        )
+        .clip(shape)
+        .then(
+            if (haze != null) {
+                Modifier.hazeEffect(
+                    haze,
+                    style = HazeStyle(
+                        backgroundColor = p.bg,
+                        tints = listOf(HazeTint(p.glassTint)),
+                        blurRadius = 22.dp,
+                        noiseFactor = 0f,
+                    ),
+                )
+            } else {
+                Modifier.background(p.glassTint)
+            },
+        )
+        .border(0.8.dp, p.glassBorder, shape)
+}
+
 /** 卡片:与 Windows 版 `.card` 同款(圆角 10、1px 边框、elev 背景)。 */
 @Composable
 fun XsshCard(
@@ -104,18 +156,17 @@ fun XsshCard(
     val haptic = LocalHapticFeedback.current
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
-    // 按下时轻微内缩:手指盖住卡片时,边缘的位移是唯一还看得见的反馈。
-    val scale by animateFloatAsState(if (pressed) 0.985f else 1f, label = "cardPress")
-
+    // 列表行,不是卡片:没有边框、没有底色,行与行之间一道细线(参考图的收件箱)。
+    // 选中时整块填强调色、白字;按下时浅填充 —— 手指盖住的地方要有反馈。
     Column(
         modifier
-            .scale(scale)
             .clip(RoundedCornerShape(RadiusBox))
-            .background(if (highlight) p.rowSel else p.bgElev)
-            .border(
-                1.dp,
-                if (highlight) p.accent.copy(alpha = 0.7f) else p.border,
-                RoundedCornerShape(RadiusBox),
+            .background(
+                when {
+                    highlight -> p.rowSel
+                    pressed -> p.bgElev2
+                    else -> Color.Transparent
+                },
             )
             .then(
                 if (onClick == null) {
@@ -192,30 +243,24 @@ fun XsshButton(
     val haptic = LocalHapticFeedback.current
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
-    val scale by animateFloatAsState(if (pressed && enabled) 0.96f else 1f, label = "btnPress")
+    val scale by animateFloatAsState(if (pressed && enabled) 0.97f else 1f, label = "btnPress")
 
+    // iOS 的做法:主操作实心强调色;次要操作用浅填充,文字决定语义(删除就是红字),没有描边。
     val background = when (kind) {
         ButtonKind.Primary -> p.accent
-        ButtonKind.Ghost -> p.bgElev2
-        ButtonKind.Danger -> Color.Transparent
+        ButtonKind.Ghost, ButtonKind.Danger -> p.bgElev2
     }
     val foreground = when (kind) {
-        ButtonKind.Primary -> p.bg
-        ButtonKind.Ghost -> p.text
+        ButtonKind.Primary -> p.onAccent
+        ButtonKind.Ghost -> p.accent
         ButtonKind.Danger -> p.danger
-    }
-    val borderColor = when (kind) {
-        ButtonKind.Primary -> Color.Transparent
-        ButtonKind.Ghost -> p.borderStrong
-        ButtonKind.Danger -> p.danger.copy(alpha = 0.55f)
     }
     Box(
         modifier
             .scale(scale)
-            .heightIn(min = TouchMin)
+            .heightIn(min = TouchMin + 2.dp)
             .clip(RoundedCornerShape(RadiusBox))
             .background(if (enabled) background else background.copy(alpha = 0.35f))
-            .border(1.dp, if (enabled) borderColor else borderColor.copy(alpha = 0.4f), RoundedCornerShape(RadiusBox))
             .clickable(interactionSource = interaction, indication = null, enabled = enabled) {
                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 onClick()
@@ -226,8 +271,8 @@ fun XsshButton(
         Text(
             text = label,
             color = if (enabled) foreground else foreground.copy(alpha = 0.4f),
-            fontSize = 15.sp,
-            fontWeight = FontWeight.Medium,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.SemiBold,
             textAlign = TextAlign.Center,
         )
     }
@@ -270,8 +315,10 @@ fun KeyCap(
     modifier: Modifier = Modifier,
     active: Boolean = false,
     repeatable: Boolean = false,
-    /** 主操作键(⏎):强调色字,一眼能找到。 */
+    /** 主操作键(⏎):实心强调色,一眼能找到。 */
     emphasis: Boolean = false,
+    /** 用图标代替文字(⏎ 用的是画出来的回车图标)。[label] 仍作为读屏文字。 */
+    icon: ImageVector? = null,
     onPress: () -> Unit,
 ) {
     val p = LocalXssh.current
@@ -279,20 +326,26 @@ fun KeyCap(
     val action by rememberUpdatedState(onPress)
     var pressed by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val shape = RoundedCornerShape(RadiusBox)
+
+    // 照系统键盘:浅色是白键,深色是灰键;按下变暗一档;粘滞修饰键和回车用强调色。
+    val filled = active || emphasis
+    val keyBg = when {
+        filled && pressed -> p.accent.copy(alpha = 0.8f)
+        filled -> p.accent
+        pressed -> if (p.dark) Color(0xFF545456) else Color(0xFFD1D1D6)
+        else -> if (p.dark) Color(0xFF3A3A3C) else Color.White
+    }
+    val fg = if (filled) p.onAccent else p.text
 
     Box(
         modifier
             .heightIn(min = TouchMin)
-            .defaultMinSize(minWidth = 52.dp)
-            .clip(RoundedCornerShape(RadiusBox))
-            .background(
-                when {
-                    active -> p.accentSoft
-                    pressed -> p.rowSel
-                    else -> p.bgElev2
-                },
-            )
-            .border(1.dp, if (active) p.accent else p.border, RoundedCornerShape(RadiusBox))
+            .defaultMinSize(minWidth = 48.dp)
+            // 浅色白键要一道很淡的投影才从面板上"浮"起来;深色靠灰度差就够了。
+            .then(if (p.dark) Modifier else Modifier.shadow(0.6.dp, shape))
+            .clip(shape)
+            .background(keyBg)
             // 手势是自己写的(为了连发),点击语义得手动补上,不然读屏用户点不动。
             .semantics {
                 role = Role.Button
@@ -323,45 +376,19 @@ fun KeyCap(
                     pressed = false
                 }
             }
-            .padding(horizontal = 10.dp),
+            .padding(horizontal = 8.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            text = label,
-            color = if (active || emphasis) p.accent else p.text,
-            fontFamily = FontFamily.Monospace,
-            fontSize = if (emphasis) 17.sp else 14.sp,
-            fontWeight = if (emphasis) FontWeight.SemiBold else null,
-        )
-    }
-}
-
-/**
- * 终端按键条。整排键(约 20 个 × 52dp ≈ 1100dp)哪块屏都放不下一行,只有两种正经摆法:
- * - 窄屏:一行横向滚动,常用键排在前面(换行会吃掉手机本就不多的竖向空间);
- * - 宽屏:自动折成两行全部露出来,不用滚 —— 滚动意味着要的键可能不在眼前。
- */
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-fun KeyCapRow(modifier: Modifier = Modifier, wrap: Boolean, content: @Composable RowScope.() -> Unit) {
-    val scroll = rememberScrollState()
-    val pad = Modifier.fillMaxWidth().padding(horizontal = Gutter, vertical = 8.dp)
-    if (wrap) {
-        FlowRow(
-            modifier.then(pad),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            // FlowRowScope 也是 RowScope,内容原样复用。
-            content()
+        if (icon != null) {
+            Icon(icon, contentDescription = null, tint = fg, modifier = Modifier.size(22.dp))
+        } else {
+            Text(
+                text = label,
+                color = fg,
+                fontSize = 15.sp,
+                fontWeight = if (filled) FontWeight.SemiBold else FontWeight.Medium,
+            )
         }
-    } else {
-        Row(
-            modifier.fillMaxWidth().horizontalScroll(scroll).padding(horizontal = Gutter, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            content = content,
-        )
     }
 }
 
@@ -444,46 +471,35 @@ val RailWidth = 72.dp
  */
 val RailClearance = 56.dp + 14.dp + 56.dp + 16.dp + Gutter
 
-/** 一组轨道按钮:一个半透明胶囊裹住若干圆钮。 */
+/** 一组轨道按钮:一枚毛玻璃胶囊裹住若干圆钮。 */
 @Composable
 fun RailGroup(content: @Composable () -> Unit) {
-    val p = LocalXssh.current
     Column(
         Modifier
-            .clip(RoundedCornerShape(28.dp))
-            .background(p.text.copy(alpha = 0.13f))
-            .border(1.dp, p.text.copy(alpha = 0.10f), RoundedCornerShape(28.dp))
+            .glass(RoundedCornerShape(28.dp))
             .padding(4.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) { content() }
 }
 
-/** 轨道上的圆钮。[tint] 给危险/主操作上色,其余沿用前景色。 */
+/** 轨道上的圆钮。[tint] 给主操作/危险操作上色,其余用前景色。 */
 @Composable
 fun RailButton(
-    glyph: String,
+    icon: ImageVector,
     contentDescription: String,
     tint: Color? = null,
-    filled: Boolean = false,
     onClick: () -> Unit,
 ) {
     val p = LocalXssh.current
     val haptic = LocalHapticFeedback.current
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
-    val fg = tint ?: p.text
     Box(
         Modifier
             .size(TouchMin)
             .clip(CircleShape)
-            .background(
-                when {
-                    filled -> fg
-                    pressed -> p.text.copy(alpha = 0.16f)
-                    else -> Color.Transparent
-                },
-            )
+            .background(if (pressed) p.text.copy(alpha = 0.12f) else Color.Transparent)
             .clickable(interactionSource = interaction, indication = null) {
                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 onClick()
@@ -491,7 +507,7 @@ fun RailButton(
             .semantics { role = Role.Button; contentDescriptionProperty = contentDescription },
         contentAlignment = Alignment.Center,
     ) {
-        Text(glyph, color = if (filled) p.bg else fg, fontSize = 18.sp)
+        Icon(icon, contentDescription = null, tint = tint ?: p.text, modifier = Modifier.size(23.dp))
     }
 }
 

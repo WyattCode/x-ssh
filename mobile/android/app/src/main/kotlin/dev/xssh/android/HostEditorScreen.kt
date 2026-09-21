@@ -174,7 +174,8 @@ fun HostEditorScreen(
     }
 
     // 整个页面量一次,和主机页同一条式子、同样量整个窗口。
-    BoxWithConstraints(Modifier.fillMaxSize().background(p.bg)) {
+    // 分组表单:浅色是浅灰底 + 白色分组块,深色是纯黑底 + 深灰分组块(iOS 设置页那种)。
+    BoxWithConstraints(Modifier.fillMaxSize().background(p.groupedBg)) {
         val window = maxWidth
         val twoPane = window >= 840.dp || (adaptive.bookFold != null && window >= 600.dp)
         // 左侧安全区(横屏时挖孔可能在左边,约 51dp)单独拿出来,不放进整页的 padding。
@@ -203,8 +204,8 @@ fun HostEditorScreen(
                 Text(
                     if (initial == null) "新建主机" else "编辑主机",
                     color = p.text,
-                    fontSize = 28.sp,
-                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 34.sp,
+                    fontWeight = FontWeight.Bold,
                 )
                 Spacer(Modifier.height(2.dp))
                 Text(
@@ -256,8 +257,8 @@ fun HostEditorScreen(
 
         // 和主机页的 ⌕ ＋ 落在同一对位置上:点 ＋ 进来,按钮原地换成 ‹ ✓,一像素不动。
         EdgeRail(Modifier.align(Alignment.BottomEnd)) {
-            RailGroup { RailButton("‹", "返回") { onBack() } }
-            RailGroup { RailButton("✓", "保存", tint = p.accent) { save() } }
+            RailGroup { RailButton(XIcons.Back, "返回") { onBack() } }
+            RailGroup { RailButton(XIcons.Check, "保存", tint = p.accent) { save() } }
         }
     }
 }

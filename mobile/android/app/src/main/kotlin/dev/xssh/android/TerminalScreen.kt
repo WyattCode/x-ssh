@@ -1,5 +1,6 @@
 package dev.xssh.android
 
+import androidx.compose.foundation.border
 import kotlin.math.roundToInt
 import android.util.Log
 import uniffi.xssh_ffi.StyledRun
@@ -337,6 +338,12 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
     // 盖住的 ✕ 正好和输入法的回车键在同一个位置,想断开却会按成回车。
     // 要打字时点终端或 ⌨,那两处会显式拿焦点并弹键盘。
 
+    // 终端配色跟着界面的深浅色走:16 色交给 Rust 解析,前景/背景用来回答程序的颜色查询
+    // (Codex 会据此选深色还是浅色主题)。
+    LaunchedEffect(p.dark) {
+        withContext(Dispatchers.IO) { live.applyTheme(p) }
+    }
+
     // 画面由会话推过来 —— 轮询循环长在会话里,这一屏只是观众,走了它照跑。
     val frame by live.frame.collectAsState()
     val rows = frame.rows
@@ -427,7 +434,7 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
         // 翻着历史时才出现,回到底部就收起 —— 不常驻,不占视线。
         if (frame.scrollOffset > 0) {
             RailGroup {
-                RailButton("↓", "回到底部") {
+                RailButton(XIcons.ArrowDown, "回到底部") {
                     scope.launch(Dispatchers.IO) { live.scrollToBottom() }
                 }
             }
@@ -436,15 +443,14 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
         // 原来 ⌨ ✕ 装在同一个胶囊里,胶囊内间距 2dp、胶囊之间 14dp,于是从主机页
         // 点卡片进终端,上面那颗钮会错开 20dp —— 换页按钮不能动。
         RailGroup {
-            RailButton("⌨", "调出键盘") {
+            RailButton(XIcons.Keyboard, "调出键盘") {
                 Log.i(TAG, "keyboard: rail button")
                 focusRequester.requestFocus()
                 keyboard?.show()
             }
         }
         RailGroup {
-            // ⏻ 字体里没有,会渲染成豆腐块;✕ 是一定有的字形。
-            RailButton("✕", "断开连接", tint = p.danger) {
+            RailButton(XIcons.Close, "断开连接", tint = p.danger) {
                 SessionRegistry.close(host.id)
                 onExit()
             }
@@ -523,7 +529,10 @@ private fun FloatingKeys(content: @Composable () -> Unit) {
             // 原来 32dp 按"跟屏幕圆角同心"来算,面板不高,看上去就是一条胶囊,
             // 和里面方正的按键不是一家人 —— 用户明确要求改成跟按键差不多。
             .clip(RoundedCornerShape(RadiusBox + 4.dp))
-            .background(p.text.copy(alpha = 0.07f)),
+            // 照系统键盘:浅色是浅灰底上的白键,深色是深灰底上的灰键。
+            // 用和终端底色一样的白/黑做面板,白键就融进去了,看不出键的边界。
+            .background(if (p.dark) Color(0xFF1C1C1E) else Color(0xFFD5D7DD))
+            .border(0.8.dp, p.glassBorder, RoundedCornerShape(RadiusBox + 4.dp)),
     ) {
         content()
     }
@@ -629,7 +638,7 @@ private fun CompactKeys(k: KeyActions) {
                 KeyCap("^Z", key) { k.bytes(26) }
                 KeyCap("⌫", key, repeatable = true) { k.bytes(0x7F) }
             }
-            KeyCap("⏎", key, emphasis = true) { k.bytes(13) }
+            KeyCap("回车", key, emphasis = true, icon = XIcons.Return) { k.bytes(13) }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             val key = Modifier.weight(1f)
@@ -670,7 +679,7 @@ private fun WideKeys(k: KeyActions) {
             KeyCap("^L", key) { k.bytes(12) }
             KeyCap("⌫", key, repeatable = true) { k.bytes(0x7F) }
             KeyCap("↑", key, repeatable = true) { k.text("\u001b[A") }
-            KeyCap("⏎", key, emphasis = true) { k.bytes(13) }
+            KeyCap("回车", key, emphasis = true, icon = XIcons.Return) { k.bytes(13) }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             val key = Modifier.weight(1f)

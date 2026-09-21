@@ -120,6 +120,8 @@ class TerminalSession(
 
     fun scroll(lines: Int) = live.scroll(lines)
 
+    fun applyTheme(p: XsshPalette) = live.applyTheme(p)
+
     fun scrollToBottom() = live.scrollToBottom()
 
     internal fun shutdown() {

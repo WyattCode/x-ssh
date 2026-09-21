@@ -145,6 +145,8 @@ pub struct Terminal {
     parser: Processor,
     size: Size,
     theme: Theme,
+    /// ANSI 0..15 的颜色(`0xRRGGBB`)。浅色主题下不能沿用深色那套 —— "白色"文字在白底上看不见。
+    base16: [u32; 16],
     /// 单元格像素尺寸,回答 CSI 14t / 16t 这类"窗口多大"的查询。
     cell_px: (u16, u16),
 }
@@ -162,7 +164,15 @@ impl Terminal {
             parser: Processor::new(),
             size,
             theme: Theme::default(),
+            base16: DEFAULT_BASE16,
             cell_px: (10, 20),
+        }
+    }
+
+    /// 设置 ANSI 0..15 的颜色(`0xRRGGBB`)。不足 16 个的部分保持默认。
+    pub fn set_palette(&mut self, colors: &[u32]) {
+        for (slot, color) in self.base16.iter_mut().zip(colors) {
+            *slot = color & 0xFF_FFFF;
         }
     }
 
@@ -299,8 +309,8 @@ impl Terminal {
             if cell.flags.contains(Flags::STRIKEOUT) {
                 flags |= style::STRIKE;
             }
-            let fg = resolve_color(cell.fg, colors);
-            let bg = resolve_color(cell.bg, colors);
+            let fg = resolve_color(cell.fg, colors, &self.base16);
+            let bg = resolve_color(cell.bg, colors, &self.base16);
 
             let line = &mut rows[row as usize];
             match line.last_mut() {
@@ -435,7 +445,7 @@ impl Terminal {
             return set;
         }
         match index {
-            i if i < 256 => rgb(palette(i as u8) & 0xFF_FFFF),
+            i if i < 256 => rgb(palette(i as u8, &self.base16) & 0xFF_FFFF),
             i if i == NamedColor::Foreground as usize => rgb(self.theme.foreground),
             i if i == NamedColor::Background as usize => rgb(self.theme.background),
             i if i == NamedColor::Cursor as usize => rgb(self.theme.cursor),
@@ -457,11 +467,12 @@ impl Terminal {
 }
 
 /// 把单元格颜色解析成 `0xAARRGGBB`;"默认前景/背景"返回 0,交给宿主按主题取色。
-fn resolve_color(color: Color, colors: &Colors) -> u32 {
+fn resolve_color(color: Color, colors: &Colors, base16: &[u32; 16]) -> u32 {
     fn pack(c: Rgb) -> u32 {
         0xFF00_0000 | (c.r as u32) << 16 | (c.g as u32) << 8 | c.b as u32
     }
-    let indexed = |index: usize| colors[index].map(pack).unwrap_or_else(|| palette(index as u8));
+    let indexed =
+        |index: usize| colors[index].map(pack).unwrap_or_else(|| palette(index as u8, base16));
     match color {
         Color::Spec(rgb) => pack(rgb),
         Color::Indexed(index) => indexed(index as usize),
@@ -481,14 +492,16 @@ fn resolve_color(color: Color, colors: &Colors) -> u32 {
     }
 }
 
-/// xterm 256 色默认调色板。前 16 色取深色背景上对比度够的一组(与常见终端一致)。
-fn palette(index: u8) -> u32 {
-    const BASE: [u32; 16] = [
-        0x000000, 0xCD3131, 0x0DBC79, 0xE5E510, 0x2472C8, 0xBC3FBC, 0x11A8CD, 0xE5E5E5,
-        0x666666, 0xF14C4C, 0x23D18B, 0xF5F543, 0x3B8EEA, 0xD670D6, 0x29B8DB, 0xFFFFFF,
-    ];
+/// 默认 16 色:深色背景上对比度够的一组(与常见终端一致)。
+pub const DEFAULT_BASE16: [u32; 16] = [
+    0x000000, 0xCD3131, 0x0DBC79, 0xE5E510, 0x2472C8, 0xBC3FBC, 0x11A8CD, 0xE5E5E5,
+    0x666666, 0xF14C4C, 0x23D18B, 0xF5F543, 0x3B8EEA, 0xD670D6, 0x29B8DB, 0xFFFFFF,
+];
+
+/// xterm 256 色调色板:前 16 色可换([base16]),其余是标准的 6×6×6 色立方和灰阶。
+fn palette(index: u8, base16: &[u32; 16]) -> u32 {
     let rgb = match index {
-        0..=15 => BASE[index as usize],
+        0..=15 => base16[index as usize],
         16..=231 => {
             let i = index as u32 - 16;
             let level = |v: u32| if v == 0 { 0 } else { 55 + v * 40 };
@@ -609,6 +622,14 @@ mod tests {
         let mut t = Terminal::new(20, 2);
         t.feed(b"\x1b[?2026hframe\x1b[?2026l");
         assert_eq!(t.text(), "frame");
+    }
+
+    #[test]
+    fn custom_palette_changes_named_colors() {
+        let mut t = Terminal::new(20, 2);
+        t.set_palette(&[0, 0x112233]);
+        t.feed(b"[31mr");
+        assert_eq!(t.screen_runs()[0][0].fg, 0xFF112233, "红色走自定义 16 色");
     }
 
     #[test]

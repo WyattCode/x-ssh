@@ -1,5 +1,14 @@
 package dev.xssh.android
 
+import dev.chrisbanes.haze.rememberHazeState
+import dev.chrisbanes.haze.hazeSource
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.material3.Icon
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.ui.layout.layout
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
@@ -51,7 +60,6 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -115,6 +123,9 @@ fun HomeScreen(
     // 看上去就是打开应用闪跳一下(录屏第 296 帧拍到的就是这个)。
     val shownHost = hosts.firstOrNull { it.id == selectedId } ?: hosts.firstOrNull()
 
+    // 浮在内容上的玻璃件(右侧轨道)要模糊的,就是这一页的内容。
+    val haze = rememberHazeState()
+
     BoxWithConstraints(Modifier.fillMaxSize().background(p.bg)) {
         // 用**实测到的窗口宽度**判断分栏,不用 Configuration 的 screenWidthDp ——
         // 分屏时部分机型的 screenWidthDp 仍报整块屏幕的宽度,那样会在只有半屏宽的窗口里
@@ -131,7 +142,7 @@ fun HomeScreen(
         if (twoPane && hosts.isNotEmpty()) {
             // 再兜一层:左栏无论如何不能吃掉整个窗口。
             val listWidth = adaptive.listPaneWidth(maxWidth).coerceAtMost(maxWidth - 280.dp)
-            Row(Modifier.fillMaxSize()) {
+            Row(Modifier.fillMaxSize().hazeSource(haze)) {
                 HostListPane(
                     modifier = Modifier
                         .width(listWidth)
@@ -188,7 +199,7 @@ fun HomeScreen(
             HostListPane(
                 // 内容通到边缘,从右边缘玻璃层底下穿过去(规范:scroll views extend
                 // beneath floating glass)。底部多留一段,最后一张卡片能滚出轨道之外。
-                modifier = Modifier.fillMaxSize().safeDrawingPadding(),
+                modifier = Modifier.fillMaxSize().hazeSource(haze).safeDrawingPadding(),
                 hosts = filtered,
                 total = hosts.size,
                 // 单栏没有"当前选中"这个概念,别画高亮。
@@ -212,19 +223,21 @@ fun HomeScreen(
             )
         }
 
-        // chrome 全在这条轨道里:界面四角不再散落按钮。
-        EdgeRail(Modifier.align(Alignment.BottomEnd)) {
-            // 一台主机都没有时不摆搜索 —— 没东西可搜,按钮只是噪音。
-            if (hosts.isNotEmpty()) {
-                RailGroup {
-                    RailButton("⌕", "搜索主机") {
-                        searching = !searching
-                        if (!searching) query = ""
+        // chrome 全在这条轨道里:界面四角不再散落按钮。轨道是毛玻璃,列表从它底下滚过去。
+        CompositionLocalProvider(LocalHaze provides haze) {
+            EdgeRail(Modifier.align(Alignment.BottomEnd)) {
+                // 一台主机都没有时不摆搜索 —— 没东西可搜,按钮只是噪音。
+                if (hosts.isNotEmpty()) {
+                    RailGroup {
+                        RailButton(XIcons.Search, "搜索主机") {
+                            searching = !searching
+                            if (!searching) query = ""
+                        }
                     }
                 }
-            }
-            RailGroup {
-                RailButton("＋", "新建主机", tint = p.accent) { onNew() }
+                RailGroup {
+                    RailButton(XIcons.Plus, "新建主机", tint = p.accent) { onNew() }
+                }
             }
         }
     }
@@ -307,25 +320,45 @@ private fun HostListPane(
             if (searching) {
                 val focus = remember { FocusRequester() }
                 LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = onQuery,
-                    placeholder = { Text("搜索名称 / 地址 / 用户", color = p.textFaint) },
-                    singleLine = true,
-                    colors = xsshFieldColors(),
-                    shape = RoundedCornerShape(28.dp),
-                    trailingIcon = {
-                        XsshIconButton("✕") {
-                            onQuery("")
-                            onSearching(false)
-                        }
-                    },
-                    modifier = Modifier
+                // iOS 的搜索框:浅填充的胶囊,左边放大镜、右边清除,没有描边。
+                Row(
+                    Modifier
                         .fillMaxWidth()
-                        .heightIn(min = 56.dp)
                         .padding(start = Gutter, end = creaseGap)
-                        .focusRequester(focus),
-                )
+                        .height(TouchMin)
+                        .clip(RoundedCornerShape(TouchMin / 2))
+                        .background(p.bgElev2)
+                        .padding(start = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(XIcons.Search, null, tint = p.textDim, modifier = Modifier.size(19.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                        if (query.isEmpty()) {
+                            Text("搜索名称 / 地址 / 用户", color = p.textFaint, fontSize = 16.sp)
+                        }
+                        BasicTextField(
+                            value = query,
+                            onValueChange = onQuery,
+                            singleLine = true,
+                            textStyle = TextStyle(color = p.text, fontSize = 16.sp),
+                            cursorBrush = SolidColor(p.accent),
+                            modifier = Modifier.fillMaxWidth().focusRequester(focus),
+                        )
+                    }
+                    Box(
+                        Modifier
+                            .size(TouchMin)
+                            .clickable {
+                                onQuery("")
+                                onSearching(false)
+                            }
+                            .semantics { contentDescription = "关闭搜索" },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(XIcons.Close, null, tint = p.textDim, modifier = Modifier.size(17.dp))
+                    }
+                }
                 Spacer(Modifier.height(GapItem))
             }
 
@@ -340,9 +373,13 @@ private fun HostListPane(
                     // 底部留出轨道的高度,最后一张卡片能滚到它上面去。
                     contentPadding = PaddingValues(start = Gutter, end = creaseGap, bottom = RailClearance),
                     horizontalArrangement = Arrangement.spacedBy(GapItem),
-                    verticalArrangement = Arrangement.spacedBy(GapItem),
+                    // 列表不是卡片墙:行紧挨着,靠细线分隔。
+                    verticalArrangement = Arrangement.spacedBy(0.dp),
                 ) {
-                    items(hosts, key = { it.id }) { host ->
+                    itemsIndexed(hosts, key = { _, it -> it.id }) { index, host ->
+                        // 细线画在两行之间;选中行(整块强调色)上下都不画,免得在色块边上多出一道。
+                        val next = hosts.getOrNull(index + 1)
+                        val divider = next != null && host.id != selectedId && next.id != selectedId
                         val open = host.id == openId
                         SwipeActions(
                             open = open,
@@ -374,6 +411,16 @@ private fun HostListPane(
                                     openId = host.id
                                     revealAboveRail(host.id)
                                 },
+                            )
+                        }
+                        if (divider) {
+                            // 从文字起点开始,和参考图一样左侧内缩。
+                            Box(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = BoxPad)
+                                    .height(0.5.dp)
+                                    .background(p.border),
                             )
                         }
                     }
@@ -436,47 +483,52 @@ private fun HostCard(
     onLongPress: () -> Unit,
 ) {
     val p = LocalXssh.current
+    // 选中行是强调色底:文字、标签一律换成白色系,标签用半透明白底。
+    val title = if (selected) p.onAccent else p.text
+    val detail = if (selected) p.onAccent.copy(alpha = 0.82f) else p.textDim
 
     XsshCard(
         modifier = Modifier.fillMaxWidth(),
         highlight = selected,
         onClick = { onPrimary(host) },
         onLongClick = onLongPress,
-        // 大卡片约 84dp 高(原来 57dp):单栏里它是主要的手指目标。
-        paddingVertical = if (large) 18.dp else 13.dp,
+        paddingVertical = if (large) 15.dp else 12.dp,
     ) {
-        // 一行纯内容:名称 + 标签,地址独占一行。
-        //
-        // 行尾**不放** ⋮ —— 参考设计里的邮件行、日历行都是纯内容,没有逐行的溢出按钮,
-        // 这正是内容能从右边缘玻璃层底下穿过去的前提。编辑/删除走左滑(宽屏还有详情栏)。
+        // 一行纯内容:名称 + 标签,地址独占一行。行尾不放 ⋮ —— 编辑/删除走左滑。
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 host.label,
-                color = p.text,
-                fontSize = if (large) 17.sp else 15.5.sp,
-                fontWeight = FontWeight.Medium,
+                color = title,
+                fontSize = if (large) 17.sp else 16.sp,
+                fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f, fill = false),
             )
             Spacer(Modifier.width(8.dp))
-            if (running) Chip("运行中", p.ok)
-            if (running) Spacer(Modifier.width(6.dp))
+            if (running) {
+                Chip("运行中", if (selected) p.onAccent else p.ok)
+                Spacer(Modifier.width(6.dp))
+            }
             Chip(
                 if (host.auth == AuthKind.KEY) "私钥" else "密码",
-                if (host.auth == AuthKind.KEY) p.accent else p.warn,
+                when {
+                    selected -> p.onAccent
+                    host.auth == AuthKind.KEY -> p.accent
+                    else -> p.warn
+                },
             )
             if (host.keyFingerprint.isBlank()) {
                 Spacer(Modifier.width(6.dp))
-                Chip("密钥待确认", p.warn)
+                Chip("密钥待确认", if (selected) p.onAccent else p.warn)
             }
         }
-        Spacer(Modifier.height(if (large) 5.dp else 3.dp))
+        Spacer(Modifier.height(if (large) 4.dp else 3.dp))
         Text(
             host.subtitle,
-            color = p.textDim,
+            color = detail,
             fontFamily = FontFamily.Monospace,
-            fontSize = if (large) 13.5.sp else 12.5.sp,
+            fontSize = if (large) 14.sp else 13.sp,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
@@ -745,8 +797,9 @@ private fun PaneTitle(
         Text(
             title,
             color = p.text,
-            fontSize = 28.sp,
-            fontWeight = FontWeight.SemiBold,
+            // 参考图的大标题:34sp、粗体,紧跟一行灰色小字。
+            fontSize = 34.sp,
+            fontWeight = FontWeight.Bold,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
