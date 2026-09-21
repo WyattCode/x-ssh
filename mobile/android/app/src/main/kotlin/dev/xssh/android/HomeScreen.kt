@@ -1,12 +1,12 @@
 package dev.xssh.android
 
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.kyant.backdrop.backdrops.layerBackdrop
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.animation.core.tween
-import dev.chrisbanes.haze.rememberHazeState
-import dev.chrisbanes.haze.hazeSource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.graphics.SolidColor
@@ -128,8 +128,8 @@ fun HomeScreen(
     // 看上去就是打开应用闪跳一下(录屏第 296 帧拍到的就是这个)。
     val shownHost = hosts.firstOrNull { it.id == selectedId } ?: hosts.firstOrNull()
 
-    // 浮在内容上的玻璃件(右侧轨道)要模糊的,就是这一页的内容。
-    val haze = rememberHazeState()
+    // 浮在内容上的玻璃按钮(右侧轨道)要模糊、折射的,就是这一页的内容。
+    val backdrop = rememberLayerBackdrop()
 
     BoxWithConstraints(Modifier.fillMaxSize().background(p.bg)) {
         // 用**实测到的窗口宽度**判断分栏,不用 Configuration 的 screenWidthDp ——
@@ -147,7 +147,7 @@ fun HomeScreen(
         if (twoPane && hosts.isNotEmpty()) {
             // 再兜一层:左栏无论如何不能吃掉整个窗口。
             val listWidth = adaptive.listPaneWidth(maxWidth).coerceAtMost(maxWidth - 280.dp)
-            Row(Modifier.fillMaxSize().hazeSource(haze)) {
+            Row(Modifier.fillMaxSize().layerBackdrop(backdrop)) {
                 HostListPane(
                     modifier = Modifier
                         .width(listWidth)
@@ -204,7 +204,7 @@ fun HomeScreen(
             HostListPane(
                 // 内容通到边缘,从右边缘玻璃层底下穿过去(规范:scroll views extend
                 // beneath floating glass)。底部多留一段,最后一张卡片能滚出轨道之外。
-                modifier = Modifier.fillMaxSize().hazeSource(haze).safeDrawingPadding(),
+                modifier = Modifier.fillMaxSize().layerBackdrop(backdrop).safeDrawingPadding(),
                 hosts = filtered,
                 total = hosts.size,
                 // 单栏没有"当前选中"这个概念,别画高亮。
@@ -230,13 +230,12 @@ fun HomeScreen(
 
         // chrome 全在这条轨道里:界面四角不再散落按钮。轨道是毛玻璃,列表从它底下滚过去。
         val theme = LocalThemeControl.current
-        CompositionLocalProvider(LocalHaze provides haze) {
+        CompositionLocalProvider(LocalBackdrop provides backdrop) {
             EdgeRail(Modifier.align(Alignment.BottomEnd)) {
                 // 外观放最上面一格:轨道从底部往上排,加在上面,下面的 ⌕ ＋ 一像素都不动。
                 // 点一下切到下一个模式(跟随系统 → 浅色 → 深色 → …),不弹窗 ——
                 // 界面和图标当场就变,这本身就是反馈。
-                RailGroup {
-                    RailButton(
+                GlassButton(
                         when (theme.mode) {
                             ThemeMode.Light -> XIcons.Sun
                             ThemeMode.Dark -> XIcons.Moon
@@ -252,19 +251,15 @@ fun HomeScreen(
                             },
                         )
                     }
-                }
                 // 一台主机都没有时不摆搜索 —— 没东西可搜,按钮只是噪音。
                 if (hosts.isNotEmpty()) {
-                    RailGroup {
-                        RailButton(XIcons.Search, "搜索主机") {
-                            searching = !searching
-                            if (!searching) query = ""
-                        }
+                    GlassButton(XIcons.Search, "搜索主机") {
+                        searching = !searching
+                        if (!searching) query = ""
                     }
                 }
-                RailGroup {
-                    RailButton(XIcons.Plus, "新建主机", tint = p.accent) { onNew() }
-                }
+                // 这一页的主操作:染色玻璃(HIG:颜色只给最重要的那个操作)。
+                GlassButton(XIcons.Plus, "新建主机", prominent = true) { onNew() }
             }
         }
     }

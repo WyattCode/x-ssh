@@ -43,8 +43,8 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.13.0")
     // 折叠屏:拿到铰链的真实位置与开合状态(分栏分界线要压在折痕上,半折要进桌面模式)。
     implementation("androidx.window:window:1.5.1")
-    // 毛玻璃:模糊浮层**背后**的内容。Compose 没有内置背景模糊,Haze 是通行做法
-    // (Android 12+ 用 RenderEffect,更早的系统退化成半透明底色)。
-    implementation("dev.chrisbanes.haze:haze:1.7.3")
+    // Liquid Glass:模糊 + 边缘折射(lens,AGSL 着色器)+ 高光 + 阴影,照 iOS 26 的材质定义做。
+    // 折射要 Android 13+,模糊要 12+;更早的系统只剩半透明底色,不崩。
+    implementation("io.github.kyant0:backdrop:2.0.1")
     implementation("net.java.dev.jna:jna:5.19.1@aar")
 }

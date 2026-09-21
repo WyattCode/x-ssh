@@ -1,5 +1,8 @@
 package dev.xssh.android
 
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.kyant.backdrop.backdrops.layerBackdrop
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.foundation.border
 import kotlin.math.roundToInt
 import android.util.Log
@@ -338,6 +341,8 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
     // 盖住的 ✕ 正好和输入法的回车键在同一个位置,想断开却会按成回车。
     // 要打字时点终端或 ⌨,那两处会显式拿焦点并弹键盘。
 
+    val backdrop = rememberLayerBackdrop()
+
     // 终端配色跟着界面的深浅色走:16 色交给 Rust 解析,前景/背景用来回答程序的颜色查询
     // (Codex 会据此选深色还是浅色主题)。
     LaunchedEffect(p.dark) {
@@ -433,27 +438,21 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
     val rail: @Composable () -> Unit = {
         // 翻着历史时才出现,回到底部就收起 —— 不常驻,不占视线。
         if (frame.scrollOffset > 0) {
-            RailGroup {
-                RailButton(XIcons.ArrowDown, "回到底部") {
-                    scope.launch(Dispatchers.IO) { live.scrollToBottom() }
-                }
+            GlassButton(XIcons.ArrowDown, "回到底部") {
+                scope.launch(Dispatchers.IO) { live.scrollToBottom() }
             }
         }
         // 两颗钮**各占一个胶囊**,和主机页的 ⌕ ＋、编辑页的 ‹ ✓ 槽位完全一致。
         // 原来 ⌨ ✕ 装在同一个胶囊里,胶囊内间距 2dp、胶囊之间 14dp,于是从主机页
         // 点卡片进终端,上面那颗钮会错开 20dp —— 换页按钮不能动。
-        RailGroup {
-            RailButton(XIcons.Keyboard, "调出键盘") {
+        GlassButton(XIcons.Keyboard, "调出键盘") {
                 Log.i(TAG, "keyboard: rail button")
                 focusRequester.requestFocus()
                 keyboard?.show()
-            }
         }
-        RailGroup {
-            RailButton(XIcons.Close, "断开连接", tint = p.danger) {
+        GlassButton(XIcons.Close, "断开连接", tint = p.danger) {
                 SessionRegistry.close(host.id)
                 onExit()
-            }
         }
     }
 
@@ -494,7 +493,9 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
                 keys()
             }
         }
-        EdgeRail(Modifier.align(Alignment.BottomEnd), content = rail)
+        CompositionLocalProvider(LocalBackdrop provides backdrop) {
+            EdgeRail(Modifier.align(Alignment.BottomEnd), content = rail)
+        }
         }
         return
     }
@@ -503,6 +504,9 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
         Column(
             Modifier
                 .fillMaxSize()
+                // 玻璃按钮背后的内容(先垫终端底色,录下来的画面才不是透明的)。
+                .layerBackdrop(backdrop)
+                .background(p.termBg)
                 .safeDrawingPadding()
                 .imePadding()
                 // 内容让出右边缘轨道的位置,终端文字不会被按钮压住。
@@ -513,7 +517,9 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
             hiddenInput()
             keys()
         }
-        EdgeRail(Modifier.align(Alignment.BottomEnd), content = rail)
+        CompositionLocalProvider(LocalBackdrop provides backdrop) {
+            EdgeRail(Modifier.align(Alignment.BottomEnd), content = rail)
+        }
     }
 }
 

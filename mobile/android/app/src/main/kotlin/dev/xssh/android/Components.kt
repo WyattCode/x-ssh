@@ -1,11 +1,21 @@
 package dev.xssh.android
 
+import com.kyant.backdrop.shadow.Shadow
+import com.kyant.backdrop.highlight.Highlight
+import com.kyant.backdrop.effects.vibrancy
+import com.kyant.backdrop.effects.lens
+import com.kyant.backdrop.effects.blur
+import com.kyant.backdrop.drawBackdrop
+import com.kyant.backdrop.Backdrop
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.geometry.isSpecified
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.Crossfade
-import dev.chrisbanes.haze.hazeEffect
-import dev.chrisbanes.haze.HazeTint
-import dev.chrisbanes.haze.HazeStyle
-import dev.chrisbanes.haze.HazeState
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.draw.shadow
@@ -102,47 +112,10 @@ val RadiusChip = 8.dp
 enum class ButtonKind { Primary, Ghost, Danger }
 
 /**
- * 当前页面里"可以被毛玻璃模糊"的内容。每一页把自己的可滚动内容标成 `hazeSource`,
- * 再通过它提供给浮在上面的玻璃件。没有提供时(null),玻璃件退化成纯半透明底色。
+ * 当前页面里"玻璃背后"的内容。每一页把自己的内容标成 `layerBackdrop(backdrop)`,
+ * 再通过它提供给浮在上面的玻璃按钮。没有提供时(null),玻璃按钮退化成半透明底色。
  */
-val LocalHaze = staticCompositionLocalOf<HazeState?> { null }
-
-/**
- * 毛玻璃:模糊背后的内容 + 一层底色 + 一道细边(+ 浅色模式下的柔和投影)。
- *
- * 参考图里所有浮在内容上的东西(右侧轨道、底部搜索条、播放条)都是这种材质:
- * 内容从底下滚过去时透出来、被虚化 —— 这比一块不透明的色块更轻,也更能看出"它浮在上面"。
- */
-@Composable
-fun Modifier.glass(shape: Shape): Modifier {
-    val p = LocalXssh.current
-    val haze = LocalHaze.current
-    return this
-        .then(
-            if (p.glassShadow.alpha > 0f) {
-                Modifier.shadow(8.dp, shape, ambientColor = p.glassShadow, spotColor = p.glassShadow)
-            } else {
-                Modifier
-            },
-        )
-        .clip(shape)
-        .then(
-            if (haze != null) {
-                Modifier.hazeEffect(
-                    haze,
-                    style = HazeStyle(
-                        backgroundColor = p.bg,
-                        tints = listOf(HazeTint(p.glassTint)),
-                        blurRadius = 22.dp,
-                        noiseFactor = 0f,
-                    ),
-                )
-            } else {
-                Modifier.background(p.glassTint)
-            },
-        )
-        .border(0.8.dp, p.glassBorder, shape)
-}
+val LocalBackdrop = staticCompositionLocalOf<Backdrop?> { null }
 
 /** 卡片:与 Windows 版 `.card` 同款(圆角 10、1px 边框、elev 背景)。 */
 @Composable
@@ -473,51 +446,128 @@ val RailWidth = 72.dp
  */
 val RailClearance = 56.dp * 3 + 14.dp * 2 + 16.dp + Gutter
 
-/** 一组轨道按钮:一枚毛玻璃胶囊裹住若干圆钮。 */
+/**
+ * 轨道上的 Liquid Glass 圆钮(56dp,和原来"胶囊 + 圆钮"的外形尺寸完全一样,轨道位置不变)。
+ *
+ * 照 Apple 对 Liquid Glass 的定义逐条做(HIG「Materials」、SwiftUI「Applying Liquid Glass
+ * to custom views」):
+ * - **模糊背后的内容,并调整亮度**保证图标清晰(regular 变体):blur + 一层半透明亮度层;
+ * - **映出周围的颜色**:vibrancy,背景透过来时饱和度提高;
+ * - **边缘的光学感**:lens,玻璃边缘实时折射背后的画面(Android 13+);再加一道镜面高光;
+ * - **实时响应触摸**(interactive):按下时弹性放大、按下的位置从内部亮起,松手回弹;
+ * - **颜色克制**:只有主操作用染色玻璃([prominent],强调色玻璃 + 白色图标),其余是无色玻璃。
+ * 只用在功能层(右侧轨道),不用在列表、详情按钮这类内容层 —— HIG 明确说别把玻璃放进内容层。
+ */
 @Composable
-fun RailGroup(content: @Composable () -> Unit) {
-    Column(
-        Modifier
-            .glass(RoundedCornerShape(28.dp))
-            .padding(4.dp),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) { content() }
-}
-
-/** 轨道上的圆钮。[tint] 给主操作/危险操作上色,其余用前景色。 */
-@Composable
-fun RailButton(
+fun GlassButton(
     icon: ImageVector,
     contentDescription: String,
     tint: Color? = null,
+    prominent: Boolean = false,
     onClick: () -> Unit,
 ) {
     val p = LocalXssh.current
+    val backdrop = LocalBackdrop.current
     val haptic = LocalHapticFeedback.current
-    val interaction = remember { MutableInteractionSource() }
-    val pressed by interaction.collectIsPressedAsState()
-    Box(
-        Modifier
-            .size(TouchMin)
-            .clip(CircleShape)
-            .background(if (pressed) p.text.copy(alpha = 0.12f) else Color.Transparent)
-            .clickable(interactionSource = interaction, indication = null) {
-                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                onClick()
+    val scope = rememberCoroutineScope()
+    val action by rememberUpdatedState(onClick)
+    // 0 = 静止,1 = 按到底。弹簧驱动:按下时略冲过头再回来,松手回弹 —— 玻璃的"液态"就在这里。
+    val press = remember { Animatable(0f) }
+    var touch by remember { mutableStateOf(Offset.Unspecified) }
+    val shape = CircleShape
+
+    // 亮度层:浅色偏白、深色偏暗,保证上面的图标在任何背景上都读得出;染色玻璃用强调色。
+    val surface = when {
+        prominent -> p.accent.copy(alpha = if (p.dark) 0.78f else 0.86f)
+        p.dark -> Color(0xFF121214).copy(alpha = 0.36f)
+        else -> Color.White.copy(alpha = 0.58f)
+    }
+    val iconColor = if (prominent) p.onAccent else (tint ?: p.text)
+
+    val gesture = Modifier
+        .size(56.dp)
+        .semantics {
+            role = Role.Button
+            contentDescriptionProperty = contentDescription
+            onClick {
+                action()
+                true
             }
-            .semantics { role = Role.Button; contentDescriptionProperty = contentDescription },
-        contentAlignment = Alignment.Center,
-    ) {
-        // 图标换了就淡入淡出地换(外观按钮每点一下图标都会变),不是生硬地一跳。
-        Crossfade(targetState = icon, animationSpec = tween(180), label = "railIcon") { shown ->
-            Icon(shown, contentDescription = null, tint = tint ?: p.text, modifier = Modifier.size(23.dp))
+        }
+        .pointerInput(Unit) {
+            detectTapGestures(
+                onPress = { position ->
+                    touch = position
+                    scope.launch { press.animateTo(1f, spring(dampingRatio = 0.55f, stiffness = 600f)) }
+                    tryAwaitRelease()
+                    scope.launch { press.animateTo(0f, spring(dampingRatio = 0.45f, stiffness = 320f)) }
+                },
+                onTap = {
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    action()
+                },
+            )
+        }
+
+    val glass = if (backdrop != null) {
+        gesture.drawBackdrop(
+            backdrop = backdrop,
+            shape = { shape },
+            effects = {
+                vibrancy()
+                blur(4.dp.toPx())
+                lens(refractionHeight = 10.dp.toPx(), refractionAmount = 20.dp.toPx(), depthEffect = true)
+            },
+            highlight = { Highlight.Default.copy(alpha = if (p.dark) 0.6f else 1f) },
+            shadow = {
+                Shadow(radius = 16.dp, color = Color.Black.copy(alpha = if (p.dark) 0.4f else 0.14f))
+            },
+            layerBlock = {
+                val s = 1f + 0.1f * press.value
+                scaleX = s
+                scaleY = s
+            },
+            onDrawSurface = {
+                drawRect(surface)
+                // 按下的位置从内部亮起。
+                val t = press.value
+                if (t > 0.01f && touch.isSpecified) {
+                    val r = size.maxDimension
+                    drawCircle(
+                        Brush.radialGradient(
+                            listOf(Color.White.copy(alpha = (if (p.dark) 0.22f else 0.4f) * t), Color.Transparent),
+                            center = touch,
+                            radius = r,
+                        ),
+                        radius = r,
+                        center = touch,
+                    )
+                }
+            },
+        )
+    } else {
+        // 这一页没提供背景源(或系统太老):半透明底色 + 细边,形状和交互不变。
+        gesture
+            .graphicsLayer {
+                val s = 1f + 0.1f * press.value
+                scaleX = s
+                scaleY = s
+            }
+            .clip(shape)
+            .background(surface)
+            .border(0.8.dp, p.glassBorder, shape)
+    }
+
+    Box(glass, contentAlignment = Alignment.Center) {
+        // 图标换了就淡入淡出地换(外观按钮每点一下都会变)。
+        Crossfade(targetState = icon, animationSpec = tween(180), label = "glassIcon") { shown ->
+            Icon(shown, contentDescription = null, tint = iconColor, modifier = Modifier.size(23.dp))
         }
     }
 }
 
 /**
- * 轨道本体;[content] 里放若干 [RailGroup]。调用方只传 `Modifier.align(Alignment.BottomEnd)`,
+ * 轨道本体;[content] 里放若干 [GlassButton]。调用方只传 `Modifier.align(Alignment.BottomEnd)`,
  * 离边、避让系统栏全在这里定 —— **每一屏的轨道因此落在完全相同的像素上**。
  *
  * 原来每一屏各自拼 `safeDrawingPadding().padding(bottom = …)`,拼出来不一样:

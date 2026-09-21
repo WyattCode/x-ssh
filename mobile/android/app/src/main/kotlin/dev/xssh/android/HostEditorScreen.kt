@@ -1,5 +1,8 @@
 package dev.xssh.android
 
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.kyant.backdrop.backdrops.layerBackdrop
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -175,6 +178,7 @@ fun HostEditorScreen(
 
     // 整个页面量一次,和主机页同一条式子、同样量整个窗口。
     // 分组表单:浅色是浅灰底 + 白色分组块,深色是纯黑底 + 深灰分组块(iOS 设置页那种)。
+    val backdrop = rememberLayerBackdrop()
     BoxWithConstraints(Modifier.fillMaxSize().background(p.groupedBg)) {
         val window = maxWidth
         val twoPane = window >= 840.dp || (adaptive.bookFold != null && window >= 600.dp)
@@ -185,6 +189,9 @@ fun HostEditorScreen(
         Column(
             Modifier
                 .fillMaxSize()
+                // 玻璃按钮背后的内容;先垫一层底色,录下来的画面才不是透明的。
+                .layerBackdrop(backdrop)
+                .background(p.groupedBg)
                 // safeDrawing 含输入法 inset:键盘一弹,可滚动区域缩到键盘上方,
                 // 聚焦的那一行会被自动滚进视野。(轨道不跟着动,见 EdgeRail。)
                 //
@@ -256,9 +263,12 @@ fun HostEditorScreen(
         }
 
         // 和主机页的 ⌕ ＋ 落在同一对位置上:点 ＋ 进来,按钮原地换成 ‹ ✓,一像素不动。
-        EdgeRail(Modifier.align(Alignment.BottomEnd)) {
-            RailGroup { RailButton(XIcons.Back, "返回") { onBack() } }
-            RailGroup { RailButton(XIcons.Check, "保存", tint = p.accent) { save() } }
+        CompositionLocalProvider(LocalBackdrop provides backdrop) {
+            EdgeRail(Modifier.align(Alignment.BottomEnd)) {
+                GlassButton(XIcons.Back, "返回") { onBack() }
+                // 这一页的主操作:染色玻璃。
+                GlassButton(XIcons.Check, "保存", prominent = true) { save() }
+            }
         }
     }
 }
