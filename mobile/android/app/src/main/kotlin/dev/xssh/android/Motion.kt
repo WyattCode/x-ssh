@@ -5,6 +5,9 @@ import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.SpringSpec
+import androidx.compose.animation.core.FiniteAnimationSpec
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.spring
@@ -55,9 +58,11 @@ object Motion {
     /**
      * iOS 的导航推入:新页从右边整页滑进来,盖在旧页上;旧页同时往左退三分之一(视差)。
      * 返回时反过来,上面那页滑出右边。[forward] 决定方向和谁在上面。
+     * [linear]:拖动返回手势期间用匀速曲线,页面位置和手指一一对应(松手后的收尾另有弹簧)。
      */
-    fun <S> AnimatedContentTransitionScope<S>.push(forward: Boolean): ContentTransform {
-        val spec = page<IntOffset>()
+    fun <S> AnimatedContentTransitionScope<S>.push(forward: Boolean, linear: Boolean = false): ContentTransform {
+        val spec: FiniteAnimationSpec<IntOffset> =
+            if (linear) tween(durationMillis = 400, easing = LinearEasing) else page()
         return if (forward) {
             slideInHorizontally(spec) { it } togetherWith slideOutHorizontally(spec) { -it / 3 }
         } else {

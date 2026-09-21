@@ -63,7 +63,8 @@ fun FormGroup(
             Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(RadiusBox))
-                .background(p.bgElev),
+                // 和主机卡片同一个底色:整个应用的"卡片"只有这一种灰。
+                .background(p.cardBg),
             content = content,
         )
         if (footnote != null) {

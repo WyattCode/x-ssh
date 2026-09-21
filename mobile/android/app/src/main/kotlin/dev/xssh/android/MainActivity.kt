@@ -1,13 +1,18 @@
 package dev.xssh.android
 
+import kotlin.coroutines.cancellation.CancellationException
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.SeekableTransitionState
+import androidx.compose.animation.core.rememberTransition
 import android.graphics.drawable.ColorDrawable
 import android.graphics.Color
 import android.content.res.Configuration
 import android.os.Bundle
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.BackHandler
+import androidx.activity.compose.PredictiveBackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -18,6 +23,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalWindowInfo
 
 class MainActivity : ComponentActivity() {
     override fun onStart() {
@@ -164,30 +170,45 @@ fun App(devTarget: DevTarget? = null) {
         store.save(list)
     }
 
-    BackHandler(enabled = screen != Screen.Home) {
-        // 返回只是离开这一屏,会话照跑(主机页会显示「运行中」)。
-        termHostId = null
-        screen = Screen.Home
+    // 页面切换:iOS 的导航推入 —— 进编辑页 / 终端从右边推进来,返回主机页时滑出去。
+    // 用可拖动的过渡:返回手势拉到一半,页面就停在一半,跟着手指走;松手才决定回不回去。
+    val seek = remember { SeekableTransitionState(screen) }
+    val scope = rememberCoroutineScope()
+    // 拖动返回期间页面位移要和手指成正比:弹簧曲线按时间取进度,拉到 40% 画面就已经走完九成。
+    val dragging = remember { mutableStateOf(false) }
+    val windowInfo = LocalWindowInfo.current
+    LaunchedEffect(screen) {
+        if (seek.currentState != screen || seek.targetState != screen) seek.animateTo(screen)
+    }
+    PredictiveBackHandler(enabled = screen != Screen.Home) { gesture ->
+        dragging.value = true
+        try {
+            // 用手指的实际位置算进度,不用系统给的 progress:那个值带缓动,
+            // 在这台机器上拉到屏幕三分之一就到 0.95,页面早早滑完,不再跟手。
+            var startX = Float.NaN
+            gesture.collect { event ->
+                if (startX.isNaN()) startX = event.touchX
+                val width = windowInfo.containerSize.width.coerceAtLeast(1)
+                seek.seekTo(((event.touchX - startX) / width).coerceIn(0f, 1f), Screen.Home)
+            }
+            // 松手:从手指停下的位置接着滑完。
+            seek.animateTo(Screen.Home, Motion.page())
+            // 返回只是离开这一屏,会话照跑(主机页会显示「运行中」)。
+            termHostId = null
+            screen = Screen.Home
+        } catch (e: CancellationException) {
+            // 手势取消(拉了一半又放回去):弹回原页。
+            scope.launch {
+                seek.animateTo(seek.currentState, Motion.page())
+                dragging.value = false
+            }
+            throw e
+        } finally {
+            if (screen == Screen.Home) dragging.value = false
+        }
     }
 
-    // 页面切换:iOS 的导航推入 —— 进编辑页 / 终端从右边推进来,返回主机页时滑出去。
-    // 同一台主机的终端换了实例(信任新指纹后重连)不算换页,不做动画。
-    // 每页的 rememberSaveable(列表滚到哪、搜索词)存在 holder 里,推进去再回来还在。
-    val pages = rememberSaveableStateHolder()
-    AnimatedContent(
-        targetState = screen,
-        contentKey = {
-            when (it) {
-                Screen.Home -> "home"
-                is Screen.Editor -> "editor"
-                is Screen.Terminal -> "term:" + it.host.id
-            }
-        },
-        transitionSpec = { with(Motion) { push(forward = targetState != Screen.Home) } },
-        label = "page",
-    ) { current ->
-      // 只有主机页需要"回来时还在原处";编辑页和终端每次都是新开的。
-      pages.SaveableStateProvider(if (current == Screen.Home) "home" else "page:" + System.identityHashCode(current)) {
+    val page: @Composable (Screen) -> Unit = { current ->
        when (current) {
         is Screen.Home -> HomeScreen(
             hosts = hosts,
@@ -239,6 +260,22 @@ fun App(devTarget: DevTarget? = null) {
             },
         )
        }
-      }
+    }
+
+    // 同一台主机的终端换了实例(信任新指纹后重连)不算换页,不做动画。
+    // 主机页的 rememberSaveable(列表滚到哪)存在 holder 里,推进去再回来还在;
+    // 编辑页和终端每次都是新开的,不用存。
+    val pages = rememberSaveableStateHolder()
+    rememberTransition(seek, label = "page").AnimatedContent(
+        contentKey = {
+            when (it) {
+                Screen.Home -> "home"
+                is Screen.Editor -> "editor"
+                is Screen.Terminal -> "term:" + it.host.id
+            }
+        },
+        transitionSpec = { with(Motion) { push(forward = targetState != Screen.Home, linear = dragging.value) } },
+    ) { current ->
+        if (current == Screen.Home) pages.SaveableStateProvider("home") { page(current) } else page(current)
     }
 }

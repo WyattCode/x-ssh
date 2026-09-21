@@ -1,5 +1,6 @@
 package dev.xssh.android
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.fadeIn
@@ -126,6 +127,11 @@ fun HomeScreen(
     // 注意:折痕位置是**窗口**坐标,所以这一层不能先加安全区内边距 —— 否则挖孔在侧边时
     // (内屏横屏挖孔占 51dp)分界线会整体右移,正好压不在折痕上。内边距放进各栏自己加。
     var searching by remember { mutableStateOf(false) }
+    // 搜索开着时,返回先收起搜索,而不是直接退出应用。
+    BackHandler(enabled = searching) {
+        query = ""
+        searching = false
+    }
 
     // 右栏要显示哪台:**在组合期间就算出来**,不能等副作用。
     //

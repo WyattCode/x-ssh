@@ -672,6 +672,10 @@ M3.17 修掉同步刷新之后,Codex 能出内容但仍不完整、输入框不�
     为假),外屏一两台主机时拖了纹丝不动。Android 自带拉伸已在主题里关掉(`LocalOverscrollFactory provides null`)。
   - 换页:`AnimatedContent` + iOS push(新页从右推入、旧页退 1/3);主机页状态存在 `SaveableStateHolder`。
     换页时轨道跟着整页一起滑是用户选定的(静止落点仍然不许变)。
+  - **返回手势跟手**:`SeekableTransitionState` + `PredictiveBackHandler`。进度用 `touchX` 自己算,
+    **不要用 `BackEventCompat.progress`**——MIUI 给的值带缓动,拉到屏幕 1/3 就 0.95;拖动期间页面位移用匀速
+    tween(弹簧按时间取进度,也不跟手),松手 / 取消再用弹簧收尾。搜索开着时返回先收起搜索。
+  - 表单分组块和主机卡片同一底色 `cardBg`。
   - 标题和搜索框是网格的一项,整页一起滚、一起弹;搜索框展开出现,打开时列表滚回顶部;
     双栏换主机时详情淡入淡出;外屏按键翻页逐格淡入淡出(Ctrl ⋯ ⏎ 不动)。
 

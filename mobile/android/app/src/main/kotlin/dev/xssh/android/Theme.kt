@@ -48,7 +48,7 @@ data class XsshPalette(
     /** 强调色上的文字/图标。 */
     val onAccent: Color,
     val accentSoft: Color,
-    /** 主机卡片的底色。深色下比分组块(bgElev)再暗一档,按用户要求更贴近黑底。 */
+    /** 卡片底色(主机卡片、表单分组块)。深色下比 bgElev 暗一档,按用户要求更贴近黑底。 */
     val cardBg: Color,
     /**
      * 列表选中的卡片:比普通卡片亮一档的**中性灰**,不带蓝。
