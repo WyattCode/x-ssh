@@ -1,5 +1,6 @@
 package dev.xssh.android
 
+import android.os.Build
 import android.hardware.display.DisplayManager
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.platform.LocalDensity
@@ -755,7 +756,12 @@ fun rememberCornerCamera(): Int {
     }
     val size = LocalWindowInfo.current.containerSize
     return remember(rotation, size) {
-        val rects = view.display?.cutout?.boundingRects.orEmpty()
+        // Display.getCutout() 是 Android 10 才有的;更老的系统上不避让。
+        val rects = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            view.display?.cutout?.boundingRects.orEmpty()
+        } else {
+            emptyList()
+        }
         val railZone = size.width * 0.8f
         rects
             .filter { it.left > railZone && it.top > size.height / 2 }
