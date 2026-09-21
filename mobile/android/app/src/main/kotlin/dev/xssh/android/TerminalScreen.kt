@@ -1,5 +1,6 @@
 package dev.xssh.android
 
+import androidx.compose.ui.unit.Dp
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.runtime.SideEffect
@@ -420,8 +421,9 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
         )
     }
     val keys: @Composable () -> Unit = {
-        FloatingKeys {
+        FloatingKeys(columns = if (adaptive.roomyKeys) 9 else 5) { keyWidth ->
             TerminalKeys(
+                keyWidth = keyWidth,
                 // 宽屏折成两行全部露出;窄屏保持一行横滚,不跟终端抢竖向空间。
                 wrap = adaptive.roomyKeys,
                 ctrl = ctrl,
@@ -554,27 +556,37 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
     }
 }
 
-/** 浮起的按键条:不再是贴底的整条横栏,而是一块带圆角、留出边距的面板。 */
+/** 按键的宽度上限:和 48dp 的高度配成接近实体键帽的比例(约 1.2 : 1)。 */
+private val KeyMaxWidth = 58.dp
+private val KeyGap = 6.dp
+
+/**
+ * 浮起的按键面板:按内容大小、在可用宽度里**居中**,不把按键拉满整行。
+ *
+ * 原来每颗键 weight(1f) 平分整行:内屏一颗键被拉到 77dp 宽、只有 48dp 高,扁长变形。
+ * 现在每颗键最宽 [KeyMaxWidth],放得下就按这个宽度排、面板收紧居中;
+ * 屏幕窄(外屏)放不下时才等比缩窄。面板离底 16dp,和 ✕ 按钮底边齐平。
+ */
 @Composable
-private fun FloatingKeys(content: @Composable () -> Unit) {
+private fun FloatingKeys(columns: Int, content: @Composable (keyWidth: Dp) -> Unit) {
     val p = LocalXssh.current
-    Box(
+    BoxWithConstraints(
         Modifier
             .fillMaxWidth()
-            // 三边都是 16dp:左缘和全应用所有面板、卡片同一条线;离底和右侧轨道一样高,
-            // 面板底边和 ✕ 按钮底边齐平;右边和轨道之间也留 16dp,跟编辑页的表单一致。
-            // 原来是 10dp,左边比别处的面板多出去 6dp,底边比 ✕ 低 6dp。
-            .padding(start = Gutter, end = Gutter, bottom = Gutter)
-            // 圆角和里面的按键同一个量级(按键 12dp,面板 16dp)。
-            // 原来 32dp 按"跟屏幕圆角同心"来算,面板不高,看上去就是一条胶囊,
-            // 和里面方正的按键不是一家人 —— 用户明确要求改成跟按键差不多。
-            .clip(RoundedCornerShape(RadiusBox + 4.dp))
-            // 照系统键盘:浅色是浅灰底上的白键,深色是深灰底上的灰键。
-            // 用和终端底色一样的白/黑做面板,白键就融进去了,看不出键的边界。
-            .background(if (p.dark) Color(0xFF1C1C1E) else Color(0xFFD5D7DD))
-            .border(0.8.dp, p.glassBorder, RoundedCornerShape(RadiusBox + 4.dp)),
+            .padding(start = Gutter, end = Gutter, bottom = Gutter),
+        contentAlignment = Alignment.Center,
     ) {
-        content()
+        val keyWidth = ((maxWidth - KeyGap * 2 - KeyGap * (columns - 1)) / columns).coerceAtMost(KeyMaxWidth)
+        Box(
+            Modifier
+                // 圆角和里面的按键同一个量级(按键 12dp,面板 16dp)。
+                .clip(RoundedCornerShape(RadiusBox + 4.dp))
+                // 照系统键盘:浅色是浅灰底上的白键,深色是深灰底上的灰键。
+                .background(if (p.dark) Color(0xFF1C1C1E) else Color(0xFFD5D7DD))
+                .border(0.8.dp, p.glassBorder, RoundedCornerShape(RadiusBox + 4.dp)),
+        ) {
+            content(keyWidth)
+        }
     }
 }
 
@@ -610,6 +622,7 @@ private fun HostLine(host: Host, dead: Boolean) {
 /** 终端按键条。方向键与退格可连发,按住就一直走 —— 改一条长命令时这是刚需。 */
 @Composable
 private fun TerminalKeys(
+    keyWidth: Dp,
     wrap: Boolean,
     ctrl: Boolean,
     alt: Boolean,
@@ -619,7 +632,7 @@ private fun TerminalKeys(
     send: (ByteArray) -> Unit,
 ) {
     val keys = KeyActions(ctrl, alt, onCtrl, onAlt, send)
-    if (wrap) WideKeys(keys) else CompactKeys(keys)
+    if (wrap) WideKeys(keys, keyWidth) else CompactKeys(keys, keyWidth)
 }
 
 /** 所有按键的动作集中在一处,两种排布共用。 */
@@ -659,21 +672,22 @@ private class KeyActions(
  *     Ctrl  ⋯   ^L   |   /
  */
 @Composable
-private fun CompactKeys(k: KeyActions) {
+private fun CompactKeys(k: KeyActions, keyWidth: Dp) {
     var more by remember { mutableStateOf(false) }
+    val key = Modifier.width(keyWidth)
     Column(
-        Modifier.fillMaxWidth().padding(6.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+        Modifier.padding(KeyGap),
+        verticalArrangement = Arrangement.spacedBy(KeyGap),
     ) {
         // 翻页的那几格淡入淡出换过去,不是一帧跳变;不动的三颗(Ctrl ⋯ ⏎)原地不闪。
         @Composable
         fun RowScope.Flip(first: @Composable () -> Unit, second: @Composable () -> Unit) {
-            Crossfade(more, Modifier.weight(1f), animationSpec = tween(140), label = "keyFlip") {
+            Crossfade(more, key, animationSpec = tween(140), label = "keyFlip") {
                 if (it) second() else first()
             }
         }
         val cell = Modifier.fillMaxWidth()
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(KeyGap)) {
             Flip({ KeyCap("Esc", cell) { k.bytes(27) } }, { KeyCap("Alt", cell, active = k.alt, onPress = k.onAlt) })
             Flip({ KeyCap("Tab", cell) { k.bytes(9) } }, { KeyCap("^D", cell) { k.bytes(4) } })
             Flip({ KeyCap("^C", cell) { k.bytes(3) } }, { KeyCap("^Z", cell) { k.bytes(26) } })
@@ -681,11 +695,11 @@ private fun CompactKeys(k: KeyActions) {
                 { KeyCap("↑", cell, repeatable = true) { k.text("\u001b[A") } },
                 { KeyCap("⌫", cell, repeatable = true) { k.bytes(0x7F) } },
             )
-            KeyCap("回车", Modifier.weight(1f), emphasis = true, icon = XIcons.Return) { k.bytes(13) }
+            KeyCap("回车", key, emphasis = true, icon = XIcons.Return) { k.bytes(13) }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            KeyCap("Ctrl", Modifier.weight(1f), active = k.ctrl, onPress = k.onCtrl)
-            KeyCap("⋯", Modifier.weight(1f), active = more) { more = !more }
+        Row(horizontalArrangement = Arrangement.spacedBy(KeyGap)) {
+            KeyCap("Ctrl", key, active = k.ctrl, onPress = k.onCtrl)
+            KeyCap("⋯", key, active = more) { more = !more }
             Flip(
                 { KeyCap("←", cell, repeatable = true) { k.text("\u001b[D") } },
                 { KeyCap("^L", cell) { k.bytes(12) } },
@@ -709,13 +723,13 @@ private fun CompactKeys(k: KeyActions) {
  *     Ctrl Alt   |   /   -   ~   ←   ↓   →
  */
 @Composable
-private fun WideKeys(k: KeyActions) {
+private fun WideKeys(k: KeyActions, keyWidth: Dp) {
+    val key = Modifier.width(keyWidth)
     Column(
-        Modifier.fillMaxWidth().padding(6.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+        Modifier.padding(KeyGap),
+        verticalArrangement = Arrangement.spacedBy(KeyGap),
     ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            val key = Modifier.weight(1f)
+        Row(horizontalArrangement = Arrangement.spacedBy(KeyGap)) {
             KeyCap("Esc", key) { k.bytes(27) }
             KeyCap("Tab", key) { k.bytes(9) }
             KeyCap("^C", key) { k.bytes(3) }
@@ -726,8 +740,7 @@ private fun WideKeys(k: KeyActions) {
             KeyCap("↑", key, repeatable = true) { k.text("\u001b[A") }
             KeyCap("回车", key, emphasis = true, icon = XIcons.Return) { k.bytes(13) }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            val key = Modifier.weight(1f)
+        Row(horizontalArrangement = Arrangement.spacedBy(KeyGap)) {
             KeyCap("Ctrl", key, active = k.ctrl, onPress = k.onCtrl)
             KeyCap("Alt", key, active = k.alt, onPress = k.onAlt)
             KeyCap("|", key) { k.text("|") }
