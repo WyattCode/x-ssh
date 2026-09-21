@@ -1,5 +1,8 @@
 package dev.xssh.android
 
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.isImeVisible
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.unit.Dp
 import androidx.compose.animation.AnimatedVisibility
@@ -338,6 +341,9 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
     val scope = rememberCoroutineScope()
     val keyboard = LocalSoftwareKeyboardController.current
     val focusRequester = remember { FocusRequester() }
+    val focusManager = LocalFocusManager.current
+    @OptIn(ExperimentalLayoutApi::class)
+    val imeVisible = WindowInsets.isImeVisible
     // 进来**不抢焦点**,也就不弹键盘。
     //
     // 原来一连上就 requestFocus(),焦点落到输入框上系统立刻弹键盘(实测连接后 100ms)。
@@ -456,10 +462,20 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
                 if (showKeys) "收起快捷键" else "显示快捷键",
                 tint = if (showKeys) p.accent else null,
             ) { showKeys = !showKeys }
-            GlassItem(XIcons.Keyboard, "调出键盘") {
-                Log.i(TAG, "keyboard: rail button")
-                focusRequester.requestFocus()
-                keyboard?.show()
+            // 键盘按钮是开关:没弹出就弹出,弹着就收起(和 ⌘ 一样,开着时图标变蓝)。
+            GlassItem(
+                XIcons.Keyboard,
+                if (imeVisible) "收起键盘" else "调出键盘",
+                tint = if (imeVisible) p.accent else null,
+            ) {
+                Log.i(TAG, "keyboard: rail button, visible=$imeVisible")
+                if (imeVisible) {
+                    keyboard?.hide()
+                    focusManager.clearFocus()
+                } else {
+                    focusRequester.requestFocus()
+                    keyboard?.show()
+                }
             }
         }
         // 断开是危险操作,单独一颗、红色图标,放在最下面(和 ＋ / ✓ 同一个位置)。
