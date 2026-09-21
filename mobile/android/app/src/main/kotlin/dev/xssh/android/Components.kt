@@ -414,19 +414,19 @@ val RailClearance = 56.dp * 3 + 14.dp + 16.dp + Gutter
  * - 模糊背后的内容,并叠一层亮度层保证上面的图标清晰(regular 变体);
  * - vibrancy:透过来的颜色更饱和("映出周围的颜色");
  * - lens:边缘实时折射背后的画面(Android 13+),加镜面高光和阴影;
- * - 颜色克制:只有主操作用染色玻璃([prominent]),其余无色。
+ * - 颜色克制:玻璃一律无色,主操作只给图标上强调色(参考图里"写邮件""+"都是无色玻璃)。
+ *   试过给主操作用强调色染色的玻璃:内屏双栏同一屏上选中行、「连接」按钮、＋ 三块实心蓝抢注意力。
  * [press] 0..1 驱动整块玻璃的弹性缩放;[glow] 在亮度层上画按压时"从内部亮起"的光。
  */
 @Composable
 private fun Modifier.liquidGlass(
     shape: Shape,
-    prominent: Boolean,
     press: () -> Float,
     glow: (DrawScope.() -> Unit)? = null,
 ): Modifier {
     val p = LocalXssh.current
     val backdrop = LocalBackdrop.current
-    val surface = if (prominent) p.accent.copy(alpha = if (p.dark) 0.78f else 0.86f) else p.glassTint
+    val surface = p.glassTint
     return if (backdrop != null) {
         drawBackdrop(
             backdrop = backdrop,
@@ -516,15 +516,14 @@ private fun DrawScope.pressGlow(press: Press, dark: Boolean) {
 }
 
 /**
- * 单独一颗 Liquid Glass 圆钮(56dp)。每页的主操作(＋ / ✓)和危险操作(✕)用它,
- * 放在轨道最下面 —— 参考图里"写邮件""+"都是这样单独一颗。
+ * 单独一颗 Liquid Glass 圆钮(56dp)。每页的主操作(＋ / ✓,蓝色图标)和危险操作(✕,红色图标)
+ * 用它,放在轨道最下面 —— 参考图里"写邮件""+"都是这样单独一颗无色玻璃。
  */
 @Composable
 fun GlassButton(
     icon: ImageVector,
     contentDescription: String,
     tint: Color? = null,
-    prominent: Boolean = false,
     onClick: () -> Unit,
 ) {
     val p = LocalXssh.current
@@ -533,14 +532,14 @@ fun GlassButton(
         Modifier
             .size(56.dp)
             .glassTap(press, contentDescription, onClick)
-            .liquidGlass(CircleShape, prominent, { press.amount.value }) { pressGlow(press, p.dark) },
+            .liquidGlass(CircleShape, { press.amount.value }) { pressGlow(press, p.dark) },
         contentAlignment = Alignment.Center,
     ) {
         Crossfade(targetState = icon, animationSpec = tween(180), label = "glassIcon") { shown ->
             Icon(
                 shown,
                 contentDescription = null,
-                tint = if (prominent) p.onAccent else (tint ?: p.text),
+                tint = tint ?: p.text,
                 modifier = Modifier.size(23.dp),
             )
         }
@@ -560,7 +559,7 @@ fun GlassGroup(content: @Composable () -> Unit) {
     Column(
         Modifier
             .width(56.dp)
-            .liquidGlass(shape, prominent = false, press = { 0f })
+            .liquidGlass(shape, press = { 0f })
             // 组内按钮按下时的光要被胶囊的圆头裁住。
             .clip(shape),
         horizontalAlignment = Alignment.CenterHorizontally,

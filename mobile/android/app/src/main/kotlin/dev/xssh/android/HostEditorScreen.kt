@@ -266,8 +266,8 @@ fun HostEditorScreen(
         CompositionLocalProvider(LocalBackdrop provides backdrop) {
             EdgeRail(Modifier.align(Alignment.BottomEnd)) {
                 GlassButton(XIcons.Back, "返回") { onBack() }
-                // 这一页的主操作:染色玻璃。
-                GlassButton(XIcons.Check, "保存", prominent = true) { save() }
+                // 无色玻璃 + 蓝色图标,和主机页的 ＋ 同一种语气;实心蓝留给真正需要的地方。
+                GlassButton(XIcons.Check, "保存", tint = p.accent) { save() }
             }
         }
     }

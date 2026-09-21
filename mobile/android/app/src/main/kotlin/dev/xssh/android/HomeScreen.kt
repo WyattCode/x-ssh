@@ -260,8 +260,9 @@ fun HomeScreen(
                         }
                     }
                 }
-                // 这一页的主操作:染色玻璃(HIG:颜色只给最重要的那个操作)。
-                GlassButton(XIcons.Plus, "新建主机", prominent = true) { onNew() }
+                // 无色玻璃 + 蓝色图标(参考图里"写邮件""+"都是无色玻璃)。
+                // 原来是蓝色染色玻璃:内屏双栏同一屏上有选中行、「连接」按钮、＋ 三块实心蓝在抢注意力。
+                GlassButton(XIcons.Plus, "新建主机", tint = p.accent) { onNew() }
             }
         }
     }
