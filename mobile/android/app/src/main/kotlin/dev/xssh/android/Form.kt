@@ -84,7 +84,8 @@ fun FormDivider() {
         Modifier
             .fillMaxWidth()
             .padding(start = BoxPad)
-            .height(1.dp)
+            // 细线:0.5dp。1dp 的线在分组块里太重,像把一块切成了几块。
+            .height(0.5.dp)
             .background(LocalXssh.current.border),
     )
 }

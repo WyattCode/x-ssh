@@ -125,9 +125,9 @@ fun HostEditorScreen(
         FormGroup(
             title = "怎么登录",
             footnote = if (auth == AuthKind.KEY) {
-                "密钥库(导入/生成/生物识别解锁)后续版本提供。"
+                "密钥导入与指纹解锁将在后续版本提供。"
             } else {
-                "密码经系统密钥库加密后保存在本机,不存明文。"
+                "密码经系统密钥库加密,只存在本机。"
             },
         ) {
             // 密码在前、私钥在后,新建默认密码。
@@ -210,7 +210,7 @@ fun HostEditorScreen(
                 Spacer(Modifier.height(2.dp))
                 Text(
                     error ?: "填完点右边的 ✓ 保存",
-                    color = if (error != null) p.danger else p.textFaint,
+                    color = if (error != null) p.danger else p.textDim,
                     fontSize = 12.5.sp,
                 )
             }

@@ -806,7 +806,7 @@ private fun PaneTitle(
         Spacer(Modifier.height(2.dp))
         Text(
             subtitle,
-            color = if (monoSubtitle) p.textDim else p.textFaint,
+            color = p.textDim,
             fontFamily = if (monoSubtitle) FontFamily.Monospace else FontFamily.Default,
             fontSize = 12.5.sp,
             maxLines = 1,
@@ -819,7 +819,7 @@ private fun PaneTitle(
 private fun DetailRow(label: String, value: String) {
     val p = LocalXssh.current
     Column {
-        Text(label, color = p.textFaint, fontSize = 12.sp)
+        Text(label, color = p.textDim, fontSize = 13.sp)
         Spacer(Modifier.height(4.dp))
         Text(value, color = p.text, fontFamily = FontFamily.Monospace, fontSize = 13.sp)
     }

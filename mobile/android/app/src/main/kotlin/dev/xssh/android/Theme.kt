@@ -105,14 +105,19 @@ val DarkPalette = XsshPalette(
 val LightPalette = XsshPalette(
     dark = false,
     bg = Color(0xFFFFFFFF),
-    groupedBg = Color(0xFFF2F2F7),
-    bgElev = Color(0xFFFFFFFF),
+    // 浅色下表单页也用白底,分组块用浅灰填充。
+    // 试过 iOS 设置页那种"偏紫的浅灰底 + 白色分组块":和白底的主机页一进一出,
+    // 用户看了直接说配色不好看。白底灰块更干净,两页也统一。
+    groupedBg = Color(0xFFFFFFFF),
+    bgElev = Color(0xFFF2F2F7),
     bgElev2 = Color(0x1F767680),
-    border = Color(0x4A3C3C43),
+    // 分隔线要轻:原来 29% 的黑、1dp 粗,把分组块切成几段。
+    border = Color(0x2E3C3C43),
     borderStrong = Color(0xFFC7C7CC),
     text = Color(0xFF000000),
     textDim = Color(0x993C3C43),
-    textFaint = Color(0x4D3C3C43),
+    // 第三级文字比 iOS 的 30% 再深一点 —— 手机上 30% 的占位字、说明字在白底上几乎看不见。
+    textFaint = Color(0x663C3C43),
     accent = Color(0xFF007AFF),
     onAccent = Color(0xFFFFFFFF),
     accentSoft = Color(0x26007AFF),
@@ -120,9 +125,11 @@ val LightPalette = XsshPalette(
     danger = Color(0xFFFF3B30),
     ok = Color(0xFF34C759),
     warn = Color(0xFFFF9500),
-    glassTint = Color(0xB8FFFFFF),
-    glassBorder = Color(0xCCFFFFFF),
-    glassShadow = Color(0x29000000),
+    // 浅色玻璃不能是白的:白底上白色亮边等于没有,轨道按钮只剩一点阴影,像悬在空中。
+    // 用浅灰半透明底色 + 一道很淡的深色细边,轮廓才出得来(iOS 的玻璃在白底上也是灰的)。
+    glassTint = Color(0xD1F2F2F5),
+    glassBorder = Color(0x1A000000),
+    glassShadow = Color(0x24000000),
     termBg = Color(0xFFFFFFFF),
     termFg = Color(0xFF1C1C1E),
     termCursor = Color(0xFF007AFF),
