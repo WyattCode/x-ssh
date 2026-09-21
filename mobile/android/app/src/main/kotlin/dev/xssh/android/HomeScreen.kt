@@ -46,6 +46,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -132,6 +133,11 @@ fun HomeScreen(
                     onSearching = { searching = it },
                     running = running.keys,
                     columns = 1,
+                    large = false,
+                    // 折痕这一侧留 32dp,右栏同样从折痕后 32dp 起 —— 两栏关于折痕镜像。
+                    // 原来左边卡片一路铺到折痕前 16dp,右栏又被轨道吃掉 72dp,
+                    // 看上去左边长、右边短。
+                    creaseGap = Gutter * 2,
                 )
                 // 两栏之间不画线:折痕本身就是分界,再补一条反而多余。
                 Spacer(Modifier.width(maxOf(1.dp, adaptive.bookFold?.sizeDp ?: 0.dp)))
@@ -173,30 +179,27 @@ fun HomeScreen(
                 searching = searching,
                 onSearching = { searching = it },
                 running = running.keys,
-                // 一列至少 264dp:外屏排一列,内屏竖屏自动变两列,不用再判断机型。
-                columns = 0,
+                // 单栏(外屏、内屏竖屏)一律单列大卡片。
+                // 原来按 264dp 自适应,竖屏排成两列,每张卡片只有 280dp 宽、57dp 高,
+                // 在 860dp 高的屏幕上缩在左上角,七成空着。
+                columns = 1,
+                large = true,
+                creaseGap = Gutter,
             )
         }
 
         // chrome 全在这条轨道里:界面四角不再散落按钮。
-        // 窄屏贴底横排,宽屏贴右竖排。
-        EdgeRail(
-            Modifier
-                .align(Alignment.BottomEnd)
-                .safeDrawingPadding()
-                .padding(bottom = 12.dp),
-            horizontal = !twoPane,
-        ) {
+        EdgeRail(Modifier.align(Alignment.BottomEnd)) {
             // 一台主机都没有时不摆搜索 —— 没东西可搜,按钮只是噪音。
             if (hosts.isNotEmpty()) {
-                RailGroup(horizontal = !twoPane) {
+                RailGroup {
                     RailButton("⌕", "搜索主机") {
                         searching = !searching
                         if (!searching) query = ""
                     }
                 }
             }
-            RailGroup(horizontal = !twoPane) {
+            RailGroup {
                 RailButton("＋", "新建主机", tint = p.accent) { onNew() }
             }
         }
@@ -219,6 +222,10 @@ private fun HostListPane(
     onSearching: (Boolean) -> Unit,
     running: Set<String>,
     columns: Int,
+    /** 单栏用大卡片:外屏和竖屏上一张卡片就是一个手指目标,不该是一行小字。 */
+    large: Boolean,
+    /** 靠折痕(或屏幕右缘)那一侧的留白。 */
+    creaseGap: Dp,
 ) {
     val p = LocalXssh.current
     Box(modifier) {
@@ -227,7 +234,7 @@ private fun HostListPane(
             PaneTitle(
                 Modifier
                     .fillMaxWidth()
-                    .padding(start = Gutter + BoxPad, end = Gutter, top = Gutter, bottom = GapItem),
+                    .padding(start = Gutter + BoxPad, end = creaseGap, top = Gutter, bottom = GapItem),
                 "X-SSH",
                 if (total == 0) "还没有主机" else "$total 台主机 · 长按卡片可编辑",
             )
@@ -252,7 +259,7 @@ private fun HostListPane(
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(min = 56.dp)
-                        .padding(horizontal = Gutter)
+                        .padding(start = Gutter, end = creaseGap)
                         .focusRequester(focus),
                 )
                 Spacer(Modifier.height(GapItem))
@@ -265,15 +272,15 @@ private fun HostListPane(
                 LazyVerticalGrid(
                     columns = if (columns > 0) GridCells.Fixed(columns) else GridCells.Adaptive(264.dp),
                     modifier = Modifier.weight(1f).fillMaxWidth(),
-                    // 底部留出悬浮按钮的位置,最后一张卡片不会被挡住。
-                    // 底部留出轨道的位置,最后一张卡片能滚到它上面去。
-                    contentPadding = PaddingValues(start = Gutter, end = Gutter, bottom = RailWidth + Gutter),
+                    // 底部留出轨道的高度,最后一张卡片能滚到它上面去。
+                    contentPadding = PaddingValues(start = Gutter, end = creaseGap, bottom = RailClearance),
                     horizontalArrangement = Arrangement.spacedBy(GapItem),
                     verticalArrangement = Arrangement.spacedBy(GapItem),
                 ) {
                     items(hosts, key = { it.id }) { host ->
                         HostCard(
                             host = host,
+                            large = large,
                             selected = host.id == selectedId,
                             running = host.id in running,
                             onPrimary = onPrimary,
@@ -333,6 +340,7 @@ private fun NoMatches(modifier: Modifier) {
 @Composable
 private fun HostCard(
     host: Host,
+    large: Boolean,
     selected: Boolean,
     running: Boolean,
     onPrimary: (Host) -> Unit,
@@ -347,7 +355,8 @@ private fun HostCard(
         highlight = selected,
         onClick = { onPrimary(host) },
         onLongClick = { menu = true },
-        paddingVertical = 13.dp,
+        // 大卡片约 84dp 高(原来 57dp):单栏里它是主要的手指目标。
+        paddingVertical = if (large) 18.dp else 13.dp,
     ) {
         // 一行纯内容:名称 + 标签,地址独占一行。
         //
@@ -357,7 +366,7 @@ private fun HostCard(
             Text(
                 host.label,
                 color = p.text,
-                fontSize = 15.5.sp,
+                fontSize = if (large) 17.sp else 15.5.sp,
                 fontWeight = FontWeight.Medium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -375,12 +384,12 @@ private fun HostCard(
                 Chip("密钥待确认", p.warn)
             }
         }
-        Spacer(Modifier.height(3.dp))
+        Spacer(Modifier.height(if (large) 5.dp else 3.dp))
         Text(
             host.subtitle,
             color = p.textDim,
             fontFamily = FontFamily.Monospace,
-            fontSize = 12.5.sp,
+            fontSize = if (large) 13.5.sp else 12.5.sp,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
@@ -435,23 +444,24 @@ private fun HostDetailPane(
         return
     }
 
+    // 整栏**只有一条左缘**:折痕后 32dp。标题、标签、详情、按钮全部从这里起。
+    //
+    // 原来文字缩进到 32dp、按钮却在 16dp,于是「连接」「编辑」「删除」左右各比上面的
+    // 「认证」「已信任的主机密钥」多出 16dp —— 这一栏没有任何面板,按钮就是唯一的"盒子",
+    // 让它按盒子的 16dp 线走,只会显得比文字宽出一截。
     Column(
         modifier
             .verticalScroll(rememberScrollState())
-            // 左右两栏的文字各距自己的外缘 32dp —— 关于折痕镜像对称。
-            .padding(horizontal = Gutter, vertical = Gutter),
+            .padding(start = Gutter * 2, end = Gutter, top = Gutter, bottom = Gutter),
     ) {
         PaneTitle(
-            Modifier.fillMaxWidth().padding(horizontal = BoxPad),
+            Modifier.fillMaxWidth(),
             host.label,
             host.subtitle,
             monoSubtitle = true,
         )
         Spacer(Modifier.height(GapItem))
-        Row(
-            Modifier.padding(horizontal = BoxPad),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Chip(
                 if (host.auth == AuthKind.KEY) "私钥认证" else "密码认证",
                 if (host.auth == AuthKind.KEY) p.accent else p.warn,
@@ -465,15 +475,24 @@ private fun HostDetailPane(
         Spacer(Modifier.height(24.dp))
         DetailRow(
             "认证",
-            if (host.auth == AuthKind.KEY) host.keyPath.ifBlank { "(未指定私钥)" } else "密码(不落盘)",
+            when {
+                host.auth == AuthKind.KEY -> host.keyPath.ifBlank { "(未指定私钥)" }
+                host.password.isEmpty() -> "密码(未保存,连接前请先编辑填入)"
+                else -> "密码(已加密保存在本机)"
+            },
         )
         if (host.keyFingerprint.isNotBlank()) {
             Spacer(Modifier.height(GapItem))
-            DetailRow("已信任的主机密钥", host.keyFingerprint)
+            val (algorithm, rows) = fingerprintRows(host.keyFingerprint)
+            DetailRow(
+                if (algorithm.isBlank()) "已信任的主机密钥" else "已信任的主机密钥 · $algorithm",
+                rows.joinToString("\n"),
+            )
         }
 
         Spacer(Modifier.height(24.dp))
-        XsshButton("连接", modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)) { onConnect(host) }
+        // 和编辑/删除同高(48dp):三颗按钮是一组,不该有一颗特别胖。
+        XsshButton("连接", modifier = Modifier.fillMaxWidth()) { onConnect(host) }
         Spacer(Modifier.height(GapItem))
         Row(horizontalArrangement = Arrangement.spacedBy(GapItem)) {
             XsshButton("编辑", kind = ButtonKind.Ghost, modifier = Modifier.weight(1f)) { onEdit(host) }
@@ -515,7 +534,7 @@ private fun PaneTitle(
 @Composable
 private fun DetailRow(label: String, value: String) {
     val p = LocalXssh.current
-    Column(Modifier.padding(horizontal = BoxPad)) {
+    Column {
         Text(label, color = p.textFaint, fontSize = 12.sp)
         Spacer(Modifier.height(4.dp))
         Text(value, color = p.text, fontFamily = FontFamily.Monospace, fontSize = 13.sp)

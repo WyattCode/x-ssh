@@ -18,6 +18,11 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -367,6 +372,19 @@ fun StatusDot(color: Color) {
     )
 }
 
+/**
+ * 把 "SHA256:<43 个 base64 字符>" 拆成 (算法名, 显示行)。
+ *
+ * 摘要固定切成 **11 字符一组、两组一行**。让它自由折行的话,断点随宽度和字号浮动,
+ * 还会停在 `/` `+` 这类字符后面 —— 第一行只剩 `SHA256:vnOd/` 一小截,既不工整,
+ * 逐字符比对时也最容易看串行。确认页和详情栏共用这一套,两处看到的分组完全一样。
+ */
+fun fingerprintRows(value: String): Pair<String, List<String>> {
+    val algorithm = value.substringBefore(':', "")
+    val digest = value.substringAfter(':', value)
+    return algorithm to digest.chunked(11).chunked(2).map { it.joinToString(" ") }
+}
+
 /** 认证方式之类的小标签。 */
 @Composable
 fun Chip(text: String, color: Color) {
@@ -408,36 +426,34 @@ fun xsshFieldColors(): TextFieldColors {
 */
 
 /**
- * 轨道占的宽(竖排)或高(横排):胶囊 56 + 离边 12。内容要按这个让出位置。
+ * 轨道占的宽度:胶囊 56 + 离边 16。内容要按这个让出位置。
  *
- * 排布方向跟 size class 的规矩:**compact 宽度贴底横排,regular 宽度才走侧栏**。
- * 之前一刀切竖排,在 425dp 的外屏上立刻出事 —— 表单是右对齐取值,
- * 竖轨道正好压在「密码」那一类值上,而且整块表单左偏(左 16dp / 右 84dp)。
+ * 离边取 16 而不是 12:胶囊右缘这样才和所有卡片、面板的右缘落在同一条 16dp 线上。
+ *
+ * 所有形态(外屏、内屏竖、内屏横)都是**右边缘竖排**。曾经试过窄屏贴底横排,
+ * 用户明确否掉了 —— 按钮就该在右侧,换一块屏不该换一个位置。
  */
-val RailWidth = 68.dp
+val RailWidth = 72.dp
 
-/** 一组轨道按钮:一个半透明胶囊裹住若干圆钮。[horizontal] 为真时钮横着排。 */
+/**
+ * 列表底部要留出的高度:两组单钮胶囊(56 + 14 + 56)+ 离底 16 + 一条间距。
+ * 留够了,最后一张卡片才能滚到轨道上方,而不是永远被它压着一角。
+ */
+val RailClearance = 56.dp + 14.dp + 56.dp + 16.dp + Gutter
+
+/** 一组轨道按钮:一个半透明胶囊裹住若干圆钮。 */
 @Composable
-fun RailGroup(horizontal: Boolean = false, content: @Composable () -> Unit) {
+fun RailGroup(content: @Composable () -> Unit) {
     val p = LocalXssh.current
-    val skin = Modifier
-        .clip(RoundedCornerShape(28.dp))
-        .background(p.text.copy(alpha = 0.13f))
-        .border(1.dp, p.text.copy(alpha = 0.10f), RoundedCornerShape(28.dp))
-        .padding(4.dp)
-    if (horizontal) {
-        Row(
-            skin,
-            horizontalArrangement = Arrangement.spacedBy(2.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) { content() }
-    } else {
-        Column(
-            skin,
-            verticalArrangement = Arrangement.spacedBy(2.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) { content() }
-    }
+    Column(
+        Modifier
+            .clip(RoundedCornerShape(28.dp))
+            .background(p.text.copy(alpha = 0.13f))
+            .border(1.dp, p.text.copy(alpha = 0.10f), RoundedCornerShape(28.dp))
+            .padding(4.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) { content() }
 }
 
 /** 轨道上的圆钮。[tint] 给危险/主操作上色,其余沿用前景色。 */
@@ -477,29 +493,22 @@ fun RailButton(
 }
 
 /**
- * 轨道本体;[content] 里放若干 [RailGroup]。
+ * 轨道本体;[content] 里放若干 [RailGroup]。调用方只传 `Modifier.align(Alignment.BottomEnd)`,
+ * 离边、避让系统栏全在这里定 —— **每一屏的轨道因此落在完全相同的像素上**。
  *
- * [horizontal] 为真就贴底横排(窄屏),否则贴右边缘竖排(宽屏)。
- * 窄屏为什么不竖排:425dp 宽让出 68dp 是 16%,还会压住表单的右对齐取值;
- * 贴底只吃掉 623dp 高里的 11%,而且正落在拇指弧线上。
+ * 原来每一屏各自拼 `safeDrawingPadding().padding(bottom = …)`,拼出来不一样:
+ * 主机页离底叠了两层 12dp、新建页只有一层,点 ＋ 进新建页按钮就往下跳 12dp。
+ *
+ * 也**不能**用 safeDrawing:它包含输入法 inset,键盘一弹轨道就被整个顶上去。
+ * 按钮的位置必须固定;键盘开着时它被盖住,收起键盘它还在原处。
  */
 @Composable
-fun EdgeRail(
-    modifier: Modifier = Modifier,
-    horizontal: Boolean = false,
-    content: @Composable () -> Unit,
-) {
-    if (horizontal) {
-        Row(
-            modifier.padding(bottom = 12.dp, end = Gutter),
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) { content() }
-    } else {
-        Column(
-            modifier.padding(end = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) { content() }
-    }
+fun EdgeRail(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    Column(
+        modifier
+            .windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.displayCutout))
+            .padding(end = Gutter, bottom = Gutter),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) { content() }
 }

@@ -21,7 +21,7 @@ data class Host(
      * 存了之后每次连接都比对,不一致就拒绝 —— 这是防中间人的唯一一道关。
      */
     val keyFingerprint: String = "",
-    /** 密码认证用;仅内存保留,不落盘。 */
+    /** 密码认证用。落盘时经 [Secrets] 加密(Android 密钥库、不可导出),不存明文。 */
     val password: String = "",
 ) {
     val label: String get() = name.ifBlank { address }
@@ -34,8 +34,11 @@ data class Host(
 }
 
 /**
- * 主机列表持久化。第一批实现用 SharedPreferences + JSON(仅存非敏感信息;
- * 密码不落盘,私钥以文件路径引用,后续迁移到 Rust 核心统一存储)。
+ * 主机列表持久化:SharedPreferences + JSON。密码经 [Secrets] 加密后存进同一条记录,
+ * 私钥以文件路径引用。
+ *
+ * 密码原来只放内存 —— 结果是存过密码、连过一次,下次打开(进程被回收、重装、
+ * 系统重启)又得重新输密码、再存、再连。
  */
 class HostStore(context: Context) {
     private val prefs = context.getSharedPreferences("xssh_hosts", Context.MODE_PRIVATE)
@@ -56,6 +59,7 @@ class HostStore(context: Context) {
                     auth = if (item.optString("auth") == "key") AuthKind.KEY else AuthKind.PASSWORD,
                     keyPath = item.optString("keyPath"),
                     keyFingerprint = item.optString("keyFingerprint"),
+                    password = Secrets.open(item.optString("password")),
                 )
             }
         }.getOrDefault(emptyList())
@@ -73,6 +77,7 @@ class HostStore(context: Context) {
             item.put("auth", if (host.auth == AuthKind.PASSWORD) "password" else "key")
             item.put("keyPath", host.keyPath)
             item.put("keyFingerprint", host.keyFingerprint)
+            item.put("password", Secrets.seal(host.password))
             array.put(item)
         }
         prefs.edit().putString(KEY_LIST, array.toString()).apply()

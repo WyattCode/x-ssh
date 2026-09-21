@@ -247,9 +247,7 @@ private fun Fingerprint(label: String, value: String, color: Color) {
     //
     // 所以:算法名提到标签里,摘要**固定切成 11 字符一组**,两组一行。
     // 断点是写死的,外屏、内屏、放大字体下看到的分组完全一样,比对时手指按着数得准。
-    val algorithm = value.substringBefore(':', "")
-    val digest = value.substringAfter(':', value)
-    val rows = digest.chunked(11).chunked(2).map { it.joinToString(" ") }
+    val (algorithm, rows) = fingerprintRows(value)
     Column {
         Text(
             if (algorithm.isBlank()) label else "$label · $algorithm",
@@ -450,14 +448,7 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
                 keys()
             }
         }
-        EdgeRail(
-            Modifier
-                .align(Alignment.BottomEnd)
-                .safeDrawingPadding()
-                .imePadding()
-                .padding(bottom = 12.dp),
-            content = rail,
-        )
+        EdgeRail(Modifier.align(Alignment.BottomEnd), content = rail)
         }
         return
     }
@@ -476,14 +467,7 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
             hiddenInput()
             keys()
         }
-        EdgeRail(
-            Modifier
-                .align(Alignment.BottomEnd)
-                .safeDrawingPadding()
-                .imePadding()
-                .padding(bottom = 12.dp),
-            content = rail,
-        )
+        EdgeRail(Modifier.align(Alignment.BottomEnd), content = rail)
     }
 }
 

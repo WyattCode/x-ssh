@@ -7,11 +7,9 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.width
@@ -121,7 +119,7 @@ fun HostEditorScreen(
             footnote = if (auth == AuthKind.KEY) {
                 "密钥库(导入/生成/生物识别解锁)后续版本提供。"
             } else {
-                "密码只留在内存里,不写入手机;每次重开要重新输入。"
+                "密码经系统密钥库加密后保存在本机,不存明文。"
             },
         ) {
             // 密码在前、私钥在后,新建默认密码。
@@ -161,89 +159,78 @@ fun HostEditorScreen(
         }
     }
 
-    // 整个页面量一次:内容和轨道用同一个 twoPane,不会一个按宽屏排、另一个按窄屏排。
-    // 量的是**整个窗口**(和主机页同一条式子、同样在加安全区内边距之前)。
+    // 整个页面量一次,和主机页同一条式子、同样量整个窗口。
     BoxWithConstraints(Modifier.fillMaxSize().background(p.bg)) {
         val window = maxWidth
         val twoPane = window >= 840.dp || (adaptive.bookFold != null && window >= 600.dp)
-        val railPad = if (twoPane) RailWidth else 0.dp
-        val available = window - railPad
+        val available = window - RailWidth
 
-        val body: @Composable (Modifier) -> Unit = { shell ->
-            Column(shell.verticalScroll(rememberScrollState()).padding(end = railPad)) {
-                Column(Modifier.padding(start = Gutter + BoxPad, end = Gutter, top = Gutter)) {
-                    Text(
-                        if (initial == null) "新建主机" else "编辑主机",
-                        color = p.text,
-                        fontSize = 28.sp,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        error ?: if (twoPane) "填完点右边的 ✓ 保存" else "填完点下面的 ✓ 保存",
-                        color = if (error != null) p.danger else p.textFaint,
-                        fontSize = 12.5.sp,
-                    )
-                }
-                Spacer(Modifier.height(GapItem + 4.dp))
+        Column(
+            Modifier
+                .fillMaxSize()
+                // safeDrawing 含输入法 inset:键盘一弹,可滚动区域缩到键盘上方,
+                // 聚焦的那一行会被自动滚进视野。(轨道不跟着动,见 EdgeRail。)
+                .safeDrawingPadding()
+                .verticalScroll(rememberScrollState())
+                // 所有形态都给右侧轨道让位 —— 表单是右对齐取值,不能让按钮压在值上。
+                .padding(end = RailWidth),
+        ) {
+            Column(Modifier.padding(start = Gutter + BoxPad, end = Gutter, top = Gutter)) {
+                Text(
+                    if (initial == null) "新建主机" else "编辑主机",
+                    color = p.text,
+                    fontSize = 28.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    error ?: "填完点右边的 ✓ 保存",
+                    color = if (error != null) p.danger else p.textFaint,
+                    fontSize = 12.5.sp,
+                )
+            }
+            Spacer(Modifier.height(GapItem + 4.dp))
 
-                if (twoPane) {
-                    val left = adaptive.listPaneWidth(available).coerceAtMost(available - 280.dp)
-                    Row(Modifier.fillMaxWidth()) {
-                        Column(
-                            Modifier.width(left).fillMaxHeight().padding(horizontal = Gutter),
-                            verticalArrangement = Arrangement.spacedBy(20.dp),
-                        ) { target() }
-                        Column(
-                            Modifier.weight(1f).padding(horizontal = Gutter),
-                            verticalArrangement = Arrangement.spacedBy(20.dp),
-                        ) {
-                            credentials()
-                            danger()
-                        }
-                    }
-                } else {
+            if (twoPane) {
+                // 与主机页一样关于折痕镜像:左栏止于折痕前 32dp,右栏从折痕后 32dp 起。
+                val left = adaptive.listPaneWidth(available).coerceAtMost(available - 280.dp)
+                Row(Modifier.fillMaxWidth()) {
                     Column(
-                        Modifier
-                            // 一行里标签在左、取值在右,行太宽的话视线要横跨半块屏幕。
-                            .widthIn(max = 520.dp)
-                            .fillMaxWidth()
-                            .align(Alignment.CenterHorizontally)
-                            .padding(horizontal = Gutter),
+                        Modifier.width(left).padding(start = Gutter, end = Gutter * 2),
+                        verticalArrangement = Arrangement.spacedBy(20.dp),
+                    ) { target() }
+                    Column(
+                        Modifier.weight(1f).padding(start = Gutter * 2, end = Gutter),
                         verticalArrangement = Arrangement.spacedBy(20.dp),
                     ) {
-                        target()
                         credentials()
                         danger()
                     }
                 }
-                // 窄屏每一dp都金贵:尾部余量给到刚好不贴边即可。
-                Spacer(Modifier.height(if (twoPane) 40.dp else 16.dp))
+            } else {
+                Column(
+                    Modifier
+                        // 一行里标签在左、取值在右,行太宽的话视线要横跨半块屏幕 —— 所以限宽。
+                        // 但**不能居中**:内屏竖屏内容区 536dp,比上限多出的 16dp 会被
+                        // 左右各分 8dp,面板里的文字就落在 40dp,和标题的 32dp 错开一截。
+                        // 限宽之后靠左,面板永远在 16dp、文字永远在 32dp。
+                        .widthIn(max = 560.dp + Gutter * 2)
+                        .fillMaxWidth()
+                        .padding(horizontal = Gutter),
+                    verticalArrangement = Arrangement.spacedBy(20.dp),
+                ) {
+                    target()
+                    credentials()
+                    danger()
+                }
             }
+            Spacer(Modifier.height(40.dp))
         }
 
-        val rail: @Composable (Modifier) -> Unit = { shell ->
-            EdgeRail(shell, horizontal = !twoPane) {
-                RailGroup(horizontal = !twoPane) { RailButton("‹", "返回") { onBack() } }
-                RailGroup(horizontal = !twoPane) { RailButton("✓", "保存", tint = p.accent) { save() } }
-            }
-        }
-
-        if (twoPane) {
-            // 宽屏:内容让出右边 68dp,轨道浮在边缘。
-            body(Modifier.fillMaxSize().safeDrawingPadding().imePadding())
-            rail(Modifier.align(Alignment.BottomEnd).safeDrawingPadding().imePadding().padding(bottom = 12.dp))
-        } else {
-            // 窄屏:轨道**实实在在占一条**,不浮在内容上。
-            //
-            // 表单的取值是右对齐的,被挡住就没法确认填对没有 —— 列表卡片那套
-            // "内容从玻璃底下穿过去"在这里不适用。而给滚动区补底部 padding 也不管用:
-            // 内容不满一屏时根本不滚,最后一行的位置压根不会因此上移。
-            Column(Modifier.fillMaxSize().safeDrawingPadding().imePadding()) {
-                body(Modifier.fillMaxWidth().weight(1f))
-                // 横排的 EdgeRail 自带 bottom 12dp,这里不要再叠一层。
-                rail(Modifier.align(Alignment.End))
-            }
+        // 和主机页的 ⌕ ＋ 落在同一对位置上:点 ＋ 进来,按钮原地换成 ‹ ✓,一像素不动。
+        EdgeRail(Modifier.align(Alignment.BottomEnd)) {
+            RailGroup { RailButton("‹", "返回") { onBack() } }
+            RailGroup { RailButton("✓", "保存", tint = p.accent) { save() } }
         }
     }
 }
