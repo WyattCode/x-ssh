@@ -1,5 +1,22 @@
 package dev.xssh.android
 
+import kotlinx.coroutines.delay
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.isImeVisible
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.foundation.relocation.bringIntoViewRequester
+import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.ui.draw.shadow
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -107,46 +124,33 @@ fun FormField(
     secret: Boolean = false,
     keyboard: KeyboardType = KeyboardType.Text,
     imeAction: ImeAction = ImeAction.Next,
-    /**
-     * 长值(文件路径之类)改成上下排:标签在上、值在下占满整行。
-     * 右对齐的单行放不下一条路径,只会从中间切掉,既看不全也没法确认改对没有。
-     */
-    stacked: Boolean = false,
 ) {
     val p = LocalXssh.current
-    if (stacked) {
-        Column(
-            Modifier.fillMaxWidth().padding(horizontal = BoxPad, vertical = 12.dp),
-        ) {
-            Text(label, color = p.textDim, fontSize = 12.sp)
-            Spacer(Modifier.height(4.dp))
-            Box {
-                if (value.isEmpty() && placeholder.isNotEmpty()) {
-                    Text(
-                        placeholder,
-                        color = p.textFaint,
-                        fontSize = 14.sp,
-                        fontFamily = if (mono) FontFamily.Monospace else FontFamily.Default,
-                    )
-                }
-                BasicTextField(
-                    value = value,
-                    onValueChange = onValue,
-                    textStyle = TextStyle(
-                        color = p.text,
-                        fontSize = 14.sp,
-                        fontFamily = if (mono) FontFamily.Monospace else FontFamily.Default,
-                    ),
-                    keyboardOptions = KeyboardOptions(keyboardType = keyboard, imeAction = imeAction),
-                    cursorBrush = SolidColor(p.accent),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-        }
-        return
+    // 聚焦时把这一行连同下面一截 [LocalFieldClearance] 一起滚进视野:
+    // 右下角悬浮的按钮随键盘升起,不这样的话,正在输入的取值正好被按钮盖住。
+    val clearance = LocalFieldClearance.current
+    val requester = remember { BringIntoViewRequester() }
+    var focused by remember { mutableStateOf(false) }
+    var rowSize by remember { mutableStateOf(IntSize.Zero) }
+    val density = LocalDensity.current
+
+    @OptIn(ExperimentalLayoutApi::class)
+    val imeUp = WindowInsets.isImeVisible
+    LaunchedEffect(focused, imeUp) {
+        if (!focused || !imeUp || clearance == 0.dp) return@LaunchedEffect
+        // 等键盘升完、可滚动区域缩好,再算要滚多少。
+        delay(320)
+        val extra = with(density) { clearance.toPx() }
+        requester.bringIntoView(Rect(0f, 0f, rowSize.width.toFloat(), rowSize.height + extra))
     }
     Row(
-        Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(horizontal = BoxPad),
+        Modifier
+            .fillMaxWidth()
+            .bringIntoViewRequester(requester)
+            .onSizeChanged { rowSize = it }
+            .onFocusChanged { focused = it.hasFocus }
+            .heightIn(min = 52.dp)
+            .padding(horizontal = BoxPad),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // 标签用主文字色、取值右对齐 —— iOS 设置页的写法。
@@ -197,3 +201,6 @@ fun FormAction(label: String, danger: Boolean = false, onClick: () -> Unit) {
         Text(label, color = if (danger) p.danger else p.accent, fontSize = 16.sp)
     }
 }
+
+/** 表单行聚焦时,除了自己还要额外露出的高度(给悬浮在右下角的按钮让位)。 */
+val LocalFieldClearance = compositionLocalOf { 0.dp }

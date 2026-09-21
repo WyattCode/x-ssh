@@ -208,8 +208,6 @@ fun HomeScreen(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxHeight()
-                        // 详情栏靠右,给边缘轨道(直板机是右下角的 ＋)让出位置。
-                        .padding(end = RailWidth)
                         .windowInsetsPadding(
                             stableSafeDrawing().only(
                                 WindowInsetsSides.Vertical + WindowInsetsSides.End,
@@ -221,6 +219,7 @@ fun HomeScreen(
                 ) { host ->
                     HostDetailPane(
                         modifier = Modifier.fillMaxSize(),
+                        bottomClearance = clearance,
                         host = host,
                         onConnect = onConnect,
                         onEdit = onEdit,
@@ -778,6 +777,8 @@ private fun SwipeTile(label: String, fg: Color, bg: Color, modifier: Modifier, o
 @Composable
 private fun HostDetailPane(
     modifier: Modifier,
+    /** 底部给悬浮按钮留的高度:详情铺满到右边缘,按钮浮在上面,最后一行要能滚到按钮之上。 */
+    bottomClearance: Dp,
     host: Host?,
     onConnect: (Host) -> Unit,
     onEdit: (Host) -> Unit,
@@ -807,7 +808,7 @@ private fun HostDetailPane(
         modifier
             .bounce()
             .verticalScroll(rememberScrollState())
-            .padding(start = Gutter * 2, end = Gutter, top = Gutter, bottom = Gutter),
+            .padding(start = Gutter * 2, end = Gutter, top = Gutter, bottom = bottomClearance),
     ) {
         PaneTitle(
             Modifier.fillMaxWidth(),

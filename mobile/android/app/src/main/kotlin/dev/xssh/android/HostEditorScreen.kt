@@ -1,5 +1,7 @@
 package dev.xssh.android
 
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.isImeVisible
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import com.kyant.backdrop.backdrops.layerBackdrop
 import androidx.compose.runtime.CompositionLocalProvider
@@ -180,10 +182,12 @@ fun HostEditorScreen(
                 )
                 .bounce()
                 .verticalScroll(rememberScrollState())
-                // 给右侧轨道让位 —— 表单是右对齐取值,不能让按钮压在值上。
-                // 直板机按钮在顶栏,表单铺满;标题从顶栏下面开始。
-                .padding(end = if (topBar) 0.dp else RailWidth, top = if (topBar) TopBarHeight else 0.dp),
+                // 直板机按钮在顶栏,标题从顶栏下面开始。
+                .padding(top = if (topBar) TopBarHeight else 0.dp),
         ) {
+          // 表单铺满到右边缘,‹ ✓ 悬浮在右下角。键盘弹起时按钮跟着升到键盘上方,正好压在
+          // "正在输入的那一行"右边(取值是右对齐的)—— 输入框聚焦时多滚一截按钮的高度,落到按钮上面。
+          CompositionLocalProvider(LocalFieldClearance provides if (topBar) 0.dp else RailClearance) {
             Column(
                 Modifier.padding(start = startInset + Gutter + BoxPad, end = Gutter, top = Gutter),
             ) {
@@ -237,7 +241,9 @@ fun HostEditorScreen(
                     danger()
                 }
             }
-            Spacer(Modifier.height(40.dp))
+            // 最后一组要能滚到右下角悬浮的按钮上面。
+            Spacer(Modifier.height(if (topBar) 40.dp else RailClearance))
+          }
         }
 
         if (topBar) {
