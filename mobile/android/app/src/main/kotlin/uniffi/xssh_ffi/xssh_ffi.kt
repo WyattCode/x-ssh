@@ -705,7 +705,13 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_xssh_ffi_checksum_method_term_scroll_to_bottom(
     ): Int
+    external fun uniffi_xssh_ffi_checksum_method_term_set_cell_pixels(
+    ): Int
+    external fun uniffi_xssh_ffi_checksum_method_term_set_theme(
+    ): Int
     external fun uniffi_xssh_ffi_checksum_method_term_take_events(
+    ): Int
+    external fun uniffi_xssh_ffi_checksum_method_term_tick(
     ): Int
     external fun uniffi_xssh_ffi_checksum_constructor_session_connect(
     ): Int
@@ -777,8 +783,14 @@ internal object UniffiLib {
     ): Int
     external fun uniffi_xssh_ffi_fn_method_term_scroll_to_bottom(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
+    external fun uniffi_xssh_ffi_fn_method_term_set_cell_pixels(`ptr`: Long,`width`: Int,`height`: Int,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_xssh_ffi_fn_method_term_set_theme(`ptr`: Long,`foreground`: Int,`background`: Int,`cursor`: Int,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
     external fun uniffi_xssh_ffi_fn_method_term_take_events(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    external fun uniffi_xssh_ffi_fn_method_term_tick(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
     external fun ffi_xssh_ffi_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun ffi_xssh_ffi_rustbuffer_from_bytes(`bytes`: ForeignBytes.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -946,7 +958,16 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_xssh_ffi_checksum_method_term_scroll_to_bottom() and 0xFFFF) != 32315) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if ((lib.uniffi_xssh_ffi_checksum_method_term_set_cell_pixels() and 0xFFFF) != 65465) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_xssh_ffi_checksum_method_term_set_theme() and 0xFFFF) != 27876) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if ((lib.uniffi_xssh_ffi_checksum_method_term_take_events() and 0xFFFF) != 33477) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_xssh_ffi_checksum_method_term_tick() and 0xFFFF) != 23644) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_xssh_ffi_checksum_constructor_session_connect() and 0xFFFF) != 53220) {
@@ -2123,9 +2144,24 @@ public interface TermInterface {
     fun `scrollToBottom`()
     
     /**
+     * 单元格像素尺寸(回答窗口尺寸查询用)。
+     */
+    fun `setCellPixels`(`width`: kotlin.UInt, `height`: kotlin.UInt)
+    
+    /**
+     * 回答颜色查询用的主题色(`0xRRGGBB`)。
+     */
+    fun `setTheme`(`foreground`: kotlin.UInt, `background`: kotlin.UInt, `cursor`: kotlin.UInt)
+    
+    /**
      * 取走终端事件(应答/标题/响铃等)。
      */
     fun `takeEvents`(): List<TerminalEvent>
+    
+    /**
+     * 每一帧调一次:同步刷新超时就把攒着的输出放出来。返回屏幕是否因此变化。
+     */
+    fun `tick`(): kotlin.Boolean
     
     companion object
 }
@@ -2391,12 +2427,63 @@ open class Term: Disposable, AutoCloseable, TermInterface
 
     
     /**
+     * 单元格像素尺寸(回答窗口尺寸查询用)。
+     */override fun `setCellPixels`(`width`: kotlin.UInt, `height`: kotlin.UInt)
+        = 
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_xssh_ffi_fn_method_term_set_cell_pixels(
+        it,
+        
+        FfiConverterUInt.lower(`width`),
+        FfiConverterUInt.lower(`height`),_status)
+}
+    }
+    
+    
+
+    
+    /**
+     * 回答颜色查询用的主题色(`0xRRGGBB`)。
+     */override fun `setTheme`(`foreground`: kotlin.UInt, `background`: kotlin.UInt, `cursor`: kotlin.UInt)
+        = 
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_xssh_ffi_fn_method_term_set_theme(
+        it,
+        
+        FfiConverterUInt.lower(`foreground`),
+        FfiConverterUInt.lower(`background`),
+        FfiConverterUInt.lower(`cursor`),_status)
+}
+    }
+    
+    
+
+    
+    /**
      * 取走终端事件(应答/标题/响铃等)。
      */override fun `takeEvents`(): List<TerminalEvent> {
             return FfiConverterSequenceTypeTerminalEvent.lift(
     callWithHandle {
     uniffiRustCall() { _status ->
     UniffiLib.uniffi_xssh_ffi_fn_method_term_take_events(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * 每一帧调一次:同步刷新超时就把攒着的输出放出来。返回屏幕是否因此变化。
+     */override fun `tick`(): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_xssh_ffi_fn_method_term_tick(
         it,
         _status)
 }

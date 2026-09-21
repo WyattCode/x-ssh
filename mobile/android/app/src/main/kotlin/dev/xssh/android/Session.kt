@@ -89,6 +89,9 @@ class LiveTerminal(
                 is ServerEvent.ExitStatus -> Unit
             }
         }
+        // 同步刷新(CSI ? 2026)超时要宿主自己触发,否则攒着的那一帧永远放不出来 ——
+        // Codex 进去整屏空白就是这个(见 Rust Terminal::tick)。每一帧都调。
+        if (term.tick()) changed = true
         for (event in term.takeEvents()) {
             if (event is TerminalEvent.Write) {
                 shell.write(event.data)
@@ -148,10 +151,12 @@ class LiveTerminal(
         dirty = true
     }
 
-    fun resizeGrid(cols: Int, rows: Int) {
+    fun resizeGrid(cols: Int, rows: Int, cellWidthPx: Int, cellHeightPx: Int) {
         if (closed) return
         runCatching { shell.resize(cols.toUInt(), rows.toUInt()) }
         runCatching { term.resize(cols.toUInt(), rows.toUInt()) }
+        // 回答"窗口多大(像素)"这类查询时要用。
+        runCatching { term.setCellPixels(cellWidthPx.toUInt(), cellHeightPx.toUInt()) }
         // 行列变了,即使没有新数据,整屏的折行结果也不一样了。
         dirty = true
     }

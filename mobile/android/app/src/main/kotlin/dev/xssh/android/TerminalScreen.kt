@@ -1,5 +1,6 @@
 package dev.xssh.android
 
+import kotlin.math.roundToInt
 import android.util.Log
 import uniffi.xssh_ffi.StyledRun
 import uniffi.xssh_ffi.ScreenRow
@@ -374,10 +375,10 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
                 rows = rows,
                 cursor = cursor,
                 fontSize = fontSize,
-                onGridSize = { cols, rows ->
+                onGridSize = { cols, rows, cellW, cellH ->
                     if (cols != grid.first || rows != grid.second) {
                         grid = cols to rows
-                        scope.launch(Dispatchers.IO) { live.resizeGrid(cols, rows) }
+                        scope.launch(Dispatchers.IO) { live.resizeGrid(cols, rows, cellW, cellH) }
                     }
                 },
                 onScroll = { deltaLines ->
@@ -517,10 +518,11 @@ private fun FloatingKeys(content: @Composable () -> Unit) {
     Box(
         Modifier
             .fillMaxWidth()
-            // 同心:屏幕圆角约 52dp,面板离边 10dp,内半径 = 52 - 10 = 42dp;
-            // 面板本身不高,42 会退化成整条胶囊,取 32dp —— 既贴近同心,形状又还立得住。
             .padding(start = 10.dp, end = 10.dp, bottom = 10.dp)
-            .clip(RoundedCornerShape(32.dp))
+            // 圆角和里面的按键同一个量级(按键 12dp,面板 16dp)。
+            // 原来 32dp 按"跟屏幕圆角同心"来算,面板不高,看上去就是一条胶囊,
+            // 和里面方正的按键不是一家人 —— 用户明确要求改成跟按键差不多。
+            .clip(RoundedCornerShape(RadiusBox + 4.dp))
             .background(p.text.copy(alpha = 0.07f)),
     ) {
         content()
@@ -567,97 +569,120 @@ private fun TerminalKeys(
     onFont: (Float) -> Unit,
     send: (ByteArray) -> Unit,
 ) {
-    val enter = { send(byteArrayOf(13)) }
-    val interrupt = { send(byteArrayOf(3)) }
-    if (!wrap) {
-        CompactKeys(ctrl, alt, onCtrl, onAlt, enter, interrupt, send)
-        return
-    }
-    // 宽屏:折行全部露出,不用滚。⏎ 和 ^C 紧跟在方向键、Tab 后面。
-    KeyCapRow(wrap = true) {
-        KeyCap("↑", repeatable = true) { send("\u001b[A".toByteArray()) }
-        KeyCap("↓", repeatable = true) { send("\u001b[B".toByteArray()) }
-        KeyCap("←", repeatable = true) { send("\u001b[D".toByteArray()) }
-        KeyCap("→", repeatable = true) { send("\u001b[C".toByteArray()) }
-        KeyCap("Tab") { send(byteArrayOf(9)) }
-        KeyCap("⏎", emphasis = true, onPress = enter)
-        KeyCap("^C", onPress = interrupt)
-        KeyCap("Esc") { send(byteArrayOf(27)) }
-        KeyCap("Ctrl", active = ctrl, onPress = onCtrl)
-        KeyCap("Alt", active = alt, onPress = onAlt)
-        KeyCap("⌫", repeatable = true) { send(byteArrayOf(0x7F)) }
-        KeyCap("^D") { send(byteArrayOf(4)) }
-        KeyCap("^Z") { send(byteArrayOf(26)) }
-        KeyCap("^L") { send(byteArrayOf(12)) }
-        KeyCap("|") { send("|".toByteArray()) }
-        KeyCap("~") { send("~".toByteArray()) }
-        KeyCap("/") { send("/".toByteArray()) }
-        KeyCap("-") { send("-".toByteArray()) }
-        KeyCap("A−") { onFont(-1f) }
-        KeyCap("A+") { onFont(1f) }
+    val keys = KeyActions(ctrl, alt, onCtrl, onAlt, send)
+    if (wrap) WideKeys(keys) else CompactKeys(keys)
+}
+
+/** 所有按键的动作集中在一处,两种排布共用。 */
+private class KeyActions(
+    val ctrl: Boolean,
+    val alt: Boolean,
+    val onCtrl: () -> Unit,
+    val onAlt: () -> Unit,
+    val send: (ByteArray) -> Unit,
+) {
+    fun bytes(vararg b: Int) = send(ByteArray(b.size) { b[it].toByte() })
+    fun text(t: String) = send(t.toByteArray())
+}
+
+/*
+ * 按键怎么排 —— 照实体键盘的逻辑,不自己发明:
+ *
+ * - **左边是功能键**:Esc 在左上,Ctrl 在左下(和键盘一样);Tab 挨着 Esc。
+ * - **右边是方向键**,摆成倒 T:↑ 在 ↓ 的正上方,← ↓ → 一排。
+ * - **回车永远是最右边那颗**(在方向键的右上方,和实体键盘里 Enter 与方向键的相对位置一致)。
+ *   原来宽屏里 ⏎ 排在第 6 颗,落在一排中间,不符合手指对键盘的预期。
+ * - ^C 紧挨在左侧功能键后面,中断命令最常用,拇指一抬就到。
+ * - 「⋯」像笔记本的 Fn 键,贴着 Ctrl 放。
+ * - 不常用的(^D ^Z ^L ⌫ | /)外屏收进第二页;宽屏两行放得下,直接全部露出。
+ * - 字号用双指捏合调,不再占两个按键位。
+ */
+
+/**
+ * 外屏(窄屏):两行、每行五颗,固定不滚。
+ *
+ *     Esc  Tab  ^C   ↑   ⏎
+ *     Ctrl  ⋯   ←    ↓   →
+ *
+ * 翻到第二页时 Ctrl、⋯、⏎ 三颗**不动**,手指记住的位置不会因为翻页失效:
+ *
+ *     Alt  ^D   ^Z   ⌫   ⏎
+ *     Ctrl  ⋯   ^L   |   /
+ */
+@Composable
+private fun CompactKeys(k: KeyActions) {
+    var more by remember { mutableStateOf(false) }
+    Column(
+        Modifier.fillMaxWidth().padding(6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            val key = Modifier.weight(1f)
+            if (!more) {
+                KeyCap("Esc", key) { k.bytes(27) }
+                KeyCap("Tab", key) { k.bytes(9) }
+                KeyCap("^C", key) { k.bytes(3) }
+                KeyCap("↑", key, repeatable = true) { k.text("\u001b[A") }
+            } else {
+                KeyCap("Alt", key, active = k.alt, onPress = k.onAlt)
+                KeyCap("^D", key) { k.bytes(4) }
+                KeyCap("^Z", key) { k.bytes(26) }
+                KeyCap("⌫", key, repeatable = true) { k.bytes(0x7F) }
+            }
+            KeyCap("⏎", key, emphasis = true) { k.bytes(13) }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            val key = Modifier.weight(1f)
+            KeyCap("Ctrl", key, active = k.ctrl, onPress = k.onCtrl)
+            KeyCap("⋯", key, active = more) { more = !more }
+            if (!more) {
+                KeyCap("←", key, repeatable = true) { k.text("\u001b[D") }
+                KeyCap("↓", key, repeatable = true) { k.text("\u001b[B") }
+                KeyCap("→", key, repeatable = true) { k.text("\u001b[C") }
+            } else {
+                KeyCap("^L", key) { k.bytes(12) }
+                KeyCap("|", key) { k.text("|") }
+                KeyCap("/", key) { k.text("/") }
+            }
+        }
     }
 }
 
 /**
- * 外屏(窄屏)的按键:**两行、每行五个,固定不滚**。
+ * 内屏(宽屏):两行九颗,全部露出,不翻页。和外屏同一套逻辑,只是把第二页并进来:
  *
- * 原来是一整排约 20 个键横向滚动,外屏一行只露得出 5 个半 —— ^C 排第 6 位,
- * 只剩半个「^」露在边上;回车键根本没有。手机上最常按的就这几个:中断、回车、
- * 方向、Tab、Esc。它们必须**一眼都在、位置固定**,手指记得住。
- *
- * 方向键摆成倒 T(↑ 在 ↓ 正上方),拇指在中间一列上下就能翻历史。
- * 不常用的收进「⋯」翻到第二页;字号用双指捏合调。
+ *     Esc  Tab  ^C  ^D  ^Z  ^L   ⌫   ↑   ⏎
+ *     Ctrl Alt   |   /   -   ~   ←   ↓   →
  */
 @Composable
-private fun CompactKeys(
-    ctrl: Boolean,
-    alt: Boolean,
-    onCtrl: () -> Unit,
-    onAlt: () -> Unit,
-    enter: () -> Unit,
-    interrupt: () -> Unit,
-    send: (ByteArray) -> Unit,
-) {
-    var more by remember { mutableStateOf(false) }
+private fun WideKeys(k: KeyActions) {
     Column(
-        Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
+        Modifier.fillMaxWidth().padding(6.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        if (!more) {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                val key = Modifier.weight(1f)
-                KeyCap("Esc", key) { send(byteArrayOf(27)) }
-                KeyCap("Tab", key) { send(byteArrayOf(9)) }
-                KeyCap("↑", key, repeatable = true) { send("\u001b[A".toByteArray()) }
-                KeyCap("Ctrl", key, active = ctrl, onPress = onCtrl)
-                KeyCap("^C", key, onPress = interrupt)
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                val key = Modifier.weight(1f)
-                KeyCap("⋯", key) { more = true }
-                KeyCap("←", key, repeatable = true) { send("\u001b[D".toByteArray()) }
-                KeyCap("↓", key, repeatable = true) { send("\u001b[B".toByteArray()) }
-                KeyCap("→", key, repeatable = true) { send("\u001b[C".toByteArray()) }
-                KeyCap("⏎", key, emphasis = true, onPress = enter)
-            }
-        } else {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                val key = Modifier.weight(1f)
-                KeyCap("Alt", key, active = alt, onPress = onAlt)
-                KeyCap("^D", key) { send(byteArrayOf(4)) }
-                KeyCap("^Z", key) { send(byteArrayOf(26)) }
-                KeyCap("^L", key) { send(byteArrayOf(12)) }
-                KeyCap("⌫", key, repeatable = true) { send(byteArrayOf(0x7F)) }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                val key = Modifier.weight(1f)
-                // 翻回去的键落在同一个位置,来回切不用找。
-                KeyCap("⋯", key, active = true) { more = false }
-                KeyCap("|", key) { send("|".toByteArray()) }
-                KeyCap("~", key) { send("~".toByteArray()) }
-                KeyCap("/", key) { send("/".toByteArray()) }
-                KeyCap("-", key) { send("-".toByteArray()) }
-            }
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            val key = Modifier.weight(1f)
+            KeyCap("Esc", key) { k.bytes(27) }
+            KeyCap("Tab", key) { k.bytes(9) }
+            KeyCap("^C", key) { k.bytes(3) }
+            KeyCap("^D", key) { k.bytes(4) }
+            KeyCap("^Z", key) { k.bytes(26) }
+            KeyCap("^L", key) { k.bytes(12) }
+            KeyCap("⌫", key, repeatable = true) { k.bytes(0x7F) }
+            KeyCap("↑", key, repeatable = true) { k.text("\u001b[A") }
+            KeyCap("⏎", key, emphasis = true) { k.bytes(13) }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            val key = Modifier.weight(1f)
+            KeyCap("Ctrl", key, active = k.ctrl, onPress = k.onCtrl)
+            KeyCap("Alt", key, active = k.alt, onPress = k.onAlt)
+            KeyCap("|", key) { k.text("|") }
+            KeyCap("/", key) { k.text("/") }
+            KeyCap("-", key) { k.text("-") }
+            KeyCap("~", key) { k.text("~") }
+            KeyCap("←", key, repeatable = true) { k.text("\u001b[D") }
+            KeyCap("↓", key, repeatable = true) { k.text("\u001b[B") }
+            KeyCap("→", key, repeatable = true) { k.text("\u001b[C") }
         }
     }
 }
@@ -725,7 +750,7 @@ private fun TerminalCanvas(
     rows: List<ScreenRow>,
     cursor: CursorState,
     fontSize: Float,
-    onGridSize: (Int, Int) -> Unit,
+    onGridSize: (cols: Int, rows: Int, cellWidthPx: Int, cellHeightPx: Int) -> Unit,
     onScroll: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -747,7 +772,9 @@ private fun TerminalCanvas(
     BoxWithConstraints(modifier) {
         val cols = (constraints.maxWidth / cell.first).toInt().coerceAtLeast(1)
         val gridRows = (constraints.maxHeight / cell.second).toInt().coerceAtLeast(1)
-        LaunchedEffect(cols, gridRows) { onGridSize(cols, gridRows) }
+        LaunchedEffect(cols, gridRows) {
+            onGridSize(cols, gridRows, cell.first.roundToInt(), cell.second.roundToInt())
+        }
 
         // 手势放在画布上(而不是外层):它先于外层的捏合缩放拿到事件并吃掉,
         // 否则单指拖动会被 transformable 当成平移吞掉,翻不动历史。

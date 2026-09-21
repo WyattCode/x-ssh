@@ -255,6 +255,21 @@ impl Term {
         self.lock().resize(cols as usize, rows as usize);
     }
 
+    /// 每一帧调一次:同步刷新超时就把攒着的输出放出来。返回屏幕是否因此变化。
+    pub fn tick(&self) -> bool {
+        self.lock().tick()
+    }
+
+    /// 回答颜色查询用的主题色(`0xRRGGBB`)。
+    pub fn set_theme(&self, foreground: u32, background: u32, cursor: u32) {
+        self.lock().set_theme(terminal::Theme { foreground, background, cursor });
+    }
+
+    /// 单元格像素尺寸(回答窗口尺寸查询用)。
+    pub fn set_cell_pixels(&self, width: u32, height: u32) {
+        self.lock().set_cell_pixels(width.min(u16::MAX as u32) as u16, height.min(u16::MAX as u32) as u16);
+    }
+
     /// 视口逐行文本(已裁剪行尾空白)。
     pub fn lines(&self) -> Vec<String> {
         self.lock().screen_lines()

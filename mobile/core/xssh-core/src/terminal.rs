@@ -5,8 +5,9 @@
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
-use alacritty_terminal::event::{Event, EventListener};
+use alacritty_terminal::event::{Event, EventListener, WindowSize};
 use alacritty_terminal::grid::{Dimensions, Scroll};
 use alacritty_terminal::term::cell::Flags;
 use alacritty_terminal::term::color::Colors;
@@ -122,12 +123,30 @@ impl EventListener for EventQueue {
     }
 }
 
+/// 回答颜色查询(OSC 10/11/12)用的主题色,`0xRRGGBB`。宿主按自己的主题设置。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Theme {
+    pub foreground: u32,
+    pub background: u32,
+    pub cursor: u32,
+}
+
+impl Default for Theme {
+    fn default() -> Self {
+        // 与安卓端深色主题一致(termFg / termBg / termCursor)。
+        Self { foreground: 0xE6E8EC, background: 0x0E0F12, cursor: 0x6EA8FE }
+    }
+}
+
 /// 终端仿真状态机。
 pub struct Terminal {
     term: Term<EventQueue>,
     events: EventQueue,
     parser: Processor,
     size: Size,
+    theme: Theme,
+    /// 单元格像素尺寸,回答 CSI 14t / 16t 这类"窗口多大"的查询。
+    cell_px: (u16, u16),
 }
 
 impl Terminal {
@@ -137,7 +156,41 @@ impl Terminal {
         let config = Config { scrolling_history: DEFAULT_SCROLLBACK, ..Config::default() };
         let events = EventQueue::default();
         let term = Term::new(config, &size, events.clone());
-        Self { term, events, parser: Processor::new(), size }
+        Self {
+            term,
+            events,
+            parser: Processor::new(),
+            size,
+            theme: Theme::default(),
+            cell_px: (10, 20),
+        }
+    }
+
+    /// 设置回答颜色查询用的主题色。
+    pub fn set_theme(&mut self, theme: Theme) {
+        self.theme = theme;
+    }
+
+    /// 设置单元格像素尺寸(宿主量出来的格宽格高)。
+    pub fn set_cell_pixels(&mut self, width: u16, height: u16) {
+        self.cell_px = (width.max(1), height.max(1));
+    }
+
+    /// 定时调用(宿主每一帧都调)。返回屏幕是否因此变化。
+    ///
+    /// 程序用「同步刷新」(`CSI ? 2026 h` … `CSI ? 2026 l`)包住一帧时,vte 会先把输出攒起来,
+    /// 等到结束序列或者 **150ms 超时**再一起画 —— 而这个超时**要宿主自己触发**:alacritty
+    /// 自己的事件循环在超时后调 `stop_sync`。我们原来从不调,一旦结束序列晚到,攒着的那一帧
+    /// 就再也放不出来;更糟的是超时之后 vte 不再攒新数据,后面只发"变化部分"的增量画在一张
+    /// 空白屏上 —— Codex(ratatui)进去之后整屏空白,就是这个。
+    pub fn tick(&mut self) -> bool {
+        match self.parser.sync_timeout().sync_timeout() {
+            Some(deadline) if Instant::now() >= deadline => {
+                self.parser.stop_sync(&mut self.term);
+                true
+            }
+            _ => false,
+        }
     }
 
     /// 当前尺寸。
@@ -350,10 +403,44 @@ impl Terminal {
                 Event::ResetTitle => out.push(TerminalEvent::ResetTitle),
                 Event::Bell => out.push(TerminalEvent::Bell),
                 Event::ClipboardStore(_, text) => out.push(TerminalEvent::ClipboardStore(text)),
+                // 程序问"你的前景/背景/某个调色板颜色是什么"(OSC 10/11/12/4)。
+                // 不回答的话,问的一方要等到自己的超时 —— Codex 这类程序启动时就会问背景色,
+                // 据此选深色还是浅色主题。
+                Event::ColorRequest(index, format) => {
+                    let rgb = self.color_for(index);
+                    out.push(TerminalEvent::Write(format(rgb).into_bytes()));
+                }
+                // 程序问窗口多大(CSI 14t / 18t 等)。
+                Event::TextAreaSizeRequest(format) => {
+                    let size = WindowSize {
+                        num_lines: self.size.rows as u16,
+                        num_cols: self.size.cols as u16,
+                        cell_width: self.cell_px.0,
+                        cell_height: self.cell_px.1,
+                    };
+                    out.push(TerminalEvent::Write(format(size).into_bytes()));
+                }
+                // OSC 52 读剪贴板:故意不回答 —— 远端不该能读走手机的剪贴板。
                 _ => {}
             }
         }
         out
+    }
+
+    fn color_for(&self, index: usize) -> Rgb {
+        fn rgb(v: u32) -> Rgb {
+            Rgb { r: (v >> 16) as u8, g: (v >> 8) as u8, b: v as u8 }
+        }
+        if let Some(set) = self.term.colors()[index] {
+            return set;
+        }
+        match index {
+            i if i < 256 => rgb(palette(i as u8) & 0xFF_FFFF),
+            i if i == NamedColor::Foreground as usize => rgb(self.theme.foreground),
+            i if i == NamedColor::Background as usize => rgb(self.theme.background),
+            i if i == NamedColor::Cursor as usize => rgb(self.theme.cursor),
+            _ => rgb(self.theme.foreground),
+        }
     }
 
     /// 读取并重置变更范围(渲染器每帧调用,只重绘脏行)。
@@ -487,6 +574,69 @@ mod tests {
         let mut t = Terminal::new(40, 4);
         t.feed(b"\x1b[31mred\x1b[0m normal");
         assert_eq!(t.text(), "red normal");
+    }
+
+    #[test]
+    fn synchronized_update_is_flushed_on_timeout() {
+        let mut t = Terminal::new(20, 2);
+        // 进备用屏 + 开始同步刷新,但结束序列迟迟不来。
+        t.feed(b"\x1b[?1049h\x1b[?2026hhello");
+        assert_eq!(t.text(), "", "同步块里的内容先攒着");
+        assert!(!t.tick(), "还没到超时");
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert!(t.tick(), "超时后必须放出来");
+        assert_eq!(t.text(), "hello");
+        // 放出来之后继续正常工作。
+        t.feed(b" world");
+        assert_eq!(t.text(), "hello world");
+    }
+
+    #[test]
+    fn without_tick_the_synchronized_frame_is_lost() {
+        // 钉住 bug 的机制:同步块的结束序列没及时到,超时之后又没人调 tick ——
+        // vte 会把**之后的所有输出**都继续扣着,屏幕上什么都没有。Codex 整屏空白就是这样。
+        let mut t = Terminal::new(20, 2);
+        t.feed(b"\x1b[?2026hhello");
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        t.feed(b" world");
+        assert_eq!(t.text(), "", "不调 tick:之前的和之后的输出全被扣住");
+        assert!(t.tick());
+        assert_eq!(t.text(), "hello world", "调了 tick 全部放出来");
+    }
+
+    #[test]
+    fn synchronized_update_with_end_marker_needs_no_tick() {
+        let mut t = Terminal::new(20, 2);
+        t.feed(b"\x1b[?2026hframe\x1b[?2026l");
+        assert_eq!(t.text(), "frame");
+    }
+
+    #[test]
+    fn answers_background_color_query() {
+        let mut t = Terminal::new(20, 2);
+        t.set_theme(Theme { foreground: 0xE6E8EC, background: 0x0E0F12, cursor: 0x6EA8FE });
+        t.feed(b"\x1b]11;?\x07");
+        let events = t.poll_events();
+        let reply = events
+            .iter()
+            .find_map(|e| match e {
+                TerminalEvent::Write(bytes) => Some(String::from_utf8_lossy(bytes).to_string()),
+                _ => None,
+            })
+            .expect("背景色查询要有回答");
+        assert!(reply.starts_with("\x1b]11;rgb:0e0e/0f0f/1212"), "回答是 {reply:?}");
+    }
+
+    #[test]
+    fn answers_text_area_size_query() {
+        let mut t = Terminal::new(40, 12);
+        t.set_cell_pixels(9, 18);
+        t.feed(b"\x1b[18t");
+        let events = t.poll_events();
+        assert!(
+            events.contains(&TerminalEvent::Write(b"\x1b[8;12;40t".to_vec())),
+            "字符网格尺寸查询的回答: {events:?}"
+        );
     }
 
     #[test]

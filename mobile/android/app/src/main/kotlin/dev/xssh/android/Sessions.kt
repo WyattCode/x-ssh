@@ -115,7 +115,8 @@ class TerminalSession(
 
     fun sendText(text: String, ctrl: Boolean, alt: Boolean) = live.sendText(text, ctrl, alt)
 
-    fun resizeGrid(cols: Int, rows: Int) = live.resizeGrid(cols, rows)
+    fun resizeGrid(cols: Int, rows: Int, cellWidthPx: Int, cellHeightPx: Int) =
+        live.resizeGrid(cols, rows, cellWidthPx, cellHeightPx)
 
     fun scroll(lines: Int) = live.scroll(lines)
 
