@@ -11,7 +11,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import android.util.Log
 import uniffi.xssh_ffi.CursorState
+import uniffi.xssh_ffi.ScreenRow
 
 /**
  * 应用是不是真的在前台。
@@ -40,7 +42,8 @@ object PermissionAsked {
 
 /** 终端某一刻的画面。 */
 data class TerminalFrame(
-    val lines: List<String> = emptyList(),
+    /** 逐行样式段:保留列位置与颜色(见 Rust 的 `Term::rows`)。 */
+    val rows: List<ScreenRow> = emptyList(),
     val cursor: CursorState = CursorState(0u, 0u, false),
     val alive: Boolean = true,
     /** 视口离底部多少行;>0 表示正在翻历史,界面要给一个「回到底部」。 */
@@ -76,17 +79,14 @@ class TerminalSession(
 
             val pumped = withContext(Dispatchers.IO) {
                 val p = live.pump()
-                val snapshot = if (p.changed && watched) {
-                    Triple(live.term.lines(), live.term.cursor(), live.scrollOffset())
-                } else {
-                    null
-                }
+                val snapshot = if (p.changed && watched) live.snapshot() else null
                 p to snapshot
             }
-            pumped.second?.let { (lines, cursor, offset) ->
-                _frame.value = TerminalFrame(lines, cursor, alive = true, scrollOffset = offset)
+            pumped.second?.let { (rows, cursor, offset) ->
+                _frame.value = TerminalFrame(rows, cursor, alive = true, scrollOffset = offset)
             }
             if (!pumped.first.alive) {
+                Log.i(TAG, "peer closed ($label)")
                 _frame.value = _frame.value.copy(alive = false)
                 withContext(NonCancellable + Dispatchers.IO) { live.close() }
                 // 对端断了就自己从名单上摘掉。

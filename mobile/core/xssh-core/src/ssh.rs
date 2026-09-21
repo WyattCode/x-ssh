@@ -16,6 +16,12 @@ use tokio::sync::mpsc;
 
 /// 连接 + 认证总超时。
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+/// 连接建立之后的单步操作(开通道、写数据、改窗口、断开)的上限。
+///
+/// 原来这些都是裸的 `block_on`:TCP 已经悄悄断了(息屏后 Wi-Fi 省电、
+/// 系统后台限网)而客户端还不知道时,开通道会一直等服务端回应 ——
+/// 界面就永远停在「正在连接」,只有杀进程才能恢复。
+const STEP_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// 认证方式。
 #[derive(Debug, Clone)]
@@ -237,8 +243,10 @@ impl Ssh {
 
         let config = Arc::new(client::Config {
             inactivity_timeout: None,
-            keepalive_interval: Some(Duration::from_secs(30)),
-            keepalive_max: 3,
+            // 15s 一次、连丢 2 次判死:死连接 30~45s 内就会报出来(原来 30s×3 要 90s)。
+            // 手机上 TCP 悄悄断掉是常态,早一点知道,界面就早一点能重连。
+            keepalive_interval: Some(Duration::from_secs(15)),
+            keepalive_max: 2,
             ..Default::default()
         });
 
@@ -335,24 +343,33 @@ impl Ssh {
     ) -> Result<Shell, SshError> {
         let events = self.events.take().ok_or(SshError::ChannelInUse)?;
         let channel = self.runtime.block_on(async {
-            let channel = self.handle.channel_open_session().await?;
-            channel.request_pty(false, term, cols as u32, rows as u32, 0, 0, &[]).await?;
-            match command {
-                Some(command) => channel.exec(false, command).await?,
-                None => channel.request_shell(false).await?,
-            }
-            Ok::<_, russh::Error>(channel)
-        })?;
+            tokio::time::timeout(STEP_TIMEOUT, async {
+                let channel = self.handle.channel_open_session().await?;
+                channel.request_pty(false, term, cols as u32, rows as u32, 0, 0, &[]).await?;
+                match command {
+                    Some(command) => channel.exec(false, command).await?,
+                    None => channel.request_shell(false).await?,
+                }
+                Ok::<_, russh::Error>(channel)
+            })
+            .await
+        });
+        let channel = channel.map_err(|_| SshError::Timeout)??;
         Ok(Shell { runtime: self.runtime.handle().clone(), channel, events })
     }
 
     /// 断开连接。
     pub fn disconnect(&self) {
-        let _ = self.runtime.block_on(self.handle.disconnect(
-            russh::Disconnect::ByApplication,
-            "",
-            "en",
-        ));
+        // 死连接上断开可能等不到回音;最多等 3 秒,别把调用方(会话收尾)卡住。
+        // 计时器必须在 async 块**里面**构造:写成 block_on 的参数的话,它在进入运行时
+        // 之前就被求值,tokio 找不到当前运行时直接 panic("no reactor running")。
+        let _ = self.runtime.block_on(async {
+            tokio::time::timeout(
+                Duration::from_secs(3),
+                self.handle.disconnect(russh::Disconnect::ByApplication, "", "en"),
+            )
+            .await
+        });
     }
 }
 
@@ -366,18 +383,25 @@ pub struct Shell {
 impl Shell {
     /// 发送按键/粘贴数据。
     pub fn write(&self, bytes: &[u8]) -> Result<(), SshError> {
-        self.runtime.block_on(self.channel.data(bytes))?;
+        // 通道窗口用完、连接又断了时 data() 会一直等窗口调整;而调用方拿着通道锁,
+        // 轮询也跟着停住 —— 整个会话看起来就是"卡死"。
+        self.runtime
+            .block_on(async { tokio::time::timeout(STEP_TIMEOUT, self.channel.data(bytes)).await })
+            .map_err(|_| SshError::Timeout)??;
         Ok(())
     }
 
     /// 通知远端窗口尺寸变化。
     pub fn resize(&self, cols: u16, rows: u16) -> Result<(), SshError> {
-        self.runtime.block_on(self.channel.window_change(
-            cols as u32,
-            rows as u32,
-            0,
-            0,
-        ))?;
+        self.runtime
+            .block_on(async {
+                tokio::time::timeout(
+                    STEP_TIMEOUT,
+                    self.channel.window_change(cols as u32, rows as u32, 0, 0),
+                )
+                .await
+            })
+            .map_err(|_| SshError::Timeout)??;
         Ok(())
     }
 

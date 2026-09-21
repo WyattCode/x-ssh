@@ -38,13 +38,22 @@ object Secrets {
         return generator.generateKey()
     }
 
-    /** 加密成 `iv:密文`(均为 base64)。空串返回空串 —— 没有密码就什么都不存。 */
+    /**
+     * 加密成 `iv:密文`(均为 base64)。空串返回空串 —— 没有密码就什么都不存。
+     *
+     * 密钥库出错(个别机型的 `ProviderException`、密钥库服务一时不可用)时返回空串:
+     * 这台主机的密码这次没存上,下次连接前要重填。**不能**让异常往上抛 ——
+     * 它是在 `HostStore.save` 里、主线程上调用的,抛出去就是整个应用在
+     * 「点 ✓ 保存」的那一下崩掉,其它主机的改动也一起丢。
+     */
     fun seal(plain: String): String {
         if (plain.isEmpty()) return ""
-        // IV 由密钥库生成(它不允许调用方自带 IV),每次加密都不同。
-        val cipher = Cipher.getInstance(TRANSFORM).apply { init(Cipher.ENCRYPT_MODE, key()) }
-        val body = cipher.doFinal(plain.toByteArray(Charsets.UTF_8))
-        return b64(cipher.iv) + ":" + b64(body)
+        return runCatching {
+            // IV 由密钥库生成(它不允许调用方自带 IV),每次加密都不同。
+            val cipher = Cipher.getInstance(TRANSFORM).apply { init(Cipher.ENCRYPT_MODE, key()) }
+            val body = cipher.doFinal(plain.toByteArray(Charsets.UTF_8))
+            b64(cipher.iv) + ":" + b64(body)
+        }.getOrDefault("")
     }
 
     /** 解密。密文损坏、或密钥已不在(重装过)时返回空串。 */

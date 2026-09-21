@@ -697,6 +697,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_xssh_ffi_checksum_method_term_resize(
     ): Int
+    external fun uniffi_xssh_ffi_checksum_method_term_rows(
+    ): Int
     external fun uniffi_xssh_ffi_checksum_method_term_scroll(
     ): Int
     external fun uniffi_xssh_ffi_checksum_method_term_scroll_offset(
@@ -767,6 +769,8 @@ internal object UniffiLib {
     ): RustBuffer.ByValue
     external fun uniffi_xssh_ffi_fn_method_term_resize(`ptr`: Long,`cols`: Int,`rows`: Int,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
+    external fun uniffi_xssh_ffi_fn_method_term_rows(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     external fun uniffi_xssh_ffi_fn_method_term_scroll(`ptr`: Long,`lines`: Int,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     external fun uniffi_xssh_ffi_fn_method_term_scroll_offset(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -928,6 +932,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_xssh_ffi_checksum_method_term_resize() and 0xFFFF) != 15757) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_xssh_ffi_checksum_method_term_rows() and 0xFFFF) != 28399) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_xssh_ffi_checksum_method_term_scroll() and 0xFFFF) != 25424) {
@@ -1103,6 +1110,33 @@ private class JavaLangRefCleanable(
     val cleanable: java.lang.ref.Cleaner.Cleanable
 ) : UniffiCleaner.Cleanable {
     override fun clean() = cleanable.clean()
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterUByte: FfiConverter<UByte, Byte> {
+    override fun lift(value: Byte): UByte {
+        return value.toUByte()
+    }
+
+    fun lift(value: Int): UByte {
+        return value.toUByte()
+    }
+
+    override fun read(buf: ByteBuffer): UByte {
+        return lift(buf.get())
+    }
+
+    override fun lower(value: UByte): Byte {
+        return value.toByte()
+    }
+
+    override fun allocationSize(value: UByte) = 1UL
+
+    override fun write(value: UByte, buf: ByteBuffer) {
+        buf.put(value.toByte())
+    }
 }
 
 /**
@@ -2068,6 +2102,12 @@ public interface TermInterface {
     fun `resize`(`cols`: kotlin.UInt, `rows`: kotlin.UInt)
     
     /**
+     * 视口逐行的样式段:保留列位置(宽字符占两列)和颜色、粗体、反白等样式。
+     * 界面按这个画 —— 用 `lines()` 整行画的话,中文后面的内容会错位。
+     */
+    fun `rows`(): List<ScreenRow>
+    
+    /**
      * 往回翻 [lines] 行(正数看更早的内容);超出历史范围会被夹住。
      */
     fun `scroll`(`lines`: kotlin.Int)
@@ -2287,6 +2327,23 @@ open class Term: Disposable, AutoCloseable, TermInterface
 
     
     /**
+     * 视口逐行的样式段:保留列位置(宽字符占两列)和颜色、粗体、反白等样式。
+     * 界面按这个画 —— 用 `lines()` 整行画的话,中文后面的内容会错位。
+     */override fun `rows`(): List<ScreenRow> {
+            return FfiConverterSequenceTypeScreenRow.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_xssh_ffi_fn_method_term_rows(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * 往回翻 [lines] 行(正数看更早的内容);超出历史范围会被夹住。
      */override fun `scroll`(`lines`: kotlin.Int)
         = 
@@ -2489,6 +2546,113 @@ public object FfiConverterTypeHostConfig: FfiConverterRustBuffer<HostConfig> {
             FfiConverterString.write(value.`username`, buf)
             FfiConverterTypeAuthMethod.write(value.`auth`, buf)
             FfiConverterOptionalString.write(value.`knownKey`, buf)
+    }
+}
+
+
+
+/**
+ * 视口里的一行。
+ */
+data class ScreenRow (
+    var `runs`: List<StyledRun>
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeScreenRow: FfiConverterRustBuffer<ScreenRow> {
+    override fun read(buf: ByteBuffer): ScreenRow {
+        return ScreenRow(
+            FfiConverterSequenceTypeStyledRun.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: ScreenRow) = (
+            FfiConverterSequenceTypeStyledRun.allocationSize(value.`runs`)
+    )
+
+    override fun write(value: ScreenRow, buf: ByteBuffer) {
+            FfiConverterSequenceTypeStyledRun.write(value.`runs`, buf)
+    }
+}
+
+
+
+/**
+ * 一段列连续、样式相同的单元格(见 core 的 `terminal::Run`)。
+ */
+data class StyledRun (
+    /**
+     * 起始列。
+     */
+    var `col`: kotlin.UInt
+    , 
+    /**
+     * 单元格内容,用 U+001F 分隔;宽字符后面的占位格是空串 —— 分隔后第 i 项就是第 col+i 列。
+     */
+    var `cells`: kotlin.String
+    , 
+    /**
+     * `0xAARRGGBB`,0 = 默认前景。
+     */
+    var `fg`: kotlin.UInt
+    , 
+    /**
+     * `0xAARRGGBB`,0 = 默认背景。
+     */
+    var `bg`: kotlin.UInt
+    , 
+    /**
+     * 位:1 粗体、2 暗淡、4 斜体、8 下划线、16 反白、32 删除线。
+     */
+    var `flags`: kotlin.UByte
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeStyledRun: FfiConverterRustBuffer<StyledRun> {
+    override fun read(buf: ByteBuffer): StyledRun {
+        return StyledRun(
+            FfiConverterUInt.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterUInt.read(buf),
+            FfiConverterUInt.read(buf),
+            FfiConverterUByte.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: StyledRun) = (
+            FfiConverterUInt.allocationSize(value.`col`) +
+            FfiConverterString.allocationSize(value.`cells`) +
+            FfiConverterUInt.allocationSize(value.`fg`) +
+            FfiConverterUInt.allocationSize(value.`bg`) +
+            FfiConverterUByte.allocationSize(value.`flags`)
+    )
+
+    override fun write(value: StyledRun, buf: ByteBuffer) {
+            FfiConverterUInt.write(value.`col`, buf)
+            FfiConverterString.write(value.`cells`, buf)
+            FfiConverterUInt.write(value.`fg`, buf)
+            FfiConverterUInt.write(value.`bg`, buf)
+            FfiConverterUByte.write(value.`flags`, buf)
     }
 }
 
@@ -2979,6 +3143,62 @@ public object FfiConverterSequenceString: FfiConverterRustBuffer<List<kotlin.Str
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterString.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeScreenRow: FfiConverterRustBuffer<List<ScreenRow>> {
+    override fun read(buf: ByteBuffer): List<ScreenRow> {
+        val len = buf.getInt()
+        return List<ScreenRow>(len) {
+            FfiConverterTypeScreenRow.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<ScreenRow>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeScreenRow.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<ScreenRow>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeScreenRow.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeStyledRun: FfiConverterRustBuffer<List<StyledRun>> {
+    override fun read(buf: ByteBuffer): List<StyledRun> {
+        val len = buf.getInt()
+        return List<StyledRun>(len) {
+            FfiConverterTypeStyledRun.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<StyledRun>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeStyledRun.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<StyledRun>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeStyledRun.write(it, buf)
         }
     }
 }

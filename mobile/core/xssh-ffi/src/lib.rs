@@ -53,6 +53,27 @@ pub enum TerminalEvent {
     ClipboardStore { text: String },
 }
 
+/// 一段列连续、样式相同的单元格(见 core 的 `terminal::Run`)。
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct StyledRun {
+    /// 起始列。
+    pub col: u32,
+    /// 单元格内容,用 U+001F 分隔;宽字符后面的占位格是空串 —— 分隔后第 i 项就是第 col+i 列。
+    pub cells: String,
+    /// `0xAARRGGBB`,0 = 默认前景。
+    pub fg: u32,
+    /// `0xAARRGGBB`,0 = 默认背景。
+    pub bg: u32,
+    /// 位:1 粗体、2 暗淡、4 斜体、8 下划线、16 反白、32 删除线。
+    pub flags: u8,
+}
+
+/// 视口里的一行。
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct ScreenRow {
+    pub runs: Vec<StyledRun>,
+}
+
 /// 光标状态。
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct CursorState {
@@ -237,6 +258,27 @@ impl Term {
     /// 视口逐行文本(已裁剪行尾空白)。
     pub fn lines(&self) -> Vec<String> {
         self.lock().screen_lines()
+    }
+
+    /// 视口逐行的样式段:保留列位置(宽字符占两列)和颜色、粗体、反白等样式。
+    /// 界面按这个画 —— 用 `lines()` 整行画的话,中文后面的内容会错位。
+    pub fn rows(&self) -> Vec<ScreenRow> {
+        self.lock()
+            .screen_runs()
+            .into_iter()
+            .map(|runs| ScreenRow {
+                runs: runs
+                    .into_iter()
+                    .map(|run| StyledRun {
+                        col: run.col as u32,
+                        cells: run.cells,
+                        fg: run.fg,
+                        bg: run.bg,
+                        flags: run.flags,
+                    })
+                    .collect(),
+            })
+            .collect()
     }
 
     /// 光标状态。

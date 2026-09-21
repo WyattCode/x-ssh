@@ -1,5 +1,13 @@
 package dev.xssh.android
 
+import android.util.Log
+import uniffi.xssh_ffi.StyledRun
+import uniffi.xssh_ffi.ScreenRow
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.TextMeasurer
+import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -83,9 +91,6 @@ import uniffi.xssh_ffi.FfiException
  */
 private val SENTINELS = arrayOf("\u200b", "\u200c")
 
-/** 一帧取回的画面;[lines] 为 null 表示这一帧屏幕没变,不用动 UI。 */
-private class Frame(val alive: Boolean, val lines: List<String>?, val cursor: CursorState?)
-
 /** 等用户裁决的主机密钥:[fingerprint] 是服务端这次给出的指纹。 */
 private data class PendingKey(val fingerprint: String, val changed: Boolean)
 
@@ -116,6 +121,13 @@ fun TerminalScreen(host: Host, onExit: () -> Unit, onTrustKey: (String) -> Unit 
         if (live != null) return@LaunchedEffect
         error = null
         pendingKey = null
+        // 密码认证却没有存密码(旧版本只放内存、或者新建时没填):拿空密码去连,
+        // 服务端只会回一句笼统的认证失败,用户看不出是"没填"还是"填错"。
+        // 也不要先弹权限框再失败 —— 在这里就说清楚。
+        if (host.auth == AuthKind.PASSWORD && host.password.isEmpty()) {
+            error = "这台主机还没有保存密码。\n回到主机页,长按卡片 → 编辑,填入密码并保存。"
+            return@LaunchedEffect
+        }
         val notifyPermission = SessionService.NOTIFICATION_PERMISSION
         if (!askedNotify && notifyPermission != null &&
             context.checkSelfPermission(notifyPermission) != PackageManager.PERMISSION_GRANTED
@@ -182,8 +194,28 @@ fun TerminalScreen(host: Host, onExit: () -> Unit, onTrustKey: (String) -> Unit 
             onExit = onExit,
         )
 
-        failure != null -> ConnectResult(failure, retry = { attempt++ }, onExit = onExit)
-        session == null -> ConnectResult("连接 ${host.subtitle} …", retry = null, onExit = onExit)
+        failure != null -> ConnectResult(
+            failure,
+            // 没存密码时重试只会得到同一句话,不给这个按钮。
+            retry = if (host.auth == AuthKind.PASSWORD && host.password.isEmpty()) null else ({ attempt++ }),
+            onExit = onExit,
+        )
+        session == null -> {
+            // 显示已经等了多久:不再是一个看不出进展的"…"。
+            // Rust 那边每一步都有上限(连接+认证 15s、开 shell 10s),到点一定会变成错误页。
+            var waited by remember(host, attempt) { mutableStateOf(0) }
+            LaunchedEffect(host, attempt) {
+                while (true) {
+                    delay(1000)
+                    waited++
+                }
+            }
+            ConnectResult(
+                if (waited < 3) "连接 ${host.subtitle} …" else "连接 ${host.subtitle} … 已等待 ${waited} 秒",
+                retry = null,
+                onExit = onExit,
+            )
+        }
         else -> TerminalView(session, host, onExit)
     }
 }
@@ -297,13 +329,16 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
     val scope = rememberCoroutineScope()
     val keyboard = LocalSoftwareKeyboardController.current
     val focusRequester = remember { FocusRequester() }
-    // 会话一建立就让隐藏输入框拿到焦点(不主动弹软键盘):外接键盘和自动化注入
-    // 才能直接输入,否则要先点一下终端。
-    LaunchedEffect(Unit) { runCatching { focusRequester.requestFocus() } }
+    // 进来**不抢焦点**,也就不弹键盘。
+    //
+    // 原来一连上就 requestFocus(),焦点落到输入框上系统立刻弹键盘(实测连接后 100ms)。
+    // 外屏只有 623dp 高,一进来就被键盘吃掉一半,轨道上的 ⌨ ✕ 也被盖住 ——
+    // 盖住的 ✕ 正好和输入法的回车键在同一个位置,想断开却会按成回车。
+    // 要打字时点终端或 ⌨,那两处会显式拿焦点并弹键盘。
 
     // 画面由会话推过来 —— 轮询循环长在会话里,这一屏只是观众,走了它照跑。
     val frame by live.frame.collectAsState()
-    val lines = frame.lines
+    val rows = frame.rows
     val cursor = frame.cursor
     val dead = !frame.alive
     var fontSize by remember { mutableStateOf(prefs.terminalFontSize) }
@@ -330,12 +365,13 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
                 ) {
+                    Log.i(TAG, "keyboard: canvas tap")
                     focusRequester.requestFocus()
                     keyboard?.show()
                 },
         ) {
             TerminalCanvas(
-                lines = lines,
+                rows = rows,
                 cursor = cursor,
                 fontSize = fontSize,
                 onGridSize = { cols, rows ->
@@ -384,9 +420,8 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
         }
     }
 
-    // 终端**不跟**主机页/编辑页改成贴底横排:
-    // 它底下已经有一条按键条了,再叠一条横轨道就是两条栏,在 623dp 高的外屏上太奢侈;
-    // 而且终端内容是左对齐的等宽字符网格,右侧让出 68dp 不会压住任何取值。
+    // 和主机页、编辑页同一条右侧竖轨道、同一个位置(见 EdgeRail)。
+    // 终端内容是左对齐的等宽字符网格,右侧让出轨道宽度不会压住任何取值。
     val rail: @Composable () -> Unit = {
         // 翻着历史时才出现,回到底部就收起 —— 不常驻,不占视线。
         if (frame.scrollOffset > 0) {
@@ -396,13 +431,17 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
                 }
             }
         }
-        // 键盘与断开都是"这条会话"的操作,归进同一个胶囊 —— 参考里也是按功能成组,
-        // 不是一颗一颗散着摆。
+        // 两颗钮**各占一个胶囊**,和主机页的 ⌕ ＋、编辑页的 ‹ ✓ 槽位完全一致。
+        // 原来 ⌨ ✕ 装在同一个胶囊里,胶囊内间距 2dp、胶囊之间 14dp,于是从主机页
+        // 点卡片进终端,上面那颗钮会错开 20dp —— 换页按钮不能动。
         RailGroup {
             RailButton("⌨", "调出键盘") {
+                Log.i(TAG, "keyboard: rail button")
                 focusRequester.requestFocus()
                 keyboard?.show()
             }
+        }
+        RailGroup {
             // ⏻ 字体里没有,会渲染成豆腐块;✕ 是一定有的字形。
             RailButton("✕", "断开连接", tint = p.danger) {
                 SessionRegistry.close(host.id)
@@ -528,16 +567,21 @@ private fun TerminalKeys(
     onFont: (Float) -> Unit,
     send: (ByteArray) -> Unit,
 ) {
-    // 顺序按使用频率排,不按键盘习惯排:外屏(425dp)一行只露得出 7 个键,
-    // 露出来的必须是上下翻历史、左右改命令、Tab 补全和 ^C —— 之前 ^C 排在第 10 位,
-    // 想中断一条命令还得先横向滚一段。宽屏会折行全部露出,顺序不影响。
-    KeyCapRow(wrap = wrap) {
+    val enter = { send(byteArrayOf(13)) }
+    val interrupt = { send(byteArrayOf(3)) }
+    if (!wrap) {
+        CompactKeys(ctrl, alt, onCtrl, onAlt, enter, interrupt, send)
+        return
+    }
+    // 宽屏:折行全部露出,不用滚。⏎ 和 ^C 紧跟在方向键、Tab 后面。
+    KeyCapRow(wrap = true) {
         KeyCap("↑", repeatable = true) { send("\u001b[A".toByteArray()) }
         KeyCap("↓", repeatable = true) { send("\u001b[B".toByteArray()) }
         KeyCap("←", repeatable = true) { send("\u001b[D".toByteArray()) }
         KeyCap("→", repeatable = true) { send("\u001b[C".toByteArray()) }
         KeyCap("Tab") { send(byteArrayOf(9)) }
-        KeyCap("^C") { send(byteArrayOf(3)) }
+        KeyCap("⏎", emphasis = true, onPress = enter)
+        KeyCap("^C", onPress = interrupt)
         KeyCap("Esc") { send(byteArrayOf(27)) }
         KeyCap("Ctrl", active = ctrl, onPress = onCtrl)
         KeyCap("Alt", active = alt, onPress = onAlt)
@@ -551,6 +595,70 @@ private fun TerminalKeys(
         KeyCap("-") { send("-".toByteArray()) }
         KeyCap("A−") { onFont(-1f) }
         KeyCap("A+") { onFont(1f) }
+    }
+}
+
+/**
+ * 外屏(窄屏)的按键:**两行、每行五个,固定不滚**。
+ *
+ * 原来是一整排约 20 个键横向滚动,外屏一行只露得出 5 个半 —— ^C 排第 6 位,
+ * 只剩半个「^」露在边上;回车键根本没有。手机上最常按的就这几个:中断、回车、
+ * 方向、Tab、Esc。它们必须**一眼都在、位置固定**,手指记得住。
+ *
+ * 方向键摆成倒 T(↑ 在 ↓ 正上方),拇指在中间一列上下就能翻历史。
+ * 不常用的收进「⋯」翻到第二页;字号用双指捏合调。
+ */
+@Composable
+private fun CompactKeys(
+    ctrl: Boolean,
+    alt: Boolean,
+    onCtrl: () -> Unit,
+    onAlt: () -> Unit,
+    enter: () -> Unit,
+    interrupt: () -> Unit,
+    send: (ByteArray) -> Unit,
+) {
+    var more by remember { mutableStateOf(false) }
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        if (!more) {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                val key = Modifier.weight(1f)
+                KeyCap("Esc", key) { send(byteArrayOf(27)) }
+                KeyCap("Tab", key) { send(byteArrayOf(9)) }
+                KeyCap("↑", key, repeatable = true) { send("\u001b[A".toByteArray()) }
+                KeyCap("Ctrl", key, active = ctrl, onPress = onCtrl)
+                KeyCap("^C", key, onPress = interrupt)
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                val key = Modifier.weight(1f)
+                KeyCap("⋯", key) { more = true }
+                KeyCap("←", key, repeatable = true) { send("\u001b[D".toByteArray()) }
+                KeyCap("↓", key, repeatable = true) { send("\u001b[B".toByteArray()) }
+                KeyCap("→", key, repeatable = true) { send("\u001b[C".toByteArray()) }
+                KeyCap("⏎", key, emphasis = true, onPress = enter)
+            }
+        } else {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                val key = Modifier.weight(1f)
+                KeyCap("Alt", key, active = alt, onPress = onAlt)
+                KeyCap("^D", key) { send(byteArrayOf(4)) }
+                KeyCap("^Z", key) { send(byteArrayOf(26)) }
+                KeyCap("^L", key) { send(byteArrayOf(12)) }
+                KeyCap("⌫", key, repeatable = true) { send(byteArrayOf(0x7F)) }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                val key = Modifier.weight(1f)
+                // 翻回去的键落在同一个位置,来回切不用找。
+                KeyCap("⋯", key, active = true) { more = false }
+                KeyCap("|", key) { send("|".toByteArray()) }
+                KeyCap("~", key) { send("~".toByteArray()) }
+                KeyCap("/", key) { send("/".toByteArray()) }
+                KeyCap("-", key) { send("-".toByteArray()) }
+            }
+        }
     }
 }
 
@@ -614,7 +722,7 @@ private fun HiddenImeField(
 
 @Composable
 private fun TerminalCanvas(
-    lines: List<String>,
+    rows: List<ScreenRow>,
     cursor: CursorState,
     fontSize: Float,
     onGridSize: (Int, Int) -> Unit,
@@ -622,20 +730,24 @@ private fun TerminalCanvas(
     modifier: Modifier = Modifier,
 ) {
     val p = LocalXssh.current
-    val measurer = rememberTextMeasurer()
+    // 缓存要够大:一屏中文每个字都要单独量一次宽度,默认 8 条会反复失效。
+    val measurer = rememberTextMeasurer(cacheSize = 512)
     val style = remember(fontSize, p.termFg) {
         TextStyle(color = p.termFg, fontFamily = FontFamily.Monospace, fontSize = fontSize.sp)
     }
     val cell = remember(style, measurer) {
-        val size = measurer.measure("M", style).size
-        size.width.toFloat().coerceAtLeast(1f) to size.height.toFloat().coerceAtLeast(1f)
+        // 格宽用 100 个 M 的总宽度来算:单个 M 的像素宽度是取整过的,
+        // 差零点几像素,一行 80 列累积下来就是十几像素的漂移。
+        val wide = measurer.measure("M".repeat(100), style).size
+        val one = measurer.measure("M", style).size
+        (wide.width / 100f).coerceAtLeast(1f) to one.height.toFloat().coerceAtLeast(1f)
     }
 
     val scrollBy by rememberUpdatedState(onScroll)
     BoxWithConstraints(modifier) {
         val cols = (constraints.maxWidth / cell.first).toInt().coerceAtLeast(1)
-        val rows = (constraints.maxHeight / cell.second).toInt().coerceAtLeast(1)
-        LaunchedEffect(cols, rows) { onGridSize(cols, rows) }
+        val gridRows = (constraints.maxHeight / cell.second).toInt().coerceAtLeast(1)
+        LaunchedEffect(cols, gridRows) { onGridSize(cols, gridRows) }
 
         // 手势放在画布上(而不是外层):它先于外层的捏合缩放拿到事件并吃掉,
         // 否则单指拖动会被 transformable 当成平移吞掉,翻不动历史。
@@ -664,27 +776,109 @@ private fun TerminalCanvas(
         }
 
         Canvas(Modifier.fillMaxSize().then(dragModifier)) {
-            lines.forEachIndexed { index, line ->
-                if (index < rows && line.isNotEmpty()) {
-                    drawText(
-                        textMeasurer = measurer,
-                        text = line,
-                        topLeft = Offset(0f, index * cell.second),
-                        style = style,
-                    )
-                }
+            val cw = cell.first
+            val ch = cell.second
+            rows.forEachIndexed { r, row ->
+                if (r >= gridRows) return@forEachIndexed
+                val y = r * ch
+                row.runs.forEach { run -> drawRun(run, y, cw, ch, style, measurer, p.termFg, p.termBg) }
             }
-            if (cursor.visible && cursor.row.toInt() < rows) {
+            if (cursor.visible && cursor.row.toInt() < gridRows) {
                 val thickness = 2.dp.toPx()
                 drawRect(
                     color = p.termCursor,
                     topLeft = Offset(
-                        cursor.col.toFloat() * cell.first,
-                        (cursor.row.toInt() + 1) * cell.second - thickness,
+                        cursor.col.toFloat() * cw,
+                        (cursor.row.toInt() + 1) * ch - thickness,
                     ),
-                    size = Size(cell.first, thickness),
+                    size = Size(cw, thickness),
                 )
             }
         }
     }
+}
+
+private const val STYLE_BOLD = 1
+private const val STYLE_DIM = 2
+private const val STYLE_ITALIC = 4
+private const val STYLE_UNDERLINE = 8
+private const val STYLE_INVERSE = 16
+private const val STYLE_STRIKE = 32
+
+/**
+ * 画一段样式相同的单元格。**每个字落在自己的列上**(`col × 格宽`):
+ * - 可打印 ASCII 连成一串一起画(等宽字体里它们的步进正好是一格,省调用);
+ * - 其它字符(中文、制表符、emoji……)单独画,居中放进它占的格子里
+ *   (后面跟着空占位格就是占两格),太宽就按比例缩进格子里,绝不挤到下一格。
+ *
+ * 原来整行当一个字符串画:中文字形不正好是两格宽,后面的内容一路往右漂,
+ * Codex 这类按列排版的界面整个错位,尾巴被裁掉。
+ */
+private fun DrawScope.drawRun(
+    run: StyledRun,
+    y: Float,
+    cw: Float,
+    ch: Float,
+    base: TextStyle,
+    measurer: TextMeasurer,
+    defaultFg: Color,
+    defaultBg: Color,
+) {
+    val flags = run.flags.toInt()
+    var fg = if (run.fg == 0u) defaultFg else Color(run.fg.toInt())
+    var bg: Color? = if (run.bg == 0u) null else Color(run.bg.toInt())
+    if (flags and STYLE_INVERSE != 0) {
+        val swapped = bg ?: defaultBg
+        bg = fg
+        fg = swapped
+    }
+    if (flags and STYLE_DIM != 0) fg = fg.copy(alpha = fg.alpha * 0.6f)
+    val cells = run.cells.split('\u001F')
+    val col0 = run.col.toInt()
+    if (bg != null) {
+        drawRect(bg, topLeft = Offset(col0 * cw, y), size = Size(cells.size * cw, ch))
+    }
+    val decoration = when {
+        flags and STYLE_UNDERLINE != 0 && flags and STYLE_STRIKE != 0 ->
+            TextDecoration.combine(listOf(TextDecoration.Underline, TextDecoration.LineThrough))
+        flags and STYLE_UNDERLINE != 0 -> TextDecoration.Underline
+        flags and STYLE_STRIKE != 0 -> TextDecoration.LineThrough
+        else -> null
+    }
+    val style = base.copy(
+        color = fg,
+        fontWeight = if (flags and STYLE_BOLD != 0) FontWeight.Bold else null,
+        fontStyle = if (flags and STYLE_ITALIC != 0) FontStyle.Italic else null,
+        textDecoration = decoration,
+    )
+
+    val ascii = StringBuilder()
+    var asciiStart = 0
+    fun flush() {
+        if (ascii.isEmpty()) return
+        drawText(measurer, ascii.toString(), topLeft = Offset((col0 + asciiStart) * cw, y), style = style)
+        ascii.setLength(0)
+    }
+    cells.forEachIndexed { i, text ->
+        if (text.length == 1 && text[0].code in 0x20..0x7E) {
+            if (ascii.isEmpty()) asciiStart = i
+            ascii.append(text)
+            return@forEachIndexed
+        }
+        flush()
+        if (text.isEmpty()) return@forEachIndexed // 宽字符后面的占位格
+        val span = if (i + 1 < cells.size && cells[i + 1].isEmpty()) 2 else 1
+        val slot = span * cw
+        val layout = measurer.measure(text, style)
+        val width = layout.size.width.toFloat()
+        val x = (col0 + i) * cw
+        if (width <= slot) {
+            drawText(layout, topLeft = Offset(x + (slot - width) / 2f, y))
+        } else {
+            scale(scaleX = slot / width, scaleY = 1f, pivot = Offset(x, y)) {
+                drawText(layout, topLeft = Offset(x, y))
+            }
+        }
+    }
+    flush()
 }

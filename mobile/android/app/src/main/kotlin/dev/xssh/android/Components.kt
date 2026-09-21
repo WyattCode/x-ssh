@@ -270,6 +270,8 @@ fun KeyCap(
     modifier: Modifier = Modifier,
     active: Boolean = false,
     repeatable: Boolean = false,
+    /** 主操作键(⏎):强调色字,一眼能找到。 */
+    emphasis: Boolean = false,
     onPress: () -> Unit,
 ) {
     val p = LocalXssh.current
@@ -326,9 +328,10 @@ fun KeyCap(
     ) {
         Text(
             text = label,
-            color = if (active) p.accent else p.text,
+            color = if (active || emphasis) p.accent else p.text,
             fontFamily = FontFamily.Monospace,
-            fontSize = 14.sp,
+            fontSize = if (emphasis) 17.sp else 14.sp,
+            fontWeight = if (emphasis) FontWeight.SemiBold else null,
         )
     }
 }

@@ -9,8 +9,9 @@ use std::sync::{Arc, Mutex};
 use alacritty_terminal::event::{Event, EventListener};
 use alacritty_terminal::grid::{Dimensions, Scroll};
 use alacritty_terminal::term::cell::Flags;
+use alacritty_terminal::term::color::Colors;
 use alacritty_terminal::term::{Config, Term, TermDamage, TermMode};
-use alacritty_terminal::vte::ansi::{CursorShape, Processor};
+use alacritty_terminal::vte::ansi::{Color, CursorShape, NamedColor, Processor, Rgb};
 
 /// 回滚缓冲上限(行)。
 pub const DEFAULT_SCROLLBACK: usize = 10_000;
@@ -48,6 +49,40 @@ pub struct Cursor {
     pub col: usize,
     pub row: usize,
     pub visible: bool,
+}
+
+/// [`Run::cells`] 里单元格之间的分隔符(U+001F,控制字符,绝不会出现在单元格内容里)。
+pub const CELL_SEP: char = '\u{1f}';
+
+/// [`Run::flags`] 的位。
+pub mod style {
+    pub const BOLD: u8 = 1;
+    pub const DIM: u8 = 1 << 1;
+    pub const ITALIC: u8 = 1 << 2;
+    pub const UNDERLINE: u8 = 1 << 3;
+    pub const INVERSE: u8 = 1 << 4;
+    pub const STRIKE: u8 = 1 << 5;
+}
+
+/// 一段**列连续、样式相同**的单元格。
+///
+/// 为什么不直接给一行字符串:宽字符(中文、emoji)占两列,一行字符串里却只有一个字符,
+/// 宿主拿它当整串画,字形宽度又不正好是两格 —— 中文后面的内容就一路往右漂,
+/// 按列定位的全屏程序(Codex、htop、vim)整个错位,尾巴被裁掉。这里把列保留下来,
+/// 宿主逐格落到 `col × 格宽` 上。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Run {
+    /// 起始列(0 起)。
+    pub col: usize,
+    /// 每个单元格的内容,用 [`CELL_SEP`] 分隔;宽字符后面的占位格是空串,
+    /// 所以分隔后的第 i 项就是第 `col + i` 列。组合字符并在所属单元格里。
+    pub cells: String,
+    /// 前景色 `0xAARRGGBB`;0 表示"默认前景",由宿主按主题取色。
+    pub fg: u32,
+    /// 背景色,同上;0 表示"默认背景"。
+    pub bg: u32,
+    /// [`style`] 里的位。
+    pub flags: u8,
 }
 
 /// 自上次 [`Terminal::take_damage`] 以来的变更范围。
@@ -161,6 +196,101 @@ impl Terminal {
         self.term.mode().contains(TermMode::ALT_SCREEN)
     }
 
+    /// 视口逐行的样式段(见 [`Run`])。行尾默认样式的空白会被裁掉。
+    pub fn screen_runs(&self) -> Vec<Vec<Run>> {
+        struct Open {
+            run: Run,
+            len: usize,
+        }
+        let content = self.term.renderable_content();
+        let offset = content.display_offset as i32;
+        let colors = content.colors;
+        let mut rows: Vec<Vec<Open>> = (0..self.size.rows).map(|_| Vec::new()).collect();
+
+        for indexed in content.display_iter {
+            let row = indexed.point.line.0 + offset;
+            if row < 0 || row as usize >= rows.len() {
+                continue;
+            }
+            let col = indexed.point.column.0;
+            let cell = indexed.cell;
+
+            let text: String = if cell.flags.contains(Flags::WIDE_CHAR_SPACER) {
+                String::new()
+            } else if cell.flags.intersects(Flags::HIDDEN | Flags::LEADING_WIDE_CHAR_SPACER) {
+                " ".to_string()
+            } else {
+                let mut t = String::from(cell.c);
+                if let Some(zero_width) = cell.zerowidth() {
+                    t.extend(zero_width);
+                }
+                t
+            };
+
+            let mut flags = 0u8;
+            if cell.flags.contains(Flags::BOLD) {
+                flags |= style::BOLD;
+            }
+            if cell.flags.contains(Flags::DIM) {
+                flags |= style::DIM;
+            }
+            if cell.flags.contains(Flags::ITALIC) {
+                flags |= style::ITALIC;
+            }
+            if cell.flags.intersects(Flags::ALL_UNDERLINES) {
+                flags |= style::UNDERLINE;
+            }
+            if cell.flags.contains(Flags::INVERSE) {
+                flags |= style::INVERSE;
+            }
+            if cell.flags.contains(Flags::STRIKEOUT) {
+                flags |= style::STRIKE;
+            }
+            let fg = resolve_color(cell.fg, colors);
+            let bg = resolve_color(cell.bg, colors);
+
+            let line = &mut rows[row as usize];
+            match line.last_mut() {
+                Some(open)
+                    if open.run.col + open.len == col
+                        && open.run.fg == fg
+                        && open.run.bg == bg
+                        && open.run.flags == flags =>
+                {
+                    open.run.cells.push(CELL_SEP);
+                    open.run.cells.push_str(&text);
+                    open.len += 1;
+                }
+                _ => line.push(Open { run: Run { col, cells: text, fg, bg, flags }, len: 1 }),
+            }
+        }
+
+        rows.into_iter()
+            .map(|line| {
+                let mut runs: Vec<Run> = line.into_iter().map(|open| open.run).collect();
+                // 行尾那段"默认样式的空白"不必跨边界搬过去。
+                while let Some(last) = runs.last_mut() {
+                    let plain = last.bg == 0
+                        && last.flags & (style::INVERSE | style::UNDERLINE | style::STRIKE) == 0;
+                    if !plain {
+                        break;
+                    }
+                    let mut cells: Vec<&str> = last.cells.split(CELL_SEP).collect();
+                    while cells.last().is_some_and(|c| *c == " ") {
+                        cells.pop();
+                    }
+                    if cells.is_empty() {
+                        runs.pop();
+                    } else {
+                        last.cells = cells.join(&CELL_SEP.to_string());
+                        break;
+                    }
+                }
+                runs
+            })
+            .collect()
+    }
+
     /// 视口逐行文本:行尾空白裁剪,宽字符占位与隐藏单元跳过,组合字符并入前一个单元。
     pub fn screen_lines(&self) -> Vec<String> {
         let mut lines: Vec<String> = Vec::with_capacity(self.size.rows);
@@ -239,6 +369,52 @@ impl Terminal {
     }
 }
 
+/// 把单元格颜色解析成 `0xAARRGGBB`;"默认前景/背景"返回 0,交给宿主按主题取色。
+fn resolve_color(color: Color, colors: &Colors) -> u32 {
+    fn pack(c: Rgb) -> u32 {
+        0xFF00_0000 | (c.r as u32) << 16 | (c.g as u32) << 8 | c.b as u32
+    }
+    let indexed = |index: usize| colors[index].map(pack).unwrap_or_else(|| palette(index as u8));
+    match color {
+        Color::Spec(rgb) => pack(rgb),
+        Color::Indexed(index) => indexed(index as usize),
+        Color::Named(named) => {
+            let index = named as usize;
+            match named {
+                NamedColor::Foreground
+                | NamedColor::Background
+                | NamedColor::Cursor
+                | NamedColor::BrightForeground
+                | NamedColor::DimForeground => 0,
+                _ if index < 16 => indexed(index),
+                // Dim 系列(DimBlack.. DimWhite)接在 Cursor 后面,折回 0..7 的基础色。
+                _ => indexed((index - NamedColor::DimBlack as usize) % 8),
+            }
+        }
+    }
+}
+
+/// xterm 256 色默认调色板。前 16 色取深色背景上对比度够的一组(与常见终端一致)。
+fn palette(index: u8) -> u32 {
+    const BASE: [u32; 16] = [
+        0x000000, 0xCD3131, 0x0DBC79, 0xE5E510, 0x2472C8, 0xBC3FBC, 0x11A8CD, 0xE5E5E5,
+        0x666666, 0xF14C4C, 0x23D18B, 0xF5F543, 0x3B8EEA, 0xD670D6, 0x29B8DB, 0xFFFFFF,
+    ];
+    let rgb = match index {
+        0..=15 => BASE[index as usize],
+        16..=231 => {
+            let i = index as u32 - 16;
+            let level = |v: u32| if v == 0 { 0 } else { 55 + v * 40 };
+            level(i / 36) << 16 | level(i / 6 % 6) << 8 | level(i % 6)
+        }
+        _ => {
+            let v = 8 + (index as u32 - 232) * 10;
+            v << 16 | v << 8 | v
+        }
+    };
+    0xFF00_0000 | rgb
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -311,6 +487,45 @@ mod tests {
         let mut t = Terminal::new(40, 4);
         t.feed(b"\x1b[31mred\x1b[0m normal");
         assert_eq!(t.text(), "red normal");
+    }
+
+    #[test]
+    fn runs_keep_wide_chars_on_their_columns() {
+        let mut t = Terminal::new(20, 2);
+        t.feed("你好a".as_bytes());
+        let runs = &t.screen_runs()[0];
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].col, 0);
+        // 占位格是空串:分隔后第 i 项正好是第 i 列,"a" 落在第 4 列。
+        let cells: Vec<&str> = runs[0].cells.split(CELL_SEP).collect();
+        assert_eq!(cells, vec!["你", "", "好", "", "a"]);
+    }
+
+    #[test]
+    fn runs_split_on_style_and_resolve_colors() {
+        let mut t = Terminal::new(20, 2);
+        t.feed(b"\x1b[31mred\x1b[0m ok \x1b[7mX\x1b[0m");
+        let runs = &t.screen_runs()[0];
+        assert_eq!(runs[0].col, 0);
+        assert_eq!(runs[0].cells, "r\u{1f}e\u{1f}d");
+        assert_eq!(runs[0].fg, 0xFFCD3131);
+        assert_eq!(runs[1].col, 3);
+        assert_eq!(runs[1].fg, 0, "默认前景交给宿主");
+        let inverse = runs.iter().find(|r| r.cells == "X").expect("反白那一格");
+        assert_eq!(inverse.col, 7, "r e d 空 o k 空 X:第 7 列");
+        assert!(inverse.flags & style::INVERSE != 0);
+    }
+
+    #[test]
+    fn runs_trim_trailing_blank_but_keep_colored_blank() {
+        let mut t = Terminal::new(10, 2);
+        t.feed(b"ab   ");
+        assert_eq!(t.screen_runs()[0][0].cells, "a\u{1f}b");
+        let mut t = Terminal::new(10, 2);
+        t.feed(b"\x1b[44m  \x1b[0m");
+        let runs = &t.screen_runs()[0];
+        assert_eq!(runs.len(), 1, "有背景色的空格要留着(状态栏、选中行靠它)");
+        assert_eq!(runs[0].bg, 0xFF2472C8);
     }
 
     #[test]
