@@ -29,6 +29,12 @@ object XIcons {
             )
             .build()
 
+    /** 主机:终端提示符 >_ 。 */
+    val Terminal = icon("terminal") {
+        moveTo(6f, 7.5f); lineTo(10.5f, 12f); lineTo(6f, 16.5f)
+        moveTo(12.5f, 16.5f); lineTo(18f, 16.5f)
+    }
+
     val Search = icon("search") {
         // 放大镜:圆 + 斜柄
         moveTo(17f, 10.5f)

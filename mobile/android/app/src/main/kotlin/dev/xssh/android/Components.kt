@@ -135,19 +135,15 @@ fun XsshCard(
     val haptic = LocalHapticFeedback.current
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
-    // 列表行,不是卡片:没有边框、没有底色,行与行之间一道细线(参考图的收件箱)。
-    // 选中时浅浅一层强调色底;按下时浅填充 —— 手指盖住的地方要有反馈(选中行按下也要)。
+    // 每台主机一张实底圆角卡片(深色 #1C1C1E 压在黑底上,浅色浅灰压在白底上),卡片之间留缝。
+    // 试过收件箱那种通栏行 + 细线:一台主机时整屏只有两行字飘着,外屏尤其单薄,
+    // 深浅两种主题下都看不出"这是一个可以点的东西"。
+    // 选中时叠一层很浅的强调色;按下时再压一层浅填充 —— 手指盖住的地方要有反馈。
+    val base = if (highlight) p.rowSel.compositeOver(p.bgElev) else p.bgElev
     Column(
         modifier
             .clip(RoundedCornerShape(RadiusBox))
-            .background(
-                when {
-                    highlight && pressed -> p.bgElev2.compositeOver(p.rowSel)
-                    highlight -> p.rowSel
-                    pressed -> p.bgElev2
-                    else -> Color.Transparent
-                },
-            )
+            .background(if (pressed) p.bgElev2.compositeOver(base) else base)
             .then(
                 if (onClick == null) {
                     Modifier

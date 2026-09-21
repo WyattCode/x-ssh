@@ -397,17 +397,12 @@ private fun HostListPane(
                     // 底部留出轨道的高度,最后一张卡片能滚到它上面去。
                     contentPadding = PaddingValues(start = Gutter, end = creaseGap, bottom = RailClearance),
                     horizontalArrangement = Arrangement.spacedBy(GapItem),
-                    // 列表不是卡片墙:行紧挨着,靠细线分隔。
-                    verticalArrangement = Arrangement.spacedBy(0.dp),
+                    // 一台主机一张卡片,卡片之间留缝。
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    itemsIndexed(hosts, key = { _, it -> it.id }) { index, host ->
-                        // 细线画在两行之间;选中行(整块强调色)上下都不画,免得在色块边上多出一道。
-                        val next = hosts.getOrNull(index + 1)
-                        val divider = next != null && host.id != selectedId && next.id != selectedId
-                        // 行和分隔线要**上下排**。网格的每一项默认是叠放(Box),不包一层 Column 的话,
-                        // 分隔线会画到每一行的顶部:标题下面多一条,最后两行之间反而少一条。
-                        // 删掉一行之后,下面的行滑上来补位 —— animateItem 要挂在每一项的最外层。
-                        Column(Modifier.animateItem()) {
+                    itemsIndexed(hosts, key = { _, it -> it.id }) { _, host ->
+                        // 删掉一张之后,下面的卡片滑上来补位 —— animateItem 要挂在每一项的最外层。
+                        Box(Modifier.animateItem()) {
                             val open = host.id == openId
                             SwipeActions(
                                 open = open,
@@ -437,16 +432,6 @@ private fun HostListPane(
                                         openId = host.id
                                         revealAboveRail(host.id)
                                     },
-                                )
-                            }
-                            if (divider) {
-                                // 从文字起点开始,和参考图一样左侧内缩。
-                                Box(
-                                    Modifier
-                                        .fillMaxWidth()
-                                        .padding(start = BoxPad)
-                                        .height(0.5.dp)
-                                        .background(p.border),
                                 )
                             }
                         }
@@ -510,51 +495,67 @@ private fun HostCard(
     onLongPress: () -> Unit,
 ) {
     val p = LocalXssh.current
-    // 选中行只是浅浅一层强调色底,文字和标签保持原来的颜色。
-    val title = p.text
-    val detail = p.textDim
-
     XsshCard(
         modifier = Modifier.fillMaxWidth(),
         highlight = selected,
         onClick = { onPrimary(host) },
         onLongClick = onLongPress,
-        paddingVertical = if (large) 15.dp else 12.dp,
+        paddingVertical = if (large) 14.dp else 12.dp,
     ) {
-        // 一行纯内容:名称 + 标签,地址独占一行。行尾不放 ⋮ —— 编辑/删除走左滑。
+        // 左边一枚图标块(iOS 设置页那种圆角方块),一眼认出"这是一台主机";连着的时候变绿。
+        // 右边:名称 + 标签,地址独占一行。行尾不放 ⋮ —— 编辑/删除走左滑。
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                host.label,
-                color = title,
-                fontSize = if (large) 17.sp else 16.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f, fill = false),
-            )
-            Spacer(Modifier.width(8.dp))
-            if (running) {
-                Chip("运行中", p.ok)
-                Spacer(Modifier.width(6.dp))
+            Box(
+                Modifier
+                    .size(if (large) 44.dp else 40.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(if (running) p.ok.copy(alpha = 0.18f) else p.bgElev2),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    XIcons.Terminal,
+                    contentDescription = null,
+                    tint = if (running) p.ok else p.textDim,
+                    modifier = Modifier.size(if (large) 24.dp else 22.dp),
+                )
             }
-            Chip(
-                if (host.auth == AuthKind.KEY) "私钥" else "密码",
-                if (host.auth == AuthKind.KEY) p.accent else p.warn,
-            )
-            if (host.keyFingerprint.isBlank()) {
-                Spacer(Modifier.width(6.dp))
-                Chip("密钥待确认", p.warn)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        host.label,
+                        color = p.text,
+                        fontSize = if (large) 17.sp else 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    if (running) {
+                        Chip("运行中", p.ok)
+                        Spacer(Modifier.width(6.dp))
+                    }
+                    Chip(
+                        if (host.auth == AuthKind.KEY) "私钥" else "密码",
+                        if (host.auth == AuthKind.KEY) p.accent else p.warn,
+                    )
+                    if (host.keyFingerprint.isBlank()) {
+                        Spacer(Modifier.width(6.dp))
+                        Chip("密钥待确认", p.warn)
+                    }
+                }
+                Spacer(Modifier.height(if (large) 4.dp else 3.dp))
+                Text(
+                    host.subtitle,
+                    color = p.textDim,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = if (large) 14.sp else 13.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
         }
-        Spacer(Modifier.height(if (large) 4.dp else 3.dp))
-        Text(
-            host.subtitle,
-            color = detail,
-            fontFamily = FontFamily.Monospace,
-            fontSize = if (large) 14.sp else 13.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
     }
 }
 
@@ -655,7 +656,7 @@ private fun SwipeActions(
             Modifier
                 // 卡片**从右边往回收窄**,不是整块平移。
                 //
-                // 平移是 iOS 通栏列表的做法 —— 那种行本来就贴着屏幕两边。我们的是带边框的
+                // 平移是 iOS 通栏列表的做法 —— 那种行本来就贴着屏幕两边。我们的是实底的
                 // 圆角卡片,整块往左推 160dp,名字被推出屏幕、边框被切掉一截,看着像坏了
                 // (外屏实测:「local-test」整个看不见,只剩 ":2222" 露在左边)。
                 // 收窄的话,左缘和名字原地不动,右边让出的位置正好放按钮。
