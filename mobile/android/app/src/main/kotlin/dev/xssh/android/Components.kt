@@ -71,6 +71,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -135,12 +136,13 @@ fun XsshCard(
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     // 列表行,不是卡片:没有边框、没有底色,行与行之间一道细线(参考图的收件箱)。
-    // 选中时浅浅一层强调色底;按下时浅填充 —— 手指盖住的地方要有反馈。
+    // 选中时浅浅一层强调色底;按下时浅填充 —— 手指盖住的地方要有反馈(选中行按下也要)。
     Column(
         modifier
             .clip(RoundedCornerShape(RadiusBox))
             .background(
                 when {
+                    highlight && pressed -> p.bgElev2.compositeOver(p.rowSel)
                     highlight -> p.rowSel
                     pressed -> p.bgElev2
                     else -> Color.Transparent
@@ -268,7 +270,7 @@ fun KeyCap(
     modifier: Modifier = Modifier,
     active: Boolean = false,
     repeatable: Boolean = false,
-    /** 主操作键(⏎):实心强调色,一眼能找到。 */
+    /** 主操作键(⏎):浅蓝底 + 蓝字,一眼能找到。 */
     emphasis: Boolean = false,
     /** 用图标代替文字(⏎ 用的是画出来的回车图标)。[label] 仍作为读屏文字。 */
     icon: ImageVector? = null,
@@ -283,12 +285,14 @@ fun KeyCap(
 
     // 照系统键盘:浅色是白键,深色是灰键;按下变暗一档。
     // 粘滞修饰键和回车用浅蓝底 + 蓝字,一眼能认出来,但不是一块实心蓝。
+    // 浅蓝要先叠到普通键色上变成不透明:半透明的键底会透出浅色模式下那道投影,键面发灰发脏。
     val filled = active || emphasis
+    val plainKey = if (p.dark) Color(0xFF3A3A3C) else Color.White
     val keyBg = when {
-        filled && pressed -> p.accent.copy(alpha = 0.34f)
-        filled -> p.accentSoft
+        filled && pressed -> p.accent.copy(alpha = 0.34f).compositeOver(plainKey)
+        filled -> p.accentSoft.compositeOver(plainKey)
         pressed -> if (p.dark) Color(0xFF545456) else Color(0xFFD1D1D6)
-        else -> if (p.dark) Color(0xFF3A3A3C) else Color.White
+        else -> plainKey
     }
     val fg = if (filled) p.accent else p.text
 
@@ -572,7 +576,7 @@ fun GlassGroup(content: @Composable () -> Unit) {
 
 /** 胶囊里的一个按钮:按下时图标弹一下、按下的位置亮起。 */
 @Composable
-fun GlassItem(icon: ImageVector, contentDescription: String, tint: Color? = null, onClick: () -> Unit) {
+fun GlassItem(icon: ImageVector, contentDescription: String, onClick: () -> Unit) {
     val p = LocalXssh.current
     val press = rememberPress()
     Box(
@@ -586,7 +590,7 @@ fun GlassItem(icon: ImageVector, contentDescription: String, tint: Color? = null
             Icon(
                 shown,
                 contentDescription = null,
-                tint = tint ?: p.text,
+                tint = p.text,
                 modifier = Modifier
                     .size(23.dp)
                     .graphicsLayer {
