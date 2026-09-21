@@ -145,10 +145,13 @@ fun rememberAdaptive(): Adaptive {
 
 /**
  * 分栏时左栏该多宽。有折痕就贴着折痕切(内容不跨折痕);没有折痕的平板按 38% 给列表,
- * 详情留大头;两种情况都夹在一个手指友好的区间里。
+ * 直板手机横屏按 45%,详情留大头;都夹在一个手指友好的区间里。
  */
 fun Adaptive.listPaneWidth(totalDp: Dp): Dp {
     val fold = bookFold
     if (fold != null && fold.startDp > 200.dp && fold.startDp < totalDp - 200.dp) return fold.startDp
-    return (totalDp * 0.38f).coerceIn(280.dp, 420.dp)
+    // 直板手机横屏(高度不到 600dp)宽度刚过分栏线,38% 只剩 330dp,再减去挖孔的安全区,
+    // 卡片里主机名被标签挤成「本地…」「生…」。矮屏给列表多一点。
+    val share = if (height == SizeClass.Compact) 0.45f else 0.38f
+    return (totalDp * share).coerceIn(280.dp, 420.dp)
 }
