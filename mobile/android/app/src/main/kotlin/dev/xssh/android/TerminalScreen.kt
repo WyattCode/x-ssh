@@ -549,6 +549,8 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
         return
     }
 
+    // 终端铺满整宽,右侧轨道悬浮在上面(玻璃按钮,底下的字透出来)—— 用户要的是最宽的终端。
+    // 只有快捷键面板给轨道让位(它和轨道同一条底边、并排),见 FloatingKeys。
     Box(Modifier.fillMaxSize().background(p.termBg)) {
         Column(
             Modifier
@@ -557,9 +559,7 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
                 .layerBackdrop(backdrop)
                 .background(p.termBg)
                 .windowInsetsPadding(stableSafeDrawing())
-                .imePadding()
-                // 内容让出右边缘轨道的位置,终端文字不会被按钮压住(直板机没有轨道)。
-                .padding(end = if (topBar) 0.dp else RailWidth),
+                .imePadding(),
         ) {
             header()
             canvas(Modifier.weight(1f).fillMaxWidth())
@@ -592,7 +592,8 @@ private fun FloatingKeys(columns: Int, content: @Composable (keyWidth: Dp) -> Un
     BoxWithConstraints(
         Modifier
             .fillMaxWidth()
-            .padding(start = Gutter, end = Gutter, bottom = Gutter),
+            // 面板和轨道同一条底边、并排放,所以右边让出轨道的宽度;终端本身不让。
+            .padding(start = Gutter, end = Gutter + if (rail) RailWidth else 0.dp, bottom = Gutter),
         contentAlignment = Alignment.Center,
     ) {
         val keyWidth = ((maxWidth - KeyGap * 2 - KeyGap * (columns - 1)) / columns).coerceAtMost(KeyMaxWidth)
