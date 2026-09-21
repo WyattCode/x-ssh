@@ -662,7 +662,9 @@ fun TopBar(
         Row(
             modifier
                 .fillMaxWidth()
-                .then(if (solid) Modifier.background(p.bg) else Modifier)
+                // 铺了底色的顶栏要把触摸"吃掉":它盖在列表 / 表单上面,不拦的话点顶栏的空白处
+                // 会点到压在底下看不见的卡片或输入框。
+                .then(if (solid) Modifier.background(p.bg).pointerInput(Unit) { detectTapGestures() } else Modifier)
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
                 .height(TopBarHeight)
                 .padding(horizontal = Gutter),
