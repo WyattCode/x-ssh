@@ -1,5 +1,8 @@
 package dev.xssh.android
 
+import android.hardware.SensorManager
+import android.hardware.Sensor
+import android.content.pm.PackageManager
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
@@ -154,4 +157,25 @@ fun Adaptive.listPaneWidth(totalDp: Dp): Dp {
     // 卡片里主机名被标签挤成「本地…」「生…」。矮屏给列表多一点。
     val share = if (height == SizeClass.Compact) 0.45f else 0.38f
     return (totalDp * share).coerceIn(280.dp, 420.dp)
+}
+
+/**
+ * 页面上的按钮放在哪。
+ *
+ * - [Rail]:折叠屏(小米 Fold 这一类)—— 右侧一条竖轨道,iPhone Duo 的思路:外屏、内屏两种形态
+ *   按钮都在同一个位置,手指记得住。
+ * - [TopBar]:直板机和平板 —— 回到安卓的惯例:顶栏放返回和页面操作,主操作(＋)是右下角的悬浮按钮。
+ *   直板机只有一种形态,右侧竖轨道只会白白占掉一条宽度,终端按键也被挤窄。
+ *
+ * 视觉(Liquid Glass、配色、卡片)两种模式完全一样,变的只是按钮的位置。
+ */
+enum class Chrome { Rail, TopBar }
+
+val LocalChrome = staticCompositionLocalOf { Chrome.Rail }
+
+/** 有铰链角度传感器,或者曾经量到过竖直折痕,就是折叠屏。 */
+fun detectChrome(context: Context): Chrome {
+    val hinge = context.packageManager.hasSystemFeature(PackageManager.FEATURE_SENSOR_HINGE_ANGLE) ||
+        context.getSystemService(SensorManager::class.java)?.getDefaultSensor(Sensor.TYPE_HINGE_ANGLE) != null
+    return if (hinge || UiPrefs(context).everSawFold()) Chrome.Rail else Chrome.TopBar
 }

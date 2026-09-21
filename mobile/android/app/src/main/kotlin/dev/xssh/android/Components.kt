@@ -1,5 +1,12 @@
 package dev.xssh.android
 
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.foundation.layout.width
@@ -454,14 +461,15 @@ private fun Modifier.liquidGlass(
             },
         )
     } else {
-        // 这一页没提供背景源(或系统太老):半透明底色 + 细边,形状和交互不变。
+        // 没有背景源(顶栏里的按钮,或系统太老):浅填充 + 细边,形状和交互不变。
+        // 不用 glassTint:那是叠在模糊背景上的亮度层,单独放在纯色底上几乎看不见。
         graphicsLayer {
             val s = 1f + 0.08f * press()
             scaleX = s
             scaleY = s
         }
             .clip(shape)
-            .background(surface)
+            .background(p.bgElev2)
             .border(0.8.dp, p.glassBorder, shape)
     }
 }
@@ -533,9 +541,10 @@ fun GlassButton(
 ) {
     val p = LocalXssh.current
     val press = rememberPress()
+    val size = LocalGlassSize.current
     Box(
         Modifier
-            .size(56.dp)
+            .size(size)
             .glassTap(press, contentDescription, onClick)
             .liquidGlass(CircleShape, { press.amount.value }) { pressGlow(press, p.dark) },
         contentAlignment = Alignment.Center,
@@ -545,7 +554,7 @@ fun GlassButton(
                 shown,
                 contentDescription = null,
                 tint = tint ?: p.text,
-                modifier = Modifier.size(23.dp),
+                modifier = Modifier.size(glassIconSize(size)),
             )
         }
     }
@@ -560,15 +569,21 @@ fun GlassButton(
  */
 @Composable
 fun GlassGroup(content: @Composable () -> Unit) {
-    val shape = RoundedCornerShape(28.dp)
-    Column(
-        Modifier
-            .width(56.dp)
-            .liquidGlass(shape, press = { 0f })
-            // 组内按钮按下时的光要被胶囊的圆头裁住。
-            .clip(shape),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) { content() }
+    val size = LocalGlassSize.current
+    val shape = RoundedCornerShape(size / 2)
+    // 组内按钮按下时的光要被胶囊的圆头裁住。
+    if (LocalGlassRow.current) {
+        // 顶栏里横着排。
+        Row(
+            Modifier.height(size).liquidGlass(shape, press = { 0f }).clip(shape),
+            verticalAlignment = Alignment.CenterVertically,
+        ) { content() }
+    } else {
+        Column(
+            Modifier.width(size).liquidGlass(shape, press = { 0f }).clip(shape),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) { content() }
+    }
 }
 
 /** 胶囊里的一个按钮:按下时图标弹一下、按下的位置亮起。 */
@@ -576,9 +591,10 @@ fun GlassGroup(content: @Composable () -> Unit) {
 fun GlassItem(icon: ImageVector, contentDescription: String, onClick: () -> Unit) {
     val p = LocalXssh.current
     val press = rememberPress()
+    val size = LocalGlassSize.current
     Box(
         Modifier
-            .size(56.dp)
+            .size(size)
             .glassTap(press, contentDescription, onClick)
             .drawBehind { pressGlow(press, p.dark) },
         contentAlignment = Alignment.Center,
@@ -589,7 +605,7 @@ fun GlassItem(icon: ImageVector, contentDescription: String, onClick: () -> Unit
                 contentDescription = null,
                 tint = p.text,
                 modifier = Modifier
-                    .size(23.dp)
+                    .size(glassIconSize(size))
                     .graphicsLayer {
                         val s = 1f + 0.16f * press.amount.value
                         scaleX = s
@@ -610,6 +626,56 @@ fun GlassItem(icon: ImageVector, contentDescription: String, onClick: () -> Unit
  * 也**不能**用 safeDrawing:它包含输入法 inset,键盘一弹轨道就被整个顶上去。
  * 按钮的位置必须固定;键盘开着时它被盖住,收起键盘它还在原处。
  */
+/** 玻璃按钮的直径:轨道里 56dp,顶栏里 44dp(由 [TopBar] 提供)。 */
+val LocalGlassSize = compositionLocalOf { 56.dp }
+
+/** 胶囊横着排(顶栏)还是竖着排(轨道)。 */
+val LocalGlassRow = compositionLocalOf { false }
+
+private fun glassIconSize(button: Dp): Dp = if (button < 56.dp) 21.dp else 23.dp
+
+/** 顶栏高度(不含状态栏)。 */
+val TopBarHeight = 56.dp
+
+/** 直板机的列表底部留白:只有右下角一颗 ＋,不像轨道那样一整列。 */
+val FabClearance = 56.dp + 16.dp + Gutter
+
+/**
+ * 直板机的顶栏(见 [Chrome.TopBar]):左边是返回之类,右边是这一页的操作。
+ * 铺一层页面底色,内容从它底下滚过去;按钮是同一套玻璃按钮,只是小一号、横着排。
+ */
+@Composable
+fun TopBar(
+    modifier: Modifier = Modifier,
+    /** 铺页面底色、内容从底下滚过(竖屏);false 时只是浮在右上角的一排按钮(横屏双栏,省高度)。 */
+    solid: Boolean = true,
+    start: @Composable RowScope.() -> Unit = {},
+    end: @Composable RowScope.() -> Unit = {},
+) {
+    val p = LocalXssh.current
+    CompositionLocalProvider(
+        LocalGlassSize provides 44.dp,
+        LocalGlassRow provides true,
+        // 顶栏底下是纯色,没有可以折射的内容。
+        LocalBackdrop provides null,
+    ) {
+        Row(
+            modifier
+                .fillMaxWidth()
+                .then(if (solid) Modifier.background(p.bg) else Modifier)
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
+                .height(TopBarHeight)
+                .padding(horizontal = Gutter),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            start()
+            Spacer(Modifier.weight(1f))
+            end()
+        }
+    }
+}
+
 @Composable
 fun EdgeRail(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     Column(

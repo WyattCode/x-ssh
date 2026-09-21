@@ -79,6 +79,7 @@ class MainActivity : ComponentActivity() {
                 // 每一帧的窗口形态(尺寸档 + 铰链)只算一次,所有界面从这里取。
                 CompositionLocalProvider(
                     LocalAdaptive provides rememberAdaptive(),
+                    LocalChrome provides remember { detectChrome(this) },
                     LocalThemeControl provides ThemeControl(mode) {
                         mode = it
                         prefs.themeMode = it

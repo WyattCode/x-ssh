@@ -143,6 +143,11 @@ fun HomeScreen(
     // 浮在内容上的玻璃按钮(右侧轨道)要模糊、折射的,就是这一页的内容。
     val backdrop = rememberLayerBackdrop()
 
+    // 折叠屏:按钮在右侧轨道;直板机:顶栏 + 右下角 ＋(见 Chrome)。
+    val topBar = LocalChrome.current == Chrome.TopBar
+    val barPad = if (topBar) TopBarHeight else 0.dp
+    val clearance = if (topBar) FabClearance else RailClearance
+
     BoxWithConstraints(Modifier.fillMaxSize().background(p.bg)) {
         // 用**实测到的窗口宽度**判断分栏,不用 Configuration 的 screenWidthDp ——
         // 分屏时部分机型的 screenWidthDp 仍报整块屏幕的宽度,那样会在只有半屏宽的窗口里
@@ -189,6 +194,9 @@ fun HomeScreen(
                     creaseGap = Gutter * 2,
                     // 双栏时轨道在右栏上方,不压列表。
                     underRail = false,
+                    // 双栏(直板机横屏)高度只有 400dp 上下,不再单独占一条顶栏:按钮浮在右上角。
+                    topPad = 0.dp,
+                    bottomClearance = clearance,
                 )
                 // 两栏之间不画线:折痕本身就是分界,再补一条反而多余。
                 Spacer(Modifier.width(maxOf(1.dp, adaptive.bookFold?.sizeDp ?: 0.dp)))
@@ -200,13 +208,15 @@ fun HomeScreen(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxHeight()
-                        // 详情栏靠右,给边缘轨道让出位置。
+                        // 详情栏靠右,给边缘轨道(直板机是右下角的 ＋)让出位置。
                         .padding(end = RailWidth)
                         .windowInsetsPadding(
                             WindowInsets.safeDrawing.only(
                                 WindowInsetsSides.Vertical + WindowInsetsSides.End,
                             ),
                         ),
+                    // 直板机横屏时右上角浮着外观 / 搜索,这里不为它往下让:两栏标题要在同一条基线上;
+                    // 标题左对齐,只有特别长的主机名才会伸到按钮底下(会被省略号截断)。
                     label = "detail",
                 ) { host ->
                     HostDetailPane(
@@ -220,7 +230,7 @@ fun HomeScreen(
                 }
             }
         } else if (hosts.isEmpty()) {
-            FirstRun(Modifier.fillMaxSize().safeDrawingPadding())
+            FirstRun(Modifier.fillMaxSize().safeDrawingPadding().padding(top = barPad))
         } else {
             HostListPane(
                 // 内容通到边缘,从右边缘玻璃层底下穿过去(规范:scroll views extend
@@ -246,43 +256,59 @@ fun HomeScreen(
                 large = true,
                 creaseGap = Gutter,
                 underRail = true,
+                topPad = barPad,
+                bottomClearance = clearance,
             )
         }
 
-        // chrome 全在这条轨道里:界面四角不再散落按钮。轨道是 Liquid Glass,列表从它底下滚过去。
         val theme = LocalThemeControl.current
-        CompositionLocalProvider(LocalBackdrop provides backdrop) {
-            EdgeRail(Modifier.align(Alignment.BottomEnd)) {
-                // 外观和搜索是"调整这一页怎么看"的两个操作,装进同一枚胶囊;
-                // 胶囊从底部往上长,搜索在下(和编辑页的 ‹、终端页的键盘同一个位置),外观在上。
-                // 外观点一下切到下一个模式(跟随系统 → 浅色 → 深色 → …),不弹窗。
-                GlassGroup {
-                    GlassItem(
+        // 外观和搜索是"调整这一页怎么看"的两个操作,装进同一枚胶囊。
+        // 外观点一下切到下一个模式(跟随系统 → 浅色 → 深色 → …),不弹窗。
+        val viewActions: @Composable () -> Unit = {
+            GlassGroup {
+                GlassItem(
+                    when (theme.mode) {
+                        ThemeMode.Light -> XIcons.Sun
+                        ThemeMode.Dark -> XIcons.Moon
+                        ThemeMode.System -> XIcons.Auto
+                    },
+                    "外观:${theme.mode.label}",
+                ) {
+                    theme.onChange(
                         when (theme.mode) {
-                            ThemeMode.Light -> XIcons.Sun
-                            ThemeMode.Dark -> XIcons.Moon
-                            ThemeMode.System -> XIcons.Auto
+                            ThemeMode.System -> ThemeMode.Light
+                            ThemeMode.Light -> ThemeMode.Dark
+                            ThemeMode.Dark -> ThemeMode.System
                         },
-                        "外观:${theme.mode.label}",
-                    ) {
-                        theme.onChange(
-                            when (theme.mode) {
-                                ThemeMode.System -> ThemeMode.Light
-                                ThemeMode.Light -> ThemeMode.Dark
-                                ThemeMode.Dark -> ThemeMode.System
-                            },
-                        )
-                    }
-                    // 一台主机都没有时不摆搜索 —— 没东西可搜。
-                    if (hosts.isNotEmpty()) {
-                        GlassItem(XIcons.Search, "搜索主机") {
-                            searching = !searching
-                            if (!searching) query = ""
-                        }
+                    )
+                }
+                // 一台主机都没有时不摆搜索 —— 没东西可搜。
+                if (hosts.isNotEmpty()) {
+                    GlassItem(XIcons.Search, "搜索主机") {
+                        searching = !searching
+                        if (!searching) query = ""
                     }
                 }
-                // 和上面胶囊里的图标同一种样式:无色玻璃、正文色图标(参考图里"+"就是这样)。
-                GlassButton(XIcons.Plus, "新建主机") { onNew() }
+            }
+        }
+        // 主操作:无色玻璃、正文色图标(参考图里"+"就是这样)。
+        val newHost: @Composable () -> Unit = { GlassButton(XIcons.Plus, "新建主机") { onNew() } }
+
+        if (topBar) {
+            // 直板机:外观 / 搜索在顶栏右边,＋ 是右下角的悬浮按钮 —— 安卓的惯例。
+            // 横屏双栏省高度:按钮浮在右上角,不铺底色、不占一条。
+            TopBar(Modifier.align(Alignment.TopCenter), solid = !twoPane || hosts.isEmpty(), end = { viewActions() })
+            CompositionLocalProvider(LocalBackdrop provides backdrop) {
+                EdgeRail(Modifier.align(Alignment.BottomEnd)) { newHost() }
+            }
+        } else {
+            // 折叠屏:chrome 全在右侧这条轨道里,界面四角不散落按钮;列表从玻璃底下滚过去。
+            // 胶囊从底部往上长,搜索在下(和编辑页的 ‹、终端页的键盘同一个位置),外观在上。
+            CompositionLocalProvider(LocalBackdrop provides backdrop) {
+                EdgeRail(Modifier.align(Alignment.BottomEnd)) {
+                    viewActions()
+                    newHost()
+                }
             }
         }
     }
@@ -310,6 +336,10 @@ private fun HostListPane(
     creaseGap: Dp,
     /** 列表是否从右侧轨道底下穿过(单栏为真):左滑露出的按钮不能落在轨道底下。 */
     underRail: Boolean,
+    /** 顶栏的高度(直板机),标题要从它下面开始。 */
+    topPad: Dp,
+    /** 列表底部给按钮留的高度:折叠屏是整条轨道,直板机只有一颗 ＋。 */
+    bottomClearance: Dp,
 ) {
     val p = LocalXssh.current
     val grid = rememberLazyGridState()
@@ -339,7 +369,7 @@ private fun HostListPane(
         if (!underRail) return
         val info = grid.layoutInfo
         val item = info.visibleItemsInfo.firstOrNull { it.key == id } ?: return
-        val band = with(density) { (RailClearance - Gutter + 8.dp).toPx() }
+        val band = with(density) { (bottomClearance - Gutter + 8.dp).toPx() }
         val limit = info.viewportEndOffset - band
         val bottom = (item.offset.y + item.size.height).toFloat()
         if (bottom > limit) {
@@ -360,7 +390,7 @@ private fun HostListPane(
             state = grid,
             modifier = Modifier.fillMaxSize().bounce(),
             // 底部留出轨道的高度,最后一张卡片能滚到它上面去。
-            contentPadding = PaddingValues(start = Gutter, end = creaseGap, bottom = RailClearance),
+            contentPadding = PaddingValues(start = Gutter, end = creaseGap, top = topPad, bottom = bottomClearance),
             horizontalArrangement = Arrangement.spacedBy(GapItem),
             // 一台主机一张卡片,卡片之间留缝。
             verticalArrangement = Arrangement.spacedBy(10.dp),

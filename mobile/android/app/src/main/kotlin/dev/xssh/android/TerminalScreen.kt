@@ -372,7 +372,6 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
         fontSize = (fontSize * zoomChange).coerceIn(UiPrefs.FONT_MIN, UiPrefs.FONT_MAX)
     }
 
-    val header: @Composable () -> Unit = { HostLine(host = host, dead = dead) }
     val canvas: @Composable (Modifier) -> Unit = { modifier ->
         Box(
             modifier
@@ -438,7 +437,7 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
 
     // 和主机页、编辑页同一条右侧竖轨道、同一个位置(见 EdgeRail)。
     // 终端内容是左对齐的等宽字符网格,右侧让出轨道宽度不会压住任何取值。
-    val rail: @Composable () -> Unit = {
+    val actions: @Composable () -> Unit = {
         // "看"的两个操作装进同一枚胶囊:键盘常驻在下(和主机页的搜索同一个位置),
         // 回到底部只在翻历史时出现,加在键盘上面 —— 胶囊往上长,键盘不动。
         GlassGroup {
@@ -457,6 +456,25 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
         GlassButton(XIcons.Close, "断开连接", tint = p.danger) {
                 SessionRegistry.close(host.id)
                 onExit()
+        }
+    }
+
+    // 折叠屏:⌨ ✕ 在右侧轨道;直板机:放进顶部的主机名这一行右边,按键面板铺满整宽(见 Chrome)。
+    val topBar = LocalChrome.current == Chrome.TopBar
+    val header: @Composable () -> Unit = {
+        if (topBar) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.weight(1f)) { HostLine(host = host, dead = dead) }
+                CompositionLocalProvider(LocalGlassSize provides 40.dp, LocalGlassRow provides true) {
+                    Row(
+                        Modifier.padding(end = Gutter),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) { actions() }
+                }
+            }
+        } else {
+            HostLine(host = host, dead = dead)
         }
     }
 
@@ -498,7 +516,7 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
             }
         }
         CompositionLocalProvider(LocalBackdrop provides backdrop) {
-            EdgeRail(Modifier.align(Alignment.BottomEnd), content = rail)
+            EdgeRail(Modifier.align(Alignment.BottomEnd), content = actions)
         }
         }
         return
@@ -513,16 +531,18 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
                 .background(p.termBg)
                 .safeDrawingPadding()
                 .imePadding()
-                // 内容让出右边缘轨道的位置,终端文字不会被按钮压住。
-                .padding(end = RailWidth),
+                // 内容让出右边缘轨道的位置,终端文字不会被按钮压住(直板机没有轨道)。
+                .padding(end = if (topBar) 0.dp else RailWidth),
         ) {
             header()
             canvas(Modifier.weight(1f).fillMaxWidth())
             hiddenInput()
             keys()
         }
-        CompositionLocalProvider(LocalBackdrop provides backdrop) {
-            EdgeRail(Modifier.align(Alignment.BottomEnd), content = rail)
+        if (!topBar) {
+            CompositionLocalProvider(LocalBackdrop provides backdrop) {
+                EdgeRail(Modifier.align(Alignment.BottomEnd), content = actions)
+            }
         }
     }
 }

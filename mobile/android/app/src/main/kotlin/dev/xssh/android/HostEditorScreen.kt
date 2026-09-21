@@ -179,6 +179,8 @@ fun HostEditorScreen(
     // 整个页面量一次,和主机页同一条式子、同样量整个窗口。
     // 分组表单:浅色是浅灰底 + 白色分组块,深色是纯黑底 + 深灰分组块(iOS 设置页那种)。
     val backdrop = rememberLayerBackdrop()
+    // 折叠屏:‹ ✓ 在右侧轨道;直板机:顶栏左边 ‹、右边 ✓(见 Chrome)。
+    val topBar = LocalChrome.current == Chrome.TopBar
     BoxWithConstraints(Modifier.fillMaxSize().background(p.groupedBg)) {
         val window = maxWidth
         val twoPane = window >= 840.dp || (adaptive.bookFold != null && window >= 600.dp)
@@ -203,8 +205,9 @@ fun HostEditorScreen(
                 )
                 .bounce()
                 .verticalScroll(rememberScrollState())
-                // 所有形态都给右侧轨道让位 —— 表单是右对齐取值,不能让按钮压在值上。
-                .padding(end = RailWidth),
+                // 给右侧轨道让位 —— 表单是右对齐取值,不能让按钮压在值上。
+                // 直板机按钮在顶栏,表单铺满;标题从顶栏下面开始。
+                .padding(end = if (topBar) 0.dp else RailWidth, top = if (topBar) TopBarHeight else 0.dp),
         ) {
             Column(
                 Modifier.padding(start = startInset + Gutter + BoxPad, end = Gutter, top = Gutter),
@@ -217,7 +220,7 @@ fun HostEditorScreen(
                 )
                 Spacer(Modifier.height(2.dp))
                 Text(
-                    error ?: "填完点右边的 ✓ 保存",
+                    error ?: if (topBar) "填完点右上角的 ✓ 保存" else "填完点右边的 ✓ 保存",
                     color = if (error != null) p.danger else p.textDim,
                     fontSize = 12.5.sp,
                 )
@@ -263,12 +266,20 @@ fun HostEditorScreen(
             Spacer(Modifier.height(40.dp))
         }
 
-        // 和主机页的 ⌕ ＋ 落在同一对位置上:点 ＋ 进来,按钮原地换成 ‹ ✓,一像素不动。
-        CompositionLocalProvider(LocalBackdrop provides backdrop) {
-            EdgeRail(Modifier.align(Alignment.BottomEnd)) {
-                GlassButton(XIcons.Back, "返回") { onBack() }
-                // 和 ‹ 同一种样式:无色玻璃、正文色图标。
-                GlassButton(XIcons.Check, "保存") { save() }
+        if (topBar) {
+            TopBar(
+                Modifier.align(Alignment.TopCenter),
+                start = { GlassButton(XIcons.Back, "返回") { onBack() } },
+                end = { GlassButton(XIcons.Check, "保存") { save() } },
+            )
+        } else {
+            // 和主机页的 ⌕ ＋ 落在同一对位置上:点 ＋ 进来,按钮原地换成 ‹ ✓,一像素不动。
+            CompositionLocalProvider(LocalBackdrop provides backdrop) {
+                EdgeRail(Modifier.align(Alignment.BottomEnd)) {
+                    GlassButton(XIcons.Back, "返回") { onBack() }
+                    // 和 ‹ 同一种样式:无色玻璃、正文色图标。
+                    GlassButton(XIcons.Check, "保存") { save() }
+                }
             }
         }
     }

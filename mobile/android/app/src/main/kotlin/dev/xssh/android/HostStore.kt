@@ -114,6 +114,11 @@ class UiPrefs(context: Context) {
         return if (start < 0f) null else start to (parts.getOrNull(1)?.toFloatOrNull() ?: 0f)
     }
 
+    /** 这台设备上是否量到过竖直折痕 —— 量到过就一定是折叠屏。 */
+    fun everSawFold(): Boolean = prefs.all.any { (key, value) ->
+        key.startsWith("fold_") && ((value as? String)?.substringBefore(',')?.toFloatOrNull() ?: -1f) >= 0f
+    }
+
     /** [startDp] 传 null 表示这个窗口形态下没有可用的竖直折痕(平板、或已折叠)。 */
     fun cacheFoldStart(windowWidthDp: Int, windowHeightDp: Int, startDp: Float?, sizeDp: Float) {
         prefs.edit()
