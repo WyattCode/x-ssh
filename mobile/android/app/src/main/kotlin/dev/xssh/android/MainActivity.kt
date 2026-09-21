@@ -1,5 +1,8 @@
 package dev.xssh.android
 
+import android.graphics.drawable.ColorDrawable
+import android.graphics.Color
+import android.content.res.Configuration
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -46,10 +49,29 @@ class MainActivity : ComponentActivity() {
                 keyPath = intent.getStringExtra("devKeyPath"),
             )
         }
+        val prefs = UiPrefs(this)
+        // 冷启动底色要和选中的外观一致:选了深色而系统是浅色时,
+        // 资源里的 windowBackground 是白的,不在这里改就会先闪一下白。
+        val systemDark = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
+            Configuration.UI_MODE_NIGHT_YES
+        val startDark = when (prefs.themeMode) {
+            ThemeMode.Light -> false
+            ThemeMode.Dark -> true
+            ThemeMode.System -> systemDark
+        }
+        window.setBackgroundDrawable(ColorDrawable(if (startDark) Color.BLACK else Color.WHITE))
+
         setContent {
-            XsshTheme {
+            var mode by remember { mutableStateOf(prefs.themeMode) }
+            XsshTheme(mode) {
                 // 每一帧的窗口形态(尺寸档 + 铰链)只算一次,所有界面从这里取。
-                CompositionLocalProvider(LocalAdaptive provides rememberAdaptive()) {
+                CompositionLocalProvider(
+                    LocalAdaptive provides rememberAdaptive(),
+                    LocalThemeControl provides ThemeControl(mode) {
+                        mode = it
+                        prefs.themeMode = it
+                    },
+                ) {
                     App(dev)
                 }
             }

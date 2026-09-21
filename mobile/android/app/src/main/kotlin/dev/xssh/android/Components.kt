@@ -466,10 +466,10 @@ fun xsshFieldColors(): TextFieldColors {
 val RailWidth = 72.dp
 
 /**
- * 列表底部要留出的高度:两组单钮胶囊(56 + 14 + 56)+ 离底 16 + 一条间距。
- * 留够了,最后一张卡片才能滚到轨道上方,而不是永远被它压着一角。
+ * 列表底部要留出的高度:主机页轨道三组单钮胶囊(外观、搜索、新建:56 × 3 + 14 × 2)
+ * + 离底 16 + 一条间距。留够了,最后一张卡片才能滚到轨道上方,而不是永远被它压着一角。
  */
-val RailClearance = 56.dp + 14.dp + 56.dp + 16.dp + Gutter
+val RailClearance = 56.dp * 3 + 14.dp * 2 + 16.dp + Gutter
 
 /** 一组轨道按钮:一枚毛玻璃胶囊裹住若干圆钮。 */
 @Composable

@@ -130,7 +130,15 @@ class UiPrefs(context: Context) {
      */
     private fun foldKey(widthDp: Int, heightDp: Int) = "fold_${widthDp}x$heightDp"
 
+    /** 外观:跟随系统 / 浅色 / 深色。 */
+    var themeMode: ThemeMode
+        get() = ThemeMode.entries.firstOrNull { it.name == prefs.getString(KEY_THEME, null) } ?: ThemeMode.System
+        set(value) {
+            prefs.edit().putString(KEY_THEME, value.name).apply()
+        }
+
     companion object {
+        private const val KEY_THEME = "themeMode"
         const val FONT_MIN = 9f
         const val FONT_MAX = 30f
         private const val KEY_FONT = "terminalFontSize"

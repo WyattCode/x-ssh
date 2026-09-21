@@ -1,9 +1,5 @@
 package dev.xssh.android
 
-import java.io.File
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.runtime.remember
-import android.content.pm.ApplicationInfo
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
@@ -143,6 +139,18 @@ val LightPalette = XsshPalette(
 
 val LocalXssh = staticCompositionLocalOf { DarkPalette }
 
+/** 外观模式。 */
+enum class ThemeMode(val label: String) {
+    Light("浅色"),
+    Dark("深色"),
+    System("跟随系统"),
+}
+
+/** 当前外观模式和切换它的入口(主机页轨道上的主题按钮用)。 */
+data class ThemeControl(val mode: ThemeMode, val onChange: (ThemeMode) -> Unit)
+
+val LocalThemeControl = staticCompositionLocalOf { ThemeControl(ThemeMode.System) {} }
+
 private fun darkScheme(p: XsshPalette) = darkColorScheme(
     primary = p.accent,
     onPrimary = p.onAccent,
@@ -193,22 +201,18 @@ private fun Context.findActivity(): Activity? {
  * 文字**行盒一样高(实测都是 24dp)**,字形只占其中一小半,多出来的行距全变成上下两行
  * 之间的空隙。行高改为跟随字号,并裁掉首行上方与末行下方的多余行距。
  */
-/** 跟随系统的深浅色。manifest 里 configChanges 含 uiMode,切换时不重建 Activity,这里直接重组。 */
+/**
+ * [mode] 是用户在主题按钮里选的:浅色、深色,或跟随系统。
+ * manifest 里 configChanges 含 uiMode,系统切深浅色时不重建 Activity,这里直接重组。
+ */
 @Composable
-fun XsshTheme(content: @Composable () -> Unit) {
-    // 调试包里可以用标记文件强制某个主题(files/force_light、files/force_dark),
-    // 用来在不改手机系统设置的前提下检查两套主题。正式包里不生效。
-    val context = LocalContext.current
-    val forced = remember(context) {
-        val debuggable = context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
-        when {
-            !debuggable -> null
-            File(context.filesDir, "force_light").exists() -> false
-            File(context.filesDir, "force_dark").exists() -> true
-            else -> null
-        }
+fun XsshTheme(mode: ThemeMode = ThemeMode.System, content: @Composable () -> Unit) {
+    val dark = when (mode) {
+        ThemeMode.Light -> false
+        ThemeMode.Dark -> true
+        ThemeMode.System -> isSystemInDarkTheme()
     }
-    val palette = if (forced ?: isSystemInDarkTheme()) DarkPalette else LightPalette
+    val palette = if (dark) DarkPalette else LightPalette
 
     // 状态栏、导航条的图标颜色跟着主题翻:浅色底上要深色图标,否则时间和电量都看不见。
     val view = LocalView.current
