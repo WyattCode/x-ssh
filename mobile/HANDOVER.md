@@ -1,7 +1,8 @@
 # X-SSH 移动端交接文档
 
-> 更新: 2026-09-22(第六次会话收尾)。项目: `mobile/`(共享 Rust 核心 + Android 原生 UI;iOS 未开工)。
-> 设备: Xiaomi 18 Fold(`2608BPX34C`,折叠屏,主测)、Xiaomi 17 Ultra(`25128PNA1C`,直板机)。
+> 更新: 2026-09-22(第七次会话:平板兼容)。项目: `mobile/`(共享 Rust 核心 + Android 原生 UI;iOS 未开工)。
+> 设备: Xiaomi 18 Fold(`2608BPX34C`,折叠屏,主测)、Xiaomi 17 Ultra(`25128PNA1C`,直板机)、
+> **Xiaomi Pad 9 Pro Max**(`M367FC`,平板,带键盘套/触控板/手写笔,见 M3.24)。
 > 最新提交以 `git log` 为准;本文 §0/§1/§6/§7 是现状,§2 起是按时间记的过程与原因(改代码前先读相关小节)。
 
 ## 0. 一句话状态
@@ -22,13 +23,18 @@ App 已能**直连局域网**(`192.168.1.100`,早期 MIUI 联网拦截的问题�
 - 终端:快捷键面板**默认收起**(⌘ 开关);⌨ 按钮点一下弹键盘、再点收起;按键保持键帽比例(≤58dp)居中。
 - 文案:**不写任何操作说明 / 存储说明 / "后续版本"**,只标需要注意的状态(主机密钥未确认、密码未保存)。
 - 登录:**界面只有密码**。私钥连接层仍支持,但还没有导入入口,所以界面上不出现(M3.22)。
+- **平板是独立的一套交互(M3.25)**:侧边栏(会话 + 主机)常驻,终端在右栏打开、多会话切换,新建 / 编辑是居中浮层,
+  顶部工具栏 + 悬停 / 右键菜单 / 快捷键。窗口缩到 600dp 以下退回手机页面。
+- **平板 / 实体键盘(M3.24)**:插着键盘时终端按键**不经过输入法**直接按 xterm 编码(方向键、F1–F12、
+  Ctrl/Alt 组合、应用光标模式);点 ⌨ 切到输入法打中文。滚轮 / 双指滑动翻历史(全屏程序收到方向键或鼠标滚轮),
+  右键和 Ctrl+Shift+V 粘贴。主机页 Ctrl+N / Ctrl+F / ↑↓ / 回车 / Esc,编辑页 Ctrl+S / Esc。小窗、竖横屏均验过。
 
 **还没有的核心能力**(桌面版有):SFTP、端口转发、多标签、选择复制、片段、快照;iOS 轨未开工。
 
 ## 1. 下一步(建议顺序)
 
-1. **私钥导入**(系统文件选择器 → 复制进 App 私有目录 → Keystore 保护),做完再把"密码 / 私钥"切换放回编辑页。
-2. **选择 / 复制粘贴**(核心要先暴露选区 API;终端是 Canvas 画的)。
+1. ~~私钥导入~~ 已做(M3.27,密钥库加密、内存里交给核心)。还缺:在手机上生成新密钥对、生物识别解锁。
+2. ~~选择 / 复制粘贴~~ 已做,选区在核心里跟着内容走(M3.27)。
 3. 多会话 / 标签;SFTP;端口转发(与桌面版对齐)。
 4. 发布前:HyperOS 省电白名单引导、通知权限被拒的兜底、TOFU 策略与桌面版统一、密码 zeroize。
 
@@ -36,10 +42,14 @@ App 已能**直连局域网**(`192.168.1.100`,早期 MIUI 联网拦截的问题�
 
 用户的真服务器 `192.168.1.100`(主机名 DGX Node 0)**只点界面、不在里面敲命令**。要测输入就用本地靶机:
 
+第七次会话在这台 PC 上重建了靶机(和之前那台不是同一台机器):`sshd_config` 已写死 `127.0.0.1:2222`、
+只认 `authorized_keys` 里的 `id_xssh_dev`,主机密钥指纹 `SHA256:c/Oi3y0+Fq6+5qYP8YF/HpDpiy2goVFAX9efU/twKFI`。
+默认 shell 是 cmd(Windows),没有 vim/less —— 应用光标模式只有单测覆盖(`input_modes_follow_the_program`)。
+
 ```bash
 # 1) PC 上起便携 sshd(配置文件必须给绝对路径,否则 "sshd_config: No such file")
-cd /c/Users/user/AppData/Local/Temp/opencode/xssh-sshd && ./OpenSSH-Win64/sshd.exe -D \
-  -f 'C:\Users\user\AppData\Local\Temp\opencode\xssh-sshd\sshd_config' -o Port=2222 -o ListenAddress=127.0.0.1
+cd /c/Users/user/AppData/Local/Temp/opencode/xssh-sshd && ./OpenSSH-Win64/sshd.exe -D -e \
+  -f 'C:\Users\user\AppData\Local\Temp\opencode\xssh-sshd\sshd_config'
 # 2) 手机回环 → PC
 adb reverse tcp:2222 tcp:2222
 # 3) 私钥推进 App 私有目录(私钥主机只能这样造,界面上没有入口)
@@ -143,6 +153,11 @@ adb push id_xssh_dev /data/local/tmp/k && adb shell "run-as dev.xssh.android sh 
 | 本地 SSH 靶机 | 便携 OpenSSH,配置 `%LOCALAPPDATA%\Temp\opencode\xssh-sshd\`(0.0.0.0:22,私钥 `id_xssh_dev`,防火墙规则 "OpenSSH dev 22") |
 | 用户服务器 | `192.168.1.100`(DGX Node 0,用户 user;**密码不写进仓库**;只点界面不敲命令) |
 | 网络 | PC 与手机同一局域网 `192.168.10.x`(手机曾为 `.150`) |
+| MSVC | VS 2022 Build Tools + C++ 工作负载(**cargo-ndk / 桌面版 xssh-ffi 编译要 `link.exe`**,没有就 `linker link.exe not found`) |
+
+第七次会话换了一台 PC(`LAPTOP-GU5Q5VRL`),上表的工具全部按原路径重装(platform-tools 37.0.1、cmdline-tools、
+`platforms;android-37.0`、`build-tools;37.0.0`、`ndk;28.2.13676358`、Temurin 21、Gradle 9.7.1、Rust 1.98.1、cargo-ndk 4.1.2),
+`mobile/android/local.properties` 指向 `D:\Android\sdk`。
 
 ### 常用命令
 ```powershell
@@ -707,6 +722,302 @@ M3.17 修掉同步刷新之后,Codex 能出内容但仍不完整、输入框不�
 - **终端空白的根因**:`AppVisibility` 是布尔,Activity 重建时新实例 onStart 先到、旧实例 onStop 后到,
   把它写成 false,会话以为没人看就不送画面。改成 start/stop 计数。
 
+### M3.24 小米平板 9 Pro Max 兼容(第七次会话,真机验证)
+
+**设备参数(adb 实测)**
+
+| 项 | 值 |
+|---|---|
+| 型号 / 代号 | `M367FC` / `yingtian`,序列号 `SERIAL0000000001`,`ro.build.characteristics=tablet` |
+| 系统 | HyperOS `OS4.0.11.0.XBMCNXM` = Android 17(API 37),安全补丁 2026-08-01 |
+| SoC | 玄戒 O3(`xring_o3_asic`),仅 `arm64-v8a` |
+| 屏幕 | 2272×3408(自然方向竖屏),**400dpi → 2.5x → 909×1363dp**,sw909dp,`xlrg`;横屏 1363×909dp |
+| 刷新率 | 30 / 48 / 50 / 60 / 90 / 120 / 144Hz,当前 144Hz;HDR 1–4,峰值 420nit |
+| 圆角 / 挖孔 | 四角圆角半径 62px(24.8dp);**无挖孔**(摄像头在边框里,cutout 全 0) |
+| 系统栏 | 状态栏 82px(32.8dp),手势导航条 40px(16dp) |
+| 输入设备 | **Xiaomi Keyboard 键盘套**(pogo,`15d9:00a3`)+ Xiaomi Touch 触控板 + Mouse + 手写笔两路 + 霍尔传感器(键盘套开合) |
+| 铰链 | 无(`FEATURE_SENSOR_HINGE_ANGLE` 否)→ App 走 `Chrome.TopBar`(顶栏 + 右下 ＋) |
+| 窗口 | 支持自由窗口(`freeform_window_management`)、HyperOS 台前调度式多窗(`stage_a..f` 任务)、画中画 |
+| 用户设置 | 旋转锁定横屏(`accelerometer_rotation=0`,`user_rotation=1`),导航手势(`navigation_mode=2`) |
+
+**最大的问题:实体键盘几乎不能用。** 真机注入 `echo abc⏎ ↑ Tab Ctrl+C`,终端里只剩 `abc`:
+系统先把按键交给输入法,中文输入法把字母吃进拼音组合;回车、方向键、Tab、Ctrl+C 又被隐藏输入框当成编辑操作吞掉。
+
+- **按键直通**:插着键盘(`Configuration.keyboard == QWERTY && hardKeyboardHidden == NO`)时,终端焦点放在一个
+  **不是输入框**的 focusable 节点(`keySink`)上 —— 没有 InputConnection,输入法不插手;根节点 `onPreviewKeyEvent`
+  用 `KeyEncoder`(新文件 `HardwareKeys.kt`)按 xterm 编码:方向键 / Home / End 看 DECCKM(`ESC O A` vs `ESC [ A`),
+  带修饰键 `ESC[1;mA`,PgUp/PgDn/Ins/Del `ESC[n~`,F1–F12,Shift+Tab `ESC[Z`,Ctrl+字母/数字/符号 → 控制字符,
+  Alt → ESC 前缀,Ctrl+退格 `^H`。按下时接管的键,松开事件也吞掉(否则 Esc 会被系统当成返回)。
+- **中文**:点 ⌨ 焦点切回隐藏输入框,输入法正常组词;这时普通字符交给输入法,非字符键(回车、方向……)照样由
+  这里编码。**Ctrl/Alt 组合键用 `onInterceptKeyBeforeSoftKeyboard` 赶在输入法之前拿**(实测不这样 Ctrl+C 到不了远端)。
+  再点 ⌨ 回到直通。实测:拼音 `nihao` → 空格上屏「你好」→ 点 ⌨ → `abc` 直接进终端。
+- **核心**:`Terminal::input_modes()` / FFI `Term.inputModes()` 导出 应用光标 / 括号粘贴 / 备用屏 / 鼠标上报 / SGR /
+  alternate scroll;随每帧画面带到 `TerminalFrame.modes`。新增单测 `input_modes_follow_the_program`(共 27 passed)。
+- **写入乱序(真 bug,手机上也有)**:界面每个键 `scope.launch(Dispatchers.IO)` 一次,多个协程并发写,
+  连敲 `127.0.0.1` 远端收到 `172.0.0.1`。`TerminalSession` 改成单一写队列(`Channel` + 一个协程),
+  `sendRaw / sendText / paste / wheel / scroll / resizeGrid` 都入队,界面直接在主线程调。
+- **滚轮 / 触控板 / 鼠标**:画布收 `PointerEventType.Scroll`(一格 3 行,小数增量累积);普通 shell 翻本地回滚,
+  全屏程序:要鼠标就发滚轮事件(SGR / X10),不要就发方向键(alternate scroll)。**单指拖动也走同一条路** ——
+  手机上在 less / man 里拖动现在会翻页(原来备用屏里拖了没反应)。右键粘贴;悬停显示文本光标。
+- **粘贴**:Ctrl+Shift+V / 右键,开了括号粘贴就包 `ESC[200~…ESC[201~`,换行统一成 `\r`。
+  Ctrl+Shift+= / - 调字号。
+- **插拔键盘套不重建**:`configChanges` 补 `keyboard|navigation`(原来插拔一次整个 Activity 重建)。
+- **主机页 / 编辑页快捷键**:主机页 Ctrl+N 新建、Ctrl+F 搜索、↑↓ 换主机(双栏)、回车连接、Esc 收起搜索;
+  编辑页 Ctrl+S 保存、Esc 返回,Tab 在字段间走。页面自己拿一个非输入框焦点,否则没点过任何东西时按键无处可去。
+  Esc 只有搜索框为空时才抢在输入法前面(组词中的拼音也在 query 里,空着就一定没在组词)。
+- **宽屏限宽**:详情栏的「连接 / 编辑 / 删除」和编辑页右栏限 560dp(横屏右栏原来 890dp 一条横幅)。
+
+**真机验收**:横屏 1363×909 / 竖屏 909×1363 双栏;深色;小窗(`--windowingMode 5`,自动退成单栏卡片,
+终端换行跟窗口宽);转屏会话存活;实体键盘 历史↑ / ←插入 / Ctrl+C 中断 ping / 顺序正确;滚轮翻历史出现「回到底部」;
+Ctrl+N → Tab → 输入 → Ctrl+S 保存;Ctrl+F / Esc;回车连接。
+
+**未验证**:物理插拔键盘套(需要人手);真触控板双指滑动(adb 只能注入鼠标滚轮);Ctrl+Shift+V / 右键粘贴
+(adb 没法写剪贴板);vim / less 的应用光标模式(靶机是 Windows cmd);HyperOS 分屏(`--windowingMode 6` 在 MIUI 上不真分)。
+
+### M3.25 平板交互重做(第七次会话后半,用户要求"按平板规范整套重新设计")
+
+用户指出上一版只是"把手机版拉宽":新建主机还是整页跳转、连上终端主机列表就没了。对照
+**小米《大屏应用 UX 设计指南》**(dev.mi.com pId=2041)和 **Apple HIG(iPadOS:sheets / sidebars / pointing devices / keyboards)**
+重做,用户确认的四个决定:侧边栏 + 终端在右栏;新建 / 编辑用居中浮层;终端里应用快捷键走 Ctrl+Shift;**只给平板**
+(折叠屏右侧轨道、直板机顶栏保持不动)。
+
+- **新设备形态 `Chrome.Tablet`**:无铰链且**整块屏幕**最短边 ≥ 600dp(`maximumWindowMetrics`,看屏幕不看窗口)。
+  `App` 里窗口 ≥ 600dp 走 `TabletApp`(新文件 `Tablet.kt`),更窄(小窗、窄分屏)退回手机页面流 `PhoneFlow`,按 TopBar 摆按钮。
+  两套共用 hosts / selectedId / termHostId,窗口来回缩放时正在看的东西不丢。
+- **分栏**:左侧边栏常驻(宽 = 窗口 26%,夹在 280–340dp,小米窗格 280–600dp),`Ctrl+Shift+S` / 工具栏按钮收起(记在 `UiPrefs.sidebarVisible`);
+  侧边栏 = 标题行(外观、＋)+ 搜索框 +「会话」区(正在连的)+「主机」区。右栏 = 详情 / 终端 / 连接中 / 确认页 / 错误页 / 欢迎页,
+  **顶上一条工具栏**(52dp,和侧边栏标题行同高、横线对齐)。多会话:会话区点选、`Ctrl+Tab` / `Ctrl+Shift+Tab` 轮换、`Ctrl+Shift+1…9`。
+- **终端进右栏**:`TerminalScreen(tablet = TabletTerminalChrome(...))`。工具栏:侧边栏开关、状态点 + 主机名、回到底部、⌘、⌨、「更多」菜单
+  (粘贴 / 清屏 / 字号 / 编辑主机)、红字「断开」。不画轨道和玻璃按钮。确认页 / 错误页也包在工具栏下面;缺密码的错误页给「填写密码」直接开编辑浮层。
+- **编辑浮层 `HostSheet`**:540dp、≤ 80% 高、背后压暗;「取消」在左「保存」在右(HIG);新建时焦点在「名称」,缺密码的主机焦点在「密码」;
+  `Ctrl+S` / `Ctrl+Enter` / 密码格回车保存,`Esc` 取消;改过内容再取消 → 居中确认「放弃未保存的修改?」。字段 / 校验和手机整页共用 `HostDraft`。
+- **确认框 `ConfirmDialog`**:删除(侧边栏菜单 / 工具栏垃圾桶 / Delete 键)不再是"点两下",而是居中确认,回车确认、Esc 取消。
+- **指针**:侧边栏行、工具栏按钮、主按钮都有悬停态(小米 5.3);工具栏图标悬停 0.5 秒出文字提示(`HoverTip`);
+  右键(触摸长按)出上下文菜单(`ContextMenu`:连接 / 编辑 / 复制地址 / 断开 / 删除,右侧写快捷键);双击主机行直接连接(自己判双击,单击不等 300ms);
+  终端右键出菜单(手机上右键仍是直接粘贴)。
+- **键盘**:页面自己拿焦点,插着键盘时方向键 / 回车 / 快捷键始终有落点;浮层关掉、退出搜索、切会话后焦点回到终端(`focusRequest` 计数)。
+  `Activity.onProvideKeyboardShortcuts` 注册了全部快捷键,Meta+/ 的系统快捷键面板里能看到。
+- **输入法抢键(重要)**:小米输入法接实体键盘组拼音时**不报 composition**,拼音攒在它自己的候选条里。
+  新增 `ImeBuffer`:敲了字符键、输入框文字却没变 = 输入法攒着字。没攒着时 ↑↓ / 回车 / Esc 用 `onInterceptKeyBeforeSoftKeyboard`
+  赶在输入法前面拿(否则方向键、回车、Esc 全被它吃掉);攒着时归输入法(上屏、选候选、取消拼音)。
+  实测:拼音打「web」按回车 → 上屏「web」而不是误连主机;打「127」↓ 回车 → 连上第二台。
+- 顺带:Manifest 加小米 `LandscapeForPad` 声明;`FormField` 增加 `focusRequester` / `onDone` / `onComposing`;XsshButton 加悬停态和手形指针。
+
+**真机验收(Pad 9 Pro Max)**:横屏 / 竖屏(侧边栏 280dp)、深浅色、小窗退回手机流、欢迎页;Ctrl+N / Ctrl+Shift+N(终端里)开浮层、
+焦点落「名称」;Esc 放弃确认;长按菜单;Delete 删除确认;搜索 → ↓ → 回车连第二个会话;Ctrl+Tab 切会话、Ctrl+Shift+W 断开;
+Ctrl+Shift+S 收 / 展侧边栏;缺密码 → 「填写密码」→ 浮层。
+
+### M3.26 选中复制、拖入粘贴、会话细节(第七次会话收尾)
+
+- **终端选中复制(新文件 `Selection.kt`,手机平板通用)**:选区是视口坐标,文字直接从界面手里的逐行样式段取(核心还没选区 API)。
+  - 鼠标 / 触控板:按住拖 = 选择,双击 = 选词;手指:拖动仍翻历史,**按住 0.45 秒**选中一个词,接着拖动往两边扩,松手出「复制 / 粘贴」菜单。
+  - 选词按字符类别断:ASCII 词(含 `. / - _ : @ ~ + = %`,路径 / IP / `user@host` 整段)、中文连续段、空白和标点(含全角)是分隔。
+  - `Ctrl+Shift+C` 复制(没选也吞掉,否则会编码成 ^C 打断命令);右键菜单 / 「更多」里有「复制」;手机右键:有选区复制、没有粘贴。
+  - 一敲键盘、一翻历史、点一下终端就清掉选区。
+- **拖入粘贴**:从分屏 / 小窗里的别的应用拖文字到终端 = 粘贴(`dragAndDropTarget`,拖着经过时描一圈强调色)。
+- **会话断了**:平板工具栏换成「关闭 / 重新连接」(对端断开后会话已自己从名单上摘掉,重连走原主机)。
+- **侧边栏会话行**:指针悬停时行尾出 ✕,点了断开。
+- **菜单关掉后焦点回来**(`LocalRestoreFocus`):右键 / 长按 / 「更多」菜单是拿焦点的弹层,关掉后焦点不自己回来,实测接着敲键盘全无反应。
+- ⌨ 只在焦点真在终端输入框上时亮(原来编辑浮层开着时背后也亮)。
+- **回归**:`FormField` 改成 TextFieldValue 后,外部过滤文字(端口只留数字)时光标没跟着挪,端口里敲 `8a0b8` 得到 `80228`(被夹成 65535 存下)。
+  `syncedField()` 按"少了几个字"回挪光标,修后得 `808`。
+
+**手机 / 折叠屏回归(在平板上模拟)**:`wm size 1200x2608` + `wm density 480` = 17 Ultra 尺寸,走直板机页面流:新建(整页)→ 地址 / 端口 → 保存、
+连接(整页终端)→ 返回 → 卡片「运行中」,全部正常。往 `xssh_ui.xml` 写一条 `fold_860x608=429.8,0.0` 让 `everSawFold()` 为真,
+再 `wm size 1168x1712` + `wm density 440` = 18 Fold 外屏,走右侧轨道:主机页、编辑页的 ‹ ✓ 位置正常。测完 `wm size reset` / `wm density reset`、还原偏好。
+(真机 17 Ultra / 18 Fold 仍建议接上再看一遍,尤其是 18 Fold 内屏的折痕分栏,模拟不了真实折痕。)
+
+### M3.27 选区进核心、私钥导入(第七次会话)
+
+- **选区挪进 Rust 核心**(alacritty `Selection`,网格坐标):新输出滚上来时高亮跟着内容走、能一直选进回滚历史、
+  被覆盖的内容自动清选区。`Terminal::select_start/update/clear`、`selection_text`、`view_selection`(视口里那段,给界面画),
+  `SelectKind::{Cell, Word, Line}`;鼠标单击拖 = 按格,双击 = 按词,三击 = 按行;手指长按 = 按词再拖。
+  **按格子左右半边**传 `right_half`(alacritty 的 `Side`),往回拖时起点那一格算不算由它决定。
+  分词符 `WORD_DELIMITERS` = alacritty 默认 + 全角标点 − `:`(`user@host:22` 整段选中)。3 个新单测。
+  翻历史不再清选区;`Selection.kt` 只剩画高亮用的 `TermSelection`。
+- **焦点兜底**:鼠标每按一下,Compose 都会清掉当前焦点(实测终端按键节点在按下时丢焦点)→ 双击选词 / 拖选 / 点侧边栏后
+  实体键盘全无反应。修:终端画布 `focusProperties { canFocus = false }` + 鼠标松开时把焦点还给按键节点;
+  平板外壳 `onFocusChanged` 发现整棵界面没了焦点、窗口本身仍有焦点(不是浮层 / 菜单)时,还回终端或列表。
+- **私钥导入**:
+  - 核心 `Auth::KeyData { pem, passphrase }`(内存里的私钥文本)、`inspect_private_key`(算法 / 指纹 / 公钥一行)、
+    `SshError::KeyEncrypted`(带口令没给 / 给错;口令错时 russh 报的是别的错,先不带口令解一次确认"本来就带口令")。
+    FFI:`AuthMethod.KeyData`、`inspectKey()`、`FfiException.KeyEncrypted`。3 个新单测(用一次性测试钥匙)。
+  - `Host` 新增 `keyData` / `keyPassphrase`(都经 `Secrets` 用密钥库加密落盘)、`keyName`、`keyPublicFingerprint`;
+    连接时解密的私钥只在内存里交给核心。老数据的 `keyPath` 照旧能用。
+  - 编辑页(手机整页 + 平板浮层共用 `CredentialFields`):「登录方式」分段选择(密码 / 私钥)回来了;私钥一组:
+    文件名 / 未导入、公钥指纹、口令(带口令时才出现并自动聚焦)、「导入私钥… / 更换私钥…」(系统文件选择器,不限类型)、
+    「复制公钥」(贴进服务器 authorized_keys)。保存前在 IO 线程验一次口令,填错当场提示。
+  - 平板浮层支持**把私钥文件拖进来**(`requestDragAndDropPermissions`),或拖一段私钥文本。
+  - 连接失败:没导入 →「导入私钥」;口令不对 →「填写口令」(平板直接开编辑浮层)。详情页显示私钥文件名和指纹。
+- **只会是英文的格子**(地址 / 端口 / 用户名)`asciiOnly`:实体键盘的字符键赶在输入法前面直接写进去 ——
+  小米输入法接实体键盘时不看键盘类型,`root` 照样被组成拼音。插字要基于每次插完立刻更新的状态,
+  不能用上一帧的快照(连着敲会丢字,实测 `example` 丢了 e)。
+
+**真机验收(私钥导入,Pad 9 Pro Max)**:新建主机 → 私钥 → 导入(系统「安全访问」选择器 → 下载 → 带口令的 ed25519 测试钥匙)
+→ 自动识别"这把私钥有口令"、焦点落口令格 → 口令填错按 Ctrl+S 提示「私钥口令不对」、浮层不关 → 填对保存 → 详情页「私钥 · 文件名」,
+指纹与 `ssh-keygen -lf` 一致 → `xssh_hosts.xml` 里搜不到明文私钥和口令 → 连接:主机密钥确认后 `auth=KEY` 登录成功。
+测试钥匙、authorized_keys 里临时加的公钥都已删除。
+
+**未验证**:平板浮层拖入私钥文件(模拟不了跨应用拖文件);「复制公钥」。
+
+**未验证(M3.25/M3.26)**:悬停提示 / 行尾 ✕(adb 注入不了纯悬停);Meta+/ 快捷键面板;拖入粘贴(需要另一个应用拖文字进来);
+手机 / 折叠屏只在平板上**模拟**测过(见上),真机的返回手势、18 Fold 内屏折痕分栏还要接上真机看。
+
+### M3.28 生成密钥、SFTP 文件面板(第七次会话续)
+
+- **在设备上生成密钥**:核心 `ssh::generate_ed25519(comment, passphrase)`(`rand::rng()`,OpenSSH 格式),FFI `generateKey()`。
+  编辑页「生成新密钥」:生成 → 当场把公钥复制进剪贴板(提示「公钥已复制」),注释是 `x-ssh@<机型>`。
+  真机:公钥贴进本机靶机的 authorized_keys 后用它登录成功。
+- **SFTP,和终端共用一条连接**:
+  - 核心 `sftp.rs`:`Ssh::open_sftp()` 在同一连接上开 `sftp` 子系统通道(russh-sftp 3)。`home` / `list`(目录在前、不分大小写)/
+    `is_dir` / `download(Write)` / `upload(Read)`(64KB 一块,进度回调返回 false = 取消;取消上传会删掉半截文件)/ `mkdir` / `remove` / `rename` / `close`。
+  - **Handler 只把 shell 那个通道的事件转给终端**(`shell_channel`):不然 SFTP 通道的数据 / EOF / Close 会被当成终端的,
+    关掉文件面板终端就"断了"。live 测试 `sftp_round_trip_alongside_shell` 覆盖:传 200KB 来回、取消、改名、删除、关 SFTP 后终端照常回显。
+  - FFI:`Session.openSftp()` → `Sftp` 对象;`downloadToFd` / `uploadFromFd` 直接接管宿主给的文件描述符
+    (Android `ParcelFileDescriptor.detachFd()`),文件内容不过 Kotlin;进度是 foreign trait `TransferListener`;取消抛 `FfiException.Cancelled`。
+    关通道的方法叫 `shutdown` —— 叫 `close` 会和 Kotlin 绑定里 `AutoCloseable.close()` 重名,编不过。
+  - Kotlin `RemoteFiles`(`Files.kt`,挂在 `TerminalSession.files`):通道第一次打开文件面板时才开,会话断开时一起关;
+    传输跑在会话作用域里,切回终端 / 别的会话照样在跑。一次只传一批(在传时拒绝再开选择器 —— 否则「存储到」已经建好一个 0 字节文件)。
+- **平板文件面板**(右栏,「终端 | 文件」分段开关,Ctrl+Shift+O 切换;按会话记住停在哪一边、哪个目录):
+  - 工具栏:上传(Ctrl+U)、新建文件夹、刷新(Ctrl+R);路径栏:上一级(Backspace / Alt+↑)+ 可点的面包屑(总是停在最末一级),
+    点面包屑后面的空白 / Ctrl+L = 输入路径(`~` 回家目录,相对路径按当前目录)。
+  - 列表:名称 / 大小 / 修改时间(窄于 560dp 收起时间列),淡斑马纹,悬停高亮;单击选中、双击或回车打开目录 / 下载文件;
+    右键(触摸长按)菜单:打开或下载… / 复制路径 / 重命名…(F2)/ 删除…(Delete,文件夹连同内容,确认框);空白处右键:上传… / 新建文件夹… / 刷新 / 前往路径… / 复制当前路径。
+  - 键盘:↑↓ Home End PgUp PgDn、Esc 取消选中、直接敲字母跳到这个前缀开头的项(Finder 习惯)。
+  - 下载走「存储到…」(`ACTION_CREATE_DOCUMENT`,按扩展名猜类型),失败 / 取消时把建好的文件删掉;
+    上传走系统选择器(可多选)或**从别的应用拖文件进来**;同名先问「替换」。底部传输条:文件名、第几个 / 共几个、已传 / 总共、「取消」;结果提示 4 秒自动消失。
+  - 重命名时先选中扩展名前面的部分;路径输入框的字符在输入法之前收(同 `asciiOnly`)。
+
+**真机验收(Pad 9 Pro Max,本机靶机 = Windows OpenSSH)**:进文件面板(家目录 `/C:/Users/user`)→ 敲 `De` 跳到 Desktop、回车进入、Backspace 回来且选中 Desktop →
+Ctrl+L 输入 scratchpad 路径 → 下载 60MB(与 PC 的 sha256 一致)→ 新建文件夹 `up` → 进去上传 60MB(进度条、完成后自动刷新,sha256 一致)→
+F2 改名 `up2` → 长按菜单删除有两级子目录的文件夹(回车确认,选中挪到下一项)→ 同名上传弹「替换」→ 3GB 下载中途取消(「已取消」,下载目录里没留半截)→
+Ctrl+Shift+O 回终端直接能打字 → 再切回来目录还在 → 深色 / 竖屏都看过。
+
+**未验证**:从别的应用拖文件进来上传;SFTP 连 Linux 服务器(只测了 Windows OpenSSH);手机 / 折叠屏还没有文件入口(只做了平板)。
+### M3.29 文件面板:多选、下载目录、打开、上传文件夹(第七次会话续)
+
+- 传输引擎拆到 `RemoteFiles.kt`(界面留在 `Files.kt`)。一次传**一批**:先在 IO 线程清点(递归列远端 / 本机目录),
+  再逐个传;进度条是**整批**的字节数 + 第几个 / 共几个,清点时显示「…」;出错 / 取消停在那一个并清掉它的半截产物。
+- **下载不再每次弹选择器**(和浏览器一样):「下载」(Ctrl+D)直接进系统「下载 / X-SSH」(MediaStore,Android 10+ 不要权限,
+  写时 `IS_PENDING=1`,写完才对别的应用可见);文件夹按原层级放进去;重名系统自己加「(1)」,提示里报**实际存成的名字**。
+  单个文件下完,提示条带「打开」按钮(留 8 秒)。「下载到…」= 系统文件夹选择器,一次性(`TreeSink` 按需建子目录)。
+  Android 9 及以下没有 MediaStore.Downloads,「下载」退回「下载到…」。
+- **打开**(双击 / 回车):下到 `cache/open/`(只留最近一个),经 FileProvider(`${applicationId}.files`)交给别的应用。
+  系统认不出的服务器常见文本(conf / log / yaml / 没扩展名…)按 `text/plain` 给,至少能用文本查看器看。
+- **上传文件夹**(Ctrl+Shift+U,或工具栏上传按钮的菜单):系统文件夹选择器 → 递归展开 → 远端先建目录(已存在就合并)再传;
+  目标里已有同名文件夹先问「合并并替换同名文件?」。
+- **多选**:Ctrl+点 加减、Shift+点 / Shift+↑↓ / Shift+Home/End 连选、Ctrl+A 全选、Esc 退出;
+  触摸:长按菜单「多选」→ 行首出勾选圈、点一下就是勾选。选了多项底部出操作栏:已选 N 项 · 下载 · 下载到… · 删除 · 完成。
+  右键点到已选的项,菜单作用于整个多选(下载 N 项 / 删除 N 项…);点到没选的,先选中它(Finder 的习惯)。
+  修饰键从 `PointerEvent.keyboardModifiers` 在按下时记下(`combinedClickable` 的回调拿不到)。
+
+**真机验收(Pad 9 Pro Max)**:Home + Shift+End 选 3 项 → Ctrl+D → 下载/X-SSH 里 6 个文件、子目录层级正确、`nginx.conf` 没被改名 →
+Esc、敲 n、回车「打开」→ 系统「打开方式」列出文字查看器(查看器首次要同意它自己的协议,没替用户点)→ 新建 `up`、进去 Ctrl+Shift+U 选
+下载/X-SSH/proj(系统「允许访问」由用户点)→ 远端完整重建 proj/src/deep 等 → 长按「多选」勾 2 项(一个文件夹)→ 删除确认「删除 2 项?」→
+单个 Ctrl+D 提示「已下载「nginx (1).conf」…」+「打开」→ 深色下勾选圈 / 操作栏正常。
+
+**未验证**:「下载到…」(`TreeSink`,又要一次系统授权);Android 9 以下的回退。
+### M3.30 手机 / 折叠屏的文件页(第七次会话续)
+
+- 终端页多一颗「文件」玻璃钮:折叠屏在轨道最上面(输入胶囊之上、✕ 之上),直板机在顶栏。连接断了不显示。
+- `Screen.Files(host)` 从终端推入(页面层级 Home 0 → 终端 / 编辑 1 → 文件 2,推入 / 退出方向按层级算);
+  系统返回手势回到它的终端(`Screen.parent()`),预测式返回照样跟手。会话没了自动退回终端页。
+- `FilesPane` 按 `FilesChrome` 分两套外观,逻辑共用:`Tablet`(工具栏 + 表格)、`Phone`(`PhoneFiles`):
+  大标题 = 当前文件夹、下面一行等宽路径(点一下 = 前往路径);第一行「↑ 上一级文件夹名」;每项两行(名字 / 大小 · 时间),
+  文件夹带 ›;点一下打开(目录进去,文件交给别的应用),长按出菜单(含「多选」);折叠屏轨道 = 上传 / 新建文件夹胶囊 + ‹,
+  直板机顶栏 ‹ 在左、胶囊在右。底部的条(多选 / 传输 / 提示)垫在导航条上面,轨道随它升上去。
+- **返回键**:先退出多选;再一级一级退回走过的目录(`history`);退空了才离开文件页。
+- 上下文菜单右边的快捷键提示只在插着实体键盘时显示。
+
+**验收(Pad 上模拟)**:`wm size 1200x2608` + `density 480` 竖屏 = 直板机:终端顶栏出现文件钮 → 文件页 → 点路径输入 → 进 proj →
+返回 ×3:proj → sftp-play → 家目录 → 终端;点文件直接在文字查看器里打开;长按菜单 → 多选 → 底部「已选 2 项」条不压导航条。
+`fold_860x608` 写进 `xssh_ui.xml` + `wm size 1168x1712` + `density 440` = 18 Fold 外屏:终端轨道 4 颗(文件在最上),文件页轨道 = 胶囊 + ‹;
+深色下多选、轨道避让底部条正常;多选时按返回只退出多选。测完 `wm size/density reset`、`xssh_ui.xml` 字节还原、平板回归正常。
+(17 Ultra / 18 Fold 真机还没接上看。)
+### M3.31 18 Fold 真机复核文件页(第七次会话续)
+
+- **装不上**:Fold 上的 X-SSH 是**上一台电脑**的 debug 签名(`INSTALL_FAILED_UPDATE_INCOMPATIBLE`),这台电脑的
+  `~/.android/debug.keystore` 是今天新建的。**不能卸载重装** —— 卸载会连同 Keystore 里的密钥一起删掉,
+  用户 DGX 主机的密码就再也解不开了。办法:`-PxsshIdSuffix=.review` 装成另一个包 `dev.xssh.android.review`
+  (`build.gradle.kts` 里读这个 Gradle 属性),和原来那个并存,测完卸掉这个副本;原来的 App 和数据一字节不动(测前测后 sha256 一致)。
+  PowerShell 里这个参数要加引号:`'-PxsshIdSuffix=.review'`。**以后要给 Fold 装正式新版,得先拿到旧电脑的 debug.keystore,或者让用户接受重填 DGX 密码。**
+- **内屏横屏(折痕在中间)改成双栏**:单栏时列表横跨折痕。现在和主机页同一个判据(≥ 840dp 或书本式折叠 ≥ 600dp)
+  分两栏:左栏列表(止于折痕前 32dp),右栏选中项的详情(文件名两行、大小、修改时间、权限 `rw-r--r--  644`、完整路径)
+  和按钮(打开 / 下载 · 下载到… / 重命名 · 删除 / 复制路径)。双栏里点文件 = 选中,点目录照样进去;单栏点文件直接打开。
+  右栏在折叠屏上整列让开轨道(右边距 = 轨道宽),按钮不压在玻璃下面。
+- **轨道顺序改成 ‹ 在上、胶囊(新建文件夹 / 上传)在下**:原来 ‹ 在最下面,和终端页的红色 ✕(断开)同一个落点 ——
+  真机上连点 ‹ 往回退,退出文件页后的下一下就把会话断了。现在连点 ‹ 落到终端页的是 ⌘,无害。(和编辑页 ‹ 在上、✓ 在下一致。)
+- 路径输入框改成 `KeyboardType.Uri`、关掉联想(软键盘默认是中文拼音);路径那一行的热区撑到 32dp 高。
+
+**真机验收(18 Fold)**:内屏:终端轨道 4 颗(文件在最上)→ 文件页双栏、行不跨折痕 → 点路径、软键盘输入路径、前往 →
+点长文件名看右栏详情(标题两行省略、按钮不压轨道)→「下载」进 下载/X-SSH、提示条 +「打开」、轨道升到条上面。
+外屏:单栏;长按菜单(**没接键盘时不显示快捷键提示**)→ 多选勾 2 项 → 底部条 → 返回退出多选;连点 ‹ ×3 → 回到终端、会话还在。
+注意:外屏打开时逻辑显示 0 = 外屏,`input` 要带 `-d 0`,否则点击落空。
+
+**未验证**:17 Ultra 真机。
+### M3.32 二次复核(SFTP / 文件页,第七次会话续)
+
+- **核心:终端通道登记晚了会丢开头的输出**。加 SFTP 时 Handler 改成只转发"终端那个通道"的事件,
+  但通道 id 是等 `request_shell` 返回后才登记的 —— 服务端应答 shell 请求后紧跟着发欢迎语和第一个提示符,
+  这几段落在登记之前就被当成别的通道丢了(测试时恰好赢了竞速,慢设备 / 快服务器上会是一个空白终端)。
+  改成 `channel_open_session` 一返回就登记(在请 pty / shell 之前)。live 测试加了一条:**不敲任何键**也必须收到初始输出。
+- **右键 / 长按时改选中,原来写在菜单内容的构建函数里**(组合过程中写状态,能跑但脆)。改成行的 `onMenu` 回调,在菜单弹出的那一刻改。
+- **文件描述符泄漏**:`pfd.detachFd()` 写在 `withSftp { … }` 里面,通道没开成时描述符既没交给 Rust 也没关。三处都包进 `pfd.use { }`
+  (交出去之后 `close()` 是空操作)。
+
+**复核(18 Fold 外屏,复核副本)**:连上后不敲键,Windows 欢迎语和提示符都在;文件页 → 路径 → 长按菜单 → 下载(进 下载/X-SSH、提示「打开」)
+→ 点文件出系统「打开方式」(没交给飞书 / ChatGPT 这类应用,直接返回);live 测试 2 个、单测 35 个、clippy 全过。
+测完卸掉副本、删测试下载,原 App 三个文件 sha256 与测前一致。
+
+**已知**:小米输入法的软键盘不看 `KeyboardType.Uri`,输入路径时默认可能还是中文 —— 实体键盘有 asciiOnly 兜底,软键盘只能靠用户切英文。
+### M3.33 中英字体统一、实体键盘切输入法、连接前的页面重做(第七次会话续)
+
+- **中英字体**:原来英文是系统 `monospace`(DroidSansMono,老式、偏粗、0.6em 宽),中文回退到 MiSans —— 两套设计,
+  中文 1em 塞进 1.2em 的两格还左右留缝。现在照「更纱黑体」的配法(`Fonts.kt` 的 `XsshFonts`):
+  英文 = Iosevka Term,**截字**到终端用得到的范围(拉丁 / 希腊 / 西里尔 / 标点 / 箭头 / 数学 / 制表符 / 方块 / 几何 / 勾叉 /
+  盲文转圈 / Powerline),只留 ccmp/locl/mark/mkmk 特性、去掉 hinting —— 每个字重 ~237KB(`res/font/xssh_mono_*.ttf`);
+  中文 = 系统自带的 Noto Sans CJK 简体(= 思源黑体),从 `/system/fonts/NotoSansCJK-Regular.ttc` 里按字体自己的 name 表找
+  族名以 " SC" 结尾的那个(找不到用 AOSP 的 2 号);拿不到就交给系统回退。英文 0.5em、中文 1em = 正好两格。
+  终端里占两格的字用思源黑体,其余用 Iosevka;**按英文字体的基线对齐**(思源黑体行高更高,按各自行顶摆中文会往下掉)。
+  界面里所有等宽字(地址、路径、指纹)也换成 `XsshFonts.mono`。
+  截字工具:`python -m fontTools.subset …`(这次装了 Python 3.12 + fonttools;Iosevka 从 GitHub releases 下 PkgTTF-Unhinted-IosevkaTerm)。
+  **许可**:Iosevka 是 SIL OFL 1.1(没有保留字体名,截字后的子集可以沿用原名),再分发必须带许可全文 ——
+  放在 `assets/licenses/Iosevka-OFL-1.1.md`(发行包里的 zip 不带 LICENSE,取自仓库的 LICENSE.md)。以后做「关于 / 开源许可」页要把它列上。
+- **实体键盘切输入法**:原来插着键盘时焦点在「不是输入框」的节点上(直通,英文可靠),输入法没挂上,键盘上的中英切换它收不到,
+  只能点 ⌨。现在:直通时**单按一下 Shift** → 输入法模式(挂上输入法,之后 Shift 归输入法自己切中英);
+  **Ctrl+Shift+Space** 两种模式来回切(输入法模式下它在输入法之前就被拿到);⌨ 按钮同样是这个开关。
+  实测 **Win+Space 和键盘的「中/英」键被系统(InputMethodManagerService)自己拿去切输入法**,应用收不到 —— 代码里仍认,有的系统会放行。
+  选择记在 `imeMode` 里,关菜单、点终端、切会话回来都回到原来那种输入。切换时终端右上角亮一下「输入法」/「英文」。
+  **不用 Ctrl+Space**:终端里它是 NUL,Emacs 用它设标记。
+- **连接前的页面重做**(`ConnectGate.kt`):确认主机身份(首次 / 密钥变了)、正在连接、连接失败三种状态一套版式 ——
+  图标块(盾牌 / 警告 / 终端)→ 大标题 → 主机名与地址 → 卡片(指纹 11 字一组、两组一行、17sp 等宽 / 失败原因原话)→ 按钮。
+  平板:右栏居中浮起的卡片(按钮横排,次要在左);折叠屏内屏关于折痕分两栏、外屏单栏,‹ 在轨道;直板机 ‹ 在顶栏。
+  回车 = 主操作、Esc = 返回;**密钥变了时回车不做事**(必须用手点「仍然信任新密钥」)。
+- 手机 / 折叠屏的连接失败页也有「填写密码 / 导入私钥 / 填写口令」了(原来只有平板有),点了进这台主机的编辑页。
+
+**真机验收(18 Fold 内屏竖,复核副本)**:连上后 `type` 一段中英混排 + 制表符表格:中英同粗细、同基线,中文正好两格,表格线接得上;
+首次连接页(盾牌、指纹卡片、信任并连接 → 进终端);密钥已变页(上次记录 / 这次收到两张卡片,红色);失败页「填写密码」→ 编辑页。
+测完卸掉副本,原 App 三个文件 sha256 与测前一致。
+
+**真机验收(Pad 9 Pro Max + 键盘套)**:直通时单按 Shift → 右上角「输入法」、⌨ 变蓝、输入法挂上(右下角 En);
+输入法内再按 Shift 切拼音 → 敲 nihao 出候选 → 空格上屏「你好」→ 回车执行;Ctrl+Shift+Space → 「英文」,接着敲的 ls 直通发出去。
+输入法模式下每键 40ms / 150ms 都不丢字(adb 零间隔连发会丢,人敲不出这个速度)。平板连接页:右栏居中卡片,首次连接回车 = 信任并连接;
+密钥已变页回车无反应(必须手点);失败页「返回 / 填写密码」;深色正常。
+
+**二次复核(工具)**:Kotlin 编译零警告;Android Lint 查出 `MediaStore.Downloads` 需要 API 29(运行时有判断,但在 lambda 外面,lint 看不见、以后改动也容易绕过)
+→ `MediaStoreSink` 加 `@RequiresApi(29)`,并在版本判断之后、lambda 之外创建。剩下的 lint 错误只有生成的 uniffi 绑定(Cleaner,已知),
+其余警告都是旧代码。Rust:单测 35 个、live 2 个、`clippy -D warnings` 全过。
+
+**未验证**:17 Ultra 真机。
+### M3.34 18 Fold 正式版复核、界面等宽字也带中文回退(第七次会话续)
+
+- 18 Fold 重装成这台电脑签名的新版后,在**用户真正在用的那个 App** 上复核(用户已加了自己的主机 → 测前字节备份、测后字节还原,sha256 一致;
+  测试私钥、临时文件测完删掉)。终端中英混排:同粗细、同基线、中文正好两格,表格线接得上。
+- **界面里的等宽字(路径、地址、指纹)遇到中文还是会跳**:`XsshFonts.mono` 只有 Iosevka,「项目文档」落到 MiSans 上。
+  新增 `XsshFonts.monoUi`:Android 10+ 用 `Typeface.CustomFallbackBuilder` 建回退链 Iosevka → 思源黑体简体 → 系统,
+  界面里所有等宽字改用它(终端画布仍用 `mono` + 宽字符单独用 `cjk`,不变)。读打包字体要应用的 Resources,
+  `MainActivity.onCreate` 里 `XsshFonts.init(this)`。Android 9 及以下退回 `mono`。
+- 手机版文件页的路径行热区从 32dp 高、字那么宽 → **48dp 高、整行宽**(真机上常点到下面的列表)。
 ## 5. 关键坑(踩过,别再踩)
 
 1. **DSR 应答**:终端事件不回写 → 远端程序挂起(ConPTY 必现;vim 同理)。已修 + 单测。
@@ -820,7 +1131,46 @@ M3.17 修掉同步刷新之后,Codex 能出内容但仍不完整、输入框不�
     拖动期间用匀速 tween,弹簧按时间取进度同样不跟手。
 55. **键盘动画期间别让重活跟着每帧跑**:画布变尺寸 = 整屏重画,行列变更 = PTY resize + 远端重画。都要等停稳再做。
 56. **Python 脚本改 Kotlin 时别在普通字符串里写 ``**,会被写成真正的 ESC 字节;改完 `grep -c $''` 查一遍。
-
+57. **实体键盘的按键先给输入法**。焦点在输入框上时,中文输入法吃字母、编辑框吃回车/方向/Tab。终端要按键直通,
+    焦点就得在一个**不是输入框**的节点上;要在输入框里抢按键,用 `onInterceptKeyBeforeSoftKeyboard`(只抢 Ctrl/Alt,别抢组词要用的键)。
+58. **小米输入法会吃掉 Esc**(输入框聚焦时第一下 Esc 只让输入框失焦),`onPreviewKeyEvent` 收不到。
+59. **每个按键 `launch(Dispatchers.IO)` 会乱序**。写远端必须串行(一个队列一个协程)。
+60. **没有任何焦点时 Compose 收不到按键**。要页面级快捷键,页面根节点自己 `focusable()` 并在插着键盘时请求焦点。
+61. **PowerShell 里 `adb exec-out screencap -p > x.png` 会把 PNG 写坏**(按文本重编码)。先 `screencap` 到 `/sdcard` 再 `adb pull`。
+62. **`sdkmanager.bat` 的包名里有分号**,经 cmd 转一道会被拆开(`Package platforms not found`)。用 `--package_file=`。
+63. **`adb shell input keyboard …` 模拟的是实体键盘**(`keycombination KEYCODE_CTRL_LEFT KEYCODE_C` 可用),
+    `input mouse scroll x y --axis VSCROLL,5` 模拟滚轮;它们不改 `Configuration.keyboard`,所以只在真插着键盘时走直通分支。
+64. **`adb shell` 的参数经过设备端 sh**:`input text` 里的 `(`、`%`、`\` 会被解析,测试命令挑不含这些字符的。
+65. **小米输入法接实体键盘组拼音时不报 composition**,别指望 `TextFieldValue.composition` 判断"在不在组词",用 `ImeBuffer` 的推断。
+70. **小米的文件选择器(「安全访问」)按媒体库列文件**:`adb push` 进去的文件要等媒体扫描
+    (`content call --method scan_volume --uri content://media --arg external_primary`),而且「我的平板 → Download」
+    目录视图还是不显示,要从「浏览 → 下载」分类里找。第一次打开「文件管理」要用户同意它的协议(不能替用户点)。
+71. **鼠标每按一下,Compose 都会清掉当前焦点**(键盘操作模式下点击 = 重新分配焦点)。没法聚焦的地方被点了,
+    焦点就没了。用鼠标的界面都要考虑"点完之后焦点回哪儿"。
+72. **小米输入法接实体键盘时无视 `KeyboardType`**:Uri / Ascii 都照样组拼音。只会是英文的输入框要自己在输入法之前收字符。
+67. **长按不能只靠"一段时间没有事件"判断**:手指按着时系统一直在报位置(抖动 / 零位移,`input swipe` 同样),
+    超时永远等不到。每个事件都要看按住多久了。
+68. **adb 注入的鼠标事件不带按键状态**(`buttons` 全空),触控板轻点也可能这样;判断"左键"要写成"不是右键 / 中键"。
+69. **`input mouse swipe/tap` 能测鼠标拖选、双击;`input motionevent DOWN/MOVE/UP` 能测"按住再拖"**(`input swipe` 一开始就在动,测不了长按)。
+66. **测搜索别用匹配不上的词**:搜「local」匹配不到「本地靶机 / 127.0.0.1」,回车理所当然没反应,差点当成 bug 查了一轮。
+73. **同一条 SSH 连接上开第二个通道(SFTP),Handler 的回调不分通道**:要记下 shell 的 ChannelId,只转它的事件,不然别的通道一关终端就判定断开。
+74. **uniffi 导出的对象方法别叫 `close`**:Kotlin 绑定里对象本身实现 `AutoCloseable`,生成出来就是重名的两个 `close()`。
+75. **`AnimatedContent` 切换的那一小段,退场的内容还在组合里、还读得到最新状态**:用计数器请求焦点时,退场那一栏也会响应并把焦点抢走
+    (切回终端后敲键盘没反应)。只把请求传给进场的那一栏。
+76. **系统「存储到…」选择器一确认就建好了文件**:之后决定不传(正忙、出错、取消)要自己 `DocumentsContract.deleteDocument`,不然留 0 字节 / 半截文件。
+77. **Pad 截图缩到 1363 宽后,换回屏幕坐标是 ×2.5**(物理 3408×2272 横屏),别按 2.35 算 —— 点歪了会以为按钮没反应。本机靶机走 USB 反向代理,400MB 一秒多就传完,测取消要用几 GB 的文件。
+78. **MediaStore 写下载目录**:`RELATIVE_PATH` 以 `Download/` 开头、按扩展名给 MIME(给错了系统会给文件名补扩展名);
+    写完要把 `IS_PENDING` 改回 0,不然别的应用看不见;重名时系统改名,实际名字要回头查 `DISPLAY_NAME`。
+79. **系统「允许访问文件夹」、别的应用首次启动的协议都不能替用户点**:测上传文件夹 / 下载到… / 打开时要请用户在场。
+80. **别的电脑装的 debug 包,这台电脑覆盖不了**(签名不同)。卸载会删掉 Keystore 里的密钥 → 已加密保存的密码全部作废。
+    真机复核用 `'-PxsshIdSuffix=.review'` 装成另一个包并存,测完卸掉副本。
+81. **按钮换页落点不变,也意味着危险按钮的落点会被"连点"命中**:新页面最下面那颗如果是 ‹,连点着退出来就会点到终端页的 ✕。
+    危险操作(断开 / 删除)所在的位置,相邻页面同一个位置不要放"会被连点"的按钮。
+82. **按通道过滤事件时,登记要早于任何可能到来的数据**:通道一开就登记,别等"请求成功"之后 —— 服务器的第一段输出紧跟着应答就来。
+83. **中英混排的等宽字体要成对选**:英文正好 0.5em、中文 1em 才能"中文 = 两格"不留缝;中文按英文字体的基线摆,
+    别按各自字体的行顶摆(CJK 字体的 ascent 大,会整体下沉)。系统 `monospace` + 界面字体回退 = 两套设计,一看就散。
+84. **终端里别占 Ctrl+Space**:它是 NUL(Emacs 设标记)。切输入法用 Shift(单按)/ Ctrl+Shift+Space。
+    Win+Space、键盘的「中/英」键在小米上被系统截走切输入法,应用收不到,别指望它们。
 ## 6. 已知问题 / 待办
 
 **已知问题**
@@ -828,11 +1178,14 @@ M3.17 修掉同步刷新之后,Codex 能出内容但仍不完整、输入框不�
 - [ ] 键盘开合停稳后有一帧 ~22ms(画布换新高度重画 + 行列变更);动画过程本身已不掉帧。
 - [ ] 生成的 UniFFI 绑定用了 `java.lang.ref.Cleaner`(API 33),lint 报 NewApi;运行时有 `ClassNotFoundException` 回退到 JNA Cleaner,不会崩。
 - [ ] 终端 Canvas 绘制,TalkBack 读不到内容。
+- [ ] 平板插着键盘时,小米输入法的悬浮候选条(右下角「拼」)不报 IME inset,会叠在右下角 ＋ 上(不挡点击)。
+- [ ] 插着键盘时的输入法模式里,Esc 先给输入法(组词要用);想把 Esc 发给远端要先点 ⌨ 回直通。
+- [ ] 冷启动后立刻按键,第一下可能丢(根节点焦点还没请求到)。
 
 **功能(按优先级)**
-- [ ] 私钥导入 / 生成 / 生物识别解锁(做完恢复编辑页的「密码 / 私钥」切换;uniffi 已有 `AuthMethod::KeyFile`)
-- [ ] 选择 / 复制粘贴(核心需暴露选区 API)
-- [ ] 多标签 / 多会话;SFTP;端口转发 / 跳板;命令片段;快照(与桌面版对齐)
+- [ ] 私钥生物识别解锁(导入 / 生成已做)
+- [ ] SFTP:拖出文件到别的应用;传输排队(现在一次一批,正在传时再点会提示);手机 / 折叠屏真机复核
+- [ ] 端口转发 / 跳板;命令片段;快照(与桌面版对齐)
 - [ ] 终端配色方案(Nord / Dracula… 与桌面版同名)
 - [ ] 一台主机信任多把主机密钥(现在一条记录一个指纹,服务端轮换要重新确认)
 
@@ -854,14 +1207,20 @@ M3.17 修掉同步刷新之后,Codex 能出内容但仍不完整、输入框不�
 - 主机列表必须有卡片框;快捷键默认收起、按键不拉伸;动效统一用 `Motion.kt` 的曲线。
 - 每次改完都要真机复核(外屏 / 内屏竖 / 内屏横,必要时直板机),并在深浅两种主题下看。
 
-## 7. 设备现状(2026-09-22)
+## 7. 设备现状(2026-09-22,M3.28 之后)
 
-- **18 Fold**(`SERIAL0000000002`):App(debug)最新版,User 0。主机列表只有用户的
-  `DGX Node 0 — user@192.168.1.100:22`(密码已由 Keystore 加密保存,**不要改动**);主题:深色;
-  自动旋转已恢复;常亮已关。内屏 display `4639175402683733248`(2364×1672 @440dpi,摄像头在自然竖屏左上角 164×140px),
-  外屏 `4639175068132267009`(1168×1712,摄像头顶部居中)。
+- **18 Fold**(`SERIAL0000000002`):2026-09-22 18:35 按用户要求**卸载了旧版(上一台电脑签的名)、装上这台电脑编的新版**,
+  用户说原来的主机信息不要了 —— 主机列表是空的。卸载前的 `xssh_hosts.xml` / `xssh_ui.xml` 备份在 `D:\Android\pad\fold-backup-2026-09-22\`
+  (密码是用旧的 Keystore 密钥加密的,已经解不开;要用只能看地址等明文字段)。从此 Fold 和 Pad 是同一个签名,`install -r` 直接覆盖。
+  内屏 display `4639175402683733248`(2364×1672 @440dpi),外屏 `4639175068132267009`(1168×1712);合上时逻辑显示 0 = 外屏,`input` 要带 `-d 0`。
 - **17 Ultra**(`4ba14696`):App 最新版;主机列表为空(测试主机和测试私钥已删);主题:跟随系统;
   单屏 display `4630946639341352083`(1200×2608 @480dpi → 400×869dp);MIUI 装包时要在手机上点「继续安装」(6 秒倒计时)。
+- **Pad 9 Pro Max**(`SERIAL0000000001`):App(debug)最新版;主机列表为空(测试主机已删);主题:跟随系统;
+  旋转已恢复为用户原设置(锁定横屏 `user_rotation=1`);常亮已关;`files/xssh_dev_key` 里留着本机靶机私钥(调试用)。
+  display id `4639175632255844352`(单屏)。
 - **PC**:测试 sshd 已关;`adb reverse` 已清。本地靶机私钥 `%LOCALAPPDATA%\Temp\opencode\xssh-sshd\id_xssh_dev`。
 - 构建:`JAVA_HOME=C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot`,
-  `D:\Android\gradle-9.7.1\bin\gradle.bat -p mobile\android :app:installDebug`(本次会话没有改 Rust 核心,不需要重编 .so)。
+  `D:\Android\gradle-9.7.1\bin\gradle.bat -p mobile\android :app:installDebug`。
+  第七次会话**改了 Rust 核心和 FFI**(`input_modes`、选区、私钥、生成密钥、SFTP),`.so` 与 Kotlin 绑定都已重新生成;别的设备上的旧 APK 要重装。
+  SFTP live 测试:`XSSH_TEST_HOST=127.0.0.1 XSSH_TEST_PORT=2222 XSSH_TEST_USER=user XSSH_TEST_KEY=%LOCALAPPDATA%\Temp\opencode\xssh-sshd\id_xssh_dev`
+  + `cargo test -p xssh-core --test live_ssh -- --ignored`(2 个都过)。
