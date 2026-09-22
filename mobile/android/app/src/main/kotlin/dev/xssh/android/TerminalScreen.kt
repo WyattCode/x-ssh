@@ -984,16 +984,38 @@ private fun HostLine(host: Host, dead: Boolean) {
         // 圆点占住 16dp 那条线(与终端文字、第一个按键同缘),名字落在 32dp 文字线上。
         StatusDot(if (dead) p.danger else p.ok)
         Spacer(Modifier.width(7.dp))
-        Text(host.label, color = p.text, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-        Spacer(Modifier.width(10.dp))
-        Text(
-            text = if (dead) "已断开" else host.subtitle,
-            color = if (dead) p.danger else p.textFaint,
-            fontFamily = XsshFonts.monoUi,
-            fontSize = 11.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        // 地址要么整条放得下就显示,要么干脆不显示 —— 直板机顶栏右边排了四颗按钮,
+        // 原来地址被截成「user@12…」,半截地址比没有更难看,也看不出是哪台机器。
+        // 「已断开」是状态,必须显示,放不下时顶掉的是名字(名字自己省略)。
+        val detail = if (dead) "已断开" else host.subtitle
+        androidx.compose.ui.layout.Layout(
+            content = {
+                Text(host.label, color = p.text, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    text = detail,
+                    color = if (dead) p.danger else p.textFaint,
+                    fontFamily = XsshFonts.monoUi,
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                    softWrap = false,
+                )
+            },
+        ) { measurables, constraints ->
+            val gap = 10.dp.roundToPx()
+            val loose = constraints.copy(minWidth = 0)
+            val detailPlaceable = measurables[1].measure(androidx.compose.ui.unit.Constraints())
+            val labelFull = measurables[0].maxIntrinsicWidth(constraints.maxHeight)
+            val showDetail = dead || labelFull + gap + detailPlaceable.width <= constraints.maxWidth
+            val labelMax = if (showDetail) (constraints.maxWidth - gap - detailPlaceable.width).coerceAtLeast(0) else constraints.maxWidth
+            val labelPlaceable = measurables[0].measure(loose.copy(maxWidth = labelMax))
+            val height = maxOf(labelPlaceable.height, if (showDetail) detailPlaceable.height else 0)
+            layout(constraints.maxWidth, height) {
+                labelPlaceable.place(0, (height - labelPlaceable.height) / 2)
+                if (showDetail) {
+                    detailPlaceable.place(labelPlaceable.width + gap, (height - detailPlaceable.height) / 2)
+                }
+            }
+        }
     }
 }
 

@@ -638,9 +638,12 @@ fun FilesPane(
                 .onFailure { e -> failure = e.reason() }
         }
     }
+    // 底部的条和列表的文字对齐:手机页的文字从 32dp 起,平板表格约 20dp 起。
+    val barInset = if (chrome is FilesChrome.Phone) Gutter + BoxPad else 18.dp
     val bars: @Composable () -> Unit = {
         if (selectMode || marked.size > 1) {
             SelectionBar(
+                inset = barInset,
                 count = marked.size,
                 onDownload = { download(selection()) },
                 onDownloadTo = { downloadTo(selection()) },
@@ -648,8 +651,8 @@ fun FilesPane(
                 onDone = ::clearSelection,
             )
         }
-        transfer?.let { TransferBar(it, onCancel = files::cancelTransfer) }
-        NoticeBar(notice)
+        transfer?.let { TransferBar(it, inset = barInset, onCancel = files::cancelTransfer) }
+        NoticeBar(notice, inset = barInset)
     }
     val dropModifier = Modifier
         .border(if (dropHover) 2.dp else 0.dp, if (dropHover) p.accent else Color.Transparent)
@@ -1301,6 +1304,7 @@ private fun PhoneFileRow(
 /** 多选时底部的操作栏(iPad「文件」的选择模式)。 */
 @Composable
 private fun SelectionBar(
+    inset: androidx.compose.ui.unit.Dp,
     count: Int,
     onDownload: () -> Unit,
     onDownloadTo: () -> Unit,
@@ -1311,7 +1315,7 @@ private fun SelectionBar(
     Column(Modifier.fillMaxWidth().background(p.cardBg)) {
         Box(Modifier.fillMaxWidth().height(0.5.dp).background(p.border))
         Row(
-            Modifier.fillMaxWidth().height(52.dp).padding(start = 18.dp, end = 10.dp),
+            Modifier.fillMaxWidth().height(52.dp).padding(start = inset, end = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
@@ -1581,13 +1585,13 @@ private fun CenterNote(text: String, action: (@Composable () -> Unit)? = null) {
 
 /** 底部的传输条:文件名、进度、已传 / 总共,右边「取消」。 */
 @Composable
-private fun TransferBar(t: Transfer, onCancel: () -> Unit) {
+private fun TransferBar(t: Transfer, inset: androidx.compose.ui.unit.Dp, onCancel: () -> Unit) {
     val p = LocalXssh.current
     val fraction = if (t.total > 0) (t.done.toFloat() / t.total).coerceIn(0f, 1f) else 0f
     Column(Modifier.fillMaxWidth().background(p.cardBg)) {
         Box(Modifier.fillMaxWidth().height(0.5.dp).background(p.border))
         Row(
-            Modifier.fillMaxWidth().height(56.dp).padding(start = 18.dp, end = 10.dp),
+            Modifier.fillMaxWidth().height(56.dp).padding(start = inset, end = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
@@ -1636,7 +1640,7 @@ private fun TransferBar(t: Transfer, onCancel: () -> Unit) {
 
 /** 一句提示,4 秒后自己消失。 */
 @Composable
-private fun NoticeBar(notice: Notice?) {
+private fun NoticeBar(notice: Notice?, inset: androidx.compose.ui.unit.Dp) {
     val p = LocalXssh.current
     var shown by remember { mutableStateOf<Notice?>(null) }
     LaunchedEffect(notice) {
@@ -1653,7 +1657,7 @@ private fun NoticeBar(notice: Notice?) {
     Column(Modifier.fillMaxWidth().background(p.cardBg)) {
         Box(Modifier.fillMaxWidth().height(0.5.dp).background(p.border))
         Row(
-            Modifier.fillMaxWidth().heightIn(min = 40.dp).padding(start = 18.dp, end = 10.dp),
+            Modifier.fillMaxWidth().heightIn(min = 40.dp).padding(start = inset, end = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
