@@ -222,11 +222,10 @@ fun ReadingPage(onBack: () -> Unit, content: @Composable ColumnScope.() -> Unit)
                 .windowInsetsPadding(stableSafeDrawing())
                 .bounce()
                 .verticalScroll(rememberScrollState())
-                // 版心:左右都是盒子线,和主机页、编辑页一样长(见 Components 的版心说明)。
-                // 轨道浮在右下角,内容从玻璃底下过;底部留够一整条轨道的高度,最后几行能滚到它上面看。
+                // 版心:左边盒子线,右边让开轨道(见 Components 的 railSide)。
                 .padding(
                     start = Gutter,
-                    end = Gutter,
+                    end = railSide(),
                     top = (if (topBar) TopBarHeight else 0.dp) + Gutter,
                     bottom = if (topBar) 40.dp else RailClearance,
                 ),

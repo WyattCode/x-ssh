@@ -339,7 +339,8 @@ fun HomeScreen(
                 // 在 860dp 高的屏幕上缩在左上角,七成空着。
                 columns = 1,
                 large = true,
-                creaseGap = Gutter,
+                // 单栏:右边让开轨道(卡片右端的 ⓘ 不被玻璃压住)。
+                creaseGap = railSide(),
                 underRail = true,
                 topPad = barPad,
                 bottomClearance = clearance,
@@ -915,8 +916,8 @@ private fun HostDetailPane(
         modifier
             .bounce()
             .verticalScroll(rememberScrollState())
-            // 版心:盒子线左右各一条(折痕这侧留 32dp,和左栏镜像);轨道浮在右下角,内容从玻璃底下过。
-            .padding(start = Gutter * 2, end = Gutter, top = Gutter, bottom = bottomClearance),
+            // 版心:折痕这侧留 32dp(和左栏镜像),右边让开轨道 —— 取值是右对齐的,不能被玻璃压住。
+            .padding(start = Gutter * 2, end = railSide(), top = Gutter, bottom = bottomClearance),
     ) {
         HostInfoBody(
             host = host,

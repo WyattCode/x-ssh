@@ -1066,7 +1066,7 @@ private fun PhoneFiles(
                     label = "fileDetail",
                 ) { entry ->
                     // 折叠屏的轨道浮在右栏右下角:按钮组整列让开轨道,别让「下载到…」「删除」压在玻璃底下。
-                    FileDetailPane(entry, bottomClearance = clearance, endPad = if (topBar) Gutter else Gutter * 2 + 56.dp, actions = actions)
+                    FileDetailPane(entry, bottomClearance = clearance, endPad = railSide(), actions = actions)
                 }
             }
         } else {
@@ -1076,7 +1076,8 @@ private fun PhoneFiles(
                     .layerBackdrop(backdrop)
                     .background(p.bg)
                     .windowInsetsPadding(insets.only(WindowInsetsSides.Top + WindowInsetsSides.End)),
-                Gutter,
+                // 单栏:右边让开轨道,文件大小这类右对齐的取值不被玻璃压住(见 railSide)。
+                railSide(),
             )
         }
 

@@ -215,7 +215,7 @@ fun HostEditorScreen(
           CompositionLocalProvider(LocalFieldClearance provides if (topBar) 0.dp else RailClearance) {
             Column(
                 // 标题线(见 Components 的版心说明):盒子线 + TitlePad。
-                Modifier.padding(start = startInset + Gutter + TitlePad, end = Gutter, top = Gutter),
+                Modifier.padding(start = startInset + Gutter + TitlePad, end = railSide(), top = Gutter),
             ) {
                 Text(
                     if (initial == null) "新建主机" else "编辑主机",
@@ -246,7 +246,7 @@ fun HostEditorScreen(
                         Column(
                             Modifier
                                 .widthIn(max = PageMaxWidth + Gutter * 3)
-                                .padding(start = Gutter * 2, end = Gutter),
+                                .padding(start = Gutter * 2, end = railSide()),
                             verticalArrangement = Arrangement.spacedBy(20.dp),
                         ) {
                             credentials()
@@ -263,7 +263,7 @@ fun HostEditorScreen(
                         .padding(start = startInset)
                         .widthIn(max = PageMaxWidth + Gutter * 2)
                         .fillMaxWidth()
-                        .padding(horizontal = Gutter),
+                        .padding(start = Gutter, end = railSide()),
                     verticalArrangement = Arrangement.spacedBy(20.dp),
                 ) {
                     target()

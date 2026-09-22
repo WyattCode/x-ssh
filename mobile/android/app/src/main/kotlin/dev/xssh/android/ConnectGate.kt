@@ -265,7 +265,7 @@ private fun GatePage(host: Host, content: GateContent, tablet: Boolean, onExit: 
                         .fillMaxHeight()
                         .bounce()
                         .verticalScroll(rememberScrollState())
-                        .padding(start = Gutter * 2, end = Gutter, top = Gutter, bottom = RailClearance),
+                        .padding(start = Gutter * 2, end = railSide(), top = Gutter, bottom = RailClearance),
                 ) {
                     Column(Modifier.widthIn(max = PageMaxWidth)) {
                         content.body(this)
@@ -283,10 +283,10 @@ private fun GatePage(host: Host, content: GateContent, tablet: Boolean, onExit: 
                     .windowInsetsPadding(insets.only(WindowInsetsSides.Vertical + WindowInsetsSides.End))
                     .bounce()
                     .verticalScroll(rememberScrollState())
-                    // 版心:左右都是盒子线,和主机页、编辑页、详情页一样长。
+                    // 版心:左边盒子线,右边让开轨道。
                     .padding(
                         start = startInset + Gutter,
-                        end = Gutter,
+                        end = railSide(),
                         top = (if (topBar) TopBarHeight else 0.dp) + Gutter,
                         bottom = if (topBar) 40.dp else RailClearance,
                     ),
