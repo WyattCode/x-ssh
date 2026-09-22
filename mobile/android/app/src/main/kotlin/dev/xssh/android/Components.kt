@@ -204,9 +204,10 @@ fun BoxScope.PinnedActions(
     start: Dp = Gutter,
     end: Dp = railSide(),
     bottom: Dp = Gutter,
+    /** 页面自己的底色 —— 条子要和它一个颜色,否则渐变尽头会露出一条色带(分组页用 groupedBg)。 */
+    background: Color = LocalXssh.current.bg,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    val p = LocalXssh.current
     val density = LocalDensity.current
     Column(
         modifier
@@ -217,12 +218,12 @@ fun BoxScope.PinnedActions(
             Modifier
                 .fillMaxWidth()
                 .height(28.dp)
-                .background(Brush.verticalGradient(listOf(Color.Transparent, p.bg))),
+                .background(Brush.verticalGradient(listOf(Color.Transparent, background))),
         )
         Column(
             Modifier
                 .fillMaxWidth()
-                .background(p.bg)
+                .background(background)
                 .padding(start = start, end = end, bottom = bottom),
             content = content,
         )

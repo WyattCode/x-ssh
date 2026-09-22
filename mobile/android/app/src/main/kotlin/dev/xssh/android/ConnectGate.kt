@@ -313,7 +313,11 @@ private fun GatePage(host: Host, content: GateContent, tablet: Boolean, onExit: 
                     .fillMaxSize()
                     .windowInsetsPadding(insets.only(WindowInsetsSides.Vertical + WindowInsetsSides.End)),
             ) {
-                PinnedActions(onHeight = { actionsHeight = it }, start = startInset + Gutter) {
+                PinnedActions(
+                    onHeight = { actionsHeight = it },
+                    start = startInset + Gutter,
+                    background = p.groupedBg,
+                ) {
                     Column(Modifier.widthIn(max = PageMaxWidth)) { content.actions(true) }
                 }
             }
