@@ -1,5 +1,11 @@
 package dev.xssh.android
 
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.core.animateTo
+import androidx.compose.animation.core.AnimationState
 import androidx.compose.ui.Alignment
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.slideInVertically
@@ -69,6 +75,22 @@ object Motion {
         slideOutVertically(tween(220, easing = imeHide)) { it } +
             shrinkVertically(tween(220, easing = imeHide), shrinkTowards = Alignment.Top)
 
+    /**
+     * 轨道 / 工具栏上的按钮出现、消失(「回到底部」、连上之后的「文件」…)。
+     *
+     * 原来是直接出现在那儿:胶囊"砰"地长高一截,手指正要按的按钮瞬间换了位置。
+     * 现在长出来的同时淡入、从 80% 放大到原大(和按下时的回弹同一种语气),消失反过来。
+     * 竖轨道用 [chipIn] / [chipOut],横着的工具栏用 [chipInRow] / [chipOutRow]。
+     */
+    val chipIn: EnterTransition = expandVertically(snappy(), expandFrom = Alignment.Bottom) +
+        fadeIn(snappy()) + scaleIn(snappy(), initialScale = 0.8f)
+    val chipOut: ExitTransition = shrinkVertically(snappy(), shrinkTowards = Alignment.Bottom) +
+        fadeOut(snappy()) + scaleOut(snappy(), targetScale = 0.8f)
+    val chipInRow: EnterTransition = expandHorizontally(snappy(), expandFrom = Alignment.End) +
+        fadeIn(snappy()) + scaleIn(snappy(), initialScale = 0.8f)
+    val chipOutRow: ExitTransition = shrinkHorizontally(snappy(), shrinkTowards = Alignment.End) +
+        fadeOut(snappy()) + scaleOut(snappy(), targetScale = 0.8f)
+
     /** 页面里一块内容出现:从上往下展开 + 淡入。 */
     val revealIn: EnterTransition = expandVertically(reveal()) + fadeIn(reveal())
     val revealOut: ExitTransition = shrinkVertically(reveal()) + fadeOut(reveal())
@@ -105,6 +127,15 @@ private class Bounce(private val limit: Float) : NestedScrollConnection {
     /** 越过边缘的原始距离(阻尼前)。 */
     private var pulled = 0f
 
+    /**
+     * 手指又按上来了:回弹动画必须立刻停。
+     *
+     * 不停的话,弹簧和手指会同时改 [shown] —— 弹簧刚把它拉回 0,这里又按"当前位移"重新算出一个
+     * [pulled],于是每一个触摸事件都被当成"先把橡皮筋收回来"吃掉,整段滑动一动不动
+     * (实测:到顶回弹之后紧接着滑 700px,画面只走了 10px)。
+     */
+    private var grabbed = false
+
     // iOS UIScrollView 的阻尼曲线:越拉越沉,永远到不了 limit。
     private fun damp(x: Float): Float = sign(x) * (1f - 1f / (abs(x) * 0.55f / limit + 1f)) * limit
 
@@ -114,6 +145,9 @@ private class Bounce(private val limit: Float) : NestedScrollConnection {
     }
 
     override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+        if (source == NestedScrollSource.UserInput) grabbed = true
+        // 弹簧的尾巴:差不到半个像素就当作已经回到位,别让浮点残渣再把橡皮筋"拉出来"。
+        if (abs(shown) < 0.5f && pulled == 0f) shown = 0f
         // 回弹途中又被按住:从当前位置接手,不跳。
         if (pulled == 0f && shown != 0f) pulled = undamp(shown)
         // 已经拉出去了、手指往回走:先把拉出去的收回来,剩下的才去滚内容。
@@ -134,6 +168,7 @@ private class Bounce(private val limit: Float) : NestedScrollConnection {
     }
 
     override suspend fun onPreFling(available: Velocity): Velocity {
+        grabbed = false
         if (shown == 0f) return Velocity.Zero
         // 拉着松手:内容不再惯性滚动,直接弹回。
         settle(available.y)
@@ -141,6 +176,7 @@ private class Bounce(private val limit: Float) : NestedScrollConnection {
     }
 
     override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
+        grabbed = false
         // 甩到头还剩速度:冲出去一小段再弹回。
         if (abs(available.y) > 50f) settle(available.y.coerceIn(-6000f, 6000f))
         return available
@@ -149,12 +185,22 @@ private class Bounce(private val limit: Float) : NestedScrollConnection {
     private suspend fun settle(v: Float) {
         pulled = 0f
         try {
-            animate(shown, 0f, v, spring(dampingRatio = 1f, stiffness = 260f)) { value, _ ->
+            AnimationState(shown, v).animateTo(0f, spring(dampingRatio = 1f, stiffness = 260f)) {
+                // 手指又按上来了:立刻撒手,后面归拖动管(见 [grabbed])。
+                if (grabbed) {
+                    cancelAnimation()
+                    return@animateTo
+                }
                 shown = value.coerceIn(-limit, limit)
             }
         } finally {
             // 被新的拖动打断时停在原地,由 onPreScroll 从当前位置接手。
-            if (shown != 0f) pulled = undamp(shown)
+            pulled = if (abs(shown) < 0.5f) {
+                shown = 0f
+                0f
+            } else {
+                undamp(shown)
+            }
         }
     }
 }

@@ -149,6 +149,21 @@ enum class ThemeMode(val label: String) {
     Light("浅色"),
     Dark("深色"),
     System("跟随系统"),
+    ;
+
+    /** 点一下切到下一个(不弹窗)。 */
+    fun next(): ThemeMode = when (this) {
+        System -> Light
+        Light -> Dark
+        Dark -> System
+    }
+
+    val icon: androidx.compose.ui.graphics.vector.ImageVector
+        get() = when (this) {
+            Light -> XIcons.Sun
+            Dark -> XIcons.Moon
+            System -> XIcons.Auto
+        }
 }
 
 /** 当前外观模式和切换它的入口(主机页轨道上的主题按钮用)。 */

@@ -280,12 +280,17 @@ fun HostEditorScreen(
             TopBar(
                 Modifier.align(Alignment.TopCenter),
                 start = { GlassButton(XIcons.Back, "返回") { onBack() } },
-                end = { GlassButton(XIcons.Check, "保存") { save() } },
+                end = {
+                    GlassGroup { ThemeGlassItem() }
+                    GlassButton(XIcons.Check, "保存") { save() }
+                },
             )
         } else {
             // 和主机页的 ⌕ ＋ 落在同一对位置上:点 ＋ 进来,按钮原地换成 ‹ ✓,一像素不动。
             CompositionLocalProvider(LocalBackdrop provides backdrop) {
                 EdgeRail(Modifier.align(Alignment.BottomEnd)) {
+                    // 外观在最上面(每一页都有,位置一样);‹ ✓ 的落点一像素不动。
+                    GlassGroup { ThemeGlassItem() }
                     GlassButton(XIcons.Back, "返回") { onBack() }
                     // 和 ‹ 同一种样式:无色玻璃、正文色图标。
                     GlassButton(XIcons.Check, "保存") { save() }

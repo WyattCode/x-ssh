@@ -1086,7 +1086,10 @@ private fun PhoneFiles(
                 // 双栏(横屏)省高度:按钮浮在上面,不铺底色(同主机页)。
                 solid = !twoPane,
                 start = { GlassButton(XIcons.Back, "返回") { onBack() } },
-                end = { railActions() },
+                end = {
+                    GlassGroup { ThemeGlassItem() }
+                    railActions()
+                },
             )
         } else {
             CompositionLocalProvider(LocalBackdrop provides backdrop) {
@@ -1096,6 +1099,8 @@ private fun PhoneFiles(
                 // 一路点 ‹ 往回退,退出文件页的那一下之后,下一下就落在 ✕ 上 —— 实测把会话断掉了。
                 // 现在连点 ‹ 落到终端页的是 ⌘(开关快捷键栏),无害。
                 EdgeRail(Modifier.align(Alignment.BottomEnd).padding(bottom = barsDp)) {
+                    // 外观在最上面(每一页都有,位置一样)。
+                    GlassGroup { ThemeGlassItem() }
                     GlassButton(XIcons.Back, "返回") { onBack() }
                     railActions()
                 }

@@ -1,5 +1,6 @@
 package dev.xssh.android
 
+import androidx.compose.animation.AnimatedVisibility
 import android.os.Build
 import android.hardware.display.DisplayManager
 import androidx.compose.runtime.DisposableEffect
@@ -609,6 +610,36 @@ fun GlassGroup(content: @Composable () -> Unit) {
             horizontalAlignment = Alignment.CenterHorizontally,
         ) { content() }
     }
+}
+
+/**
+ * 外观(跟随系统 → 浅色 → 深色)。**每一页的轨道 / 顶栏最上面都有它** ——
+ * 用户在终端里看着输出想换个深浅色,不该先退回主机页。
+ */
+@Composable
+fun ThemeGlassItem() {
+    val theme = LocalThemeControl.current
+    GlassItem(theme.mode.icon, "外观:${theme.mode.label}") { theme.onChange(theme.mode.next()) }
+}
+
+/**
+ * 会来会去的按钮(「回到底部」、连上才有的「文件」)统一的出现 / 消失动效。
+ * 竖轨道里往上长,顶栏(横着排)里往右长 —— 按 [LocalGlassRow] 自己选,调用方不用管。
+ */
+@Composable
+fun GlassReveal(visible: Boolean, content: @Composable () -> Unit) {
+    val row = LocalGlassRow.current
+    AnimatedVisibility(
+        visible,
+        enter = if (row) Motion.chipInRow else Motion.chipIn,
+        exit = if (row) Motion.chipOutRow else Motion.chipOut,
+    ) { content() }
+}
+
+/** 横着的工具栏(平板、直板机顶栏)上同样的东西。 */
+@Composable
+fun GlassRevealRow(visible: Boolean, content: @Composable () -> Unit) {
+    AnimatedVisibility(visible, enter = Motion.chipInRow, exit = Motion.chipOutRow) { content() }
 }
 
 /** 胶囊里的一个按钮:按下时图标弹一下、按下的位置亮起。 */

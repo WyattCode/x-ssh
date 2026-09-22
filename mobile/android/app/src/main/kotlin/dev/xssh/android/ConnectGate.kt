@@ -302,10 +302,17 @@ private fun GatePage(host: Host, content: GateContent, tablet: Boolean, onExit: 
             }
         }
         if (topBar) {
-            TopBar(Modifier.align(Alignment.TopCenter), start = { GlassButton(XIcons.Back, "返回") { onExit() } })
+            TopBar(
+                Modifier.align(Alignment.TopCenter),
+                start = { GlassButton(XIcons.Back, "返回") { onExit() } },
+                end = { GlassGroup { ThemeGlassItem() } },
+            )
         } else {
             CompositionLocalProvider(LocalBackdrop provides backdrop) {
-                EdgeRail(Modifier.align(Alignment.BottomEnd)) { GlassButton(XIcons.Back, "返回") { onExit() } }
+                EdgeRail(Modifier.align(Alignment.BottomEnd)) {
+                    GlassGroup { ThemeGlassItem() }
+                    GlassButton(XIcons.Back, "返回") { onExit() }
+                }
             }
         }
     }

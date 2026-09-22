@@ -243,11 +243,19 @@ fun ReadingPage(onBack: () -> Unit, content: @Composable ColumnScope.() -> Unit)
                 ),
             content = content,
         )
+        // 外观在最上面:每一页都有,位置一样(见 ThemeGlassItem)。
         if (topBar) {
-            TopBar(Modifier.align(Alignment.TopCenter), start = { GlassButton(XIcons.Back, "返回") { onBack() } })
+            TopBar(
+                Modifier.align(Alignment.TopCenter),
+                start = { GlassButton(XIcons.Back, "返回") { onBack() } },
+                end = { GlassGroup { ThemeGlassItem() } },
+            )
         } else {
             CompositionLocalProvider(LocalBackdrop provides backdrop) {
-                EdgeRail(Modifier.align(Alignment.BottomEnd)) { GlassButton(XIcons.Back, "返回") { onBack() } }
+                EdgeRail(Modifier.align(Alignment.BottomEnd)) {
+                    GlassGroup { ThemeGlassItem() }
+                    GlassButton(XIcons.Back, "返回") { onBack() }
+                }
             }
         }
     }

@@ -737,13 +737,21 @@ private fun TerminalView(
 
     // 和主机页、编辑页同一条右侧竖轨道、同一个位置(见 EdgeRail),悬浮在终端上面。
     val actions: @Composable () -> Unit = {
+        // 外观:每一页都有,在最上面 —— 看着满屏输出想换个深浅色,不用先退回主机页。
+        // 键盘弹起来时先收走:外屏只有 623dp 高,键盘占掉一半,轨道再多一颗就顶到状态栏上去了。
+        // 正在打字的人也不会同时想换深浅色;收起键盘它自己长回来。
+        @OptIn(ExperimentalLayoutApi::class)
+        val imeUp = WindowInsets.isImeVisible
+        GlassReveal(!imeUp) { GlassGroup { ThemeGlassItem() } }
         // 文件(SFTP):单独一颗,在输入那枚胶囊上面 —— 它是"换一页",不是输入。
-        if (onFiles != null && !dead) GlassButton(XIcons.Folder, "文件") { onFiles() }
+        // 断开之后它会消失,所以长出来 / 收回去都带动效(见 GlassReveal)。
+        GlassReveal(onFiles != null && !dead) { GlassButton(XIcons.Folder, "文件") { onFiles?.invoke() } }
         // 输入相关的操作装进同一枚胶囊:键盘常驻在下(和主机页的搜索同一个位置),
         // 快捷键面板的开关在它上面(开着时图标变蓝);回到底部只在翻历史时出现,加在最上面 ——
         // 胶囊往上长,键盘不动。
         GlassGroup {
-            if (frame.scrollOffset > 0) {
+            // 翻历史时才有:胶囊往上长出这一颗,不是凭空"砰"地出现。
+            GlassReveal(frame.scrollOffset > 0) {
                 GlassItem(XIcons.ArrowDown, "回到底部") {
                     live.scrollToBottom()
                 }
@@ -785,11 +793,13 @@ private fun TerminalView(
                 subtitle = if (dead) "已断开" else host.subtitle,
                 dot = if (dead) p.danger else p.ok,
             ) {
-                if (!dead) {
-                    PaneSwitch(files = false) { if (it) tablet.onShowFiles() }
-                    Spacer(Modifier.width(8.dp))
+                GlassRevealRow(!dead) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        PaneSwitch(files = false) { if (it) tablet.onShowFiles() }
+                        Spacer(Modifier.width(8.dp))
+                    }
                 }
-                if (frame.scrollOffset > 0) {
+                GlassRevealRow(frame.scrollOffset > 0) {
                     ToolbarIcon(XIcons.ArrowDown, "回到底部") { live.scrollToBottom() }
                 }
                 ToolbarIcon(

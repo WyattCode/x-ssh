@@ -346,27 +346,11 @@ fun HomeScreen(
             )
         }
 
-        val theme = LocalThemeControl.current
         // 外观、字体、搜索都是"怎么看"的操作,装进同一枚胶囊。
         // 外观点一下切到下一个模式(跟随系统 → 浅色 → 深色 → …),不弹窗;字体要挑,推一页出来。
         val viewActions: @Composable () -> Unit = {
             GlassGroup {
-                GlassItem(
-                    when (theme.mode) {
-                        ThemeMode.Light -> XIcons.Sun
-                        ThemeMode.Dark -> XIcons.Moon
-                        ThemeMode.System -> XIcons.Auto
-                    },
-                    "外观:${theme.mode.label}",
-                ) {
-                    theme.onChange(
-                        when (theme.mode) {
-                            ThemeMode.System -> ThemeMode.Light
-                            ThemeMode.Light -> ThemeMode.Dark
-                            ThemeMode.Dark -> ThemeMode.System
-                        },
-                    )
-                }
+                ThemeGlassItem()
                 GlassItem(XIcons.Font, "终端字体") { onFonts() }
                 // 一台主机都没有时不摆搜索 —— 没东西可搜。
                 if (hosts.isNotEmpty()) {

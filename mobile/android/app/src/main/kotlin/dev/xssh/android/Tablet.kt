@@ -650,22 +650,7 @@ private fun Sidebar(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text("X-SSH", color = p.text, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-            ToolbarIcon(
-                when (theme.mode) {
-                    ThemeMode.Light -> XIcons.Sun
-                    ThemeMode.Dark -> XIcons.Moon
-                    ThemeMode.System -> XIcons.Auto
-                },
-                "外观:${theme.mode.label}",
-            ) {
-                theme.onChange(
-                    when (theme.mode) {
-                        ThemeMode.System -> ThemeMode.Light
-                        ThemeMode.Light -> ThemeMode.Dark
-                        ThemeMode.Dark -> ThemeMode.System
-                    },
-                )
-            }
+            ToolbarIcon(theme.mode.icon, "外观:${theme.mode.label}") { theme.onChange(theme.mode.next()) }
             ToolbarIcon(XIcons.Font, "终端字体") { onFonts() }
             ToolbarIcon(XIcons.Plus, "新建主机  Ctrl+N") { onNew() }
         }
@@ -1005,6 +990,11 @@ fun TabletToolbar(
                 XIcons.Sidebar,
                 if (sidebarVisible) "隐藏侧边栏  Ctrl+Shift+S" else "显示侧边栏  Ctrl+Shift+S",
             ) { onToggleSidebar() }
+            // 外观按钮平时在侧边栏标题行;侧边栏收起来时挪到这里 —— 任何时候都能换深浅色。
+            val theme = LocalThemeControl.current
+            GlassRevealRow(!sidebarVisible) {
+                ToolbarIcon(theme.mode.icon, "外观:${theme.mode.label}") { theme.onChange(theme.mode.next()) }
+            }
             Spacer(Modifier.width(6.dp))
             if (dot != null) {
                 StatusDot(dot)
