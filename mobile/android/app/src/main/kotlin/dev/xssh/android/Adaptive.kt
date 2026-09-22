@@ -167,15 +167,31 @@ fun Adaptive.listPaneWidth(totalDp: Dp): Dp {
  * - [TopBar]:直板机和平板 —— 回到安卓的惯例:顶栏放返回和页面操作,主操作(＋)是右下角的悬浮按钮。
  *   直板机只有一种形态,右侧竖轨道只会白白占掉一条宽度,终端按键也被挤窄。
  *
- * 视觉(Liquid Glass、配色、卡片)两种模式完全一样,变的只是按钮的位置。
+ * - [Tablet]:平板 —— 不是换个按钮位置,是**另一套交互**(见 Tablet.kt):侧边栏常驻、终端在右栏打开、
+ *   新建 / 编辑是居中浮层、工具栏在内容顶上、鼠标悬停 / 右键菜单 / 键盘快捷键齐全。
+ *   窗口被缩到 600dp 以下(小窗、窄分屏)时退回手机那套页面,此时按 [TopBar] 摆按钮。
+ *
+ * 前两种视觉(Liquid Glass、配色、卡片)完全一样,变的只是按钮的位置。
  */
-enum class Chrome { Rail, TopBar }
+enum class Chrome { Rail, TopBar, Tablet }
 
 val LocalChrome = staticCompositionLocalOf { Chrome.Rail }
 
-/** 有铰链角度传感器,或者曾经量到过竖直折痕,就是折叠屏。 */
+/**
+ * 有铰链角度传感器,或者曾经量到过竖直折痕,就是折叠屏;
+ * 否则**整块屏幕**最短边 ≥ 600dp 就是平板(看屏幕不看窗口:平板开小窗时窗口很窄,但它仍是平板)。
+ */
 fun detectChrome(context: Context): Chrome {
     val hinge = context.packageManager.hasSystemFeature(PackageManager.FEATURE_SENSOR_HINGE_ANGLE) ||
         context.getSystemService(SensorManager::class.java)?.getDefaultSensor(Sensor.TYPE_HINGE_ANGLE) != null
-    return if (hinge || UiPrefs(context).everSawFold()) Chrome.Rail else Chrome.TopBar
+    if (hinge || UiPrefs(context).everSawFold()) return Chrome.Rail
+    val density = context.resources.displayMetrics.density
+    val shortestDp = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+        context.getSystemService(android.view.WindowManager::class.java)?.maximumWindowMetrics?.bounds
+            ?.let { minOf(it.width(), it.height()) / density } ?: 0f
+    } else {
+        // Android 11 以前没有 maximumWindowMetrics;那时还没有平板小窗,配置里的最短边就是屏幕的。
+        context.resources.configuration.smallestScreenWidthDp.toFloat()
+    }
+    return if (shortestDp >= 600f) Chrome.Tablet else Chrome.TopBar
 }

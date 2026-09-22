@@ -28,6 +28,16 @@ const val TAG = "xssh"
 /** 一帧的结果:连接是否还在、屏幕内容有没有变过。 */
 data class Pumped(val alive: Boolean, val changed: Boolean)
 
+/** 从核心取回的一帧画面。 */
+data class Snapshot(
+    val rows: List<ScreenRow>,
+    val cursor: uniffi.xssh_ffi.CursorState,
+    val scrollOffset: Int,
+    val modes: uniffi.xssh_ffi.InputModes,
+    /** 选区在视口里的范围(核心记在网格坐标上,新输出滚上来时跟着内容走)。 */
+    val selection: uniffi.xssh_ffi.ViewSelection?,
+)
+
 /** 一条活动会话:SSH 连接 + 通道 + 终端状态机。所有方法都必须在 IO 线程调用。 */
 class LiveTerminal(
     val session: Session,
@@ -69,12 +79,52 @@ class LiveTerminal(
         }
     }
 
-    /** 当前画面(样式段 + 光标 + 回滚偏移)。关闭后返回 null。 */
-    fun snapshot(): Triple<List<ScreenRow>, uniffi.xssh_ffi.CursorState, Int>? {
+    /** 当前画面(样式段 + 光标 + 回滚偏移 + 输入模式)。关闭后返回 null。 */
+    fun snapshot(): Snapshot? {
         if (closed) return null
         return runCatching {
-            Triple(term.rows(), term.cursor(), term.scrollOffset().toInt())
+            Snapshot(term.rows(), term.cursor(), term.scrollOffset().toInt(), term.inputModes(), term.viewSelection())
         }.getOrNull()
+    }
+
+    /**
+     * 滚轮 / 双指滑动 [lines] 行(正数 = 往上看更早的内容),[col]/[row] 是指针所在的格子。
+     * 全屏程序要的是按键或鼠标事件,普通 shell 才翻本地的回滚缓冲(见 [KeyEncoder.wheel])。
+     */
+    fun wheel(lines: Int, col: Int, row: Int) {
+        if (closed) return
+        val modes = runCatching { term.inputModes() }.getOrNull() ?: return
+        val bytes = KeyEncoder.wheel(lines, col, row, modes)
+        if (bytes == null) scroll(lines) else sendRaw(bytes.toByteArray())
+    }
+
+    /** 开始选择(视口坐标)。 */
+    fun selectStart(row: Int, col: Int, rightHalf: Boolean, kind: uniffi.xssh_ffi.SelectKind) {
+        if (closed) return
+        runCatching { term.selectStart(row.toUInt(), col.toUInt(), rightHalf, kind) }
+        dirty = true
+    }
+
+    fun selectUpdate(row: Int, col: Int, rightHalf: Boolean) {
+        if (closed) return
+        runCatching { term.selectUpdate(row.toUInt(), col.toUInt(), rightHalf) }
+        dirty = true
+    }
+
+    fun selectClear() {
+        if (closed) return
+        runCatching { term.selectClear() }
+        dirty = true
+    }
+
+    /** 选中的文字;没选时为 null。 */
+    fun selectionText(): String? = if (closed) null else runCatching { term.selectionText() }.getOrNull()
+
+    /** 粘贴一段文字(开了括号粘贴的程序会收到包好的整段)。 */
+    fun paste(text: String) {
+        if (closed || text.isEmpty()) return
+        val modes = runCatching { term.inputModes() }.getOrNull() ?: DefaultInputModes
+        sendRaw(KeyEncoder.paste(text, modes).toByteArray())
     }
 
     private fun pumpOnce(): Pumped {
@@ -210,7 +260,12 @@ class LiveTerminal(
 fun connectHost(host: Host, cols: Int = 80, rows: Int = 24): LiveTerminal {
     val auth = when (host.auth) {
         AuthKind.PASSWORD -> AuthMethod.Password(host.password)
-        AuthKind.KEY -> AuthMethod.KeyFile(host.keyPath, null)
+        // 导入的私钥:解密后的文本只在内存里交给核心;老数据 / 调试用的私钥文件路径照旧。
+        AuthKind.KEY -> if (host.keyData.isNotEmpty()) {
+            AuthMethod.KeyData(host.keyData, host.keyPassphrase.ifEmpty { null })
+        } else {
+            AuthMethod.KeyFile(host.keyPath, host.keyPassphrase.ifEmpty { null })
+        }
     }
     val config = HostConfig(
         host.address,

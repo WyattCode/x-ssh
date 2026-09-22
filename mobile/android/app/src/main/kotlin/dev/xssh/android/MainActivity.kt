@@ -15,6 +15,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -22,10 +23,45 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.unit.dp
+import android.view.KeyEvent
+import android.view.KeyboardShortcutGroup
+import android.view.KeyboardShortcutInfo
+import android.view.Menu
 
 class MainActivity : ComponentActivity() {
+    /**
+     * 系统的键盘快捷键面板(按住 Meta 或 Meta+/)里列出本应用的快捷键 ——
+     * 快捷键要"找得到",不能只写在代码里(HIG:键盘快捷键的可发现性)。
+     */
+    override fun onProvideKeyboardShortcuts(data: MutableList<KeyboardShortcutGroup>, menu: Menu?, deviceId: Int) {
+        super.onProvideKeyboardShortcuts(data, menu, deviceId)
+        val ctrlShift = KeyEvent.META_CTRL_ON or KeyEvent.META_SHIFT_ON
+        data += KeyboardShortcutGroup(
+            "X-SSH",
+            listOf(
+                KeyboardShortcutInfo("新建主机", KeyEvent.KEYCODE_N, ctrlShift),
+                KeyboardShortcutInfo("搜索主机", KeyEvent.KEYCODE_F, ctrlShift),
+                KeyboardShortcutInfo("编辑主机", KeyEvent.KEYCODE_E, ctrlShift),
+                KeyboardShortcutInfo("显示 / 隐藏侧边栏", KeyEvent.KEYCODE_S, ctrlShift),
+                KeyboardShortcutInfo("下一个会话", KeyEvent.KEYCODE_TAB, KeyEvent.META_CTRL_ON),
+                KeyboardShortcutInfo("上一个会话", KeyEvent.KEYCODE_TAB, ctrlShift),
+                KeyboardShortcutInfo("断开当前会话", KeyEvent.KEYCODE_W, ctrlShift),
+                KeyboardShortcutInfo("切换终端 / 文件", KeyEvent.KEYCODE_O, ctrlShift),
+                KeyboardShortcutInfo("粘贴到终端", KeyEvent.KEYCODE_V, ctrlShift),
+                KeyboardShortcutInfo("终端里切换输入法 / 英文直通", KeyEvent.KEYCODE_SPACE, ctrlShift),
+                KeyboardShortcutInfo("放大字号", KeyEvent.KEYCODE_EQUALS, ctrlShift),
+                KeyboardShortcutInfo("缩小字号", KeyEvent.KEYCODE_MINUS, ctrlShift),
+            ),
+        )
+    }
+
     override fun onStart() {
         super.onStart()
         AppVisibility.onStart()
@@ -38,6 +74,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        XsshFonts.init(this)
         // 调试录制只在可调试的包里可用(还要有 files/record 标记文件才真的录)。
         if (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0) {
             DebugRecorder.dir = filesDir
@@ -121,6 +158,19 @@ sealed interface Screen {
     data object Home : Screen
     data class Editor(val host: Host?) : Screen
     data class Terminal(val host: Host) : Screen
+
+    /** 某条连接的文件页(从终端推进来,返回回到终端)。 */
+    data class Files(val host: Host) : Screen
+}
+
+/** 返回回到哪一页:文件页回它的终端,其余回主机页。 */
+private fun Screen.parent(): Screen = if (this is Screen.Files) Screen.Terminal(host) else Screen.Home
+
+/** 页面的层级:往深处走是"推入",往浅处走是"退出"(决定页面从哪边滑)。 */
+private fun Screen.depth(): Int = when (this) {
+    Screen.Home -> 0
+    is Screen.Editor, is Screen.Terminal -> 1
+    is Screen.Files -> 2
 }
 
 /**
@@ -171,6 +221,76 @@ fun App(devTarget: DevTarget? = null) {
         store.save(list)
     }
 
+    // 平板:窗口够宽(≥ 600dp)就是平板那一整套交互;小窗、窄分屏缩到手机宽度时退回手机的页面,
+    // 按钮按直板机的顶栏摆。两套共用上面这些状态,窗口来回缩放时正在看的东西不丢。
+    val chrome = LocalChrome.current
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        if (chrome == Chrome.Tablet && maxWidth >= 600.dp) {
+            TabletApp(
+                hosts = hosts,
+                selectedId = selectedId,
+                onSelect = { selectedId = it },
+                termHostId = termHostId?.takeIf { id -> hosts.any { it.id == id } },
+                onOpenTerminal = { termHostId = it.id },
+                onCloseTerminal = { termHostId = null },
+                onSave = { host ->
+                    val list = hosts.toMutableList()
+                    val index = list.indexOfFirst { it.id == host.id }
+                    if (index >= 0) list[index] = host else list.add(host)
+                    persist(list)
+                    selectedId = host.id
+                },
+                onDelete = { host ->
+                    persist(hosts.filterNot { it.id == host.id })
+                    if (selectedId == host.id) selectedId = null
+                    if (termHostId == host.id) termHostId = null
+                },
+                onTrustKey = { host, fingerprint ->
+                    // 换一个 Host 实例 → 终端的 remember(host) 失效 → 带着新指纹重连。
+                    persist(hosts.map { if (it.id == host.id) it.copy(keyFingerprint = fingerprint) else it })
+                },
+            )
+        } else {
+            CompositionLocalProvider(
+                LocalChrome provides if (chrome == Chrome.Tablet) Chrome.TopBar else chrome,
+            ) {
+                // 从平板布局缩进来:右栏开着终端就接着显示它,否则回主机页。
+                LaunchedEffect(Unit) {
+                    val open = termHostId?.let { id -> hosts.firstOrNull { it.id == id } }
+                    screen = when {
+                        open != null -> Screen.Terminal(open)
+                        screen is Screen.Terminal -> Screen.Home
+                        else -> screen
+                    }
+                }
+                PhoneFlow(
+                    screen = screen,
+                    onScreen = { screen = it },
+                    hosts = hosts,
+                    selectedId = selectedId,
+                    onSelect = { selectedId = it },
+                    onTerminalHost = { termHostId = it },
+                    persist = ::persist,
+                )
+            }
+        }
+    }
+}
+
+/** 手机 / 折叠屏(以及缩成手机宽度的平板小窗)的页面流:主机页 → 终端 / 编辑页,整页推入。 */
+@Composable
+private fun PhoneFlow(
+    screen: Screen,
+    onScreen: (Screen) -> Unit,
+    hosts: List<Host>,
+    selectedId: String?,
+    onSelect: (String?) -> Unit,
+    onTerminalHost: (String?) -> Unit,
+    persist: (List<Host>) -> Unit,
+) {
+    // 返回手势的协程里要读"现在"是哪一屏,不是开始拖动那一刻的参数值。
+    val currentScreen by rememberUpdatedState(screen)
+
     // 页面切换:iOS 的导航推入 —— 进编辑页 / 终端从右边推进来,返回主机页时滑出去。
     // 用可拖动的过渡:返回手势拉到一半,页面就停在一半,跟着手指走;松手才决定回不回去。
     val seek = remember { SeekableTransitionState(screen) }
@@ -183,6 +303,7 @@ fun App(devTarget: DevTarget? = null) {
     }
     PredictiveBackHandler(enabled = screen != Screen.Home) { gesture ->
         dragging.value = true
+        val target = currentScreen.parent()
         try {
             // 用手指的实际位置算进度,不用系统给的 progress:那个值带缓动,
             // 在这台机器上拉到屏幕三分之一就到 0.95,页面早早滑完,不再跟手。
@@ -190,13 +311,15 @@ fun App(devTarget: DevTarget? = null) {
             gesture.collect { event ->
                 if (startX.isNaN()) startX = event.touchX
                 val width = windowInfo.containerSize.width.coerceAtLeast(1)
-                seek.seekTo(((event.touchX - startX) / width).coerceIn(0f, 1f), Screen.Home)
+                seek.seekTo(((event.touchX - startX) / width).coerceIn(0f, 1f), target)
             }
             // 松手:从手指停下的位置接着滑完。
-            seek.animateTo(Screen.Home, Motion.page())
+            seek.animateTo(target, Motion.page())
             // 返回只是离开这一屏,会话照跑(主机页会显示「运行中」)。
-            termHostId = null
-            screen = Screen.Home
+            if (target == Screen.Home) onTerminalHost(null)
+            onScreen(target)
+            // 页面已经停在目标上了,之后的推入 / 退出恢复成弹簧曲线。
+            dragging.value = false
         } catch (e: CancellationException) {
             // 手势取消(拉了一半又放回去):弹回原页。
             scope.launch {
@@ -205,7 +328,7 @@ fun App(devTarget: DevTarget? = null) {
             }
             throw e
         } finally {
-            if (screen == Screen.Home) dragging.value = false
+            if (currentScreen == target) dragging.value = false
         }
     }
 
@@ -214,42 +337,42 @@ fun App(devTarget: DevTarget? = null) {
         is Screen.Home -> HomeScreen(
             hosts = hosts,
             selectedId = selectedId,
-            onSelect = { selectedId = it.id },
+            onSelect = { onSelect(it.id) },
             onConnect = {
-                termHostId = it.id
-                screen = Screen.Terminal(it)
+                onTerminalHost(it.id)
+                onScreen(Screen.Terminal(it))
             },
-            onNew = { screen = Screen.Editor(null) },
-            onEdit = { screen = Screen.Editor(it) },
+            onNew = { onScreen(Screen.Editor(null)) },
+            onEdit = { onScreen(Screen.Editor(it)) },
             onDelete = { host ->
                 persist(hosts.filterNot { it.id == host.id })
-                if (selectedId == host.id) selectedId = null
+                if (selectedId == host.id) onSelect(null)
             },
         )
 
         is Screen.Editor -> HostEditorScreen(
             initial = current.host,
-            onBack = { screen = Screen.Home },
+            onBack = { onScreen(Screen.Home) },
             onSave = { host ->
                 val list = hosts.toMutableList()
                 val index = list.indexOfFirst { it.id == host.id }
                 if (index >= 0) list[index] = host else list.add(host)
                 persist(list)
-                selectedId = host.id
-                screen = Screen.Home
+                onSelect(host.id)
+                onScreen(Screen.Home)
             },
             onDelete = { host ->
                 persist(hosts.filterNot { it.id == host.id })
-                if (selectedId == host.id) selectedId = null
-                screen = Screen.Home
+                if (selectedId == host.id) onSelect(null)
+                onScreen(Screen.Home)
             },
         )
 
         is Screen.Terminal -> TerminalScreen(
             host = current.host,
             onExit = {
-                termHostId = null
-                screen = Screen.Home
+                onTerminalHost(null)
+                onScreen(Screen.Home)
             },
             onTrustKey = { fingerprint ->
                 // 换一个 Host 实例 → 终端屏的 remember(host) 失效 → 带着新指纹重连。
@@ -257,9 +380,28 @@ fun App(devTarget: DevTarget? = null) {
                 if (hosts.any { it.id == trusted.id }) {
                     persist(hosts.map { if (it.id == trusted.id) it.copy(keyFingerprint = fingerprint) else it })
                 }
-                screen = Screen.Terminal(trusted)
+                onScreen(Screen.Terminal(trusted))
+            },
+            onFiles = { onScreen(Screen.Files(current.host)) },
+            onEditHost = {
+                onTerminalHost(null)
+                onScreen(Screen.Editor(current.host))
             },
         )
+
+        is Screen.Files -> {
+            val session = SessionRegistry.sessions.collectAsState().value[current.host.id]
+            // 连接断了(对端关了 / 被断开):没有文件可看,退回终端页(那里有「重新连接」)。
+            LaunchedEffect(session == null) { if (session == null) onScreen(Screen.Terminal(current.host)) }
+            if (session != null) {
+                FilesPane(
+                    host = current.host,
+                    session = session,
+                    chrome = FilesChrome.Phone(onLeave = { onScreen(Screen.Terminal(current.host)) }),
+                    focusRequest = 1,
+                )
+            }
+        }
        }
     }
 
@@ -273,9 +415,10 @@ fun App(devTarget: DevTarget? = null) {
                 Screen.Home -> "home"
                 is Screen.Editor -> "editor"
                 is Screen.Terminal -> "term:" + it.host.id
+                is Screen.Files -> "files:" + it.host.id
             }
         },
-        transitionSpec = { with(Motion) { push(forward = targetState != Screen.Home, linear = dragging.value) } },
+        transitionSpec = { with(Motion) { push(forward = targetState.depth() > initialState.depth(), linear = dragging.value) } },
     ) { current ->
         if (current == Screen.Home) pages.SaveableStateProvider("home") { page(current) } else page(current)
     }

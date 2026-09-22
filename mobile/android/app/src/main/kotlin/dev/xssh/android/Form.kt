@@ -33,7 +33,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.onInterceptKeyBeforeSoftKeyboard
+import androidx.compose.runtime.SideEffect
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -124,6 +133,20 @@ fun FormField(
     secret: Boolean = false,
     keyboard: KeyboardType = KeyboardType.Text,
     imeAction: ImeAction = ImeAction.Next,
+    /** 平板浮层打开时直接聚焦第一格(插着键盘就能开始打字)。 */
+    focusRequester: FocusRequester? = null,
+    /** 最后一格按回车 / 完成时要做的事(平板浮层:保存)。 */
+    onDone: (() -> Unit)? = null,
+    /**
+     * 输入法是否正在组词(拼音还没上屏)。平板浮层据此决定 Esc 归谁:
+     * 组词中 Esc 是取消拼音,交给输入法;没在组词时 Esc 就是关浮层,要赶在输入法前面拿。
+     */
+    onComposing: ((Boolean) -> Unit)? = null,
+    /**
+     * 只会是英文的一格(地址、端口、用户名)。插着实体键盘时,字符键赶在输入法前面直接写进来 ——
+     * 小米输入法接实体键盘时不看输入框声明的键盘类型,照样把 `root` 组成拼音候选。
+     */
+    asciiOnly: Boolean = false,
 ) {
     val p = LocalXssh.current
     // 聚焦时把这一行连同下面一截 [LocalFieldClearance] 一起滚进视野:
@@ -162,26 +185,97 @@ fun FormField(
                     placeholder,
                     color = p.textFaint,
                     fontSize = 16.sp,
-                    fontFamily = if (mono) FontFamily.Monospace else FontFamily.Default,
+                    fontFamily = if (mono) XsshFonts.monoUi else FontFamily.Default,
                     textAlign = TextAlign.End,
                 )
             }
+            // 用 TextFieldValue 才看得到组词区间(composition);外部改了值(端口只留数字)时以外部为准。
+            var field by remember { mutableStateOf(TextFieldValue(value, TextRange(value.length))) }
+            val shown = syncedField(field, value)
+            // 外部改写过文字(端口只留数字)时,把自己的状态也对齐 —— 下面直接插字要基于最新内容。
+            SideEffect { if (field != shown) field = shown }
             BasicTextField(
-                value = value,
-                onValueChange = onValue,
+                value = shown,
+                onValueChange = {
+                    field = it
+                    onComposing?.invoke(it.composition != null)
+                    if (it.text != value) onValue(it.text)
+                },
                 singleLine = true,
                 textStyle = TextStyle(
                     color = p.text,
                     fontSize = 16.sp,
-                    fontFamily = if (mono) FontFamily.Monospace else FontFamily.Default,
+                    fontFamily = if (mono) XsshFonts.monoUi else FontFamily.Default,
                     textAlign = TextAlign.End,
                 ),
                 visualTransformation =
                     if (secret) PasswordVisualTransformation() else VisualTransformation.None,
                 keyboardOptions = KeyboardOptions(keyboardType = keyboard, imeAction = imeAction),
+                keyboardActions = if (onDone != null) KeyboardActions(onDone = { onDone() }) else KeyboardActions.Default,
                 cursorBrush = SolidColor(p.accent),
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+                    .then(
+                        if (!asciiOnly) {
+                            Modifier
+                        } else {
+                            Modifier.onInterceptKeyBeforeSoftKeyboard { event ->
+                                val e = event.nativeKeyEvent
+                                if (!e.isPrintingKey || e.isCtrlPressed || e.isAltPressed || e.isMetaPressed) {
+                                    return@onInterceptKeyBeforeSoftKeyboard false
+                                }
+                                val code = e.getUnicodeChar(e.metaState)
+                                if (code !in 0x20..0x7E) return@onInterceptKeyBeforeSoftKeyboard false
+                                // 松开事件也吞掉,别让输入法收到半个按键。
+                                if (e.action != android.view.KeyEvent.ACTION_DOWN) return@onInterceptKeyBeforeSoftKeyboard true
+                                // 用 field(每次插字后立刻更新)而不是 shown(上一次组合时的快照):
+                                // 按键连着来、界面还没重组时,用快照会拿旧内容覆盖,字就丢了(实测 example 丢了 e)。
+                                val current = field
+                                val sel = current.selection
+                                val text = current.text.replaceRange(sel.min, sel.max, code.toChar().toString())
+                                field = TextFieldValue(text, TextRange(sel.min + 1))
+                                onComposing?.invoke(false)
+                                onValue(text)
+                                true
+                            }
+                        },
+                    ),
             )
+        }
+    }
+}
+
+/**
+ * 分段选择(几选一):浅灰轨道里一块白色(深色下是灰色)滑块标出当前项 —— iOS 的 segmented control。
+ * 一眼看出是"几选一",而不是两颗都能按的按钮。
+ */
+@Composable
+fun Segmented(options: List<String>, selected: Int, onSelect: (Int) -> Unit) {
+    val p = LocalXssh.current
+    Row(
+        Modifier
+            .clip(RoundedCornerShape(9.dp))
+            .background(p.bgElev2)
+            .padding(2.dp),
+    ) {
+        options.forEachIndexed { index, label ->
+            val on = index == selected
+            Box(
+                Modifier
+                    .clip(RoundedCornerShape(7.dp))
+                    .background(if (on) (if (p.dark) Color(0xFF636366) else Color.White) else Color.Transparent)
+                    .clickable(role = Role.Tab) { onSelect(index) }
+                    .padding(horizontal = 16.dp, vertical = 7.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    label,
+                    color = p.text,
+                    fontSize = 14.sp,
+                    fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
+                )
+            }
         }
     }
 }
@@ -200,6 +294,20 @@ fun FormAction(label: String, danger: Boolean = false, onClick: () -> Unit) {
     ) {
         Text(label, color = if (danger) p.danger else p.accent, fontSize = 16.sp)
     }
+}
+
+/**
+ * 输入框自己的 TextFieldValue 和外部的取值对齐。
+ *
+ * 外部可能改写了文字(端口只留数字、限 5 位):只换文字不动光标的话,光标还停在过滤前的位置,
+ * 后面输入的字就插错了地方(实测端口里敲 "8a0b8" 变成 "80228")。光标按"少了几个字"往回挪 ——
+ * 被滤掉的正是刚敲的那个字时,光标原地不动;被截断时夹到末尾。
+ */
+fun syncedField(field: TextFieldValue, value: String): TextFieldValue {
+    if (field.text == value) return field
+    val removed = field.text.length - value.length
+    val cursor = (field.selection.end - removed).coerceIn(0, value.length)
+    return TextFieldValue(value, TextRange(cursor))
 }
 
 /** 表单行聚焦时,除了自己还要额外露出的高度(给悬浮在右下角的按钮让位)。 */

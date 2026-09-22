@@ -23,7 +23,21 @@ data class Host(
     val keyFingerprint: String = "",
     /** 密码认证用。落盘时经 [Secrets] 加密(Android 密钥库、不可导出),不存明文。 */
     val password: String = "",
+    /**
+     * 导入的私钥内容(OpenSSH / PEM 文本)。和密码一样经 [Secrets] 加密落盘,
+     * 连接时在内存里解密交给核心 —— 磁盘上没有明文私钥文件。空 = 走 [keyPath](老数据 / 调试)。
+     */
+    val keyData: String = "",
+    /** 私钥口令(没有就空)。同样加密存。 */
+    val keyPassphrase: String = "",
+    /** 导入时的文件名,只用来显示(「id_ed25519」)。 */
+    val keyName: String = "",
+    /** 私钥对应公钥的指纹(SHA256:…),给用户对照服务器上的 authorized_keys。 */
+    val keyPublicFingerprint: String = "",
 ) {
+    /** 用私钥登录,但手里既没有导入的私钥、也没有私钥文件。 */
+    val keyMissing: Boolean get() = auth == AuthKind.KEY && keyData.isEmpty() && keyPath.isEmpty()
+
     val label: String get() = name.ifBlank { address }
 
     val subtitle: String
@@ -60,6 +74,10 @@ class HostStore(context: Context) {
                     keyPath = item.optString("keyPath"),
                     keyFingerprint = item.optString("keyFingerprint"),
                     password = Secrets.open(item.optString("password")),
+                    keyData = Secrets.open(item.optString("keyData")),
+                    keyPassphrase = Secrets.open(item.optString("keyPassphrase")),
+                    keyName = item.optString("keyName"),
+                    keyPublicFingerprint = item.optString("keyPublicFingerprint"),
                 )
             }
         }.getOrDefault(emptyList())
@@ -78,6 +96,10 @@ class HostStore(context: Context) {
             item.put("keyPath", host.keyPath)
             item.put("keyFingerprint", host.keyFingerprint)
             item.put("password", Secrets.seal(host.password))
+            item.put("keyData", Secrets.seal(host.keyData))
+            item.put("keyPassphrase", Secrets.seal(host.keyPassphrase))
+            item.put("keyName", host.keyName)
+            item.put("keyPublicFingerprint", host.keyPublicFingerprint)
             array.put(item)
         }
         prefs.edit().putString(KEY_LIST, array.toString()).apply()
@@ -142,7 +164,15 @@ class UiPrefs(context: Context) {
             prefs.edit().putString(KEY_THEME, value.name).apply()
         }
 
+    /** 平板侧边栏是否展开(收起后终端独占整个宽度,下次打开保持用户的选择)。 */
+    var sidebarVisible: Boolean
+        get() = prefs.getBoolean(KEY_SIDEBAR, true)
+        set(value) {
+            prefs.edit().putBoolean(KEY_SIDEBAR, value).apply()
+        }
+
     companion object {
+        private const val KEY_SIDEBAR = "sidebarVisible"
         private const val KEY_THEME = "themeMode"
         const val FONT_MIN = 9f
         const val FONT_MAX = 30f

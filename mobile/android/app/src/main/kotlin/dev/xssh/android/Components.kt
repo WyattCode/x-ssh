@@ -54,6 +54,10 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.foundation.hoverable
+import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -238,6 +242,8 @@ fun XsshButton(
     val haptic = LocalHapticFeedback.current
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
+    // 平板接鼠标 / 触控板时的悬停态(小米:光标指向要有明确的悬停表现)。手指操作不会触发。
+    val hovered by interaction.collectIsHoveredAsState()
     val scale by animateFloatAsState(if (pressed && enabled) 0.97f else 1f, label = "btnPress")
 
     // 主操作(连接 / 重试 / 信任)是实心蓝白字 —— 一屏只有这一块实心蓝,一眼就知道能点。
@@ -259,6 +265,9 @@ fun XsshButton(
             .heightIn(min = TouchMin + 2.dp)
             .clip(RoundedCornerShape(RadiusBox))
             .background(if (enabled) background else background.copy(alpha = 0.35f))
+            .then(if (hovered && enabled) Modifier.background(p.text.copy(alpha = 0.06f)) else Modifier)
+            .hoverable(interaction, enabled)
+            .pointerHoverIcon(PointerIcon.Hand)
             .clickable(interactionSource = interaction, indication = null, enabled = enabled) {
                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 onClick()

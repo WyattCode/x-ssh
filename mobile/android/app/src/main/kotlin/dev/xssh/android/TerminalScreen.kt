@@ -1,5 +1,34 @@
 package dev.xssh.android
 
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.input.key.isMetaPressed
+
+import androidx.compose.foundation.focusable
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.foundation.draganddrop.dragAndDropTarget
+import androidx.compose.ui.draganddrop.DragAndDropEvent
+import androidx.compose.ui.draganddrop.DragAndDropTarget
+import androidx.compose.ui.draganddrop.mimeTypes
+import androidx.compose.ui.draganddrop.toAndroidDragEvent
+import androidx.compose.ui.input.pointer.PointerType
+import androidx.compose.ui.input.pointer.isTertiaryPressed
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.unit.DpOffset
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.key.isAltPressed
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.onInterceptKeyBeforeSoftKeyboard
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.isSecondaryPressed
+import androidx.compose.ui.input.pointer.pointerHoverIcon
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.layout.wrapContentHeight
@@ -106,6 +135,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import uniffi.xssh_ffi.CursorState
 import uniffi.xssh_ffi.FfiException
+import uniffi.xssh_ffi.SelectKind
 
 /**
  * 隐藏输入框里的哨兵字符。每次提交后要把输入框重置回哨兵,但重置是异步生效的:
@@ -119,7 +149,17 @@ private val SENTINELS = arrayOf("\u200b", "\u200c")
 private data class PendingKey(val fingerprint: String, val changed: Boolean)
 
 @Composable
-fun TerminalScreen(host: Host, onExit: () -> Unit, onTrustKey: (String) -> Unit = {}) {
+fun TerminalScreen(
+    host: Host,
+    onExit: () -> Unit,
+    onTrustKey: (String) -> Unit = {},
+    /** 放在平板右栏里时不为空:工具栏换成平板那套,不再画手机的轨道 / 顶栏按钮。 */
+    tablet: TabletTerminalChrome? = null,
+    /** 手机 / 折叠屏:打开这条连接的文件页(平板走 [tablet] 里的开关)。 */
+    onFiles: (() -> Unit)? = null,
+    /** 手机 / 折叠屏:打开这台主机的编辑页(连接失败时「填写密码」这类就地修复用;平板走 [tablet])。 */
+    onEditHost: (() -> Unit)? = null,
+) {
     val context = LocalContext.current
     // 已经连着就直接接管,不重连、也不再问一次主机密钥。
     var live by remember(host) { mutableStateOf(SessionRegistry[host.id]) }
@@ -150,6 +190,10 @@ fun TerminalScreen(host: Host, onExit: () -> Unit, onTrustKey: (String) -> Unit 
         // 也不要先弹权限框再失败 —— 在这里就说清楚。
         if (host.auth == AuthKind.PASSWORD && host.password.isEmpty()) {
             error = "这台主机还没有保存密码。"
+            return@LaunchedEffect
+        }
+        if (host.keyMissing) {
+            error = "这台主机还没有导入私钥。"
             return@LaunchedEffect
         }
         val notifyPermission = SessionService.NOTIFICATION_PERMISSION
@@ -196,6 +240,9 @@ fun TerminalScreen(host: Host, onExit: () -> Unit, onTrustKey: (String) -> Unit 
                     failure is FfiException.HostKeyChanged ->
                         pendingKey = PendingKey(fingerprint, changed = true)
 
+                    failure is FfiException.KeyEncrypted ->
+                        error = if (host.keyPassphrase.isEmpty()) "这把私钥有口令。" else "私钥口令不对。"
+
                     else -> error = LocalNetwork.hintFor(
                         context,
                         host.address,
@@ -209,22 +256,54 @@ fun TerminalScreen(host: Host, onExit: () -> Unit, onTrustKey: (String) -> Unit 
     val pending = pendingKey
     val failure = error
     val session = live
+    // 平板右栏:确认页 / 错误页 / 连接中上面也要有工具栏(侧边栏开关、主机名),不能是一整块没有出口的页面。
+    val frame: @Composable (@Composable () -> Unit) -> Unit = { content ->
+        if (tablet == null) {
+            content()
+        } else {
+            Column(Modifier.fillMaxSize()) {
+                TabletToolbar(tablet.sidebarVisible, tablet.onToggleSidebar, host.label, host.subtitle)
+                Box(Modifier.weight(1f).fillMaxWidth()) { content() }
+            }
+        }
+    }
     when {
-        pending != null -> HostKeyPrompt(
-            host = host,
-            pending = pending,
-            // 信任后由上层把指纹写回主机并换一个新的 Host 实例,本屏随之重连。
-            onTrust = { onTrustKey(pending.fingerprint) },
-            onExit = onExit,
-        )
+        pending != null -> frame {
+            HostKeyGate(
+                host = host,
+                fingerprint = pending.fingerprint,
+                changed = pending.changed,
+                tablet = tablet != null,
+                // 信任后由上层把指纹写回主机并换一个新的 Host 实例,本屏随之重连。
+                onTrust = { onTrustKey(pending.fingerprint) },
+                onExit = onExit,
+            )
+        }
 
-        failure != null -> ConnectResult(
-            failure,
-            // 没存密码时重试只会得到同一句话,不给这个按钮。
-            retry = if (host.auth == AuthKind.PASSWORD && host.password.isEmpty()) null else ({ attempt++ }),
-            onExit = onExit,
-        )
-        session == null -> {
+        failure != null -> frame {
+            val noPassword = host.auth == AuthKind.PASSWORD && host.password.isEmpty()
+            val keyProblem = host.keyMissing || failure.startsWith("这把私钥有口令") || failure.startsWith("私钥口令不对")
+            ConnectGate(
+                host = host,
+                failure = failure,
+                waited = 0,
+                tablet = tablet != null,
+                // 没存密码 / 没导入私钥时,重试只会得到同一句话,不给这个按钮。
+                retry = if (noPassword || host.keyMissing) null else ({ attempt++ }),
+                onExit = onExit,
+                // 平板:能就地修的直接给按钮,打开编辑浮层 —— 不用先退回去再找编辑入口。
+                // 能就地修的直接给按钮,打开编辑页(平板是浮层)—— 不用先退回去再找编辑入口。
+                fix = (tablet?.onEdit ?: onEditHost)?.let { edit ->
+                    when {
+                        noPassword -> "填写密码" to edit
+                        host.keyMissing -> "导入私钥" to edit
+                        keyProblem -> "填写口令" to edit
+                        else -> null
+                    }
+                },
+            )
+        }
+        session == null -> frame {
             // 显示已经等了多久:不再是一个看不出进展的"…"。
             // Rust 那边每一步都有上限(连接+认证 15s、开 shell 10s),到点一定会变成错误页。
             var waited by remember(host, attempt) { mutableStateOf(0) }
@@ -234,112 +313,42 @@ fun TerminalScreen(host: Host, onExit: () -> Unit, onTrustKey: (String) -> Unit 
                     waited++
                 }
             }
-            ConnectResult(
-                if (waited < 3) "连接 ${host.subtitle} …" else "连接 ${host.subtitle} … 已等待 ${waited} 秒",
+            ConnectGate(
+                host = host,
+                failure = null,
+                waited = waited,
+                tablet = tablet != null,
                 retry = null,
+                fix = null,
                 onExit = onExit,
             )
         }
-        else -> TerminalView(session, host, onExit)
-    }
-}
-
-/**
- * 首次连接要用户确认主机密钥;密钥变了则是明确的告警 —— 可能是服务端重装,
- * 也可能是有人在中间。两种情况都必须由人点一下,程序不替用户决定。
- */
-@Composable
-private fun HostKeyPrompt(host: Host, pending: PendingKey, onTrust: () -> Unit, onExit: () -> Unit) {
-    val p = LocalXssh.current
-    Column(
-        Modifier
-            .fillMaxSize()
-            .background(p.bg)
-            .windowInsetsPadding(stableSafeDrawing())
-            .padding(Gutter + BoxPad),
-        verticalArrangement = Arrangement.Center,
-    ) {
-        Text(
-            if (pending.changed) "主机密钥已改变" else "首次连接这台主机",
-            color = if (pending.changed) p.danger else p.text,
-            fontSize = 17.sp,
-            fontWeight = FontWeight.SemiBold,
+        else -> TerminalView(
+            session,
+            host,
+            onExit,
+            tablet,
+            onFiles,
+            // 对端断了:丢掉这条死会话、按原主机重连(会话表里它已经自己摘掉了)。
+            onReconnect = {
+                live = null
+                attempt++
+            },
         )
-        // 首次连接只摆指纹,不写"怎么核对"的教程;密钥变了才多说一句 —— 那是真的危险。
-        if (pending.changed) {
-            Spacer(Modifier.height(10.dp))
-            Text("与已信任的密钥不一致,连接可能被劫持。", color = p.textDim, fontSize = 13.sp)
-        }
-        Spacer(Modifier.height(16.dp))
-        if (pending.changed) {
-            Fingerprint("已信任", host.keyFingerprint, p.textDim)
-            Spacer(Modifier.height(8.dp))
-        }
-        Fingerprint("本次收到", pending.fingerprint, if (pending.changed) p.danger else p.text)
-        Spacer(Modifier.height(20.dp))
-        Row {
-            XsshButton(
-                if (pending.changed) "仍然信任新密钥" else "信任并连接",
-                kind = if (pending.changed) ButtonKind.Danger else ButtonKind.Primary,
-            ) { onTrust() }
-            Spacer(Modifier.width(GapItem))
-            XsshButton("返回", kind = ButtonKind.Ghost) { onExit() }
-        }
     }
 }
 
 @Composable
-private fun Fingerprint(label: String, value: String, color: Color) {
+private fun TerminalView(
+    live: TerminalSession,
+    host: Host,
+    onExit: () -> Unit,
+    tablet: TabletTerminalChrome?,
+    onFiles: (() -> Unit)?,
+    onReconnect: () -> Unit,
+) {
     val p = LocalXssh.current
-    // "SHA256:<43 个 base64 字符>" 在 425dp 的外屏上放不进一行,而人要做的正是
-    // 逐字符比对 —— 让它自由折行的话,断点随字号浮动,还会从字符中间切开。
-    //
-    // 所以:算法名提到标签里,摘要**固定切成 11 字符一组**,两组一行。
-    // 断点是写死的,外屏、内屏、放大字体下看到的分组完全一样,比对时手指按着数得准。
-    val (algorithm, rows) = fingerprintRows(value)
-    Column {
-        Text(
-            if (algorithm.isBlank()) label else "$label · $algorithm",
-            color = p.textFaint,
-            fontSize = 11.sp,
-        )
-        Spacer(Modifier.height(3.dp))
-        if (rows.isEmpty()) {
-            Text("(无)", color = color, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
-        }
-        rows.forEach { row ->
-            Text(row, color = color, fontSize = 13.sp, fontFamily = FontFamily.Monospace, softWrap = false)
-        }
-    }
-}
-
-@Composable
-private fun ConnectResult(message: String, retry: (() -> Unit)?, onExit: () -> Unit) {
-    val p = LocalXssh.current
-    Column(
-        Modifier
-            .fillMaxSize()
-            .background(p.bg)
-            .windowInsetsPadding(stableSafeDrawing())
-            .padding(Gutter + BoxPad),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text(message, color = if (retry == null) p.textDim else p.danger, fontSize = 14.sp)
-        Spacer(Modifier.height(18.dp))
-        Row {
-            if (retry != null) {
-                XsshButton("重试") { retry() }
-                Spacer(Modifier.width(GapItem))
-            }
-            XsshButton("返回", kind = ButtonKind.Ghost) { onExit() }
-        }
-    }
-}
-
-@Composable
-private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) {
-    val p = LocalXssh.current
+    val density = LocalDensity.current
     val adaptive = LocalAdaptive.current
     val context = LocalContext.current
     val prefs = remember(context) { UiPrefs(context) }
@@ -347,6 +356,59 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
     val keyboard = LocalSoftwareKeyboardController.current
     val focusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
+    // 实体键盘(平板键盘套、蓝牙键盘)插着时,焦点放在一个**不是输入框**的节点上(keySink):
+    // 按键不经过输入法,由 onPreviewKeyEvent 按 xterm 编码直接发出去(见 KeyEncoder)。
+    // 要打中文时点 ⌨ 切回输入框,输入法照常工作。
+    val hardKeyboard = LocalConfiguration.current.hasHardKeyboard()
+    val keySink = remember { FocusRequester() }
+    var sinkFocused by remember { mutableStateOf(false) }
+    var imeFocused by remember { mutableStateOf(false) }
+    // 插着实体键盘时用户选的是哪种输入:false = 英文直通(按键直接编码发出去),true = 输入法(能打中文)。
+    //
+    // 原来只能点工具栏的 ⌨ 切到输入法 —— 直通时焦点不在输入框上,输入法根本没挂上,键盘上的
+    // 中英切换(Shift / Ctrl+Space)它收不到,用户"按什么都切不出中文"。现在键盘上就能切(见 onKey),
+    // 而且记住选择:关个菜单、点一下终端,焦点回来时还是原来那种输入,不会悄悄退回英文。
+    var imeMode by remember { mutableStateOf(false) }
+    // 切换时在终端右上角亮一下「中」「英」,一秒多就收。
+    var modePill by remember { mutableStateOf<String?>(null) }
+    var modePillTick by remember { mutableIntStateOf(0) }
+    LaunchedEffect(modePillTick) {
+        if (modePillTick == 0) return@LaunchedEffect
+        delay(1200)
+        modePill = null
+    }
+    // 单独按一下 Shift(按下到松开之间没按别的键)= 切到中文。记按下的时刻。
+    var shiftTapAt by remember { mutableLongStateOf(0L) }
+    // 按下时接管了的键,松开事件也要吞掉,别让系统拿半个按键去做别的(比如 Esc 被当成返回)。
+    val swallowed = remember { mutableSetOf<Int>() }
+    /** 插着实体键盘时,焦点该回到哪:按用户选的输入方式。已经在那儿就不动。 */
+    fun focusInput() {
+        if (!hardKeyboard) return
+        runCatching {
+            if (imeMode) {
+                if (!imeFocused) focusRequester.requestFocus()
+            } else if (!sinkFocused) {
+                keySink.requestFocus()
+            }
+        }
+    }
+    /** 中文(输入法)↔ 英文(直通)。只在插着实体键盘时有意义;没键盘时本来就是输入法。 */
+    fun switchInput() {
+        if (!hardKeyboard) return
+        imeMode = !imeMode
+        focusInput()
+        // 「输入法」而不是「中」:输入法自己可能正处在英文状态(Shift 切过),说"中"不一定对。
+        modePill = if (imeMode) "输入法" else "英文"
+        modePillTick++
+    }
+    // 插着实体键盘就直接能打字:焦点不在输入框上(直通)时不会弹软键盘。
+    LaunchedEffect(hardKeyboard) {
+        if (hardKeyboard) focusInput()
+    }
+    // 平板:外面(关浮层、退出搜索、点侧边栏的会话)要求把焦点还给终端。
+    LaunchedEffect(tablet?.focusRequest) {
+        if (tablet != null && tablet.focusRequest > 0) focusInput()
+    }
     // 进来**不抢焦点**,也就不弹键盘。
     //
     // 原来一连上就 requestFocus(),焦点落到输入框上系统立刻弹键盘(实测连接后 100ms)。
@@ -383,17 +445,187 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
         fontSize = (fontSize * zoomChange).coerceIn(UiPrefs.FONT_MIN, UiPrefs.FONT_MAX)
     }
 
+    val paste: () -> Unit = {
+        val clip = context.getSystemService(android.content.ClipboardManager::class.java)?.primaryClip
+        val text = clip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty()
+        if (text.isNotEmpty()) live.paste(text)
+    }
+
+    // 选中的文字(鼠标拖选 / 双击选词 / 三击选行 / 手指长按)。选区在核心里,跟着内容滚动,
+    // 能一直选进回滚历史;这里只拿它落在视口里的那一段来画。一敲键盘、点一下终端就清掉。
+    val selection = frame.selection?.toTermSelection()
+    val copySelection: () -> Unit = { live.copySelection { copyText(context, it) } }
+    val clearSelection: () -> Unit = { if (frame.selection != null) live.selectClear() }
+
+    // 实体键盘。输入框模式下普通字符交给输入法(中文要组词),其余键(回车、方向、Esc、
+    // Ctrl 组合……)一律在这里编码 —— 输入法不组词时会把它们放行,正好落到这里。
+    val onKey: (androidx.compose.ui.input.key.KeyEvent) -> Boolean = handler@{ event ->
+        val e = event.nativeKeyEvent
+        if (!sinkFocused && !imeFocused) return@handler false
+        // 输入法 ↔ 英文直通:**Ctrl+Shift+Space**,两种模式下都认(输入法模式下 Ctrl 组合在输入法之前就被拿到)。
+        // 实测 Win+Space 和键盘的「中/英」键被系统自己拿去切输入法了,应用收不到;有的系统会放行,所以也认。
+        // **不用 Ctrl+Space**:终端里它是 NUL,Emacs 拿它设标记,抢了就用不了。
+        val space = e.keyCode == android.view.KeyEvent.KEYCODE_SPACE
+        val toggle = e.keyCode == android.view.KeyEvent.KEYCODE_LANGUAGE_SWITCH ||
+            (space && e.isMetaPressed) ||
+            (space && e.isCtrlPressed && e.isShiftPressed && !e.isAltPressed)
+        if (hardKeyboard && toggle) {
+            if (e.action == android.view.KeyEvent.ACTION_DOWN && e.repeatCount == 0) switchInput()
+            return@handler true
+        }
+        // 直通时单独按一下 Shift = 切到中文(和输入法里"按 Shift 切中英"同一个手势)。切过去之后 Shift 就归输入法自己管。
+        if (hardKeyboard && !imeFocused) {
+            val shift = e.keyCode == android.view.KeyEvent.KEYCODE_SHIFT_LEFT || e.keyCode == android.view.KeyEvent.KEYCODE_SHIFT_RIGHT
+            when {
+                shift && e.action == android.view.KeyEvent.ACTION_DOWN && e.repeatCount == 0 -> shiftTapAt = e.eventTime
+                shift && e.action == android.view.KeyEvent.ACTION_UP -> {
+                    val clean = shiftTapAt > 0 && e.eventTime - shiftTapAt < 500
+                    shiftTapAt = 0
+                    if (clean) {
+                        switchInput()
+                        return@handler true
+                    }
+                }
+                e.action == android.view.KeyEvent.ACTION_DOWN -> shiftTapAt = 0
+            }
+        }
+        // 平板的应用快捷键(Ctrl+Shift+N / W / S…、Ctrl+Tab)放行给外层,不能编码成控制字符发给远端。
+        if (tablet != null && isShellShortcut(e)) return@handler false
+        if (e.action != android.view.KeyEvent.ACTION_DOWN) return@handler swallowed.remove(e.keyCode)
+        // 终端自己的快捷键(和桌面终端的习惯一致):Ctrl+Shift+V 粘贴,Ctrl+Shift+= / - 调字号。
+        if (e.isCtrlPressed && e.isShiftPressed) {
+            val handled = when (e.keyCode) {
+                android.view.KeyEvent.KEYCODE_V -> { paste(); true }
+                // 没选东西也要吞掉:否则 Ctrl+Shift+C 会被编码成 ^C 发出去,把正在跑的命令打断。
+                android.view.KeyEvent.KEYCODE_C -> { copySelection(); true }
+                android.view.KeyEvent.KEYCODE_EQUALS, android.view.KeyEvent.KEYCODE_PLUS,
+                android.view.KeyEvent.KEYCODE_NUMPAD_ADD -> {
+                    fontSize = (fontSize + 1f).coerceIn(UiPrefs.FONT_MIN, UiPrefs.FONT_MAX); true
+                }
+                android.view.KeyEvent.KEYCODE_MINUS, android.view.KeyEvent.KEYCODE_NUMPAD_SUBTRACT -> {
+                    fontSize = (fontSize - 1f).coerceIn(UiPrefs.FONT_MIN, UiPrefs.FONT_MAX); true
+                }
+                else -> false
+            }
+            if (handled) {
+                swallowed += e.keyCode
+                return@handler true
+            }
+        }
+        if (imeFocused && e.isPrintingKey && !e.isCtrlPressed && !e.isAltPressed && !ctrl && !alt) {
+            return@handler false
+        }
+        val text = KeyEncoder.encode(e, frame.modes, ctrl, alt) ?: return@handler false
+        ctrl = false
+        alt = false
+        clearSelection()
+        swallowed += e.keyCode
+        live.sendRaw(text.toByteArray())
+        true
+    }
+
+    // 右键 / 工具栏「更多」里的终端操作(平板)。手机上右键仍是直接粘贴。
+    fun terminalMenu(): List<MenuAction> = buildList {
+        if (frame.selection != null) add(MenuAction("复制", shortcut = "Ctrl+Shift+C") { copySelection() })
+        add(MenuAction("粘贴", shortcut = "Ctrl+Shift+V") { paste() })
+        add(MenuAction("清屏", shortcut = "Ctrl+L") { live.sendRaw(byteArrayOf(12)) })
+        add(MenuAction("放大字号", shortcut = "Ctrl+Shift+=") {
+            fontSize = (fontSize + 1f).coerceIn(UiPrefs.FONT_MIN, UiPrefs.FONT_MAX)
+        })
+        add(MenuAction("缩小字号", shortcut = "Ctrl+Shift+-") {
+            fontSize = (fontSize - 1f).coerceIn(UiPrefs.FONT_MIN, UiPrefs.FONT_MAX)
+        })
+        tablet?.let { add(MenuAction("编辑主机…", shortcut = "Ctrl+Shift+E") { it.onEdit() }) }
+    }
+    var canvasMenuAt by remember { mutableStateOf<DpOffset?>(null) }
+    var canvasHeight by remember { mutableIntStateOf(0) }
+
+    var dropHover by remember { mutableStateOf(false) }
+    val dropTarget = remember(live) {
+        object : DragAndDropTarget {
+            override fun onEntered(event: DragAndDropEvent) {
+                dropHover = true
+            }
+
+            override fun onExited(event: DragAndDropEvent) {
+                dropHover = false
+            }
+
+            override fun onEnded(event: DragAndDropEvent) {
+                dropHover = false
+            }
+
+            override fun onDrop(event: DragAndDropEvent): Boolean {
+                dropHover = false
+                val clip = event.toAndroidDragEvent().clipData ?: return false
+                val text = (0 until clip.itemCount)
+                    .joinToString("\n") { clip.getItemAt(it).coerceToText(context).toString() }
+                if (text.isEmpty()) return false
+                live.paste(text)
+                return true
+            }
+        }
+    }
+
+    // ⌨ 开关:没弹出就弹出,弹着就收起。插着实体键盘时是"直通 ↔ 输入法"两种模式之间切换。
+    val toggleIme: (Boolean) -> Unit = { imeOn ->
+        Log.i(TAG, "keyboard: toggle, on=$imeOn hard=$hardKeyboard")
+        when {
+            // 插着实体键盘:这颗按钮就是中文 ↔ 英文(和 Ctrl+Space 一样)。
+            hardKeyboard -> switchInput()
+            imeOn -> {
+                keyboard?.hide()
+                focusManager.clearFocus()
+            }
+            else -> {
+                focusRequester.requestFocus()
+                keyboard?.show()
+            }
+        }
+    }
+
+    // 菜单(右键、长按、「更多」)关掉后焦点回到终端,不然实体键盘接着敲什么都没反应。
+    val restoreFocus: () -> Unit = { focusInput() }
+
+    val keyModifier = Modifier
+        // 用输入法打中文时(点过 ⌨),输入法排在页面前面拿按键,Ctrl+C 会被它当成复制吃掉。
+        // Ctrl / Alt 组合键赶在它前面接管 —— 组词从来不用这两个键;其余键仍先给输入法。
+        .onInterceptKeyBeforeSoftKeyboard {
+            val languageKey = it.nativeKeyEvent.keyCode == android.view.KeyEvent.KEYCODE_LANGUAGE_SWITCH ||
+                (it.isMetaPressed && it.nativeKeyEvent.keyCode == android.view.KeyEvent.KEYCODE_SPACE)
+            if (imeFocused && (it.isCtrlPressed || it.isAltPressed || languageKey)) onKey(it) else false
+        }
+        .onPreviewKeyEvent(onKey)
+
     val canvas: @Composable (Modifier) -> Unit = { modifier ->
         Box(
             modifier
+                .onSizeChanged { canvasHeight = it.height }
+                // 从别的应用(分屏另一边、小窗)拖一段文字进来 = 粘贴(小米:支持跨应用拖放)。
+                // 拖着经过时终端描一圈强调色,告诉用户"可以放在这里"。
+                .dragAndDropTarget(
+                    shouldStartDragAndDrop = { event -> event.mimeTypes().any { it.startsWith("text/") } },
+                    target = dropTarget,
+                )
+                .then(if (dropHover) Modifier.border(2.dp, p.accent, RoundedCornerShape(RadiusBox)) else Modifier)
                 .transformable(transformState)
+                // 画布自己不拿焦点:用鼠标点它时 clickable 会把焦点抢过来(键盘操作模式下点击 = 聚焦),
+                // 实体键盘的按键节点就丢了焦点 —— 实测鼠标点过终端之后,敲什么都没反应。
+                .focusProperties { canFocus = false }
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
                 ) {
-                    Log.i(TAG, "keyboard: canvas tap")
-                    focusRequester.requestFocus()
-                    keyboard?.show()
+                    clearSelection()
+                    Log.i(TAG, "keyboard: canvas tap, hard=$hardKeyboard ime=$imeFocused")
+                    when {
+                        // 插着实体键盘:点终端 = 要在这里打字,焦点回到用户选的那种输入上,不弹软键盘。
+                        hardKeyboard -> focusInput()
+                        else -> {
+                            focusRequester.requestFocus()
+                            keyboard?.show()
+                        }
+                    }
                 },
         ) {
             TerminalCanvas(
@@ -403,20 +635,75 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
                 onGridSize = { cols, rows, cellW, cellH ->
                     if (cols != grid.first || rows != grid.second) {
                         grid = cols to rows
-                        scope.launch(Dispatchers.IO) { live.resizeGrid(cols, rows, cellW, cellH) }
+                        live.resizeGrid(cols, rows, cellW, cellH)
                     }
                 },
-                onScroll = { deltaLines ->
-                    scope.launch(Dispatchers.IO) { live.scroll(deltaLines) }
+                // 拖动、滚轮、触控板双指滑动都走这里:普通 shell 翻本地历史,
+                // 全屏程序(less、vim、htop)收到方向键或滚轮事件。
+                // 翻历史不清选区:选区在核心里跟着内容走,可以边翻边选、翻回来还在。
+                onScroll = { deltaLines, col, row ->
+                    live.wheel(deltaLines, col, row)
+                },
+                // 鼠标右键:平板出上下文菜单(小米 / HIG:右键呼出菜单);
+                // 手机沿用 PuTTY 的习惯:有选区就复制,没有就粘贴。
+                onSecondaryClick = { at ->
+                    when {
+                        // 菜单挂在这个 Box 上;画布在里面左右各缩了 Gutter。
+                        tablet != null ->
+                            canvasMenuAt = with(density) { DpOffset(at.x.toDp() + Gutter, (at.y - canvasHeight).toDp()) }
+                        frame.selection != null -> copySelection()
+                        else -> paste()
+                    }
+                },
+                selection = selection,
+                onSelectStart = { at, kind -> live.selectStart(at.row, at.col, at.rightHalf, kind) },
+                onMouseReleased = { focusInput() },
+                onSelectUpdate = { at -> live.selectUpdate(at.row, at.col, at.rightHalf) },
+                onSelectClear = clearSelection,
+                // 手指选完松手:在松手的地方出「复制 / 粘贴」(手机、平板都一样)。
+                onSelectionDone = { at ->
+                    canvasMenuAt = with(density) { DpOffset(at.x.toDp() + Gutter, (at.y - canvasHeight).toDp()) }
                 },
                 // 留一点边距:内屏圆角半径 52dp,贴边的字会被切掉一角。
                 modifier = Modifier.fillMaxSize().padding(horizontal = Gutter),
             )
+            CompositionLocalProvider(LocalRestoreFocus provides restoreFocus) {
+                ContextMenu(at = canvasMenuAt, onDismiss = { canvasMenuAt = null }, actions = ::terminalMenu)
+            }
+            // 中英切换的提示:右上角一颗小胶囊,和系统输入法切换时的提示同一个意思。
+            AnimatedVisibility(
+                visible = modePill != null,
+                enter = fadeIn(tween(120)),
+                exit = fadeOut(tween(220)),
+                modifier = Modifier.align(Alignment.TopEnd).padding(top = 10.dp, end = Gutter + 4.dp),
+            ) {
+                Text(
+                    modePill ?: "",
+                    color = p.text,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(if (p.dark) p.bgElev else Color.White)
+                        .border(0.5.dp, p.borderStrong, RoundedCornerShape(10.dp))
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                )
+            }
         }
     }
     val hiddenInput: @Composable () -> Unit = {
+        // 实体键盘的落点:能拿焦点、但不是输入框,系统不会把按键先交给输入法。
+        Box(
+            Modifier
+                .size(1.dp)
+                .focusRequester(keySink)
+                .onFocusChanged { sinkFocused = it.isFocused }
+                .focusable(),
+        )
         HiddenImeField(
             focusRequester = focusRequester,
+            onFocus = { imeFocused = it },
             takeModifiers = {
                 val used = ctrl to alt
                 ctrl = false
@@ -424,9 +711,10 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
                 used
             },
             onText = { text, useCtrl, useAlt ->
-                scope.launch(Dispatchers.IO) { live.sendText(text, useCtrl, useAlt) }
+                clearSelection()
+                live.sendText(text, useCtrl, useAlt)
             },
-            onBackspace = { scope.launch(Dispatchers.IO) { live.sendRaw(byteArrayOf(0x7F)) } },
+            onBackspace = { live.sendRaw(byteArrayOf(0x7F)) },
         )
     }
     val keys: @Composable () -> Unit = {
@@ -442,20 +730,22 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
                 onFont = { step ->
                     fontSize = (fontSize + step).coerceIn(UiPrefs.FONT_MIN, UiPrefs.FONT_MAX)
                 },
-                send = { bytes -> scope.launch(Dispatchers.IO) { live.sendRaw(bytes) } },
+                send = { bytes -> live.sendRaw(bytes) },
             )
         }
     }
 
     // 和主机页、编辑页同一条右侧竖轨道、同一个位置(见 EdgeRail),悬浮在终端上面。
     val actions: @Composable () -> Unit = {
+        // 文件(SFTP):单独一颗,在输入那枚胶囊上面 —— 它是"换一页",不是输入。
+        if (onFiles != null && !dead) GlassButton(XIcons.Folder, "文件") { onFiles() }
         // 输入相关的操作装进同一枚胶囊:键盘常驻在下(和主机页的搜索同一个位置),
         // 快捷键面板的开关在它上面(开着时图标变蓝);回到底部只在翻历史时出现,加在最上面 ——
         // 胶囊往上长,键盘不动。
         GlassGroup {
             if (frame.scrollOffset > 0) {
                 GlassItem(XIcons.ArrowDown, "回到底部") {
-                    scope.launch(Dispatchers.IO) { live.scrollToBottom() }
+                    live.scrollToBottom()
                 }
             }
             GlassItem(
@@ -467,20 +757,14 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
             // 在这里读键盘状态:只有这颗按钮随它重组,不牵动整屏终端。
             @OptIn(ExperimentalLayoutApi::class)
             val imeVisible = WindowInsets.isImeVisible
+            // 插着实体键盘时输入法多半只露一条候选栏(不算"键盘弹出"),
+            // 那时"焦点在输入框上"本身就是开着的状态。
+            val imeOn = imeFocused && (imeVisible || hardKeyboard)
             GlassItem(
                 XIcons.Keyboard,
-                if (imeVisible) "收起键盘" else "调出键盘",
-                tint = if (imeVisible) p.accent else null,
-            ) {
-                Log.i(TAG, "keyboard: rail button, visible=$imeVisible")
-                if (imeVisible) {
-                    keyboard?.hide()
-                    focusManager.clearFocus()
-                } else {
-                    focusRequester.requestFocus()
-                    keyboard?.show()
-                }
-            }
+                if (imeOn) "收起键盘" else "调出键盘",
+                tint = if (imeOn) p.accent else null,
+            ) { toggleIme(imeOn) }
         }
         // 断开是危险操作,单独一颗、红色图标,放在最下面(和 ＋ / ✓ 同一个位置)。
         GlassButton(XIcons.Close, "断开连接", tint = p.danger) {
@@ -492,7 +776,64 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
     // 折叠屏:⌨ ✕ 在右侧轨道;直板机:放进顶部的主机名这一行右边,按键面板铺满整宽(见 Chrome)。
     val topBar = LocalChrome.current == Chrome.TopBar
     val header: @Composable () -> Unit = {
-        if (topBar) {
+        if (tablet != null) {
+            // 平板:工具栏在终端上面 —— 侧边栏开关、主机名、输入相关的开关、「更多」和「断开」。
+            TabletToolbar(
+                sidebarVisible = tablet.sidebarVisible,
+                onToggleSidebar = tablet.onToggleSidebar,
+                title = host.label,
+                subtitle = if (dead) "已断开" else host.subtitle,
+                dot = if (dead) p.danger else p.ok,
+            ) {
+                if (!dead) {
+                    PaneSwitch(files = false) { if (it) tablet.onShowFiles() }
+                    Spacer(Modifier.width(8.dp))
+                }
+                if (frame.scrollOffset > 0) {
+                    ToolbarIcon(XIcons.ArrowDown, "回到底部") { live.scrollToBottom() }
+                }
+                ToolbarIcon(
+                    XIcons.Command,
+                    if (showKeys) "收起快捷键栏" else "显示快捷键栏",
+                    active = showKeys,
+                ) { showKeys = !showKeys }
+                @OptIn(ExperimentalLayoutApi::class)
+                val imeVisible = WindowInsets.isImeVisible
+                val imeOn = imeFocused && (imeVisible || hardKeyboard)
+                ToolbarIcon(
+                    XIcons.Keyboard,
+                    when {
+                        hardKeyboard && imeOn -> "输入法  Ctrl+Shift+Space 切回英文"
+                        hardKeyboard -> "英文直通  Shift 切到输入法"
+                        imeOn -> "收起键盘"
+                        else -> "调出键盘"
+                    },
+                    active = imeOn,
+                ) { toggleIme(imeOn) }
+                var moreOpen by remember { mutableStateOf(false) }
+                Box {
+                    ToolbarIcon(XIcons.More, "更多") { moreOpen = true }
+                    CompositionLocalProvider(LocalRestoreFocus provides restoreFocus) {
+                        ContextMenu(
+                            at = if (moreOpen) DpOffset.Zero else null,
+                            onDismiss = { moreOpen = false },
+                            actions = ::terminalMenu,
+                        )
+                    }
+                }
+                Spacer(Modifier.width(4.dp))
+                if (dead) {
+                    // 对端断了(服务器重启、网络掉了):最常见的下一步是重连,放在最显眼的位置。
+                    ToolbarTextButton("关闭", p.textDim) { onExit() }
+                    ToolbarTextButton("重新连接", p.accent, bold = true) { onReconnect() }
+                } else {
+                    ToolbarTextButton("断开", p.danger) {
+                        SessionRegistry.close(host.id)
+                        onExit()
+                    }
+                }
+            }
+        } else if (topBar) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.weight(1f)) { HostLine(host = host, dead = dead) }
                 CompositionLocalProvider(LocalGlassSize provides 40.dp, LocalGlassRow provides true) {
@@ -512,7 +853,7 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
     if (tabletop != null) {
         // 桌面模式:机器半开着立在桌上。上半屏只放要看的(终端),下半屏只放要碰的
         // (按键与输入法),手不会伸到上半屏去挡住输出。
-        Box(Modifier.fillMaxSize().background(p.bg)) {
+        Box(Modifier.fillMaxSize().background(p.bg).then(keyModifier)) {
         Column(Modifier.fillMaxSize()) {
             Column(
                 Modifier
@@ -555,7 +896,7 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
 
     // 终端铺满整宽,右侧轨道悬浮在上面(玻璃按钮,底下的字透出来)—— 用户要的是最宽的终端。
     // 只有快捷键面板给轨道让位(它和轨道同一条底边、并排),见 FloatingKeys。
-    Box(Modifier.fillMaxSize().background(p.termBg)) {
+    Box(Modifier.fillMaxSize().background(p.termBg).then(keyModifier)) {
         Column(
             Modifier
                 .fillMaxSize()
@@ -566,17 +907,25 @@ private fun TerminalView(live: TerminalSession, host: Host, onExit: () -> Unit) 
                 .imePadding(),
         ) {
             header()
+            // 平板的工具栏下面有一道分隔线,第一行字贴着它太挤。
+            if (tablet != null) Spacer(Modifier.height(8.dp))
             canvas(Modifier.weight(1f).fillMaxWidth())
             hiddenInput()
             AnimatedVisibility(showKeys, enter = Motion.keyboardIn, exit = Motion.keyboardOut) { keys() }
         }
-        if (!topBar) {
+        if (!topBar && tablet == null) {
             CompositionLocalProvider(LocalBackdrop provides backdrop) {
                 EdgeRail(Modifier.align(Alignment.BottomEnd), content = actions)
             }
         }
     }
 }
+
+/** 鼠标滚轮一格翻几行。 */
+private const val WheelLines = 3f
+
+/** 手指按住多久进入选择(和系统长按选字差不多)。 */
+private const val LongPressMillis = 450L
 
 /** 按键的宽度上限:和 48dp 的高度配成接近实体键帽的比例(约 1.2 : 1)。 */
 private val KeyMaxWidth = 58.dp
@@ -640,7 +989,7 @@ private fun HostLine(host: Host, dead: Boolean) {
         Text(
             text = if (dead) "已断开" else host.subtitle,
             color = if (dead) p.danger else p.textFaint,
-            fontFamily = FontFamily.Monospace,
+            fontFamily = XsshFonts.monoUi,
             fontSize = 11.sp,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -790,6 +1139,7 @@ private fun WideKeys(k: KeyActions, keyWidth: Dp) {
 @Composable
 private fun HiddenImeField(
     focusRequester: FocusRequester,
+    onFocus: (Boolean) -> Unit,
     takeModifiers: () -> Pair<Boolean, Boolean>,
     onText: (String, Boolean, Boolean) -> Unit,
     onBackspace: () -> Unit,
@@ -835,7 +1185,11 @@ private fun HiddenImeField(
             }
             field = value
         },
-        modifier = Modifier.size(1.dp).alpha(0f).focusRequester(focusRequester),
+        modifier = Modifier
+            .size(1.dp)
+            .alpha(0f)
+            .focusRequester(focusRequester)
+            .onFocusChanged { onFocus(it.isFocused) },
         textStyle = TextStyle(color = Color.Transparent, fontSize = 1.sp),
         cursorBrush = SolidColor(Color.Transparent),
     )
@@ -847,15 +1201,28 @@ private fun TerminalCanvas(
     cursor: CursorState,
     fontSize: Float,
     onGridSize: (cols: Int, rows: Int, cellWidthPx: Int, cellHeightPx: Int) -> Unit,
-    onScroll: (Int) -> Unit,
+    onScroll: (lines: Int, col: Int, row: Int) -> Unit,
+    onSecondaryClick: (Offset) -> Unit,
+    /** 选区落在视口里的部分(只用来画);选区本身在核心里。 */
+    selection: TermSelection?,
+    /** 开始选择:按格(鼠标拖)、按词(双击 / 长按)、按行(三击)。 */
+    onSelectStart: (GridCell, SelectKind) -> Unit,
+    onSelectUpdate: (GridCell) -> Unit,
+    onSelectClear: () -> Unit,
+    /** 手指长按选完、松手的位置(在这里弹「复制 / 粘贴」菜单)。 */
+    onSelectionDone: (Offset) -> Unit,
+    /** 鼠标左键松开(把焦点还给按键节点)。 */
+    onMouseReleased: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val p = LocalXssh.current
     // 缓存要够大:一屏中文每个字都要单独量一次宽度,默认 8 条会反复失效。
     val measurer = rememberTextMeasurer(cacheSize = 512)
+    // 英文 Iosevka、中文思源黑体(见 XsshFonts):同一套设计,中文正好两格宽。
     val style = remember(fontSize, p.termFg) {
-        TextStyle(color = p.termFg, fontFamily = FontFamily.Monospace, fontSize = fontSize.sp)
+        TextStyle(color = p.termFg, fontFamily = XsshFonts.mono, fontSize = fontSize.sp)
     }
+    val wideStyle = remember(style) { XsshFonts.cjk?.let { style.copy(fontFamily = it) } ?: style }
     val cell = remember(style, measurer) {
         // 格宽用 100 个 M 的总宽度来算:单个 M 的像素宽度是取整过的,
         // 差零点几像素,一行 80 列累积下来就是十几像素的漂移。
@@ -863,8 +1230,17 @@ private fun TerminalCanvas(
         val one = measurer.measure("M", style).size
         (wide.width / 100f).coerceAtLeast(1f) to one.height.toFloat().coerceAtLeast(1f)
     }
+    // 每一格的基线(英文字体的):中文、符号都对齐到这条线上,不按各自字体的行高往下掉。
+    val baseline = remember(style, measurer) { measurer.measure("M", style).firstBaseline }
 
     val scrollBy by rememberUpdatedState(onScroll)
+    val secondary by rememberUpdatedState(onSecondaryClick)
+    val selectStart by rememberUpdatedState(onSelectStart)
+    val selectUpdate by rememberUpdatedState(onSelectUpdate)
+    val selectClear by rememberUpdatedState(onSelectClear)
+    val selectDone by rememberUpdatedState(onSelectionDone)
+    val released by rememberUpdatedState(onMouseReleased)
+    val haptic = LocalHapticFeedback.current
     BoxWithConstraints(modifier.clipToBounds()) {
         // 画布的高度**等停下来再跟**。键盘 / 快捷键面板升起的 300ms 里可用高度每帧都在变,
         // 原来画布跟着每帧变高变矮,每一帧都要把整屏几千个字重画一遍,动画一路掉帧(实测
@@ -890,24 +1266,145 @@ private fun TerminalCanvas(
         // 手势放在画布上(而不是外层):它先于外层的捏合缩放拿到事件并吃掉,
         // 否则单指拖动会被 transformable 当成平移吞掉,翻不动历史。
         // 按行取整,余量留到下一次,慢慢拖才不会卡顿。
-        val dragModifier = Modifier.pointerInput(cell) {
+        fun cellAt(position: Offset) =
+            (position.x / cell.first).toInt().coerceAtLeast(0) to (position.y / cell.second).toInt().coerceAtLeast(0)
+        fun gridAt(position: Offset): GridCell {
+            val col = (position.x / cell.first).toInt().coerceIn(0, cols - 1)
+            return GridCell(
+                row = (position.y / cell.second).toInt().coerceIn(0, gridRows - 1),
+                col = col,
+                rightHalf = position.x - col * cell.first >= cell.first / 2f,
+            )
+        }
+        fun sameCell(a: GridCell, b: GridCell) = a.row == b.row && a.col == b.col
+        val dragModifier = Modifier.pointerInput(cell, cols, gridRows) {
+            // 连击判定跨手势,记在手势外面:双击选词,三击选整行。
+            var lastClickAt = 0L
+            var lastClickCell: GridCell? = null
+            var clicks = 0
             awaitEachGesture {
-                awaitFirstDown(requireUnconsumed = false)
+                val down = awaitFirstDown(requireUnconsumed = false)
+                if (down.type == PointerType.Mouse) {
+                    // 鼠标 / 触控板按住拖 = 选择(滚动交给滚轮),和桌面终端一样。右键在 mouseModifier 里处理。
+                    // 只排除右键 / 中键:触控板轻点、部分注入的鼠标事件不带按键状态,那也是"左键"。
+                    val buttons = currentEvent.buttons
+                    if (buttons.isSecondaryPressed || buttons.isTertiaryPressed) return@awaitEachGesture
+                    val start = gridAt(down.position)
+                    val last = lastClickCell
+                    clicks = if (down.uptimeMillis - lastClickAt < 350 && last != null && sameCell(start, last)) clicks + 1 else 1
+                    lastClickAt = down.uptimeMillis
+                    lastClickCell = start
+                    val kind = when (clicks) {
+                        1 -> SelectKind.CELL
+                        2 -> SelectKind.WORD
+                        else -> SelectKind.LINE
+                    }
+                    if (kind != SelectKind.CELL) {
+                        down.consume()
+                        selectStart(start, kind)
+                    }
+                    var moved = false
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val change = event.changes.firstOrNull() ?: break
+                        if (!change.pressed) break
+                        val at = gridAt(change.position)
+                        if (!moved && !sameCell(at, start)) {
+                            moved = true
+                            // 按格选:真的拖动了才开始(单击不留空选区)。
+                            if (kind == SelectKind.CELL) selectStart(start, kind)
+                        }
+                        if (moved) {
+                            change.consume()
+                            selectUpdate(at)
+                        }
+                    }
+                    // 单击没拖:清掉选区(点击本身照常聚焦终端)。
+                    if (!moved && kind == SelectKind.CELL) selectClear()
+                    // 鼠标按下时 Compose 会清掉焦点;松手后要回来,否则拖选 / 双击之后实体键盘没了去处。
+                    released()
+                    return@awaitEachGesture
+                }
+                // 手指:拖动翻历史;按住不动 0.45 秒进入选择,接着拖动扩大选区,松手出「复制」菜单。
+                val pressedAt = System.currentTimeMillis()
+                var travelled = 0f
+                var anchor: GridCell? = null
                 var carry = 0f
                 while (true) {
-                    val event = awaitPointerEvent()
+                    val waiting = anchor == null && travelled < viewConfiguration.touchSlop
+                    val event = if (waiting) {
+                        val left = (LongPressMillis - (System.currentTimeMillis() - pressedAt)).coerceAtLeast(1L)
+                        withTimeoutOrNull(left) { awaitPointerEvent() }
+                    } else {
+                        awaitPointerEvent()
+                    }
+                    // 按住不动够久就进入选择。两种到达方式:一段时间没有任何事件(超时),
+                    // 或者事件一直在来但手指没挪开 —— 手指按着时系统仍在持续上报位置(抖动 / 零位移),
+                    // 只靠超时的话永远等不到(实测长按毫无反应)。
+                    val heldLong = System.currentTimeMillis() - pressedAt >= LongPressMillis
+                    if (anchor == null && travelled < viewConfiguration.touchSlop && (event == null || heldLong)) {
+                        val at = gridAt(down.position)
+                        anchor = at
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        // 长按先选中一个词;接着拖动时核心按词往两边扩(词本身始终在选区里)。
+                        selectStart(at, SelectKind.WORD)
+                        if (event == null) continue
+                    }
+                    if (event == null) continue
                     // 两根手指 = 用户在捏合缩放,让给外层的 transformable,这里不抢。
                     if (event.changes.size > 1) break
                     val change = event.changes.firstOrNull() ?: break
+                    val from = anchor
+                    if (from != null) {
+                        change.consume()
+                        if (!change.pressed) {
+                            selectDone(change.position)
+                            break
+                        }
+                        val at = gridAt(change.position)
+                        if (!sameCell(at, from)) selectUpdate(at)
+                        continue
+                    }
                     if (!change.pressed) break
-                    carry += change.positionChange().y
+                    val step = change.positionChange()
+                    travelled += kotlin.math.abs(step.x) + kotlin.math.abs(step.y)
+                    carry += step.y
                     val moved = (carry / cell.second).toInt()
                     if (moved != 0) {
                         carry -= moved * cell.second
                         // 只在真的翻了一行时才吃掉事件:轻点不受影响,照样聚焦弹键盘。
                         change.consume()
                         // 内容往下拖 = 看更早的内容。
-                        scrollBy(moved)
+                        val (col, row) = cellAt(change.position)
+                        scrollBy(moved, col, row)
+                    }
+                }
+            }
+        }
+        // 鼠标 / 触控板:滚轮一格翻 3 行(桌面终端的惯例),触控板的小数增量攒够一行再翻;
+        // 右键粘贴。
+        val mouseModifier = Modifier.pointerInput(cell) {
+            awaitPointerEventScope {
+                var carry = 0f
+                while (true) {
+                    val event = awaitPointerEvent()
+                    val change = event.changes.firstOrNull() ?: continue
+                    when {
+                        event.type == PointerEventType.Scroll -> {
+                            // scrollDelta.y 正数是往下滚(看更新的内容),和我们的"正数看更早"相反。
+                            carry += -change.scrollDelta.y * WheelLines
+                            val lines = carry.toInt()
+                            if (lines != 0) {
+                                carry -= lines
+                                val (col, row) = cellAt(change.position)
+                                scrollBy(lines, col, row)
+                            }
+                            change.consume()
+                        }
+                        event.type == PointerEventType.Press && event.buttons.isSecondaryPressed -> {
+                            event.changes.forEach { it.consume() }
+                            secondary(change.position)
+                        }
                     }
                 }
             }
@@ -920,6 +1417,8 @@ private fun TerminalCanvas(
                 .wrapContentHeight(align = Alignment.Top, unbounded = true)
                 .height(heightDp)
                 .graphicsLayer()
+                .pointerHoverIcon(PointerIcon.Text)
+                .then(mouseModifier)
                 .then(dragModifier),
         ) {
             val cw = cell.first
@@ -927,7 +1426,18 @@ private fun TerminalCanvas(
             rows.forEachIndexed { r, row ->
                 if (r >= gridRows) return@forEachIndexed
                 val y = r * ch
-                row.runs.forEach { run -> drawRun(run, y, cw, ch, style, measurer, p.termFg, p.termBg) }
+                row.runs.forEach { run -> drawRun(run, y, cw, ch, style, wideStyle, baseline, measurer, p.termFg, p.termBg) }
+            }
+            // 选区:半透明的强调色盖在字上,和系统文本选择一个样子。
+            selection?.let { sel ->
+                for (r in sel.start.row..minOf(sel.end.row, gridRows - 1)) {
+                    val range = sel.colsOn(r, cols) ?: continue
+                    drawRect(
+                        color = p.accent.copy(alpha = 0.32f),
+                        topLeft = Offset(range.first * cw, r * ch),
+                        size = Size((range.last - range.first + 1) * cw, ch),
+                    )
+                }
             }
             if (cursor.visible && cursor.row.toInt() < gridRows) {
                 val thickness = 2.dp.toPx()
@@ -966,6 +1476,10 @@ private fun DrawScope.drawRun(
     cw: Float,
     ch: Float,
     base: TextStyle,
+    /** 宽字符(中日韩,占两格)用的字:思源黑体。 */
+    wideBase: TextStyle,
+    /** 这一格的基线离格子顶部多远(英文字体的)。 */
+    baseline: Float,
     measurer: TextMeasurer,
     defaultFg: Color,
     defaultBg: Color,
@@ -997,6 +1511,12 @@ private fun DrawScope.drawRun(
         fontStyle = if (flags and STYLE_ITALIC != 0) FontStyle.Italic else null,
         textDecoration = decoration,
     )
+    val wideStyle = wideBase.copy(
+        color = fg,
+        fontWeight = style.fontWeight,
+        fontStyle = style.fontStyle,
+        textDecoration = decoration,
+    )
 
     val ascii = StringBuilder()
     var asciiStart = 0
@@ -1015,14 +1535,17 @@ private fun DrawScope.drawRun(
         if (text.isEmpty()) return@forEachIndexed // 宽字符后面的占位格
         val span = if (i + 1 < cells.size && cells[i + 1].isEmpty()) 2 else 1
         val slot = span * cw
-        val layout = measurer.measure(text, style)
+        // 占两格的(中日韩)用思源黑体;其它(制表符、箭头、希腊字母…)用和英文同一套的等宽字。
+        val layout = measurer.measure(text, if (span == 2) wideStyle else style)
         val width = layout.size.width.toFloat()
         val x = (col0 + i) * cw
+        // 对齐基线:思源黑体的行高比英文字体高,按各自的行顶摆放的话中文会整体往下掉一截。
+        val top = y + baseline - layout.firstBaseline
         if (width <= slot) {
-            drawText(layout, topLeft = Offset(x + (slot - width) / 2f, y))
+            drawText(layout, topLeft = Offset(x + (slot - width) / 2f, top))
         } else {
             scale(scaleX = slot / width, scaleY = 1f, pivot = Offset(x, y)) {
-                drawText(layout, topLeft = Offset(x, y))
+                drawText(layout, topLeft = Offset(x, top))
             }
         }
     }

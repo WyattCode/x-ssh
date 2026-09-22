@@ -9,6 +9,9 @@ android {
 
     defaultConfig {
         applicationId = "dev.xssh.android"
+        // 真机复核用:`-PxsshIdSuffix=.review` 装成另一个包,和设备上已有的(别的电脑签名、带着用户数据)并存,
+        // 不用卸载原来那个。
+        providers.gradleProperty("xsshIdSuffix").orNull?.let { applicationIdSuffix = it }
         minSdk = 26
         targetSdk = 37
         versionCode = 1

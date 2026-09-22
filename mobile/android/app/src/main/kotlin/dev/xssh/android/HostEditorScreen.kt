@@ -35,6 +35,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.focusable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.onInterceptKeyBeforeSoftKeyboard
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.font.FontWeight
@@ -42,7 +50,17 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import java.util.UUID
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * 新建 / 编辑主机。
@@ -51,8 +69,8 @@ import java.util.UUID
  * 展开的内屏不把表单拉成一条 860dp 宽的长行,而是**按折痕分成两栏**:
  * 左边是连到哪台,右边是密码 —— 一眼能看完,也不用来回滚。
  *
- * 只有密码登录。私钥还没有导入的办法(只能填应用内部的文件路径),普通用户用不了,
- * 界面上干脆不出现;数据模型和连接层仍然支持私钥,老数据照常能连。
+ * 登录方式:密码,或者导入的私钥(系统文件选择器选文件,平板上也能直接把文件拖进浮层)。
+ * 私钥内容经 Android 密钥库加密存在应用里,连接时只在内存里解密。
  * 页面上不写操作说明、存储说明、"后续版本"之类的话 —— 用户都知道怎么用。
  */
 @Composable
@@ -65,40 +83,22 @@ fun HostEditorScreen(
     val p = LocalXssh.current
     val adaptive = LocalAdaptive.current
 
-    var name by remember { mutableStateOf(initial?.name ?: "") }
-    var address by remember { mutableStateOf(initial?.address ?: "") }
-    var port by remember { mutableStateOf((initial?.port ?: 22).toString()) }
-    var username by remember { mutableStateOf(initial?.username ?: "") }
-    var password by remember { mutableStateOf(initial?.password ?: "") }
-    var error by remember { mutableStateOf<String?>(null) }
+    val draft = remember { HostDraft(initial) }
+    var name by draft::name
+    var address by draft::address
+    var port by draft::port
+    var username by draft::username
+    val error = draft.error
+    val scope = rememberCoroutineScope()
+    var keyMessage by remember { mutableStateOf<String?>(null) }
+    val importKey = rememberKeyImporter(draft) { keyMessage = it }
 
     fun save() {
-        val newAddress = address.trim()
-        if (newAddress.isEmpty()) {
-            error = "地址不能为空"
-            return
+        // 用私钥登录时要验一次口令(解私钥要几百毫秒),放到 IO 线程,别卡住界面。
+        scope.launch {
+            val host = withContext(Dispatchers.IO) { draft.build() }
+            host?.let(onSave)
         }
-        error = null
-        val newPort = (port.toIntOrNull() ?: 22).coerceIn(1, 65535)
-        // 已信任的指纹绑在「地址:端口」上:改了目标就是另一台机器,旧指纹不能跟着走;
-        // 没改就必须留下,否则编辑一下备注就把信任关系抹了。
-        val sameEndpoint = initial != null && initial.address == newAddress && initial.port == newPort
-        val keepKey = initial?.auth == AuthKind.KEY && password.isEmpty()
-        onSave(
-            Host(
-                id = initial?.id ?: UUID.randomUUID().toString(),
-                name = name.trim(),
-                address = newAddress,
-                port = newPort,
-                username = username.trim(),
-                // 界面上只有密码。老数据里用私钥登录、又没填密码的主机,保存时别悄悄改成密码登录 ——
-                // 那样它就再也连不上了。
-                auth = if (keepKey) AuthKind.KEY else AuthKind.PASSWORD,
-                keyPath = if (keepKey) initial?.keyPath.orEmpty() else "",
-                keyFingerprint = if (sameEndpoint) initial.keyFingerprint else "",
-                password = password,
-            ),
-        )
     }
 
     val target: @Composable () -> Unit = {
@@ -112,6 +112,7 @@ fun HostEditorScreen(
                 placeholder = "192.168.1.10",
                 mono = true,
                 keyboard = KeyboardType.Uri,
+                            asciiOnly = true,
             )
             FormDivider()
             FormField(
@@ -121,24 +122,22 @@ fun HostEditorScreen(
                 placeholder = "22",
                 mono = true,
                 keyboard = KeyboardType.Number,
+                            asciiOnly = true,
             )
             FormDivider()
-            FormField("用户名", username, { username = it }, placeholder = "root", mono = true)
+            // 用户名只会是英文:用 URI 类键盘,中文输入法会切到英文,不会把 root 组成拼音。
+            FormField("用户名", username, { username = it }, placeholder = "root", mono = true, keyboard = KeyboardType.Uri, asciiOnly = true)
         }
     }
 
     val credentials: @Composable () -> Unit = {
-        FormGroup {
-            FormField(
-                "密码",
-                password,
-                { password = it },
-                placeholder = "输入密码",
-                secret = true,
-                keyboard = KeyboardType.Password,
-                imeAction = ImeAction.Done,
-            )
-        }
+        CredentialFields(
+            draft = draft,
+            keyMessage = keyMessage,
+            onImport = importKey,
+            onDone = { save() },
+            onMessage = { keyMessage = it },
+        )
     }
 
     val danger: @Composable () -> Unit = {
@@ -158,7 +157,33 @@ fun HostEditorScreen(
     val backdrop = rememberLayerBackdrop()
     // 折叠屏:‹ ✓ 在右侧轨道;直板机:顶栏左边 ‹、右边 ✓(见 Chrome)。
     val topBar = LocalChrome.current == Chrome.TopBar
-    BoxWithConstraints(Modifier.fillMaxSize().background(p.groupedBg)) {
+    // 实体键盘:Ctrl+S 保存、Esc 返回(不保存)。
+    val hardKeyboard = LocalConfiguration.current.hasHardKeyboard()
+    val pageFocus = remember { FocusRequester() }
+    LaunchedEffect(hardKeyboard) {
+        if (hardKeyboard) runCatching { pageFocus.requestFocus() }
+    }
+    val onKey: (androidx.compose.ui.input.key.KeyEvent) -> Boolean = handler@{ event ->
+        val e = event.nativeKeyEvent
+        if (e.action != android.view.KeyEvent.ACTION_DOWN) return@handler false
+        when {
+            e.isCtrlPressed && e.keyCode == android.view.KeyEvent.KEYCODE_S -> save()
+            e.keyCode == android.view.KeyEvent.KEYCODE_ESCAPE -> onBack()
+            else -> return@handler false
+        }
+        true
+    }
+    BoxWithConstraints(
+        Modifier
+            .fillMaxSize()
+            .background(p.groupedBg)
+            // Ctrl 组合键要赶在输入法前面拿:中文输入法开着时它会先吃掉按键(实测 Ctrl+S 到不了页面)。
+            // 只拦 Ctrl —— 组词从来不用 Ctrl;Esc 留给输入法取消组词,它不要才轮到页面返回。
+            .onInterceptKeyBeforeSoftKeyboard { if (it.isCtrlPressed) onKey(it) else false }
+            .onPreviewKeyEvent(onKey)
+            .focusRequester(pageFocus)
+            .focusable(),
+    ) {
         val window = maxWidth
         val twoPane = window >= 840.dp || (adaptive.bookFold != null && window >= 600.dp)
         // 左侧安全区(横屏时挖孔可能在左边,约 51dp)单独拿出来,不放进整页的 padding。
@@ -215,12 +240,17 @@ fun HostEditorScreen(
                         Modifier.width(left).padding(start = startInset + Gutter, end = Gutter * 2),
                         verticalArrangement = Arrangement.spacedBy(20.dp),
                     ) { target() }
-                    Column(
-                        Modifier.weight(1f).padding(start = Gutter * 2, end = Gutter),
-                        verticalArrangement = Arrangement.spacedBy(20.dp),
-                    ) {
-                        credentials()
-                        danger()
+                    // 右栏也限宽:平板横屏右栏有 900dp,"标签在左、取值在右"的一行会横跨整块屏幕。
+                    Column(Modifier.weight(1f)) {
+                        Column(
+                            Modifier
+                                .widthIn(max = 560.dp + Gutter * 3)
+                                .padding(start = Gutter * 2, end = Gutter),
+                            verticalArrangement = Arrangement.spacedBy(20.dp),
+                        ) {
+                            credentials()
+                            danger()
+                        }
                     }
                 }
             } else {
@@ -259,6 +289,327 @@ fun HostEditorScreen(
                     GlassButton(XIcons.Back, "返回") { onBack() }
                     // 和 ‹ 同一种样式:无色玻璃、正文色图标。
                     GlassButton(XIcons.Check, "保存") { save() }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 新建 / 编辑主机的草稿:手机的整页编辑和平板的浮层共用同一套字段、校验和保存规则。
+ */
+class HostDraft(private val initial: Host?) {
+    var name by mutableStateOf(initial?.name ?: "")
+    var address by mutableStateOf(initial?.address ?: "")
+    var port by mutableStateOf((initial?.port ?: 22).toString())
+    var username by mutableStateOf(initial?.username ?: "")
+    var password by mutableStateOf(initial?.password ?: "")
+    var auth by mutableStateOf(initial?.auth ?: AuthKind.PASSWORD)
+    var keyData by mutableStateOf(initial?.keyData ?: "")
+    var keyName by mutableStateOf(initial?.keyName ?: "")
+    var keyPublicFingerprint by mutableStateOf(initial?.keyPublicFingerprint ?: "")
+    var keyPassphrase by mutableStateOf(initial?.keyPassphrase ?: "")
+    /** 这把私钥带口令(口令那一格要露出来)。 */
+    var keyLocked by mutableStateOf((initial?.keyPassphrase ?: "").isNotEmpty())
+    var error by mutableStateOf<String?>(null)
+
+    /** 老数据 / 调试用的私钥文件路径(界面上不出现,保存时原样留下)。 */
+    private val keyPath = initial?.keyPath.orEmpty()
+
+    val isNew: Boolean get() = initial == null
+
+    /** 有私钥可用(导入过的,或者老数据里的私钥文件)。 */
+    val hasKey: Boolean get() = keyData.isNotEmpty() || keyPath.isNotEmpty()
+
+    /** 改过没有 —— 平板浮层点外面关闭时,改过的内容不能悄悄丢掉。 */
+    val dirty: Boolean
+        get() = name != (initial?.name ?: "") ||
+            address != (initial?.address ?: "") ||
+            port != (initial?.port ?: 22).toString() ||
+            username != (initial?.username ?: "") ||
+            password != (initial?.password ?: "") ||
+            auth != (initial?.auth ?: AuthKind.PASSWORD) ||
+            keyData != (initial?.keyData ?: "") ||
+            keyPassphrase != (initial?.keyPassphrase ?: "")
+
+    /**
+     * 导入一把私钥。返回要给用户看的一句话:null = 成功;带口令时返回提示并露出口令格
+     * (私钥先收下,保存时再验口令)。在 IO 线程调用 —— 带口令的私钥解一次要几百毫秒。
+     */
+    fun importKey(text: String, fileName: String): String? {
+        val pem = text.trim()
+        return try {
+            val info = uniffi.xssh_ffi.inspectKey(pem, keyPassphrase.ifEmpty { null })
+            keyData = pem
+            keyName = fileName
+            keyPublicFingerprint = info.fingerprint
+            keyLocked = keyPassphrase.isNotEmpty()
+            auth = AuthKind.KEY
+            error = null
+            null
+        } catch (e: uniffi.xssh_ffi.FfiException.KeyEncrypted) {
+            keyData = pem
+            keyName = fileName
+            keyPublicFingerprint = ""
+            keyLocked = true
+            auth = AuthKind.KEY
+            "这把私钥有口令"
+        } catch (e: Exception) {
+            "不是可用的私钥文件"
+        }
+    }
+
+    /**
+     * 在本机生成一把 ed25519 密钥并用上它。返回公钥一行(贴进服务器的 authorized_keys);失败返回 null。
+     * 不加口令:私钥本身经密钥库加密存在应用里,口令只会让每次连接多一步。在 IO 线程调用。
+     */
+    fun generateKey(): String? = runCatching {
+        val comment = "x-ssh@" + android.os.Build.MODEL.replace(' ', '-')
+        val key = uniffi.xssh_ffi.generateKey(comment, null)
+        keyData = key.pem
+        keyName = "本机生成 · ed25519"
+        keyPublicFingerprint = key.info.fingerprint
+        keyPassphrase = ""
+        keyLocked = false
+        auth = AuthKind.KEY
+        error = null
+        key.info.publicKey
+    }.getOrNull()
+
+    /** 公钥一行(贴进服务器的 authorized_keys 用);解不开时为 null。 */
+    fun publicKey(): String? = runCatching {
+        uniffi.xssh_ffi.inspectKey(keyData, keyPassphrase.ifEmpty { null }).publicKey
+    }.getOrNull()
+
+    /**
+     * 校验并生成要保存的主机;不合法时写 [error] 并返回 null。
+     * 用私钥登录时会验一次口令(解私钥要时间,在 IO 线程调用)。
+     */
+    fun build(): Host? {
+        val newAddress = address.trim()
+        if (newAddress.isEmpty()) {
+            error = "地址不能为空"
+            return null
+        }
+        if (auth == AuthKind.KEY) {
+            if (!hasKey) {
+                error = "还没有导入私钥"
+                return null
+            }
+            // 带口令的私钥:保存前就验口令,填错当场说,而不是等到连接时才失败。
+            if (keyData.isNotEmpty()) {
+                try {
+                    keyPublicFingerprint = uniffi.xssh_ffi.inspectKey(keyData, keyPassphrase.ifEmpty { null }).fingerprint
+                } catch (e: uniffi.xssh_ffi.FfiException.KeyEncrypted) {
+                    keyLocked = true
+                    error = if (keyPassphrase.isEmpty()) "这把私钥有口令" else "私钥口令不对"
+                    return null
+                } catch (e: Exception) {
+                    error = "私钥无法使用"
+                    return null
+                }
+            }
+        }
+        error = null
+        val newPort = (port.toIntOrNull() ?: 22).coerceIn(1, 65535)
+        // 已信任的指纹绑在「地址:端口」上:改了目标就是另一台机器,旧指纹不能跟着走;
+        // 没改就必须留下,否则编辑一下备注就把信任关系抹了。
+        val sameEndpoint = initial != null && initial.address == newAddress && initial.port == newPort
+        val key = auth == AuthKind.KEY
+        return Host(
+            id = initial?.id ?: UUID.randomUUID().toString(),
+            name = name.trim(),
+            address = newAddress,
+            port = newPort,
+            username = username.trim(),
+            auth = auth,
+            // 换成密码登录就不留私钥(反之亦然):没用的秘密不存。
+            keyPath = if (key && keyData.isEmpty()) keyPath else "",
+            keyFingerprint = if (sameEndpoint) initial.keyFingerprint else "",
+            password = if (key) "" else password,
+            keyData = if (key) keyData else "",
+            keyPassphrase = if (key && keyLocked) keyPassphrase else "",
+            keyName = if (key) keyName else "",
+            keyPublicFingerprint = if (key) keyPublicFingerprint else "",
+        )
+    }
+}
+
+/** 私钥文件不会超过这个大小(4096 位 RSA 带口令也才 3KB 多);更大的多半选错了文件。 */
+private const val MaxKeyBytes = 64 * 1024
+
+/** 从系统文件选择器 / 拖放进来的文件里读私钥交给 [draft]。在 IO 线程调用。 */
+fun importKeyFrom(context: android.content.Context, uri: android.net.Uri, draft: HostDraft): String? {
+    val name = runCatching {
+        context.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { if (it.moveToFirst()) it.getString(0) else null }
+    }.getOrNull() ?: uri.lastPathSegment.orEmpty().substringAfterLast('/')
+    val bytes = runCatching {
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            val out = java.io.ByteArrayOutputStream()
+            val buffer = ByteArray(8192)
+            while (out.size() <= MaxKeyBytes) {
+                val n = input.read(buffer)
+                if (n < 0) break
+                out.write(buffer, 0, n)
+            }
+            out.toByteArray()
+        }
+    }.getOrNull() ?: return "读不了这个文件"
+    if (bytes.size > MaxKeyBytes) return "不是可用的私钥文件"
+    return draft.importKey(String(bytes, Charsets.UTF_8), name)
+}
+
+/**
+ * 打开系统文件选择器导入私钥。返回"点一下就选文件"的动作;结果(一句话或 null)交给 [onResult]。
+ */
+@Composable
+fun rememberKeyImporter(draft: HostDraft, onResult: (String?) -> Unit): () -> Unit {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            scope.launch {
+                val message = withContext(Dispatchers.IO) { importKeyFrom(context, uri, draft) }
+                onResult(message)
+            }
+        }
+    }
+    // 私钥文件大多没有扩展名、也没有对应的类型,只能不限类型。
+    return { launcher.launch(arrayOf("*/*")) }
+}
+
+/**
+ * 「怎么登录」这一块:登录方式切换 + 密码,或者私钥(导入 / 更换、指纹、口令、复制公钥)。
+ * 手机的整页编辑和平板的浮层共用。
+ */
+@Composable
+fun CredentialFields(
+    draft: HostDraft,
+    /** 导入私钥后的提示(带口令 / 文件不对);null 不显示。 */
+    keyMessage: String?,
+    onImport: () -> Unit,
+    onDone: () -> Unit,
+    /** 生成密钥 / 复制公钥之后的一句状态(「公钥已复制」)。 */
+    onMessage: (String?) -> Unit,
+    passwordFocus: FocusRequester? = null,
+    passphraseFocus: FocusRequester? = null,
+    onComposing: ((Boolean) -> Unit)? = null,
+) {
+    val p = LocalXssh.current
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    FormGroup {
+        Row(
+            Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(horizontal = BoxPad),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("登录方式", color = p.text, fontSize = 16.sp, modifier = Modifier.weight(1f))
+            Segmented(
+                options = listOf("密码", "私钥"),
+                selected = if (draft.auth == AuthKind.KEY) 1 else 0,
+                onSelect = { draft.auth = if (it == 1) AuthKind.KEY else AuthKind.PASSWORD },
+            )
+        }
+    }
+    if (draft.auth == AuthKind.PASSWORD) {
+        FormGroup {
+            FormField(
+                "密码",
+                draft.password,
+                { draft.password = it },
+                placeholder = "输入密码",
+                secret = true,
+                keyboard = KeyboardType.Password,
+                imeAction = ImeAction.Done,
+                onDone = onDone,
+                focusRequester = passwordFocus,
+                onComposing = onComposing,
+            )
+        }
+        return
+    }
+    FormGroup(footnote = keyMessage) {
+        Row(
+            Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(horizontal = BoxPad),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("私钥", color = p.text, fontSize = 16.sp)
+            Spacer(Modifier.width(GapItem))
+            Text(
+                when {
+                    draft.keyName.isNotEmpty() -> draft.keyName
+                    draft.hasKey -> "私钥文件"
+                    else -> "未导入"
+                },
+                color = if (draft.hasKey) p.textDim else p.warn,
+                fontSize = 16.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.End,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        if (draft.keyPublicFingerprint.isNotEmpty()) {
+            FormDivider()
+            Row(
+                Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(horizontal = BoxPad),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("指纹", color = p.text, fontSize = 16.sp)
+                Spacer(Modifier.width(GapItem))
+                Text(
+                    draft.keyPublicFingerprint.removePrefix("SHA256:"),
+                    color = p.textDim,
+                    fontSize = 13.sp,
+                    fontFamily = XsshFonts.monoUi,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.End,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+        if (draft.keyLocked) {
+            FormDivider()
+            FormField(
+                "口令",
+                draft.keyPassphrase,
+                { draft.keyPassphrase = it },
+                placeholder = "私钥口令",
+                secret = true,
+                keyboard = KeyboardType.Password,
+                imeAction = ImeAction.Done,
+                onDone = onDone,
+                focusRequester = passphraseFocus,
+                onComposing = onComposing,
+            )
+        }
+        FormDivider()
+        FormAction(if (draft.keyData.isEmpty()) "导入私钥…" else "更换私钥…") { onImport() }
+        if (draft.keyData.isEmpty()) {
+            // 手里没有私钥文件的人(平板上很常见):在这里生成一把,公钥直接进剪贴板,贴到服务器上就能用。
+            FormDivider()
+            FormAction("生成新密钥") {
+                scope.launch {
+                    val line = withContext(Dispatchers.IO) { draft.generateKey() }
+                    if (line != null) {
+                        copyText(context, line)
+                        onMessage("公钥已复制")
+                    } else {
+                        onMessage("生成失败")
+                    }
+                }
+            }
+        } else {
+            FormDivider()
+            FormAction("复制公钥") {
+                scope.launch {
+                    val line = withContext(Dispatchers.IO) { draft.publicKey() }
+                    if (line != null) {
+                        copyText(context, line)
+                        onMessage("公钥已复制")
+                    }
                 }
             }
         }

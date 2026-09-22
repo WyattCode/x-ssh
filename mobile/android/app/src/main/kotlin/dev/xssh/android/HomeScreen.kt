@@ -65,6 +65,7 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -82,8 +83,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.focusable
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onInterceptKeyBeforeSoftKeyboard
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -148,11 +156,68 @@ fun HomeScreen(
     val barPad = if (topBar) TopBarHeight else 0.dp
     val clearance = if (topBar) FabClearance else RailClearance
 
-    BoxWithConstraints(Modifier.fillMaxSize().background(p.bg)) {
+    // 实体键盘(平板键盘套):Ctrl+N 新建、Ctrl+F 搜索、↑↓ 换主机、回车连接、Esc 收起搜索。
+    // 键盘事件只发给有焦点的节点,所以这一页自己拿一个焦点(不是输入框,不会弹软键盘)。
+    val hardKeyboard = LocalConfiguration.current.hasHardKeyboard()
+    val homeFocus = remember { FocusRequester() }
+    // 分栏与否在下面量窗口宽度时才知道,按键处理要读最新值。
+    val paneMode = remember { booleanArrayOf(false) }
+    LaunchedEffect(hardKeyboard, searching) {
+        if (hardKeyboard && !searching) runCatching { homeFocus.requestFocus() }
+    }
+    val onKey: (androidx.compose.ui.input.key.KeyEvent) -> Boolean = handler@{ event ->
+        val e = event.nativeKeyEvent
+        if (e.action != android.view.KeyEvent.ACTION_DOWN) return@handler false
+        val ctrl = e.isCtrlPressed && !e.isAltPressed
+        val code = e.keyCode
+        when {
+            ctrl && code == android.view.KeyEvent.KEYCODE_N -> onNew()
+            ctrl && code == android.view.KeyEvent.KEYCODE_F && hosts.isNotEmpty() -> searching = true
+            code == android.view.KeyEvent.KEYCODE_ESCAPE && searching -> {
+                query = ""
+                searching = false
+            }
+            paneMode[0] && (code == android.view.KeyEvent.KEYCODE_DPAD_UP ||
+                code == android.view.KeyEvent.KEYCODE_DPAD_DOWN) -> {
+                if (filtered.isEmpty()) return@handler false
+                val at = filtered.indexOfFirst { it.id == selectedId }
+                val step = if (code == android.view.KeyEvent.KEYCODE_DPAD_UP) -1 else 1
+                val next = if (at < 0) 0 else (at + step).coerceIn(0, filtered.lastIndex)
+                onSelect(filtered[next])
+            }
+            code == android.view.KeyEvent.KEYCODE_ENTER || code == android.view.KeyEvent.KEYCODE_NUMPAD_ENTER -> {
+                // 双栏连右边正显示的那台;单栏只有搜索时才有"那一台"(第一条结果)。
+                val target = if (paneMode[0]) {
+                    filtered.firstOrNull { it.id == selectedId } ?: filtered.firstOrNull()
+                } else {
+                    filtered.firstOrNull()?.takeIf { searching }
+                }
+                target?.let(onConnect) ?: return@handler false
+            }
+            else -> return@handler false
+        }
+        true
+    }
+
+    BoxWithConstraints(
+        Modifier
+            .fillMaxSize()
+            .background(p.bg)
+            // 搜索框开着时中文输入法会先吃按键;Ctrl 组合键赶在它前面拿(组词不用 Ctrl)。
+            // Esc 只在搜索框是空的时候抢:组词中的拼音也会进 query,空着就一定没在组词。
+            .onInterceptKeyBeforeSoftKeyboard {
+                val esc = it.key == Key.Escape && searching && query.isEmpty()
+                if (it.isCtrlPressed || esc) onKey(it) else false
+            }
+            .onPreviewKeyEvent(onKey)
+            .focusRequester(homeFocus)
+            .focusable(),
+    ) {
         // 用**实测到的窗口宽度**判断分栏,不用 Configuration 的 screenWidthDp ——
         // 分屏时部分机型的 screenWidthDp 仍报整块屏幕的宽度,那样会在只有半屏宽的窗口里
         // 摆出双栏:左栏按折痕位置占满整个窗口,右栏被挤到窗口之外,看起来就是内容跑到右边。
         val twoPane = maxWidth >= 840.dp || (adaptive.bookFold != null && maxWidth >= 600.dp)
+        paneMode[0] = twoPane
 
         // 只有双栏才自动选中:右栏必须有东西可看。
         // 单栏(外屏)里"选中"没有任何去处 —— 点卡片是直接连接 —— 自动选中只会让
@@ -605,7 +670,7 @@ private fun HostCard(
                 Text(
                     host.subtitle,
                     color = p.textDim,
-                    fontFamily = FontFamily.Monospace,
+                    fontFamily = XsshFonts.monoUi,
                     fontSize = if (large) 14.sp else 13.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -835,23 +900,30 @@ private fun HostDetailPane(
         }
 
         Spacer(Modifier.height(24.dp))
-        // 和编辑/删除同高(48dp):三颗按钮是一组,不该有一颗特别胖。
-        XsshButton("连接", modifier = Modifier.fillMaxWidth()) { onConnect(host) }
-        Spacer(Modifier.height(GapItem))
-        // 删除要点两下,和左滑一致:第一下变「确认删除」,换一台主机就复位。
-        var confirming by remember(host.id) { mutableStateOf(false) }
-        Row(horizontalArrangement = Arrangement.spacedBy(GapItem)) {
-            XsshButton("编辑", kind = ButtonKind.Ghost, modifier = Modifier.weight(1f)) { onEdit(host) }
-            XsshButton(
-                if (confirming) "确认删除" else "删除",
-                kind = ButtonKind.Danger,
-                modifier = Modifier.weight(1f),
-            ) {
-                if (confirming) onDelete(host) else confirming = true
+        // 按钮组有宽度上限:平板横屏右栏有 900dp,拉满的「连接」扁得像一条横幅。
+        // 上限和编辑页的表单一致,两页的按钮 / 输入框看着是同一个尺度。
+        Column(Modifier.widthIn(max = DetailMaxWidth)) {
+            // 和编辑/删除同高(48dp):三颗按钮是一组,不该有一颗特别胖。
+            XsshButton("连接", modifier = Modifier.fillMaxWidth()) { onConnect(host) }
+            Spacer(Modifier.height(GapItem))
+            // 删除要点两下,和左滑一致:第一下变「确认删除」,换一台主机就复位。
+            var confirming by remember(host.id) { mutableStateOf(false) }
+            Row(horizontalArrangement = Arrangement.spacedBy(GapItem)) {
+                XsshButton("编辑", kind = ButtonKind.Ghost, modifier = Modifier.weight(1f)) { onEdit(host) }
+                XsshButton(
+                    if (confirming) "确认删除" else "删除",
+                    kind = ButtonKind.Danger,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    if (confirming) onDelete(host) else confirming = true
+                }
             }
         }
     }
 }
+
+/** 详情栏里按钮组的宽度上限(与编辑页表单同宽)。 */
+private val DetailMaxWidth = 560.dp
 
 /** 栏标题(大标题 + 一行说明)。两栏共用同一套字号,基线才能横跨折痕对齐。 */
 @Composable
@@ -876,7 +948,7 @@ private fun PaneTitle(
         Text(
             subtitle,
             color = p.textDim,
-            fontFamily = if (monoSubtitle) FontFamily.Monospace else FontFamily.Default,
+            fontFamily = if (monoSubtitle) XsshFonts.monoUi else FontFamily.Default,
             fontSize = 12.5.sp,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -890,6 +962,6 @@ private fun DetailRow(label: String, value: String) {
     Column {
         Text(label, color = p.textDim, fontSize = 13.sp)
         Spacer(Modifier.height(4.dp))
-        Text(value, color = p.text, fontFamily = FontFamily.Monospace, fontSize = 13.sp)
+        Text(value, color = p.text, fontFamily = XsshFonts.monoUi, fontSize = 13.sp)
     }
 }

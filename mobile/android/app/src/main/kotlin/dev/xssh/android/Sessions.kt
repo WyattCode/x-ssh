@@ -5,6 +5,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -13,6 +14,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import android.util.Log
 import uniffi.xssh_ffi.CursorState
+import uniffi.xssh_ffi.InputModes
 import uniffi.xssh_ffi.ScreenRow
 
 /**
@@ -60,6 +62,10 @@ data class TerminalFrame(
     val alive: Boolean = true,
     /** 视口离底部多少行;>0 表示正在翻历史,界面要给一个「回到底部」。 */
     val scrollOffset: Int = 0,
+    /** 远端程序开着的输入模式:实体键盘按它编码方向键(应用光标模式等)。 */
+    val modes: InputModes = DefaultInputModes,
+    /** 选区在视口里的部分;null = 没选,或选区整个在视口外。 */
+    val selection: uniffi.xssh_ffi.ViewSelection? = null,
 )
 
 /**
@@ -76,6 +82,9 @@ class TerminalSession(
     private val live: LiveTerminal,
     scope: CoroutineScope,
 ) {
+    /** 同一条连接上的文件(SFTP),第一次打开文件面板时才开通道。 */
+    val files = RemoteFiles(live.session, scope)
+
     private val _frame = MutableStateFlow(TerminalFrame())
     val frame: StateFlow<TerminalFrame> = _frame
 
@@ -94,13 +103,23 @@ class TerminalSession(
                 val snapshot = if (p.changed && watched) live.snapshot() else null
                 p to snapshot
             }
-            pumped.second?.let { (rows, cursor, offset) ->
-                _frame.value = TerminalFrame(rows, cursor, alive = true, scrollOffset = offset)
+            pumped.second?.let { s ->
+                _frame.value = TerminalFrame(
+                    s.rows,
+                    s.cursor,
+                    alive = true,
+                    scrollOffset = s.scrollOffset,
+                    modes = s.modes,
+                    selection = s.selection,
+                )
             }
             if (!pumped.first.alive) {
                 Log.i(TAG, "peer closed ($label)")
                 _frame.value = _frame.value.copy(alive = false)
-                withContext(NonCancellable + Dispatchers.IO) { live.close() }
+                withContext(NonCancellable + Dispatchers.IO) {
+                    files.close()
+                    live.close()
+                }
                 // 对端断了就自己从名单上摘掉。
                 //
                 // 原来这件事是终端界面用 `LaunchedEffect(dead)` 做的 —— 那就要求
@@ -123,21 +142,61 @@ class TerminalSession(
         }
     }
 
-    fun sendRaw(bytes: ByteArray) = live.sendRaw(bytes)
+    /**
+     * 往远端写的动作排成**一队**,由同一个协程按顺序执行。
+     *
+     * 原来界面每按一个键就 `launch(Dispatchers.IO)` 一次,几个协程在线程池里并发跑,
+     * 谁先写出去没有保证 —— 实体键盘连着敲 `127.0.0.1`,远端收到的是 `172.0.0.1`。
+     * 这些方法可以在主线程直接调,不阻塞。
+     */
+    private val outbox = Channel<() -> Unit>(Channel.UNLIMITED)
+    private val writer: Job = scope.launch(Dispatchers.IO) {
+        for (op in outbox) runCatching { op() }.onFailure { Log.w(TAG, "write op failed: ${it.message}") }
+    }
 
-    fun sendText(text: String, ctrl: Boolean, alt: Boolean) = live.sendText(text, ctrl, alt)
+    private fun enqueue(op: () -> Unit) {
+        outbox.trySend(op)
+    }
+
+    fun sendRaw(bytes: ByteArray) = enqueue { live.sendRaw(bytes) }
+
+    fun sendText(text: String, ctrl: Boolean, alt: Boolean) = enqueue { live.sendText(text, ctrl, alt) }
 
     fun resizeGrid(cols: Int, rows: Int, cellWidthPx: Int, cellHeightPx: Int) =
-        live.resizeGrid(cols, rows, cellWidthPx, cellHeightPx)
+        enqueue { live.resizeGrid(cols, rows, cellWidthPx, cellHeightPx) }
 
-    fun scroll(lines: Int) = live.scroll(lines)
+    fun scroll(lines: Int) = enqueue { live.scroll(lines) }
+
+    fun wheel(lines: Int, col: Int, row: Int) = enqueue { live.wheel(lines, col, row) }
+
+    fun paste(text: String) = enqueue { live.paste(text) }
+
+    // 选择:和写入排在同一条队列里,顺序才不会乱(先选再复制,复制拿到的一定是选好的)。
+    fun selectStart(row: Int, col: Int, rightHalf: Boolean, kind: uniffi.xssh_ffi.SelectKind) =
+        enqueue { live.selectStart(row, col, rightHalf, kind) }
+
+    fun selectUpdate(row: Int, col: Int, rightHalf: Boolean) = enqueue { live.selectUpdate(row, col, rightHalf) }
+
+    fun selectClear() = enqueue { live.selectClear() }
+
+    /** 取选中的文字交给 [onText](在主线程回调),然后清掉选区。 */
+    fun copySelection(onText: (String) -> Unit) = enqueue {
+        val text = live.selectionText()
+        live.selectClear()
+        if (!text.isNullOrEmpty()) mainThread.post { onText(text) }
+    }
+
+    private val mainThread = android.os.Handler(android.os.Looper.getMainLooper())
 
     fun applyTheme(p: XsshPalette) = live.applyTheme(p)
 
-    fun scrollToBottom() = live.scrollToBottom()
+    fun scrollToBottom() = enqueue { live.scrollToBottom() }
 
     internal fun shutdown() {
         job.cancel()
+        outbox.close()
+        writer.cancel()
+        files.closeAsync()
         live.closeAsync()
     }
 }
