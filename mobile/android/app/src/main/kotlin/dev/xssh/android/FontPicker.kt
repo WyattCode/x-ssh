@@ -1,5 +1,11 @@
 package dev.xssh.android
 
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.foundation.focusable
+import android.view.KeyEvent as AndroidKeyEvent
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -162,10 +168,15 @@ fun FontScreen(onBack: () -> Unit) {
     }
 }
 
-/** 平板:居中浮层(和新建 / 编辑主机同一种)。选完就关。 */
+/**
+ * 平板:居中浮层(和新建 / 编辑主机同一种版式:标题居中、右上角「完成」、点外面关、Esc 关)。
+ * 选一款就换,不用按「完成」—— 那颗只是关浮层。
+ */
 @Composable
 fun FontSheet(onDismiss: () -> Unit) {
     val p = LocalXssh.current
+    val focus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
@@ -184,13 +195,36 @@ fun FontSheet(onDismiss: () -> Unit) {
                     .clip(RoundedCornerShape(20.dp))
                     .background(p.bg)
                     .border(0.5.dp, p.glassBorder, RoundedCornerShape(20.dp))
+                    .clip(RoundedCornerShape(20.dp))
                     .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
-                    .verticalScroll(rememberScrollState())
-                    .padding(20.dp),
+                    // 插着键盘时 Esc 关浮层(和编辑浮层一致);这里没有输入框,不用管输入法组词。
+                    .focusRequester(focus)
+                    .focusable()
+                    .onPreviewKeyEvent { event ->
+                        val e = event.nativeKeyEvent
+                        if (e.action == AndroidKeyEvent.ACTION_DOWN && e.keyCode == AndroidKeyEvent.KEYCODE_ESCAPE) {
+                            onDismiss()
+                            true
+                        } else {
+                            false
+                        }
+                    },
             ) {
-                Text("终端字体", color = p.text, fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.height(16.dp))
-                FontList(onPicked = onDismiss)
+                // 标题栏和编辑浮层同一条:56dp 高、标题居中、下面一条细线。
+                Box(Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 8.dp)) {
+                    Text(
+                        "终端字体",
+                        color = p.text,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.align(Alignment.Center),
+                    )
+                    ToolbarTextButton("完成", p.accent, Modifier.align(Alignment.CenterEnd), bold = true) { onDismiss() }
+                }
+                Box(Modifier.fillMaxWidth().height(0.5.dp).background(p.border))
+                Column(Modifier.verticalScroll(rememberScrollState()).padding(20.dp)) {
+                    FontList(onPicked = onDismiss)
+                }
             }
         }
     }
