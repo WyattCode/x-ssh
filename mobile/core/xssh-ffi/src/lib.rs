@@ -29,6 +29,8 @@ pub struct HostConfig {
 pub enum AuthMethod {
     Password { password: String },
     KeyFile { path: String, passphrase: Option<String> },
+    /// 私钥内容(导入后加密存在应用里,连接时在内存里解密传过来)。
+    KeyData { pem: String, passphrase: Option<String> },
 }
 
 /// 服务端消息。
@@ -82,6 +84,34 @@ pub struct CursorState {
     pub visible: bool,
 }
 
+/// 怎么选:按格(拖动)、按词(双击 / 长按)、按行(三击)。
+#[derive(Debug, Clone, Copy, uniffi::Enum)]
+pub enum SelectKind {
+    Cell,
+    Word,
+    Line,
+}
+
+/// 选区落在当前视口里的部分(闭区间),给界面画高亮。
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct ViewSelection {
+    pub start_row: u32,
+    pub start_col: u32,
+    pub end_row: u32,
+    pub end_col: u32,
+}
+
+/// 远端程序打开的输入模式(实体键盘、滚轮、粘贴按它编码)。
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct InputModes {
+    pub app_cursor: bool,
+    pub bracketed_paste: bool,
+    pub alt_screen: bool,
+    pub mouse_report: bool,
+    pub sgr_mouse: bool,
+    pub alternate_scroll: bool,
+}
+
 /// 错误(flat_error:只有变体名和 Display 文本跨边界,字段不过去)。
 ///
 /// 两个主机密钥变体的 Display **就是服务端指纹本身**,不加任何说明文字 ——
@@ -95,6 +125,10 @@ pub enum FfiError {
     HostKeyUnknown { fingerprint: String },
     /// 主机密钥与已信任的不一致,连接已拒绝。
     HostKeyChanged { actual: String },
+    /// 私钥带口令,没给或给错了(导入 / 连接时界面据此提示填口令)。
+    KeyEncrypted { detail: String },
+    /// 传输被用户取消(不是错误,界面不用提示)。
+    Cancelled { detail: String },
 }
 
 impl std::fmt::Display for FfiError {
@@ -103,6 +137,7 @@ impl std::fmt::Display for FfiError {
             Self::Message { message } => write!(f, "{message}"),
             Self::HostKeyUnknown { fingerprint } => write!(f, "{fingerprint}"),
             Self::HostKeyChanged { actual } => write!(f, "{actual}"),
+            Self::KeyEncrypted { detail } | Self::Cancelled { detail } => write!(f, "{detail}"),
         }
     }
 }
@@ -112,9 +147,158 @@ impl From<ssh::SshError> for FfiError {
         match err {
             ssh::SshError::HostKeyUnknown { fingerprint } => Self::HostKeyUnknown { fingerprint },
             ssh::SshError::HostKeyChanged { actual, .. } => Self::HostKeyChanged { actual },
+            ssh::SshError::KeyEncrypted => Self::KeyEncrypted { detail: err.to_string() },
+            ssh::SshError::Cancelled => Self::Cancelled { detail: err.to_string() },
             other => Self::Message { message: other.to_string() },
         }
     }
+}
+
+/// 一把私钥的公开信息(导入时展示给用户核对)。
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct KeyInfo {
+    pub algorithm: String,
+    /// `SHA256:…`,和 `ssh-keygen -lf` 一致。
+    pub fingerprint: String,
+    /// 公钥一行,可以直接贴进服务器的 authorized_keys。
+    pub public_key: String,
+}
+
+/// 远端的一个文件 / 目录。
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct RemoteEntry {
+    pub name: String,
+    pub path: String,
+    pub is_dir: bool,
+    pub is_link: bool,
+    pub size: u64,
+    /// 修改时间(Unix 秒),0 = 服务器没给。
+    pub modified: u64,
+    pub permissions: u32,
+}
+
+impl From<xssh_core::sftp::RemoteEntry> for RemoteEntry {
+    fn from(e: xssh_core::sftp::RemoteEntry) -> Self {
+        Self {
+            name: e.name,
+            path: e.path,
+            is_dir: e.is_dir,
+            is_link: e.is_link,
+            size: e.size,
+            modified: e.modified,
+            permissions: e.permissions,
+        }
+    }
+}
+
+/// 传输进度(宿主实现)。返回 false = 取消。
+#[uniffi::export(with_foreign)]
+pub trait TransferListener: Send + Sync {
+    fn progress(&self, done: u64, total: u64) -> bool;
+}
+
+/// 一个 SFTP 会话(和终端共用同一条 SSH 连接)。
+#[derive(uniffi::Object)]
+pub struct Sftp {
+    inner: xssh_core::sftp::Sftp,
+}
+
+/// 接管宿主给的文件描述符(Android:`ParcelFileDescriptor.detachFd()`),用完自动关闭。
+#[cfg(unix)]
+fn file_from_fd(fd: i32) -> Result<std::fs::File, FfiError> {
+    use std::os::fd::FromRawFd;
+    if fd < 0 {
+        return Err(FfiError::Message { message: "invalid file descriptor".into() });
+    }
+    // SAFETY:宿主把这个描述符的所有权交给了我们(detachFd 之后它不会再关),这里只接管一次。
+    Ok(unsafe { std::fs::File::from_raw_fd(fd) })
+}
+
+#[cfg(not(unix))]
+fn file_from_fd(_fd: i32) -> Result<std::fs::File, FfiError> {
+    Err(FfiError::Message { message: "file descriptors are only supported on unix".into() })
+}
+
+#[uniffi::export]
+impl Sftp {
+    /// 起始目录(一般是家目录)。
+    pub fn home(&self) -> Result<String, FfiError> {
+        Ok(self.inner.home()?)
+    }
+
+    /// 列目录(目录在前)。
+    pub fn list(&self, path: String) -> Result<Vec<RemoteEntry>, FfiError> {
+        Ok(self.inner.list(&path)?.into_iter().map(Into::into).collect())
+    }
+
+    /// 这个路径是不是目录(符号链接点进去之前先问一下)。
+    pub fn is_dir(&self, path: String) -> bool {
+        self.inner.is_dir(&path)
+    }
+
+    /// 下载远端文件,写进宿主给的文件描述符(接管并关闭它)。返回字节数。
+    pub fn download_to_fd(&self, path: String, fd: i32, listener: Arc<dyn TransferListener>) -> Result<u64, FfiError> {
+        let mut file = file_from_fd(fd)?;
+        Ok(self.inner.download(&path, &mut file, &mut |done, total| listener.progress(done, total))?)
+    }
+
+    /// 从宿主给的文件描述符读内容,上传到远端(已存在就覆盖)。[total] 只用于进度。
+    pub fn upload_from_fd(
+        &self,
+        path: String,
+        fd: i32,
+        total: u64,
+        listener: Arc<dyn TransferListener>,
+    ) -> Result<u64, FfiError> {
+        let mut file = file_from_fd(fd)?;
+        Ok(self.inner.upload(&path, &mut file, total, &mut |done, total| listener.progress(done, total))?)
+    }
+
+    pub fn mkdir(&self, path: String) -> Result<(), FfiError> {
+        Ok(self.inner.mkdir(&path)?)
+    }
+
+    pub fn remove(&self, path: String, is_dir: bool) -> Result<(), FfiError> {
+        Ok(self.inner.remove(&path, is_dir)?)
+    }
+
+    pub fn rename(&self, from: String, to: String) -> Result<(), FfiError> {
+        Ok(self.inner.rename(&from, &to)?)
+    }
+
+    /// 关闭 SFTP 通道(终端不受影响)。不叫 close:Kotlin 绑定里 close() 是 AutoCloseable 的,会重名。
+    pub fn shutdown(&self) {
+        self.inner.close();
+    }
+}
+
+/// 在设备上生成的一把新私钥。
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct GeneratedKey {
+    /// OpenSSH 格式的私钥文本(宿主加密后保存)。
+    pub pem: String,
+    pub info: KeyInfo,
+}
+
+/// 生成一把 ed25519 密钥。[comment] 写进公钥末尾(在服务器上认出是哪台设备)。
+#[uniffi::export]
+pub fn generate_key(comment: String, passphrase: Option<String>) -> Result<GeneratedKey, FfiError> {
+    let key = ssh::generate_ed25519(&comment, passphrase.as_deref())?;
+    Ok(GeneratedKey {
+        pem: key.pem,
+        info: KeyInfo {
+            algorithm: key.info.algorithm,
+            fingerprint: key.info.fingerprint,
+            public_key: key.info.public_key,
+        },
+    })
+}
+
+/// 校验私钥文本(导入时调用)。带口令而没给口令时返回 [`FfiError::KeyEncrypted`]。
+#[uniffi::export]
+pub fn inspect_key(pem: String, passphrase: Option<String>) -> Result<KeyInfo, FfiError> {
+    let info = ssh::inspect_private_key(&pem, passphrase.as_deref())?;
+    Ok(KeyInfo { algorithm: info.algorithm, fingerprint: info.fingerprint, public_key: info.public_key })
 }
 
 /// 一条 SSH 连接。
@@ -133,6 +317,7 @@ impl Session {
             AuthMethod::KeyFile { path, passphrase } => {
                 ssh::Auth::KeyFile { path: path.into(), passphrase }
             }
+            AuthMethod::KeyData { pem, passphrase } => ssh::Auth::KeyData { pem, passphrase },
         };
         let target = ssh::Target {
             host: config.host,
@@ -168,6 +353,12 @@ impl Session {
         let mut guard = self.lock();
         let shell = guard.open_exec(cols as u16, rows as u16, &term, &command)?;
         Ok(Arc::new(Shell { inner: Mutex::new(shell) }))
+    }
+
+    /// 在同一条连接上开一个 SFTP 通道(终端不受影响)。
+    pub fn open_sftp(&self) -> Result<Arc<Sftp>, FfiError> {
+        let sftp = self.lock().open_sftp()?;
+        Ok(Arc::new(Sftp { inner: sftp }))
     }
 
     /// 断开连接。
@@ -329,6 +520,54 @@ impl Term {
     /// 是否处于备用屏(全屏 TUI)。
     pub fn alt_screen(&self) -> bool {
         self.lock().alt_screen()
+    }
+
+    /// 开始选择(视口坐标)。[right_half]:按在格子右半边。
+    pub fn select_start(&self, row: u32, col: u32, right_half: bool, kind: SelectKind) {
+        let kind = match kind {
+            SelectKind::Cell => terminal::SelectKind::Cell,
+            SelectKind::Word => terminal::SelectKind::Word,
+            SelectKind::Line => terminal::SelectKind::Line,
+        };
+        self.lock().select_start(row as usize, col as usize, right_half, kind);
+    }
+
+    /// 拖到 (row, col)。
+    pub fn select_update(&self, row: u32, col: u32, right_half: bool) {
+        self.lock().select_update(row as usize, col as usize, right_half);
+    }
+
+    /// 清掉选区。
+    pub fn select_clear(&self) {
+        self.lock().select_clear();
+    }
+
+    /// 选中的文字;没选时为 None。
+    pub fn selection_text(&self) -> Option<String> {
+        self.lock().selection_text()
+    }
+
+    /// 选区在视口里的范围;没选、或整个在视口外时为 None。
+    pub fn view_selection(&self) -> Option<ViewSelection> {
+        self.lock().view_selection().map(|v| ViewSelection {
+            start_row: v.start_row as u32,
+            start_col: v.start_col as u32,
+            end_row: v.end_row as u32,
+            end_col: v.end_col as u32,
+        })
+    }
+
+    /// 输入模式(应用光标、括号粘贴、鼠标上报……)。
+    pub fn input_modes(&self) -> InputModes {
+        let m = self.lock().input_modes();
+        InputModes {
+            app_cursor: m.app_cursor,
+            bracketed_paste: m.bracketed_paste,
+            alt_screen: m.alt_screen,
+            mouse_report: m.mouse_report,
+            sgr_mouse: m.sgr_mouse,
+            alternate_scroll: m.alternate_scroll,
+        }
     }
 
     /// 取走终端事件(应答/标题/响铃等)。

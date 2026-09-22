@@ -30,6 +30,77 @@ pub enum Auth {
     Password(String),
     /// 私钥文件认证(可带口令)。
     KeyFile { path: PathBuf, passphrase: Option<String> },
+    /// 私钥内容认证(OpenSSH / PEM 文本)。移动端把导入的私钥加密存在应用里,
+    /// 连接时只在内存里解密交过来,磁盘上不落明文文件。
+    KeyData { pem: String, passphrase: Option<String> },
+}
+
+/// 导入私钥时要给用户看的信息。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeyInfo {
+    /// 算法名,如 `ssh-ed25519`、`rsa-sha2-512`。
+    pub algorithm: String,
+    /// 公钥指纹 `SHA256:…`(和 `ssh-keygen -lf` 一致,方便对照服务器上的 authorized_keys)。
+    pub fingerprint: String,
+    /// 公钥一行(`ssh-ed25519 AAAA…`),可以直接贴进服务器的 authorized_keys。
+    pub public_key: String,
+}
+
+/// 解析私钥文本。带口令的私钥没给口令时返回 [`SshError::KeyEncrypted`],
+/// 界面据此提示"这把私钥有口令"而不是笼统的"格式不对"。
+pub fn parse_private_key(pem: &str, passphrase: Option<&str>) -> Result<russh::keys::PrivateKey, SshError> {
+    let pem = pem.trim();
+    let passphrase = passphrase.filter(|p| !p.is_empty());
+    russh::keys::decode_secret_key(pem, passphrase).map_err(|err| {
+        if matches!(err, russh::keys::Error::KeyIsEncrypted) {
+            return SshError::KeyEncrypted;
+        }
+        // 口令填错时报的是解密 / 校验一类的错误,不是"已加密"。先确认这把钥匙本身带口令,
+        // 带的话就是口令不对 —— 别让用户以为文件格式有问题。
+        let locked = passphrase.is_some()
+            && matches!(russh::keys::decode_secret_key(pem, None), Err(russh::keys::Error::KeyIsEncrypted));
+        if locked { SshError::KeyEncrypted } else { SshError::Key(err.to_string()) }
+    })
+}
+
+/// 在设备上新生成的一把私钥:OpenSSH 格式文本(给了口令就是加密过的)+ 公开信息。
+#[derive(Debug, Clone)]
+pub struct GeneratedKey {
+    pub pem: String,
+    pub info: KeyInfo,
+}
+
+/// 生成一把 ed25519 密钥(现在服务器都认、最短、最快)。[comment] 写进公钥末尾,
+/// 方便在服务器的 authorized_keys 里认出是哪台设备的钥匙。
+pub fn generate_ed25519(comment: &str, passphrase: Option<&str>) -> Result<GeneratedKey, SshError> {
+    use russh::keys::ssh_key::{Algorithm, LineEnding};
+    let mut rng = rand::rng();
+    let mut key = russh::keys::PrivateKey::random(&mut rng, Algorithm::Ed25519)
+        .map_err(|err| SshError::Key(err.to_string()))?;
+    key.set_comment(comment);
+    let public = key.public_key();
+    let info = KeyInfo {
+        algorithm: public.algorithm().to_string(),
+        fingerprint: public.fingerprint(HashAlg::Sha256).to_string(),
+        public_key: public.to_openssh().map_err(|err| SshError::Key(err.to_string()))?,
+    };
+    let stored = match passphrase.filter(|p| !p.is_empty()) {
+        Some(p) => key.encrypt(&mut rng, p).map_err(|err| SshError::Key(err.to_string()))?,
+        None => key,
+    };
+    let pem = stored.to_openssh(LineEnding::LF).map_err(|err| SshError::Key(err.to_string()))?;
+    Ok(GeneratedKey { pem: pem.to_string(), info })
+}
+
+/// 校验一把私钥,返回算法、指纹和公钥(导入时用)。
+pub fn inspect_private_key(pem: &str, passphrase: Option<&str>) -> Result<KeyInfo, SshError> {
+    let key = parse_private_key(pem, passphrase)?;
+    let public = key.public_key();
+    Ok(KeyInfo {
+        algorithm: public.algorithm().to_string(),
+        fingerprint: public.fingerprint(HashAlg::Sha256).to_string(),
+        public_key: public.to_openssh().map_err(|err| SshError::Key(err.to_string()))?,
+    })
 }
 
 /// 连接目标。
@@ -82,6 +153,12 @@ pub enum ServerMsg {
 pub enum SshError {
     Io(std::io::Error),
     Key(String),
+    /// 私钥有口令,但没给口令(或口令不对)。
+    KeyEncrypted,
+    /// SFTP 操作失败(没有权限、文件不存在、服务器没开 sftp 子系统……),带服务器给的原因。
+    Sftp(String),
+    /// 用户取消了传输。
+    Cancelled,
     AuthFailed,
     /// 连接/认证超时(默认 15 秒),避免 UI 无限"连接中"。
     Timeout,
@@ -99,6 +176,9 @@ impl fmt::Display for SshError {
         match self {
             Self::Io(err) => write!(f, "io: {err}"),
             Self::Key(err) => write!(f, "key: {err}"),
+            Self::KeyEncrypted => write!(f, "private key is encrypted: passphrase missing or wrong"),
+            Self::Sftp(err) => write!(f, "sftp: {err}"),
+            Self::Cancelled => write!(f, "cancelled"),
             Self::AuthFailed => write!(f, "authentication failed"),
             Self::Timeout => write!(f, "connection timed out"),
             Self::ChannelInUse => write!(f, "connection already has an active channel"),
@@ -134,6 +214,16 @@ struct Handler {
     /// 已信任的指纹;None 表示首次连接,握手会被拒绝并交给上层确认。
     known_key: Option<String>,
     verdict: Arc<Mutex<Option<HostKeyVerdict>>>,
+    /// 终端(shell)通道的编号。只有它的数据和开关事件进消息队列:
+    /// 同一条连接上的 SFTP 通道自己读自己的字节流,它的数据要是也进来,二进制会被当成终端输出画上屏,
+    /// 它一关闭,终端还会以为自己断了。
+    shell_channel: Arc<Mutex<Option<ChannelId>>>,
+}
+
+impl Handler {
+    fn is_shell(&self, channel: ChannelId) -> bool {
+        self.shell_channel.lock().map(|slot| *slot == Some(channel)).unwrap_or(false)
+    }
 }
 
 impl client::Handler for Handler {
@@ -162,7 +252,9 @@ impl client::Handler for Handler {
         data: &[u8],
         _session: &mut client::Session,
     ) -> Result<(), Self::Error> {
-        let _ = self.tx.send(ServerMsg::Data { channel, data: data.to_vec() });
+        if self.is_shell(channel) {
+            let _ = self.tx.send(ServerMsg::Data { channel, data: data.to_vec() });
+        }
         Ok(())
     }
 
@@ -173,7 +265,9 @@ impl client::Handler for Handler {
         data: &[u8],
         _session: &mut client::Session,
     ) -> Result<(), Self::Error> {
-        let _ = self.tx.send(ServerMsg::ExtendedData { channel, data: data.to_vec() });
+        if self.is_shell(channel) {
+            let _ = self.tx.send(ServerMsg::ExtendedData { channel, data: data.to_vec() });
+        }
         Ok(())
     }
 
@@ -183,7 +277,9 @@ impl client::Handler for Handler {
         exit_status: u32,
         _session: &mut client::Session,
     ) -> Result<(), Self::Error> {
-        let _ = self.tx.send(ServerMsg::ExitStatus { channel, status: exit_status });
+        if self.is_shell(channel) {
+            let _ = self.tx.send(ServerMsg::ExitStatus { channel, status: exit_status });
+        }
         Ok(())
     }
 
@@ -192,7 +288,9 @@ impl client::Handler for Handler {
         channel: ChannelId,
         _session: &mut client::Session,
     ) -> Result<(), Self::Error> {
-        let _ = self.tx.send(ServerMsg::Eof { channel });
+        if self.is_shell(channel) {
+            let _ = self.tx.send(ServerMsg::Eof { channel });
+        }
         Ok(())
     }
 
@@ -201,7 +299,9 @@ impl client::Handler for Handler {
         channel: ChannelId,
         _session: &mut client::Session,
     ) -> Result<(), Self::Error> {
-        let _ = self.tx.send(ServerMsg::Close { channel });
+        if self.is_shell(channel) {
+            let _ = self.tx.send(ServerMsg::Close { channel });
+        }
         Ok(())
     }
 
@@ -224,6 +324,7 @@ pub struct Ssh {
     handle: Handle<Handler>,
     events: Option<mpsc::UnboundedReceiver<ServerMsg>>,
     server_key: String,
+    shell_channel: Arc<Mutex<Option<ChannelId>>>,
 }
 
 impl Ssh {
@@ -250,11 +351,13 @@ impl Ssh {
             ..Default::default()
         });
 
+        let shell_channel = Arc::new(Mutex::new(None));
         let handler = Handler {
             tx,
             server_key: server_key.clone(),
             known_key: target.known_key.clone(),
             verdict: verdict.clone(),
+            shell_channel: shell_channel.clone(),
         };
         let handle = runtime.block_on(async {
             tokio::time::timeout(CONNECT_TIMEOUT, async {
@@ -268,9 +371,13 @@ impl Ssh {
                             .await?
                             .success()
                     }
-                    Auth::KeyFile { path, passphrase } => {
-                        let key = load_secret_key(path, passphrase.as_deref())
-                            .map_err(|err| SshError::Key(err.to_string()))?;
+                    Auth::KeyFile { .. } | Auth::KeyData { .. } => {
+                        let key = match &target.auth {
+                            Auth::KeyFile { path, passphrase } => load_secret_key(path, passphrase.as_deref())
+                                .map_err(|err| SshError::Key(err.to_string()))?,
+                            Auth::KeyData { pem, passphrase } => parse_private_key(pem, passphrase.as_deref())?,
+                            Auth::Password(_) => unreachable!(),
+                        };
                         let hash = handle.best_supported_rsa_hash().await?.flatten();
                         handle
                             .authenticate_publickey(
@@ -310,7 +417,23 @@ impl Ssh {
             }
         };
 
-        Ok(Self { runtime, handle, events: Some(rx), server_key: fingerprint })
+        Ok(Self { runtime, handle, events: Some(rx), server_key: fingerprint, shell_channel })
+    }
+
+    /// 在这条连接上再开一个 SFTP 通道(不影响终端)。服务器没开 sftp 子系统时报错。
+    pub fn open_sftp(&self) -> Result<crate::sftp::Sftp, SshError> {
+        let session = self.runtime.block_on(async {
+            tokio::time::timeout(STEP_TIMEOUT, async {
+                let channel = self.handle.channel_open_session().await?;
+                channel.request_subsystem(true, "sftp").await?;
+                russh_sftp::client::SftpSession::new(channel.into_stream())
+                    .await
+                    .map_err(|err| SshError::Sftp(err.to_string()))
+            })
+            .await
+        });
+        let session = session.map_err(|_| SshError::Timeout)??;
+        Ok(crate::sftp::Sftp::new(self.runtime.clone(), session))
     }
 
     /// 服务端主机密钥指纹(SHA256)。
@@ -342,9 +465,16 @@ impl Ssh {
         command: Option<&str>,
     ) -> Result<Shell, SshError> {
         let events = self.events.take().ok_or(SshError::ChannelInUse)?;
+        let shell_channel = self.shell_channel.clone();
         let channel = self.runtime.block_on(async {
             tokio::time::timeout(STEP_TIMEOUT, async {
                 let channel = self.handle.channel_open_session().await?;
+                // 通道一开就登记成"终端的"——必须在请求 shell **之前**。Handler 只转发登记过的通道,
+                // 服务端在应答 shell 请求后紧跟着就发欢迎语和第一个提示符;等 request_shell 返回再登记的话,
+                // 这几段数据到的时候通道还没登记,会被当成别的通道(SFTP)的数据丢掉,终端开出来是空的。
+                if let Ok(mut slot) = shell_channel.lock() {
+                    *slot = Some(channel.id());
+                }
                 channel.request_pty(false, term, cols as u32, rows as u32, 0, 0, &[]).await?;
                 match command {
                     Some(command) => channel.exec(false, command).await?,
@@ -355,6 +485,7 @@ impl Ssh {
             .await
         });
         let channel = channel.map_err(|_| SshError::Timeout)??;
+
 
         // russh 收到通道数据时,先 `send().await` 塞进通道**自己的**消息队列(容量
         // channel_buffer_size,默认 100),然后才调我们 Handler 的回调。我们只用回调,
@@ -440,7 +571,72 @@ impl Shell {
 
 #[cfg(test)]
 mod tests {
-    use super::{verify_host_key, HostKeyVerdict};
+    use super::{inspect_private_key, verify_host_key, HostKeyVerdict, SshError};
+
+    // 测试专用的一次性密钥(只在这里用过,没有放到任何服务器上)。
+    const PLAIN_KEY: &str = "-----BEGIN OPENSSH PRIVATE KEY-----
+b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
+QyNTUxOQAAACCOX2TFjJykQB49AejSPEeullPCXMVB4mc8zLbdJvhvMQAAAIhbIKMUWyCj
+FAAAAAtzc2gtZWQyNTUxOQAAACCOX2TFjJykQB49AejSPEeullPCXMVB4mc8zLbdJvhvMQ
+AAAEC06P+Sjh3min4ldSJ4NYv63RUZW7flHDaFAQ1EoCk/o45fZMWMnKRAHj0B6NI8R66W
+U8JcxUHiZzzMtt0m+G8xAAAABHRlc3QB
+-----END OPENSSH PRIVATE KEY-----
+";
+    /// 口令是 `pw123`。
+    const LOCKED_KEY: &str = "-----BEGIN OPENSSH PRIVATE KEY-----
+b3BlbnNzaC1rZXktdjEAAAAACmFlczI1Ni1jdHIAAAAGYmNyeXB0AAAAGAAAABBS7uy2Hu
+SMRFX1PEQPdh5cAAAAGAAAAAEAAAAzAAAAC3NzaC1lZDI1NTE5AAAAIK39PcJJEL5bcoKH
+UfSQb2YF8rVWuqbsMyMKdNWytQSjAAAAkHYjEG+65bWqDjbRpm5f1vZHRe2RLH0l9j0jcW
+541GvfuIZjACmp6Xs0hGhe0Kn2tjexjJDpy+GnbH8c2XgXpDP5oS9EL7ARNPPazjEmlzyh
+D0CIHjyFdamhF+XZuRgVSXjyKe3N8K8+jDEwyp+xSLG1Mr5FonHy5fshcN6U0rJZnHz2+N
+H+1bWL3HrzyeMpLQ==
+-----END OPENSSH PRIVATE KEY-----
+";
+
+    #[test]
+    fn inspects_an_unencrypted_key() {
+        let info = inspect_private_key(PLAIN_KEY, None).expect("应能解析");
+        assert_eq!(info.algorithm, "ssh-ed25519");
+        // 和 `ssh-keygen -lf plain.pub` 的输出一致。
+        assert_eq!(info.fingerprint, "SHA256:Jj0HIeewaSgaFIpQEShYu53Wc3w6AdkjDBaPhhhj68E");
+        assert!(info.public_key.starts_with("ssh-ed25519 AAAA"));
+    }
+
+    #[test]
+    fn encrypted_key_needs_the_passphrase() {
+        assert!(matches!(inspect_private_key(LOCKED_KEY, None), Err(SshError::KeyEncrypted)));
+        assert!(matches!(inspect_private_key(LOCKED_KEY, Some("")), Err(SshError::KeyEncrypted)));
+        assert!(matches!(inspect_private_key(LOCKED_KEY, Some("wrong")), Err(SshError::KeyEncrypted)));
+        let info = inspect_private_key(LOCKED_KEY, Some("pw123")).expect("口令正确应能解开");
+        assert_eq!(info.algorithm, "ssh-ed25519");
+    }
+
+    #[test]
+    fn generated_key_round_trips() {
+        let plain = super::generate_ed25519("xssh@pad", None).expect("生成");
+        assert!(plain.pem.contains("BEGIN OPENSSH PRIVATE KEY"));
+        assert!(plain.info.public_key.starts_with("ssh-ed25519 ") && plain.info.public_key.ends_with("xssh@pad"));
+        // 生成出来的私钥自己能解开,指纹一致。
+        let again = inspect_private_key(&plain.pem, None).expect("能解析");
+        assert_eq!(again.fingerprint, plain.info.fingerprint);
+
+        let locked = super::generate_ed25519("xssh@pad", Some("secret")).expect("生成带口令的");
+        assert!(matches!(inspect_private_key(&locked.pem, None), Err(SshError::KeyEncrypted)));
+        let opened = inspect_private_key(&locked.pem, Some("secret")).expect("口令能解开");
+        assert_eq!(opened.fingerprint, locked.info.fingerprint);
+        // 两次生成的不是同一把钥匙。
+        assert_ne!(plain.info.fingerprint, locked.info.fingerprint);
+    }
+
+    #[test]
+    fn garbage_is_not_a_key() {
+        assert!(matches!(inspect_private_key("hello", None), Err(SshError::Key(_))));
+        // 公钥不是私钥。
+        assert!(matches!(
+            inspect_private_key("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAII5fZMWMnKRAHj0B6NI8R66WU8JcxUHiZzzMtt0m+G8x test", None),
+            Err(SshError::Key(_))
+        ));
+    }
 
     #[test]
     fn first_connection_is_unknown() {

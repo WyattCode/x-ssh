@@ -45,6 +45,20 @@ fn shell_round_trip_and_clean_disconnect() {
     let mut ssh = Ssh::connect(&target(Some(fingerprint)).unwrap()).expect("带指纹连接");
     let mut shell = ssh.open_shell(80, 24, "xterm-256color").expect("开 shell");
 
+    // 不敲任何东西,欢迎语 / 第一个提示符也得收到。Handler 只转发登记过的终端通道,
+    // 登记晚了(等 shell 请求返回才登记)这一段会被当成别的通道丢掉,终端开出来是空的。
+    let mut greeting = 0usize;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while greeting == 0 && Instant::now() < deadline {
+        while let Some(msg) = shell.poll_msg() {
+            if let ServerMsg::Data { data, .. } = msg {
+                greeting += data.len();
+            }
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(greeting > 0, "连上之后没收到任何初始输出(提示符丢了)");
+
     shell.resize(100, 30).expect("改窗口尺寸");
     shell.write(b"echo xssh-live-$((6*7))\r").expect("写数据");
 
@@ -105,4 +119,77 @@ fn shell_round_trip_and_clean_disconnect() {
     let started = Instant::now();
     ssh.disconnect();
     assert!(started.elapsed() < Duration::from_secs(4), "断开被卡住了");
+}
+
+/// 同一条连接上:终端开着的同时开 SFTP,传一个文件来回,关掉 SFTP 后终端照常能用。
+#[test]
+#[ignore = "需要真实 sshd,见文件头"]
+fn sftp_round_trip_alongside_shell() {
+    let Some(first) = target(None) else {
+        eprintln!("未设置 XSSH_TEST_* 环境变量,跳过");
+        return;
+    };
+    let fingerprint = match Ssh::connect(&first) {
+        Err(SshError::HostKeyUnknown { fingerprint }) => fingerprint,
+        other => panic!("首次握手应要求确认主机密钥: {:?}", other.err()),
+    };
+    let mut ssh = Ssh::connect(&target(Some(fingerprint)).unwrap()).expect("带指纹连接");
+    let mut shell = ssh.open_shell(80, 24, "xterm-256color").expect("开 shell");
+    let sftp = ssh.open_sftp().expect("开 SFTP");
+
+    let home = sftp.home().expect("家目录");
+    eprintln!("家目录: {home}");
+    assert!(!sftp.list(&home).expect("列目录").is_empty(), "家目录不该是空的");
+
+    // 3 块多一点,跨过读写块的边界。
+    let payload: Vec<u8> = (0..200_000u32).map(|i| (i % 251) as u8).collect();
+    let path = xssh_core::sftp::join(&home, "xssh-sftp-test.bin");
+    let mut calls = 0;
+    let sent = sftp
+        .upload(&path, &mut payload.as_slice(), payload.len() as u64, &mut |_, _| {
+            calls += 1;
+            true
+        })
+        .expect("上传");
+    assert_eq!(sent, payload.len() as u64);
+    assert!(calls >= 3, "进度回调应该按块来,实际 {calls} 次");
+
+    let listed = sftp.list(&home).expect("再列一次");
+    let entry = listed.iter().find(|e| e.name == "xssh-sftp-test.bin").expect("上传的文件应在列表里");
+    assert_eq!(entry.size, payload.len() as u64);
+    assert!(!entry.is_dir);
+
+    let mut back = Vec::new();
+    sftp.download(&path, &mut back, &mut |_, _| true).expect("下载");
+    assert_eq!(back, payload, "下载回来的内容和上传的不一致");
+
+    // 取消:进度回调返回 false 就停。
+    let cancelled = sftp.download(&path, &mut Vec::new(), &mut |_, _| false);
+    assert!(matches!(cancelled, Err(SshError::Cancelled)));
+
+    let renamed = xssh_core::sftp::join(&home, "xssh-sftp-test-2.bin");
+    sftp.rename(&path, &renamed).expect("改名");
+    sftp.remove(&renamed, false).expect("删除");
+    assert!(!sftp.list(&home).unwrap().iter().any(|e| e.name.starts_with("xssh-sftp-test")));
+    sftp.close();
+
+    // SFTP 通道的数据不能漏进终端,它关掉也不能让终端以为断了。
+    shell.write(b"echo after-sftp-ok\r").expect("终端还能写");
+    let mut seen = Vec::new();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline {
+        while let Some(msg) = shell.poll_msg() {
+            match msg {
+                ServerMsg::Data { data, .. } => seen.extend_from_slice(&data),
+                ServerMsg::Close { .. } | ServerMsg::Eof { .. } => panic!("SFTP 关闭被当成了终端关闭"),
+                _ => {}
+            }
+        }
+        if String::from_utf8_lossy(&seen).contains("after-sftp-ok") {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(String::from_utf8_lossy(&seen).contains("after-sftp-ok"), "关掉 SFTP 后终端没反应");
+    ssh.disconnect();
 }

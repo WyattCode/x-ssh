@@ -9,6 +9,8 @@ use std::time::Instant;
 
 use alacritty_terminal::event::{Event, EventListener, WindowSize};
 use alacritty_terminal::grid::{Dimensions, Scroll};
+use alacritty_terminal::index::{Column, Line, Point, Side};
+use alacritty_terminal::selection::{Selection, SelectionType};
 use alacritty_terminal::term::cell::Flags;
 use alacritty_terminal::term::color::Colors;
 use alacritty_terminal::term::{Config, Term, TermDamage, TermMode};
@@ -51,6 +53,52 @@ pub struct Cursor {
     pub row: usize,
     pub visible: bool,
 }
+
+/// 远端程序打开的输入相关模式。实体键盘、触控板的字节编码要跟着它们变:
+/// 应用光标模式下方向键是 `ESC O A` 而不是 `ESC [ A`(vim、less 认前者)。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct InputModes {
+    /// DECCKM:方向键 / Home / End 用 SS3(`ESC O x`)。
+    pub app_cursor: bool,
+    /// 粘贴要包在 `ESC[200~` … `ESC[201~` 里。
+    pub bracketed_paste: bool,
+    /// 备用屏(全屏程序)。
+    pub alt_screen: bool,
+    /// 程序要鼠标事件(任一种上报模式)。
+    pub mouse_report: bool,
+    /// 鼠标事件用 SGR 编码(`ESC[<b;x;yM`)。
+    pub sgr_mouse: bool,
+    /// 备用屏里滚轮换成方向键(DECSET 1007)。
+    pub alternate_scroll: bool,
+}
+
+/// 怎么选:按格、按词(双击 / 长按)、按行(三击)。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelectKind {
+    Cell,
+    Word,
+    Line,
+}
+
+/// 选区落在当前视口里的部分(行列 0 起、闭区间)。滚出视口的部分已裁掉,
+/// 选区整个在视口外时为 None —— 选区本身还在,滚回来又能看到。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ViewSelection {
+    pub start_row: usize,
+    pub start_col: usize,
+    pub end_row: usize,
+    pub end_col: usize,
+}
+
+/// 按词选择时的分隔符:alacritty 的默认值,加上全角标点,去掉 `:` ——
+/// `user@host:22`、`http://…` 这种一下选中整段更有用;中文句子遇到「。,」要断开
+/// (不加的话 `Corporation。保留所有权利。` 会被当成一个词)。
+const WORD_DELIMITERS: &str = concat!(
+    ",│`|\"' ()[]{}<>\t",
+    // 全角:,。、;:?!()【】《》「」“”‘’ —— 用转义写,免得被编辑器或输入法换成半角。
+    "\u{FF0C}\u{3002}\u{3001}\u{FF1B}\u{FF1A}\u{FF1F}\u{FF01}\u{FF08}\u{FF09}",
+    "\u{3010}\u{3011}\u{300A}\u{300B}\u{300C}\u{300D}\u{201C}\u{201D}\u{2018}\u{2019}",
+);
 
 /// [`Run::cells`] 里单元格之间的分隔符(U+001F,控制字符,绝不会出现在单元格内容里)。
 pub const CELL_SEP: char = '\u{1f}';
@@ -155,7 +203,11 @@ impl Terminal {
     /// 新建终端(含回滚缓冲)。
     pub fn new(cols: usize, rows: usize) -> Self {
         let size = Size::new(cols.max(1), rows.max(1));
-        let config = Config { scrolling_history: DEFAULT_SCROLLBACK, ..Config::default() };
+        let config = Config {
+            scrolling_history: DEFAULT_SCROLLBACK,
+            semantic_escape_chars: WORD_DELIMITERS.to_owned(),
+            ..Config::default()
+        };
         let events = EventQueue::default();
         let term = Term::new(config, &size, events.clone());
         Self {
@@ -257,6 +309,84 @@ impl Terminal {
     /// 是否处于备用屏(vim/htop 等全屏程序)。
     pub fn alt_screen(&self) -> bool {
         self.term.mode().contains(TermMode::ALT_SCREEN)
+    }
+
+    /// 视口里的 (行, 列) → 网格坐标。网格坐标里历史是负行号,新输出滚上来时
+    /// alacritty 会把选区跟着"转"(`Selection::rotate`),所以选区记在网格坐标上就能跟着内容走。
+    fn grid_point(&self, row: usize, col: usize) -> Point {
+        let offset = self.term.grid().display_offset() as i32;
+        let row = row.min(self.size.rows - 1) as i32;
+        Point::new(Line(row - offset), Column(col.min(self.size.cols - 1)))
+    }
+
+    /// 开始选择。[right_half] 是按在格子的右半边 —— 往回拖时起点这一格算不算进去由它决定
+    /// (和桌面终端的手感一致)。
+    pub fn select_start(&mut self, row: usize, col: usize, right_half: bool, kind: SelectKind) {
+        let point = self.grid_point(row, col);
+        let ty = match kind {
+            SelectKind::Cell => SelectionType::Simple,
+            SelectKind::Word => SelectionType::Semantic,
+            SelectKind::Line => SelectionType::Lines,
+        };
+        let side = if right_half { Side::Right } else { Side::Left };
+        let mut selection = Selection::new(ty, point, side);
+        // 按格选时,刚按下还没拖动算空选区;按词 / 按行一按下就有内容。
+        if kind != SelectKind::Cell {
+            selection.update(point, side);
+        }
+        self.term.selection = Some(selection);
+    }
+
+    /// 拖到 (row, col)。选区的起点不动,已经随滚动转过的也照样对。
+    pub fn select_update(&mut self, row: usize, col: usize, right_half: bool) {
+        let point = self.grid_point(row, col);
+        if let Some(selection) = self.term.selection.as_mut() {
+            selection.update(point, if right_half { Side::Right } else { Side::Left });
+        }
+    }
+
+    /// 清掉选区。
+    pub fn select_clear(&mut self) {
+        self.term.selection = None;
+    }
+
+    /// 选中的文字(跨行时带换行,行尾空白去掉);没有选区或是空选区时为 None。
+    pub fn selection_text(&self) -> Option<String> {
+        self.term.selection_to_string().filter(|text| !text.is_empty())
+    }
+
+    /// 选区在当前视口里的范围(给宿主画高亮)。
+    pub fn view_selection(&self) -> Option<ViewSelection> {
+        let range = self.term.selection.as_ref()?.to_range(&self.term)?;
+        let offset = self.term.grid().display_offset() as i32;
+        let rows = self.size.rows as i32;
+        let start_row = range.start.line.0 + offset;
+        let end_row = range.end.line.0 + offset;
+        if end_row < 0 || start_row >= rows {
+            return None;
+        }
+        // 上端滚出视口就从第 0 列算起,下端滚出视口就画到行尾。
+        let (start_row, start_col) =
+            if start_row < 0 { (0, 0) } else { (start_row as usize, range.start.column.0) };
+        let (end_row, end_col) = if end_row >= rows {
+            (self.size.rows - 1, self.size.cols - 1)
+        } else {
+            (end_row as usize, range.end.column.0)
+        };
+        Some(ViewSelection { start_row, start_col, end_row, end_col })
+    }
+
+    /// 宿主编码按键/滚轮/粘贴时要看的模式(实体键盘、触控板用)。
+    pub fn input_modes(&self) -> InputModes {
+        let mode = *self.term.mode();
+        InputModes {
+            app_cursor: mode.contains(TermMode::APP_CURSOR),
+            bracketed_paste: mode.contains(TermMode::BRACKETED_PASTE),
+            alt_screen: mode.contains(TermMode::ALT_SCREEN),
+            mouse_report: mode.intersects(TermMode::MOUSE_MODE),
+            sgr_mouse: mode.contains(TermMode::SGR_MOUSE),
+            alternate_scroll: mode.contains(TermMode::ALTERNATE_SCROLL),
+        }
     }
 
     /// 视口逐行的样式段(见 [`Run`])。行尾默认样式的空白会被裁掉。
@@ -779,5 +909,64 @@ mod tests {
         assert!(t.term.mode().contains(TermMode::BRACKETED_PASTE));
         t.feed(b"\x1b[?2004l");
         assert!(!t.term.mode().contains(TermMode::BRACKETED_PASTE));
+    }
+
+    #[test]
+    fn selection_follows_content_when_output_scrolls() {
+        let mut t = Terminal::new(20, 4);
+        t.feed(b"alpha\r\nbeta\r\ngamma");
+        // 选中第 1 行的 "beta"。
+        t.select_start(1, 0, false, SelectKind::Cell);
+        t.select_update(1, 3, true);
+        assert_eq!(t.selection_text().as_deref(), Some("beta"));
+        assert_eq!(
+            t.view_selection(),
+            Some(ViewSelection { start_row: 1, start_col: 0, end_row: 1, end_col: 3 })
+        );
+        // 新输出把整屏往上推两行:高亮跟着 "beta" 走到第 0 行之上(滚进历史),文字不变。
+        t.feed(b"\r\ndelta\r\nepsilon\r\nzeta");
+        assert_eq!(t.selection_text().as_deref(), Some("beta"));
+        assert_eq!(t.view_selection(), None);
+        // 往回翻两行又能看到高亮。
+        t.scroll(2);
+        let view = t.view_selection().expect("翻回来应该看得到选区");
+        assert_eq!((view.start_row, view.start_col, view.end_col), (1, 0, 3));
+    }
+
+    #[test]
+    fn word_selection_stops_at_full_width_punctuation() {
+        let mut t = Terminal::new(40, 2);
+        t.feed("(c) Microsoft Corporation\u{3002}\u{4FDD}\u{7559}".as_bytes());
+        // 双击 "Corporation" 中间。
+        t.select_start(0, 18, false, SelectKind::Word);
+        assert_eq!(t.selection_text().as_deref(), Some("Corporation"));
+        // user@host:22 整段是一个词(冒号不算分隔)。
+        let mut t = Terminal::new(40, 2);
+        t.feed(b"ssh user@host:22 ok");
+        t.select_start(0, 8, false, SelectKind::Word);
+        assert_eq!(t.selection_text().as_deref(), Some("user@host:22"));
+    }
+
+    #[test]
+    fn selection_can_reach_into_scrollback() {
+        let mut t = Terminal::new(20, 2);
+        t.feed(b"one\r\ntwo\r\nthree\r\nfour");
+        t.scroll(2); // 视口现在是 "one" / "two"
+        t.select_start(0, 0, false, SelectKind::Line);
+        t.select_update(1, 0, false);
+        assert_eq!(t.selection_text().as_deref(), Some("one\ntwo\n"));
+    }
+
+    #[test]
+    fn input_modes_follow_the_program() {
+        let mut t = Terminal::new(20, 4);
+        assert!(!t.input_modes().app_cursor);
+        // vim 启动时的典型序列:应用光标 + 备用屏 + SGR 鼠标。
+        t.feed(b"\x1b[?1h\x1b[?1049h\x1b[?1000h\x1b[?1006h\x1b[?2004h");
+        let m = t.input_modes();
+        assert!(m.app_cursor && m.alt_screen && m.mouse_report && m.sgr_mouse && m.bracketed_paste);
+        t.feed(b"\x1b[?1l\x1b[?1049l\x1b[?1000l\x1b[?1006l\x1b[?2004l");
+        let m = t.input_modes();
+        assert!(!m.app_cursor && !m.alt_screen && !m.mouse_report && !m.sgr_mouse && !m.bracketed_paste);
     }
 }
