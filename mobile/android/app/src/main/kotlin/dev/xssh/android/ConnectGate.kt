@@ -51,6 +51,9 @@ import androidx.compose.ui.unit.sp
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import androidx.compose.foundation.layout.offset
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 
 /* ─────────────────────────────── 连接前的那一屏 ───────────────────────────────
 
@@ -281,6 +284,8 @@ private fun GatePage(host: Host, content: GateContent, tablet: Boolean, onExit: 
                 }
             }
         } else {
+            // 「确认 / 取消」也钉在页底(同主机详情页):这是要按的东西,指纹是要看的东西。
+            var actionsHeight by remember { mutableStateOf(0.dp) }
             Column(
                 Modifier
                     .fillMaxSize()
@@ -294,15 +299,22 @@ private fun GatePage(host: Host, content: GateContent, tablet: Boolean, onExit: 
                         start = startInset + Gutter,
                         end = railSide(),
                         top = (if (topBar) TopBarHeight else 0.dp) + Gutter,
-                        bottom = if (topBar) 40.dp else RailClearance,
+                        bottom = actionsHeight + Gutter,
                     ),
             ) {
                 Column(Modifier.widthIn(max = PageMaxWidth)) {
                     Identity(host, content)
                     Spacer(Modifier.height(24.dp))
                     content.body(this)
-                    Spacer(Modifier.height(24.dp))
-                    content.actions(true)
+                }
+            }
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .windowInsetsPadding(insets.only(WindowInsetsSides.Vertical + WindowInsetsSides.End)),
+            ) {
+                PinnedActions(onHeight = { actionsHeight = it }, start = startInset + Gutter) {
+                    Column(Modifier.widthIn(max = PageMaxWidth)) { content.actions(true) }
                 }
             }
         }

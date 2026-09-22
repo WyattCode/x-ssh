@@ -209,10 +209,16 @@ fun HostIdentity(host: Host, running: Boolean, modifier: Modifier = Modifier) {
  * 两页共用一个外壳,边距、‹ 的落点、底部留白就不会各写一套慢慢走偏。
  */
 @Composable
-fun ReadingPage(onBack: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
+fun ReadingPage(
+    onBack: () -> Unit,
+    /** 钉在页面底部、不跟着滚的主操作(见 [PinnedActions]);没有就照旧整页滚。 */
+    actions: (@Composable ColumnScope.() -> Unit)? = null,
+    content: @Composable ColumnScope.() -> Unit,
+) {
     val p = LocalXssh.current
     val topBar = LocalChrome.current == Chrome.TopBar
     val backdrop = rememberLayerBackdrop()
+    var actionsHeight by remember { mutableStateOf(0.dp) }
     Box(Modifier.fillMaxSize().background(p.bg)) {
         Column(
             Modifier
@@ -227,10 +233,17 @@ fun ReadingPage(onBack: () -> Unit, content: @Composable ColumnScope.() -> Unit)
                     start = Gutter,
                     end = railSide(),
                     top = (if (topBar) TopBarHeight else 0.dp) + Gutter,
-                    bottom = if (topBar) 40.dp else RailClearance,
+                    // 底部让开钉住的操作条;没有操作条时照旧给轨道留白。
+                    bottom = if (actions != null) actionsHeight + Gutter else if (topBar) 40.dp else RailClearance,
                 ),
             content = content,
         )
+        if (actions != null) {
+            // 安全区在滚动那一层加过了,这里自己再加一次 —— 它不在那一层里面。
+            Box(Modifier.fillMaxSize().windowInsetsPadding(stableSafeDrawing())) {
+                PinnedActions(onHeight = { actionsHeight = it }, content = actions)
+            }
+        }
         // 外观在最上面:每一页都有,位置一样(见 ThemeGlassItem)。
         if (topBar) {
             TopBar(
@@ -261,8 +274,9 @@ fun HostInfoScreen(
     onDelete: (Host) -> Unit,
 ) {
     val running = host.id in SessionRegistry.sessions.collectAsState().value
-    ReadingPage(onBack) {
-        HostInfoBody(host, running, onConnect, onEdit, onDelete)
+    // 「连接 / 编辑 / 删除」钉在页底,和展开的折叠屏一个规矩:手在下半截,按钮就在下半截。
+    ReadingPage(onBack, actions = { HostActions(host, running, onConnect, onEdit, onDelete) }) {
+        HostInfoBody(host, running, onConnect, onEdit, onDelete, actionsPinned = true)
     }
 }
 

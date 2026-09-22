@@ -113,6 +113,8 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.ui.layout.onSizeChanged
 
 /**
  * 手指能稳稳点到的最小边长。Material 的无障碍下限是 48dp,本应用一律不低于它 ——
@@ -184,6 +186,48 @@ fun creaseGapFor(listWidth: Dp, leadInset: Dp, detailContent: Dp): Dp =
  */
 @Composable
 fun railSide(): Dp = if (LocalChrome.current == Chrome.Rail) Gutter * 2 + 56.dp else Gutter
+
+/**
+ * **钉在页面底部的操作条**:正文从它底下滚过去,上缘用一段 28dp 的渐变化开(不画硬线)。
+ *
+ * 手是握在屏幕下半截的,主操作就该在那儿。放在标题底下的话,内屏竖屏 2364px 高、
+ * 展开横屏 600dp 高,按钮都落在上三分之一 —— 要么换手,要么把手机往下捋一截。
+ * 页面再长也不用往回滚去够按钮:它根本不跟着滚。
+ *
+ * 右边默认让开轨道([railSide]),别压在 ‹ 和外观那一列玻璃底下。
+ * [onHeight] 把量到的高度回给调用方,正文按它加底部留白,滚到底时最后一行正好停在条的上沿。
+ */
+@Composable
+fun BoxScope.PinnedActions(
+    onHeight: (Dp) -> Unit,
+    modifier: Modifier = Modifier,
+    start: Dp = Gutter,
+    end: Dp = railSide(),
+    bottom: Dp = Gutter,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val p = LocalXssh.current
+    val density = LocalDensity.current
+    Column(
+        modifier
+            .align(Alignment.BottomStart)
+            .onSizeChanged { onHeight(with(density) { it.height.toDp() }) },
+    ) {
+        Spacer(
+            Modifier
+                .fillMaxWidth()
+                .height(28.dp)
+                .background(Brush.verticalGradient(listOf(Color.Transparent, p.bg))),
+        )
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .background(p.bg)
+                .padding(start = start, end = end, bottom = bottom),
+            content = content,
+        )
+    }
+}
 
 /** 列表项之间、并排按钮之间的统一间距。 */
 val GapItem = 12.dp

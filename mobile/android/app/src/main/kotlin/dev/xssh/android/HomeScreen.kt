@@ -958,26 +958,10 @@ private fun HostDetailPane(
                 },
             )
         }
-        Column(
-            Modifier
-                .align(Alignment.BottomStart)
-                .onSizeChanged { actionsHeight = with(density) { it.height.toDp() } },
-        ) {
-            // 正文从按钮底下滚过去,所以按钮要有底色兜住;上缘用一段 28dp 的渐变化开,不画硬线。
-            Spacer(
-                Modifier
-                    .fillMaxWidth()
-                    .height(28.dp)
-                    .background(Brush.verticalGradient(listOf(Color.Transparent, p.bg))),
-            )
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .background(p.bg)
-                    .padding(start = Gutter * 2, end = railSide(), bottom = Gutter),
-            ) {
-                HostActions(host, running, onConnect, onEdit, onDelete)
-            }
+        // 和单栏详情页共用同一条操作条(见 PinnedActions),两处不会各写一套慢慢走偏。
+        // 左边多缩一个盒子线:这一栏的盒子都从折痕后 32dp 起。
+        PinnedActions(onHeight = { actionsHeight = it }, start = Gutter * 2) {
+            HostActions(host, running, onConnect, onEdit, onDelete)
         }
     }
 }
