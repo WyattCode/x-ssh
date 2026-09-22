@@ -100,20 +100,10 @@ class TerminalSession(
 
             val pumped = withContext(Dispatchers.IO) {
                 val p = live.pump()
-                val snapshot = if (p.changed && watched) live.snapshot() else null
-                p to snapshot
+                if (p.changed && watched) publishFrame()
+                p
             }
-            pumped.second?.let { s ->
-                _frame.value = TerminalFrame(
-                    s.rows,
-                    s.cursor,
-                    alive = true,
-                    scrollOffset = s.scrollOffset,
-                    modes = s.modes,
-                    selection = s.selection,
-                )
-            }
-            if (!pumped.first.alive) {
+            if (!pumped.alive) {
                 Log.i(TAG, "peer closed ($label)")
                 _frame.value = _frame.value.copy(alive = false)
                 withContext(NonCancellable + Dispatchers.IO) {
@@ -129,7 +119,7 @@ class TerminalSession(
                 SessionRegistry.forget(this@TerminalSession)
                 break
             }
-            idle = if (pumped.first.changed) 0 else idle + 1
+            idle = if (pumped.changed) 0 else idle + 1
             // 有人看且有输出:16ms 跟手。安静下来:96ms。没人看(切走了):250ms ——
             // 只要还能把数据收下来不让它堆着就够了,没人等这一帧。
             delay(
@@ -165,24 +155,54 @@ class TerminalSession(
     fun resizeGrid(cols: Int, rows: Int, cellWidthPx: Int, cellHeightPx: Int) =
         enqueue { live.resizeGrid(cols, rows, cellWidthPx, cellHeightPx) }
 
-    fun scroll(lines: Int) = enqueue { live.scroll(lines) }
+    /**
+     * 取一帧画面并发布出去。
+     *
+     * **取和发必须是一步**(所以上了锁):推帧的有两条线 —— 轮询循环和滚动(下面的 wheel / scroll)。
+     * 不上锁的话,轮询可能先取好快照、还没写出去就被一次滚动插进来,写完之后轮询再把**旧的**那张盖上,
+     * 画面就往回跳一帧(下一次轮询才纠正)。快速滑的时候这一下就是肉眼可见的抖。
+     */
+    private val frameLock = Any()
 
-    fun wheel(lines: Int, col: Int, row: Int) = enqueue { live.wheel(lines, col, row) }
+    private fun publishFrame() = synchronized(frameLock) {
+        val s = live.snapshot() ?: return@synchronized
+        _frame.value = _frame.value.copy(
+            rows = s.rows,
+            cursor = s.cursor,
+            scrollOffset = s.scrollOffset,
+            modes = s.modes,
+            selection = s.selection,
+        )
+    }
+
+    /**
+     * 翻历史:滚完**马上**出一帧,不等轮询循环下一次醒来。
+     *
+     * 轮询是 16ms 一次(约 62 帧/秒),而手指在 120Hz 的屏上每 8ms 拖一次 —— 画面追不上手,
+     * 而且每一步还要多等最多 16ms 才看得见,拖长历史时就是一顿一顿的。
+     * 现在一步一帧:手指走多快,画面就出多少帧。滚动本身走的是同一条写入队列,顺序不会乱。
+     */
+    fun scroll(lines: Int) = enqueue { live.scroll(lines); publishFrame() }
+
+    fun wheel(lines: Int, col: Int, row: Int) = enqueue { live.wheel(lines, col, row); publishFrame() }
 
     fun paste(text: String) = enqueue { live.paste(text) }
 
     // 选择:和写入排在同一条队列里,顺序才不会乱(先选再复制,复制拿到的一定是选好的)。
+    // 和滚动一样当场出一帧 —— 拖选时高亮要跟着手指,不该等轮询那 16ms。
     fun selectStart(row: Int, col: Int, rightHalf: Boolean, kind: uniffi.xssh_ffi.SelectKind) =
-        enqueue { live.selectStart(row, col, rightHalf, kind) }
+        enqueue { live.selectStart(row, col, rightHalf, kind); publishFrame() }
 
-    fun selectUpdate(row: Int, col: Int, rightHalf: Boolean) = enqueue { live.selectUpdate(row, col, rightHalf) }
+    fun selectUpdate(row: Int, col: Int, rightHalf: Boolean) =
+        enqueue { live.selectUpdate(row, col, rightHalf); publishFrame() }
 
-    fun selectClear() = enqueue { live.selectClear() }
+    fun selectClear() = enqueue { live.selectClear(); publishFrame() }
 
     /** 取选中的文字交给 [onText](在主线程回调),然后清掉选区。 */
     fun copySelection(onText: (String) -> Unit) = enqueue {
         val text = live.selectionText()
         live.selectClear()
+        publishFrame()
         if (!text.isNullOrEmpty()) mainThread.post { onText(text) }
     }
 
@@ -190,7 +210,7 @@ class TerminalSession(
 
     fun applyTheme(p: XsshPalette) = live.applyTheme(p)
 
-    fun scrollToBottom() = enqueue { live.scrollToBottom() }
+    fun scrollToBottom() = enqueue { live.scrollToBottom(); publishFrame() }
 
     internal fun shutdown() {
         job.cancel()

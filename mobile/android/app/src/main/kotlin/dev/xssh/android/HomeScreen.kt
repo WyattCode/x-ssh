@@ -103,6 +103,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.graphics.Brush
 
 /**
  * 主机页。三种形态:
@@ -245,6 +247,12 @@ fun HomeScreen(
         if (twoPane && hosts.isNotEmpty()) {
             // 再兜一层:左栏无论如何不能吃掉整个窗口。
             val listWidth = adaptive.listPaneWidth(maxWidth).coerceAtMost(maxWidth - 280.dp)
+            val creaseWidth = maxOf(1.dp, adaptive.bookFold?.sizeDp ?: 0.dp)
+            // 两栏内容一样宽(式子见 creaseGapFor)。右栏正文自己还限宽 PageMaxWidth
+            // (见 HostInfoBody),超过就不再变长,左栏也跟着停。
+            val detailContent = ((maxWidth - listWidth - creaseWidth) - Gutter * 2 - railSide())
+                .coerceAtMost(PageMaxWidth)
+            val creaseGap = creaseGapFor(listWidth, Gutter, detailContent)
             Row(Modifier.fillMaxSize().layerBackdrop(backdrop)) {
                 HostListPane(
                     grid = grid,
@@ -272,10 +280,8 @@ fun HomeScreen(
                     running = running.keys,
                     columns = 1,
                     large = false,
-                    // 折痕这一侧留 32dp,右栏同样从折痕后 32dp 起 —— 两栏关于折痕镜像。
-                    // 原来左边卡片一路铺到折痕前 16dp,右栏又被轨道吃掉 72dp,
-                    // 看上去左边长、右边短。
-                    creaseGap = Gutter * 2,
+                    // 见上面 creaseGap 的算法:收到和右栏一样宽。
+                    creaseGap = creaseGap,
                     // 双栏时轨道在右栏上方,不压列表。
                     underRail = false,
                     // 双栏(直板机横屏)高度只有 400dp 上下,不再单独占一条顶栏:按钮浮在右上角。
@@ -283,7 +289,7 @@ fun HomeScreen(
                     bottomClearance = clearance,
                 )
                 // 两栏之间不画线:折痕本身就是分界,再补一条反而多余。
-                Spacer(Modifier.width(maxOf(1.dp, adaptive.bookFold?.sizeDp ?: 0.dp)))
+                Spacer(Modifier.width(creaseWidth))
                 // 换一台主机时详情淡入淡出,不是生硬地一帧换掉。
                 AnimatedContent(
                     targetState = shownHost,
@@ -303,7 +309,6 @@ fun HomeScreen(
                 ) { host ->
                     HostDetailPane(
                         modifier = Modifier.fillMaxSize(),
-                        bottomClearance = clearance,
                         host = host,
                         running = host != null && host.id in running,
                         onConnect = onConnect,
@@ -619,7 +624,13 @@ private fun FirstRun(modifier: Modifier) {
             .padding(horizontal = Gutter + BoxPad),
         verticalArrangement = Arrangement.Center,
     ) {
-        Text("X-SSH", color = p.text, fontSize = 34.sp, fontWeight = FontWeight.SemiBold)
+        Text(
+            "X-SSH",
+            Modifier.offset(x = -TitleOptical),
+            color = p.text,
+            fontSize = 34.sp,
+            fontWeight = FontWeight.SemiBold,
+        )
         Spacer(Modifier.height(10.dp))
         Text("还没有主机", color = p.textDim, fontSize = 15.sp)
     }
@@ -887,8 +898,6 @@ private fun SwipeTile(label: String, fg: Color, bg: Color, modifier: Modifier, o
 @Composable
 private fun HostDetailPane(
     modifier: Modifier,
-    /** 底部给悬浮按钮留的高度:详情铺满到右边缘,按钮浮在上面,最后一行要能滚到按钮之上。 */
-    bottomClearance: Dp,
     host: Host?,
     running: Boolean,
     onConnect: (Host) -> Unit,
@@ -912,28 +921,64 @@ private fun HostDetailPane(
     // 和左栏关于折痕镜像:左栏卡片止于折痕前 32dp,这一栏的盒子(按钮、分组块)从折痕后 32dp 起;
     // 文字再缩进一个盒子内边距,和左栏"卡片边 / 卡片里的字"是同一对线。
     // 标题用和左栏「X-SSH」同一套字号、同一个顶距,两栏的大标题在一条基线上。
-    Column(
-        modifier
-            .bounce()
-            .verticalScroll(rememberScrollState())
-            // 版心:折痕这侧留 32dp(和左栏镜像),右边让开轨道 —— 取值是右对齐的,不能被玻璃压住。
-            .padding(start = Gutter * 2, end = railSide(), top = Gutter, bottom = bottomClearance),
-    ) {
-        HostInfoBody(
-            host = host,
-            running = running,
-            onConnect = onConnect,
-            onEdit = onEdit,
-            onDelete = onDelete,
-            header = {
-                PaneTitle(
-                    Modifier.fillMaxWidth().padding(start = TitlePad),
-                    host.label,
-                    host.subtitle,
-                    monoSubtitle = true,
-                )
-            },
-        )
+    // 「连接 / 编辑 / 删除」钉在栏底,不跟着信息滚(见 HostInfoBody 的 actionsPinned):
+    // 展开的折叠屏有 600dp 高,手握在下半截,按钮放顶上要抬手去够。信息在上面看,按钮在下面按。
+    // 内容照常从按钮底下穿过去(和轨道一样的做法),滚到底时最后一行正好停在按钮上沿。
+    var actionsHeight by remember { mutableStateOf(0.dp) }
+    val density = LocalDensity.current
+    Box(modifier) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .bounce()
+                .verticalScroll(rememberScrollState())
+                // 版心:折痕这侧留 32dp(和左栏镜像),右边让开轨道 —— 取值是右对齐的,不能被玻璃压住。
+                .padding(
+                    start = Gutter * 2,
+                    end = railSide(),
+                    top = Gutter,
+                    // 底部只让开按钮条(按钮条自己贴着栏底);轨道在右边,横向已经让开了。
+                    bottom = actionsHeight + Gutter,
+                ),
+        ) {
+            HostInfoBody(
+                host = host,
+                running = running,
+                onConnect = onConnect,
+                onEdit = onEdit,
+                onDelete = onDelete,
+                actionsPinned = true,
+                header = {
+                    PaneTitle(
+                        Modifier.fillMaxWidth().padding(start = TitlePad),
+                        host.label,
+                        host.subtitle,
+                        monoSubtitle = true,
+                    )
+                },
+            )
+        }
+        Column(
+            Modifier
+                .align(Alignment.BottomStart)
+                .onSizeChanged { actionsHeight = with(density) { it.height.toDp() } },
+        ) {
+            // 正文从按钮底下滚过去,所以按钮要有底色兜住;上缘用一段 28dp 的渐变化开,不画硬线。
+            Spacer(
+                Modifier
+                    .fillMaxWidth()
+                    .height(28.dp)
+                    .background(Brush.verticalGradient(listOf(Color.Transparent, p.bg))),
+            )
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .background(p.bg)
+                    .padding(start = Gutter * 2, end = railSide(), bottom = Gutter),
+            ) {
+                HostActions(host, running, onConnect, onEdit, onDelete)
+            }
+        }
     }
 }
 
@@ -949,6 +994,7 @@ private fun PaneTitle(
     Column(modifier) {
         Text(
             title,
+            modifier = Modifier.offset(x = -TitleOptical),
             color = p.text,
             // 参考图的大标题:34sp、粗体,紧跟一行灰色小字。
             fontSize = 34.sp,

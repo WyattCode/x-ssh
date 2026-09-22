@@ -278,12 +278,22 @@ fun HostInfoBody(
     onEdit: (Host) -> Unit,
     onDelete: (Host) -> Unit,
     header: (@Composable () -> Unit)? = null,
+    /**
+     * 按钮不跟着正文滚,由调用方钉在栏底(双栏的右栏)。
+     *
+     * 展开的折叠屏上手握在下半截,顶部的「连接 / 编辑 / 删除」要抬手去够;信息本来就是"看的",
+     * 按钮才是"按的",所以信息在上、按钮贴着底边。单栏页面不这样 —— 那是一页从上往下读到底,
+     * 按钮跟在身份块后面才是常规位置。
+     */
+    actionsPinned: Boolean = false,
 ) {
     Column(Modifier.widthIn(max = PageMaxWidth)) {
         header?.invoke() ?: HostIdentity(host, running)
         Spacer(Modifier.height(24.dp))
-        HostActions(host, running, onConnect, onEdit, onDelete)
-        Spacer(Modifier.height(32.dp))
+        if (!actionsPinned) {
+            HostActions(host, running, onConnect, onEdit, onDelete)
+            Spacer(Modifier.height(32.dp))
+        }
         HostInfoGroups(host)
     }
 }

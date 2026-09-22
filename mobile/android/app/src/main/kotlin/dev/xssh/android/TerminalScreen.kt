@@ -1,5 +1,8 @@
 package dev.xssh.android
 
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
+
 import kotlinx.coroutines.Job
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.animation.core.exponentialDecay
@@ -103,6 +106,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -429,10 +433,21 @@ private fun TerminalView(
     }
 
     // 画面由会话推过来 —— 轮询循环长在会话里,这一屏只是观众,走了它照跑。
-    val frame by live.frame.collectAsState()
-    val rows = frame.rows
-    val cursor = frame.cursor
-    val dead = !frame.alive
+    val frameState = live.frame.collectAsState()
+    // 画面每 16ms 换一帧,**但整屏不该跟着重组**。
+    //
+    // 原来这里写 `val frame by …collectAsState()`:一读就等于订阅,新的一帧到了,这个函数
+    // 从头到尾重新跑一遍 —— 工具栏、轨道、快捷键面板、几十个 Modifier 全部重建,而它们
+    // 一个字都没变。滚 Codex 的长历史时每帧都这样,CPU 全花在重组上。
+    // 现在组合期只看下面这几个**很少变**的开关(derivedStateOf:值没变就不重组),
+    // 真正每帧都在变的行内容和光标只在**画**的时候读(见 TerminalCanvas 的画布 lambda),
+    // 变了就只重画,不重组、不重新布局。
+    val dead by remember { derivedStateOf { !frameState.value.alive } }
+    val scrolled by remember { derivedStateOf { frameState.value.scrollOffset > 0 } }
+    val hasSelection by remember { derivedStateOf { frameState.value.selection != null } }
+    val canFling by remember {
+        derivedStateOf { !frameState.value.modes.altScreen && !frameState.value.modes.mouseReport }
+    }
     var fontSize by remember { mutableStateOf(prefs.terminalFontSize) }
     var ctrl by remember { mutableStateOf(false) }
     // 快捷键面板默认收起,终端多出两行;点轨道上的 ⌘ 才出来。
@@ -458,9 +473,9 @@ private fun TerminalView(
 
     // 选中的文字(鼠标拖选 / 双击选词 / 三击选行 / 手指长按)。选区在核心里,跟着内容滚动,
     // 能一直选进回滚历史;这里只拿它落在视口里的那一段来画。一敲键盘、点一下终端就清掉。
-    val selection = frame.selection?.toTermSelection()
+    val selection: () -> TermSelection? = { frameState.value.selection?.toTermSelection() }
     val copySelection: () -> Unit = { live.copySelection { copyText(context, it) } }
-    val clearSelection: () -> Unit = { if (frame.selection != null) live.selectClear() }
+    val clearSelection: () -> Unit = { if (frameState.value.selection != null) live.selectClear() }
 
     // 实体键盘。输入框模式下普通字符交给输入法(中文要组词),其余键(回车、方向、Esc、
     // Ctrl 组合……)一律在这里编码 —— 输入法不组词时会把它们放行,正好落到这里。
@@ -520,7 +535,7 @@ private fun TerminalView(
         if (imeFocused && e.isPrintingKey && !e.isCtrlPressed && !e.isAltPressed && !ctrl && !alt) {
             return@handler false
         }
-        val text = KeyEncoder.encode(e, frame.modes, ctrl, alt) ?: return@handler false
+        val text = KeyEncoder.encode(e, frameState.value.modes, ctrl, alt) ?: return@handler false
         ctrl = false
         alt = false
         clearSelection()
@@ -531,7 +546,7 @@ private fun TerminalView(
 
     // 右键 / 工具栏「更多」里的终端操作(平板)。手机上右键仍是直接粘贴。
     fun terminalMenu(): List<MenuAction> = buildList {
-        if (frame.selection != null) add(MenuAction("复制", shortcut = "Ctrl+Shift+C") { copySelection() })
+        if (hasSelection) add(MenuAction("复制", shortcut = "Ctrl+Shift+C") { copySelection() })
         add(MenuAction("粘贴", shortcut = "Ctrl+Shift+V") { paste() })
         add(MenuAction("清屏", shortcut = "Ctrl+L") { live.sendRaw(byteArrayOf(12)) })
         add(MenuAction("放大字号", shortcut = "Ctrl+Shift+=") {
@@ -634,9 +649,8 @@ private fun TerminalView(
                 },
         ) {
             TerminalCanvas(
-                canFling = !frame.modes.altScreen && !frame.modes.mouseReport,
-                rows = rows,
-                cursor = cursor,
+                canFling = canFling,
+                frame = { frameState.value },
                 fontSize = fontSize,
                 onGridSize = { cols, rows, cellW, cellH ->
                     if (cols != grid.first || rows != grid.second) {
@@ -657,7 +671,7 @@ private fun TerminalView(
                         // 菜单挂在这个 Box 上;画布在里面左右各缩了 Gutter。
                         tablet != null ->
                             canvasMenuAt = with(density) { DpOffset(at.x.toDp() + Gutter, (at.y - canvasHeight).toDp()) }
-                        frame.selection != null -> copySelection()
+                        hasSelection -> copySelection()
                         else -> paste()
                     }
                 },
@@ -757,7 +771,7 @@ private fun TerminalView(
         // 胶囊往上长,键盘不动。
         GlassGroup {
             // 翻历史时才有:胶囊往上长出这一颗,不是凭空"砰"地出现。
-            GlassReveal(frame.scrollOffset > 0) {
+            GlassReveal(scrolled) {
                 GlassItem(XIcons.ArrowDown, "回到底部") {
                     live.scrollToBottom()
                 }
@@ -805,7 +819,7 @@ private fun TerminalView(
                         Spacer(Modifier.width(8.dp))
                     }
                 }
-                GlassRevealRow(frame.scrollOffset > 0) {
+                GlassRevealRow(scrolled) {
                     ToolbarIcon(XIcons.ArrowDown, "回到底部") { live.scrollToBottom() }
                 }
                 ToolbarIcon(
@@ -1235,8 +1249,11 @@ private fun HiddenImeField(
 
 @Composable
 private fun TerminalCanvas(
-    rows: List<ScreenRow>,
-    cursor: CursorState,
+    /**
+     * 当前这一帧。**只在画的时候读**(画布的 lambda 里),不在组合期读:
+     * 这样新的一帧到了只会触发重画,不会把这一屏重组一遍。
+     */
+    frame: () -> TerminalFrame,
     fontSize: Float,
     onGridSize: (cols: Int, rows: Int, cellWidthPx: Int, cellHeightPx: Int) -> Unit,
     onScroll: (lines: Int, col: Int, row: Int) -> Unit,
@@ -1246,8 +1263,8 @@ private fun TerminalCanvas(
      */
     canFling: Boolean,
     onSecondaryClick: (Offset) -> Unit,
-    /** 选区落在视口里的部分(只用来画);选区本身在核心里。 */
-    selection: TermSelection?,
+    /** 选区落在视口里的部分(只用来画,同样只在画的时候读);选区本身在核心里。 */
+    selection: () -> TermSelection?,
     /** 开始选择:按格(鼠标拖)、按词(双击 / 长按)、按行(三击)。 */
     onSelectStart: (GridCell, SelectKind) -> Unit,
     onSelectUpdate: (GridCell) -> Unit,
@@ -1260,10 +1277,9 @@ private fun TerminalCanvas(
 ) {
     val p = LocalXssh.current
     // 缓存要够大:一屏中文每个字都要单独量一次宽度,默认 8 条会反复失效。
-    val measurer = rememberTextMeasurer(cacheSize = 512)
     // 英文按用户选的终端字体,中文思源黑体,画线字符 Iosevka;格子一律按 Iosevka 量(见 TerminalFont)。
-    val text = rememberTermText(TerminalFontChoice.current, fontSize, p.termFg, measurer)
-    val cell = text.cellWidth to text.cellHeight
+    val paints = rememberTermPaints(TerminalFontChoice.current, fontSize)
+    val cell = paints.cellWidth to paints.cellHeight
 
     val scrollBy by rememberUpdatedState(onScroll)
     val secondary by rememberUpdatedState(onSecondaryClick)
@@ -1483,13 +1499,18 @@ private fun TerminalCanvas(
         ) {
             val cw = cell.first
             val ch = cell.second
-            rows.forEachIndexed { r, row ->
-                if (r >= gridRows) return@forEachIndexed
+            // 这两行是**整屏唯一**读当前帧的地方:读在画的时候,换帧就只重画这块画布。
+            val now = frame()
+            val cursor = now.cursor
+            val rows = now.rows
+            for (r in rows.indices) {
+                if (r >= gridRows) break
                 val y = r * ch
-                row.runs.forEach { run -> drawRun(run, y, cw, ch, text, measurer, p.termFg, p.termBg) }
+                val runs = rows[r].runs
+                for (i in runs.indices) drawRun(runs[i], y, paints, p.termFg, p.termBg)
             }
             // 选区:半透明的强调色盖在字上,和系统文本选择一个样子。
-            selection?.let { sel ->
+            selection()?.let { sel ->
                 for (r in sel.start.row..minOf(sel.end.row, gridRows - 1)) {
                     val range = sel.colsOn(r, cols) ?: continue
                     drawRect(
@@ -1522,58 +1543,254 @@ private const val STYLE_INVERSE = 16
 private const val STYLE_STRIKE = 32
 
 /** 终端画字的一套字体和格子尺寸。终端画面和选字体页的示例共用,两处画出来一模一样。 */
-internal class TermText(
-    /** 英文(用户选的终端字体)。 */
-    val style: TextStyle,
-    /** 宽字符(中日韩,占两格):思源黑体。 */
-    val wide: TextStyle,
-    /** 制表符、方块、箭头等要和格子严丝合缝的字:Iosevka。 */
-    val symbol: TextStyle,
-    val cellWidth: Float,
-    val cellHeight: Float,
-    /** 格子的基线离格子顶部多远:所有字(不管哪套字体)都对齐到这条线上。 */
-    val baseline: Float,
+/**
+ * 终端画字用的画笔。**每帧要画几千个格子,这里一个对象都不新建**:
+ * 画笔就这几支(英文 / 英文粗 / 中文 / 符号),画的时候只改颜色和下划线之类的开关。
+ *
+ * 原来每个格子都走 `TextMeasurer.measure` 拿一份排版结果再画:一屏中文加制表符就是上千次测量 + 上千个
+ * 临时对象,滚 Codex 那种长历史时每帧 23~29ms(120Hz 的预算是 8ms),手感就是"顿"。
+ * 改成直接用 Paint 往画布上写,测量只在换字体 / 字号时做一次。
+ *
+ * 格子的大小和基线一律按 Iosevka(符号那支笔)量:换字体只换字形,行高、列宽、中文位置都不动。
+ */
+internal class TermPaints(
     val font: TerminalFont,
-)
+    /** 英文(用户选的终端字体)。 */
+    private val latin: android.graphics.Typeface?,
+    private val latinBold: android.graphics.Typeface?,
+    /** 制表符、方块、箭头这些要和格子严丝合缝的字:Iosevka。 */
+    private val symbol: android.graphics.Typeface?,
+    private val symbolBold: android.graphics.Typeface?,
+    /** 宽字符(中日韩,占两格):思源黑体。 */
+    private val cjk: android.graphics.Typeface?,
+    sizePx: Float,
+) {
+    private val paint = android.graphics.Paint(
+        android.graphics.Paint.ANTI_ALIAS_FLAG or android.graphics.Paint.SUBPIXEL_TEXT_FLAG,
+    ).apply { textSize = sizePx }
 
-@Composable
-internal fun rememberTermText(font: TerminalFont, fontSize: Float, fg: Color, measurer: TextMeasurer): TermText =
-    remember(font, fontSize, fg, measurer) {
-        val symbol = TextStyle(color = fg, fontFamily = XsshFonts.mono, fontSize = fontSize.sp)
-        val style = if (font == TerminalFont.Iosevka) symbol else symbol.copy(fontFamily = font.family)
-        val wide = XsshFonts.cjk?.let { symbol.copy(fontFamily = it) } ?: symbol
-        // 格子一律按 Iosevka 量,换字体时行高、列宽、基线都不动(候选字体都是正好半格宽)。
-        // 格宽用 100 个 M 的总宽度来算:单个 M 的像素宽度是取整过的,
-        // 差零点几像素,一行 80 列累积下来就是十几像素的漂移。
-        val row = measurer.measure("M".repeat(100), symbol).size
-        val one = measurer.measure("M", symbol)
-        TermText(
-            style = style,
-            wide = wide,
-            symbol = symbol,
-            cellWidth = (row.width / 100f).coerceAtLeast(1f),
-            cellHeight = one.size.height.toFloat().coerceAtLeast(1f),
-            baseline = one.firstBaseline,
-            font = font,
-        )
+    /** 拼可打印 ASCII 的暂存(只在画面线程上用,不新建字符串)。 */
+    private val chunk = StringBuilder(256)
+
+    /** 拼连续汉字的暂存(同上)。 */
+    private val wide = StringBuilder(128)
+
+    val cellWidth: Float
+    val cellHeight: Float
+    /** 格子的基线离格子顶部多远:所有字(不管哪套字体)都对齐到这条线上。 */
+    val baseline: Float
+
+    init {
+        paint.typeface = symbol
+        // 格宽用 100 个 M 的总宽度来算:单个 M 的宽度带小数,一行 80 列累积下来就是十几像素的漂移。
+        cellWidth = (paint.measureText("M".repeat(100)) / 100f).coerceAtLeast(1f)
+        val metrics = paint.fontMetrics
+        cellHeight = kotlin.math.ceil(metrics.descent - metrics.ascent).coerceAtLeast(1f)
+        baseline = -metrics.ascent
     }
 
+    /** 这套字体的英文步进和格子对得上吗(对不上就一个字一个字摆,不能整串画)。 */
+    private val latinFits: Boolean = run {
+        paint.typeface = latin
+        kotlin.math.abs(paint.measureText("M".repeat(100)) / 100f - cellWidth) < 0.05f
+    }
+
+    /**
+     * 中文字体一个字是不是正好两格。思源黑体是 1em = 正好两格,所以**一串汉字可以一次画完** ——
+     * 不用像原来那样每个字量一次宽度再单独摆一次(一屏中文就是一千多次量 + 一千多次绘制,
+     * 滚长历史时这是最后剩下的大头)。量不准的字体(极少见)才退回逐字摆。
+     */
+    private val cjkFits: Boolean = cjk != null && run {
+        paint.typeface = cjk
+        kotlin.math.abs(paint.measureText("中".repeat(50)) / 50f - cellWidth * 2f) < 0.05f
+    }
+
+    private fun ready(
+        typeface: android.graphics.Typeface?,
+        color: Int,
+        bold: Boolean,
+        italic: Boolean,
+        underline: Boolean,
+        strike: Boolean,
+        fakeBold: Boolean,
+    ): android.graphics.Paint {
+        paint.typeface = typeface
+        paint.color = color
+        paint.isFakeBoldText = fakeBold && bold
+        paint.textSkewX = if (italic) -0.25f else 0f
+        paint.isUnderlineText = underline
+        paint.isStrikeThruText = strike
+        return paint
+    }
+
+    /**
+     * 画一段样式相同的单元格。每个字落在自己的列上(`col × 格宽`):可打印 ASCII 连成一串一起画,
+     * 其它字符(中文、制表符、emoji……)单独摆进它占的格子里居中,太宽就压进格子,绝不挤到下一格。
+     */
+    fun draw(
+        canvas: android.graphics.Canvas,
+        run: StyledRun,
+        y: Float,
+        fg: Int,
+        bg: Int?,
+        bold: Boolean,
+        italic: Boolean,
+        underline: Boolean,
+        strike: Boolean,
+    ) {
+        val cells = run.cells
+        val col0 = run.col.toInt()
+        if (bg != null) {
+            var count = 1
+            for (i in cells.indices) if (cells[i] == CELL_SEPARATOR) count++
+            paint.typeface = null
+            paint.color = bg
+            paint.isUnderlineText = false
+            paint.isStrikeThruText = false
+            canvas.drawRect(col0 * cellWidth, y, (col0 + count) * cellWidth, y + cellHeight, paint)
+        }
+        val textY = y + baseline
+        val latinFace = if (bold) latinBold ?: latin else latin
+        val symbolFace = if (bold) symbolBold ?: symbol else symbol
+        val latinBoldFake = latinBold == null
+        val symbolBoldFake = symbolBold == null
+
+        var chunkCol = col0
+        fun flush() {
+            if (chunk.isEmpty()) return
+            val p = ready(latinFace, fg, bold, italic, underline, strike, latinBoldFake)
+            if (latinFits) {
+                canvas.drawText(chunk, 0, chunk.length, chunkCol * cellWidth, textY, p)
+            } else {
+                // 步进和格子对不上的字体:一个字一个字摆,免得一行下来越飘越远。
+                for (i in 0 until chunk.length) {
+                    canvas.drawText(chunk, i, i + 1, (chunkCol + i) * cellWidth, textY, p)
+                }
+            }
+            chunk.setLength(0)
+        }
+        var wideCol = col0
+        fun flushWide() {
+            if (wide.isEmpty()) return
+            val p = ready(cjk, fg, bold, italic, underline, strike, fakeBold = true)
+            canvas.drawText(wide, 0, wide.length, wideCol * cellWidth, textY, p)
+            wide.setLength(0)
+        }
+
+        var pos = 0
+        var col = col0
+        val length = cells.length
+        while (pos <= length) {
+            var end = cells.indexOf(CELL_SEPARATOR, pos)
+            if (end < 0) end = length
+            val len = end - pos
+            when {
+                // 可打印 ASCII:攒起来一起画。
+                len == 1 && cells[pos].code in 0x20..0x7E -> {
+                    flushWide()
+                    if (chunk.isEmpty()) chunkCol = col
+                    chunk.append(cells[pos])
+                    col++
+                    pos = end + 1
+                }
+                len == 0 -> {
+                    // 宽字符后面的占位格(正常会在下面被一起吃掉;落单时只是让出一格)。
+                    flush()
+                    flushWide()
+                    col++
+                    pos = end + 1
+                }
+                else -> {
+                    flush()
+                    // 后面紧跟一个空格子 = 这个字占两格。
+                    var span = 1
+                    var next = pos
+                    if (end < length) {
+                        var nextEnd = cells.indexOf(CELL_SEPARATOR, end + 1)
+                        if (nextEnd < 0) nextEnd = length
+                        if (nextEnd == end + 1) {
+                            span = 2
+                            next = nextEnd
+                        }
+                    }
+                    val isWide = span == 2
+                    // 连续的汉字(思源黑体里正好两格宽)攒成一串一次画完,见 [cjkFits]。
+                    if (isWide && cjkFits && len == 1 && isHan(cells[pos])) {
+                        if (wide.isEmpty()) wideCol = col
+                        wide.append(cells[pos])
+                        col += 2
+                        pos = next + 1
+                        if (next >= length) break
+                        continue
+                    }
+                    flushWide()
+                    val face = when {
+                        isWide && cjk != null -> cjk
+                        isWide -> latinFace
+                        font.draws(cells, pos, end) -> latinFace
+                        else -> symbolFace
+                    }
+                    val fake = if (face === cjk) true else if (face === symbolFace) symbolBoldFake else latinBoldFake
+                    val p = ready(face, fg, bold, italic, underline, strike, fake)
+                    val slot = span * cellWidth
+                    val width = p.measureText(cells, pos, end)
+                    val x = col * cellWidth
+                    if (width <= slot) {
+                        canvas.drawText(cells, pos, end, x + (slot - width) / 2f, textY, p)
+                    } else {
+                        // 比格子宽(emoji、个别字体的全角符号):压进格子,不许挤到下一格。
+                        canvas.save()
+                        canvas.scale(slot / width, 1f, x, y)
+                        canvas.drawText(cells, pos, end, x, textY, p)
+                        canvas.restore()
+                    }
+                    col += span
+                    pos = (if (span == 2) next else end) + 1
+                }
+            }
+            if (end >= length) break
+        }
+        flush()
+        flushWide()
+    }
+}
+
 /**
- * 画一段样式相同的单元格。**每个字落在自己的列上**(`col × 格宽`):
- * - 可打印 ASCII 连成一串一起画(等宽字体里它们的步进正好是一格,省调用);
- * - 其它字符(中文、制表符、emoji……)单独画,居中放进它占的格子里
- *   (后面跟着空占位格就是占两格),太宽就按比例缩进格子里,绝不挤到下一格。
- *
- * 原来整行当一个字符串画:中文字形不正好是两格宽,后面的内容一路往右漂,
- * Codex 这类按列排版的界面整个错位,尾巴被裁掉。
+ * 这个字是不是「一定占满两格」的汉字类字符(中日韩、假名、谚文、全角标点)。
+ * 只有这些才敢连成一串一次画:它们在思源黑体里一律 1em。emoji、箭头之类宽度不一定,仍旧一个个摆。
  */
+private fun isHan(c: Char): Boolean = when (c.code) {
+    in 0x2E80..0x303E, in 0x3041..0x33FF, in 0x3400..0x4DBF, in 0x4E00..0x9FFF,
+    in 0xA000..0xA4CF, in 0xAC00..0xD7A3, in 0xF900..0xFAFF, in 0xFE30..0xFE4F,
+    in 0xFF01..0xFF60, in 0xFFE0..0xFFE6,
+    -> true
+    else -> false
+}
+
+/** 单元格之间的分隔符(见 Rust 的 `Term::rows`)。 */
+private const val CELL_SEPARATOR = ''
+
+@Composable
+internal fun rememberTermPaints(font: TerminalFont, fontSize: Float): TermPaints {
+    val sizePx = with(LocalDensity.current) { fontSize.sp.toPx() }
+    return remember(font, sizePx) {
+        TermPaints(
+            font = font,
+            latin = XsshFonts.typeface(font.regular),
+            latinBold = XsshFonts.typeface(font.bold),
+            symbol = XsshFonts.typeface(R.font.xssh_mono_regular),
+            symbolBold = XsshFonts.typeface(R.font.xssh_mono_bold),
+            cjk = XsshFonts.cjkTypeface,
+            sizePx = sizePx,
+        )
+    }
+}
+
+/** 画一行里样式相同的一段(颜色、反白、暗淡、粗斜体、下划线在这里算好,画笔那边只管写字)。 */
 internal fun DrawScope.drawRun(
     run: StyledRun,
     y: Float,
-    cw: Float,
-    ch: Float,
-    text: TermText,
-    measurer: TextMeasurer,
+    paints: TermPaints,
     defaultFg: Color,
     defaultBg: Color,
 ) {
@@ -1586,80 +1803,15 @@ internal fun DrawScope.drawRun(
         fg = swapped
     }
     if (flags and STYLE_DIM != 0) fg = fg.copy(alpha = fg.alpha * 0.6f)
-    val cells = run.cells.split('\u001F')
-    val col0 = run.col.toInt()
-    if (bg != null) {
-        drawRect(bg, topLeft = Offset(col0 * cw, y), size = Size(cells.size * cw, ch))
-    }
-    val decoration = when {
-        flags and STYLE_UNDERLINE != 0 && flags and STYLE_STRIKE != 0 ->
-            TextDecoration.combine(listOf(TextDecoration.Underline, TextDecoration.LineThrough))
-        flags and STYLE_UNDERLINE != 0 -> TextDecoration.Underline
-        flags and STYLE_STRIKE != 0 -> TextDecoration.LineThrough
-        else -> null
-    }
-    val baseline = text.baseline
-    val style = text.style.copy(
-        color = fg,
-        fontWeight = if (flags and STYLE_BOLD != 0) FontWeight.Bold else null,
-        fontStyle = if (flags and STYLE_ITALIC != 0) FontStyle.Italic else null,
-        textDecoration = decoration,
+    paints.draw(
+        canvas = drawContext.canvas.nativeCanvas,
+        run = run,
+        y = y,
+        fg = fg.toArgb(),
+        bg = bg?.toArgb(),
+        bold = flags and STYLE_BOLD != 0,
+        italic = flags and STYLE_ITALIC != 0,
+        underline = flags and STYLE_UNDERLINE != 0,
+        strike = flags and STYLE_STRIKE != 0,
     )
-    val wideStyle = text.wide.copy(
-        color = fg,
-        fontWeight = style.fontWeight,
-        fontStyle = style.fontStyle,
-        textDecoration = decoration,
-    )
-    val symbolStyle = if (text.font == TerminalFont.Iosevka) {
-        style
-    } else {
-        text.symbol.copy(color = fg, fontWeight = style.fontWeight, fontStyle = style.fontStyle, textDecoration = decoration)
-    }
-
-    // 颜色和下划线必须在**画的时候**给,不能只写在 style 里:TextMeasurer 的缓存只按影响排版的属性
-    // (字、字体、字号、粗细)比对,颜色不算。同一串字换了颜色再量,拿回来的是缓存里旧颜色的排版结果 ——
-    // 切换深浅色后,终端里原有的英文仍是上一个主题的颜色(浅色底上一片近白的字),中文却换了。
-    val ascii = StringBuilder()
-    var asciiStart = 0
-    fun flush() {
-        if (ascii.isEmpty()) return
-        val layout = measurer.measure(ascii.toString(), style)
-        // 按格子的基线摆:换了字体,各家字体的行高不同,贴着格子顶画就会有的偏上、有的偏下。
-        val top = y + baseline - layout.firstBaseline
-        drawText(layout, color = fg, topLeft = Offset((col0 + asciiStart) * cw, top), textDecoration = decoration)
-        ascii.setLength(0)
-    }
-    cells.forEachIndexed { i, glyph ->
-        if (glyph.length == 1 && glyph[0].code in 0x20..0x7E) {
-            if (ascii.isEmpty()) asciiStart = i
-            ascii.append(glyph)
-            return@forEachIndexed
-        }
-        flush()
-        if (glyph.isEmpty()) return@forEachIndexed // 宽字符后面的占位格
-        val span = if (i + 1 < cells.size && cells[i + 1].isEmpty()) 2 else 1
-        val slot = span * cw
-        // 占两格的(中日韩)用思源黑体;其它窄字:这套字体有(且是半格宽)就用它,否则 Iosevka(制表符、方块、箭头…)。
-        val layout = measurer.measure(
-            glyph,
-            when {
-                span == 2 -> wideStyle
-                text.font.draws(glyph) -> style
-                else -> symbolStyle
-            },
-        )
-        val width = layout.size.width.toFloat()
-        val x = (col0 + i) * cw
-        // 对齐基线:思源黑体的行高比英文字体高,按各自的行顶摆放的话中文会整体往下掉一截。
-        val top = y + baseline - layout.firstBaseline
-        if (width <= slot) {
-            drawText(layout, color = fg, topLeft = Offset(x + (slot - width) / 2f, top), textDecoration = decoration)
-        } else {
-            scale(scaleX = slot / width, scaleY = 1f, pivot = Offset(x, y)) {
-                drawText(layout, color = fg, topLeft = Offset(x, top), textDecoration = decoration)
-            }
-        }
-    }
-    flush()
 }

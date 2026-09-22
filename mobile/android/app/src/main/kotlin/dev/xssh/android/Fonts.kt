@@ -89,6 +89,14 @@ object XsshFonts {
         TerminalFontChoice.load(context)
     }
 
+    /** 系统思源黑体简体的 android Typeface(终端画中文用)。 */
+    val cjkTypeface: android.graphics.Typeface? by lazy {
+        runCatching {
+            val index = cjkIndex ?: return@runCatching null
+            android.graphics.Typeface.Builder(cjkFile).setTtcIndex(index).build()
+        }.getOrNull()
+    }
+
     /** 打包字体的 android Typeface(查某个字有没有字形用)。 */
     internal fun typeface(res: Int): android.graphics.Typeface? =
         appContext?.let { runCatching { androidx.core.content.res.ResourcesCompat.getFont(it, res) }.getOrNull() }
@@ -172,11 +180,19 @@ enum class TerminalFont(val id: String, val label: String, val regular: Int, val
 
     private val glyphs = HashMap<Int, Boolean>()
     private val paint by lazy { XsshFonts.typeface(regular)?.let { android.graphics.Paint().apply { typeface = it } } }
-
     /** 这个字(按第一个码位)用不用这套字体画。只在画面线程上调。 */
-    fun draws(text: String): Boolean {
+    fun draws(text: String): Boolean = draws(text, 0, text.length)
+
+    /** 同上,但按下标取字 —— 画面每帧要问上千次,不能为此切出一个新字符串。 */
+    fun draws(text: CharSequence, start: Int, end: Int): Boolean {
         if (full) return true
-        val cp = text.codePointAt(0)
+        if (start >= end) return true
+        val first = text[start]
+        val cp = if (Character.isHighSurrogate(first) && start + 1 < end) {
+            Character.toCodePoint(first, text[start + 1])
+        } else {
+            first.code
+        }
         if (cp in 0x20..0x7E) return true
         return glyphs.getOrPut(cp) { paint?.hasGlyph(String(Character.toChars(cp))) == true }
     }

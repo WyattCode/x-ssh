@@ -140,11 +140,39 @@ val BoxPad = 16.dp
  * 宽屏:内容整体限宽 [PageMaxWidth],不让一行横跨过去;内屏横屏另有折痕镜像的规矩(见主机页)。
  */
 
-/** 页面大标题、分组小标题相对盒子线的缩进(比盒内文字少 4dp,见上面的版心说明)。 */
+/** 分组小标题相对盒子线的缩进(比盒内文字少 4dp,见上面的版心说明)。 */
 val TitlePad = BoxPad - 4.dp
+
+/**
+ * **页面大标题**再往左挪的那一点(视觉补偿,不动它下面的小字)。
+ *
+ * 字号越大,字形左边自带的空白越宽(28~34sp 的大标题比 12sp 的小标题明显多一截),
+ * 按同一条线摆出来,大标题看着就是比下面的小标题往右缩了一点。往左补 2dp,视觉上才真的对齐。
+ * 用 `Modifier.offset(x = -TitleOptical)` 加在**大标题那一行文字**上,不要改整块的 padding ——
+ * 副标题、搜索框、下面的卡片仍旧站在各自的版心线上。
+ */
+val TitleOptical = 2.dp
 
 /** 一页内容的最大宽度:超过这个宽度就居左留白,所有页面同一个数。 */
 val PageMaxWidth = 560.dp
+
+/**
+ * 两栏页面里,**左栏靠折痕那一侧**该留多宽 —— 让两栏的内容一样长。
+ *
+ * 右栏的右边要让开轨道([railSide]),左栏不用,于是左栏一路铺到折痕前 32dp、右栏却短一条轨道:
+ * 一边长一边短。分栏线钉在折痕上(`listPaneWidth`)动不了,所以反过来算:**右栏能放多宽,
+ * 左栏就收到多宽**,差值全堆在折痕那一侧(折痕本来就不该压内容)。
+ *
+ * 主机页和编辑页都用这一个式子 —— 否则两页的分栏看着不是一套。
+ *
+ * @param listWidth 左栏的宽度(含它自己的左边距)
+ * @param leadInset 左栏左边已经占掉的宽度(安全区 + 盒子线)
+ * @param detailContent 右栏内容实际有多宽
+ */
+fun creaseGapFor(listWidth: Dp, leadInset: Dp, detailContent: Dp): Dp =
+    (listWidth - leadInset - detailContent)
+        .coerceAtLeast(Gutter * 2)
+        .coerceAtMost(maxOf(Gutter * 2, listWidth / 2))
 
 /**
  * 内容右边要让开的宽度。

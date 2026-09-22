@@ -50,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import androidx.compose.foundation.layout.offset
 
 /* ─────────────────────────────── 连接前的那一屏 ───────────────────────────────
 
@@ -241,6 +242,11 @@ private fun GatePage(host: Host, content: GateContent, tablet: Boolean, onExit: 
         val twoPane = adaptive.splits(maxWidth)
         if (twoPane) {
             val left = adaptive.listPaneWidth(maxWidth).coerceAtMost(maxWidth - 280.dp)
+            val creaseWidth = maxOf(1.dp, adaptive.bookFold?.sizeDp ?: 0.dp)
+            // 和主机页、编辑页同一条规矩:右栏让开了轨道,左栏就收到同样宽(见 creaseGapFor)。
+            val rightContent = ((maxWidth - left - creaseWidth) - Gutter * 2 - railSide())
+                .coerceAtMost(PageMaxWidth)
+            val leftEnd = creaseGapFor(left, startInset + Gutter, rightContent)
             Row(
                 Modifier
                     .fillMaxSize()
@@ -254,11 +260,11 @@ private fun GatePage(host: Host, content: GateContent, tablet: Boolean, onExit: 
                     Modifier
                         .width(left)
                         .fillMaxHeight()
-                        .padding(start = startInset + Gutter, end = Gutter * 2, top = Gutter),
+                        .padding(start = startInset + Gutter, end = leftEnd, top = Gutter),
                 ) {
                     Identity(host, content)
                 }
-                Spacer(Modifier.width(maxOf(1.dp, adaptive.bookFold?.sizeDp ?: 0.dp)))
+                Spacer(Modifier.width(creaseWidth))
                 Column(
                     Modifier
                         .weight(1f)
@@ -336,6 +342,7 @@ private fun Identity(host: Host, content: GateContent) {
         Column(Modifier.padding(start = TitlePad)) {
         Text(
             content.title,
+            Modifier.offset(x = -TitleOptical),
             color = p.text,
             fontSize = 28.sp,
             fontWeight = FontWeight.Bold,

@@ -122,6 +122,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import uniffi.xssh_ffi.RemoteEntry
+import androidx.compose.foundation.layout.offset
 
 /** 面包屑:根目录 + 逐级路径。`/C:/Users/user`(Windows 的 OpenSSH)也按同样的规则拆。 */
 private fun crumbs(path: String): List<Pair<String, String>> {
@@ -937,8 +938,9 @@ private fun PhoneFiles(
 
     BoxWithConstraints(modifier.fillMaxSize().background(p.bg)) {
         // 和主机页同一个判据(量整窗,不看 Configuration)。
-        val twoPane = maxWidth >= 840.dp || (adaptive.bookFold != null && maxWidth >= 600.dp)
-        val listWidth = if (twoPane) adaptive.listPaneWidth(maxWidth).coerceAtMost(maxWidth - 280.dp) else maxWidth
+        val pageWidth = maxWidth
+        val twoPane = pageWidth >= 840.dp || (adaptive.bookFold != null && pageWidth >= 600.dp)
+        val listWidth = if (twoPane) adaptive.listPaneWidth(pageWidth).coerceAtMost(pageWidth - 280.dp) else pageWidth
         val rowStart = startInset + Gutter + BoxPad
         val clearance = (if (topBar) 40.dp else RailClearance) + barsDp + navDp
 
@@ -957,6 +959,7 @@ private fun PhoneFiles(
                     Column(Modifier.padding(start = rowStart, end = endPad, top = Gutter, bottom = 10.dp)) {
                         Text(
                             name,
+                            Modifier.offset(x = -TitleOptical),
                             color = p.text,
                             fontSize = 34.sp,
                             fontWeight = FontWeight.Bold,
@@ -1055,9 +1058,14 @@ private fun PhoneFiles(
                     .background(p.bg)
                     .windowInsetsPadding(insets.only(WindowInsetsSides.Top)),
             ) {
-                // 折痕这一侧留 32dp,右栏同样从折痕后 32dp 起 —— 两栏关于折痕镜像(同主机页)。
-                list(Modifier.width(listWidth).fillMaxHeight(), Gutter * 2)
-                Spacer(Modifier.width(maxOf(1.dp, adaptive.bookFold?.sizeDp ?: 0.dp)))
+                // 右栏让开了轨道,左栏就收到同样宽,别一边长一边短(同主机页、编辑页,见 creaseGapFor)。
+                val creaseWidth = maxOf(1.dp, adaptive.bookFold?.sizeDp ?: 0.dp)
+                val rightContent = (pageWidth - listWidth - creaseWidth) - Gutter * 2 - railSide()
+                list(
+                    Modifier.width(listWidth).fillMaxHeight(),
+                    creaseGapFor(listWidth, startInset + Gutter, rightContent),
+                )
+                Spacer(Modifier.width(creaseWidth))
                 AnimatedContent(
                     targetState = shown,
                     contentKey = { it?.path },
@@ -1171,6 +1179,7 @@ private fun FileDetailPane(
     ) {
         Text(
             entry.name,
+            Modifier.offset(x = -TitleOptical),
             color = p.text,
             fontSize = 28.sp,
             fontWeight = FontWeight.Bold,
@@ -1299,7 +1308,9 @@ private fun PhoneFileRow(
         Box(
             Modifier
                 .align(Alignment.BottomStart)
-                .padding(start = start + 40.dp)
+                // 右边也要收 —— 原来只给了左边距就 fillMaxWidth,分隔线一路画到栏边:
+                // 单栏时钻进右边轨道的玻璃底下,双栏时越过行内容一直顶到折痕。
+                .padding(start = start + 40.dp, end = end)
                 .fillMaxWidth()
                 .height(0.5.dp)
                 .background(p.border),

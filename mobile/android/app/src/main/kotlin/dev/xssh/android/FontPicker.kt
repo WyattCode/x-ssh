@@ -65,7 +65,7 @@ private val SampleRows: List<List<Pair<String, Long>>> = listOf(
 private fun FontSample(font: TerminalFont, modifier: Modifier = Modifier) {
     val p = LocalXssh.current
     val measurer = rememberTextMeasurer(cacheSize = 256)
-    val text = rememberTermText(font, 13f, p.termFg, measurer)
+    val text = rememberTermPaints(font, 13f)
     val rows = remember(p) {
         SampleRows.map { line ->
             var col = 0
@@ -107,7 +107,7 @@ private fun FontSample(font: TerminalFont, modifier: Modifier = Modifier) {
         Canvas(Modifier.width(width).height(height)) {
             rows.forEachIndexed { index, line ->
                 line.forEach { run ->
-                    drawRun(run, index * text.cellHeight, text.cellWidth, text.cellHeight, text, measurer, p.termFg, p.termBg)
+                    drawRun(run, index * text.cellHeight, text, p.termFg, p.termBg)
                 }
             }
         }
@@ -161,7 +161,7 @@ fun FontScreen(onBack: () -> Unit) {
                 color = p.text,
                 fontSize = 34.sp,
                 fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(start = TitlePad, bottom = 18.dp),
+                modifier = Modifier.padding(start = TitlePad - TitleOptical, bottom = 18.dp),
             )
             FontList()
         }

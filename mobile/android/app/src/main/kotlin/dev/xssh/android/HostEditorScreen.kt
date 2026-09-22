@@ -61,6 +61,7 @@ import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.compose.foundation.layout.offset
 
 /**
  * 新建 / 编辑主机。
@@ -219,6 +220,7 @@ fun HostEditorScreen(
             ) {
                 Text(
                     if (initial == null) "新建主机" else "编辑主机",
+                    Modifier.offset(x = -TitleOptical),
                     color = p.text,
                     fontSize = 34.sp,
                     fontWeight = FontWeight.Bold,
@@ -236,9 +238,13 @@ fun HostEditorScreen(
                 // 分界用和主机页**完全相同**的式子(量整窗):原来这里传的是减掉轨道后的宽度,
                 // 没有折痕的平板上按 38% 兜底时两页切在不同位置,从主机页点进来两栏会跳一下。
                 val left = adaptive.listPaneWidth(window).coerceAtMost(window - 280.dp)
+                // 和主机页同一条规矩:右栏让开了轨道,左栏就收到同样宽,别一边长一边短(见 creaseGapFor)。
+                val rightContent = ((window - left) - Gutter * 2 - railSide())
+                    .coerceAtMost(PageMaxWidth + Gutter * 3)
+                val leftEnd = creaseGapFor(left, startInset + Gutter, rightContent)
                 Row(Modifier.fillMaxWidth()) {
                     Column(
-                        Modifier.width(left).padding(start = startInset + Gutter, end = Gutter * 2),
+                        Modifier.width(left).padding(start = startInset + Gutter, end = leftEnd),
                         verticalArrangement = Arrangement.spacedBy(20.dp),
                     ) { target() }
                     // 右栏也限宽:平板横屏右栏有 900dp,"标签在左、取值在右"的一行会横跨整块屏幕。
