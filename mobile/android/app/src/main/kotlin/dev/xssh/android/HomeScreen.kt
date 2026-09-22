@@ -1,5 +1,7 @@
 package dev.xssh.android
 
+import kotlinx.coroutines.flow.first
+import androidx.compose.runtime.snapshotFlow
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.fadeOut
@@ -37,6 +39,7 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clip
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -60,7 +63,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
@@ -109,8 +114,13 @@ import androidx.compose.ui.unit.sp
 fun HomeScreen(
     hosts: List<Host>,
     selectedId: String?,
+    /** 用户自己选了一台(双栏里点卡片、方向键)。 */
     onSelect: (Host) -> Unit,
+    /** 双栏右边不能空着,自动选中第一台 —— 不算用户选的(合上时不会因此停在详情页)。 */
+    onAutoSelect: (Host) -> Unit,
     onConnect: (Host) -> Unit,
+    /** 单栏卡片上的 ⓘ:推进这台主机的详情页。 */
+    onInfo: (Host) -> Unit,
     onNew: () -> Unit,
     onEdit: (Host) -> Unit,
     onDelete: (Host) -> Unit,
@@ -135,6 +145,9 @@ fun HomeScreen(
     // 注意:折痕位置是**窗口**坐标,所以这一层不能先加安全区内边距 —— 否则挖孔在侧边时
     // (内屏横屏挖孔占 51dp)分界线会整体右移,正好压不在折痕上。内边距放进各栏自己加。
     var searching by remember { mutableStateOf(false) }
+    // 列表滚到哪由这一页记着,不跟着某一栏:展开 / 合上时单栏和双栏是两棵不同的树,
+    // 各记各的话,一展开列表就跳回顶上。
+    val grid = rememberLazyGridState()
     // 搜索开着时,返回先收起搜索,而不是直接退出应用。
     BackHandler(enabled = searching) {
         query = ""
@@ -216,14 +229,14 @@ fun HomeScreen(
         // 用**实测到的窗口宽度**判断分栏,不用 Configuration 的 screenWidthDp ——
         // 分屏时部分机型的 screenWidthDp 仍报整块屏幕的宽度,那样会在只有半屏宽的窗口里
         // 摆出双栏:左栏按折痕位置占满整个窗口,右栏被挤到窗口之外,看起来就是内容跑到右边。
-        val twoPane = maxWidth >= 840.dp || (adaptive.bookFold != null && maxWidth >= 600.dp)
+        val twoPane = adaptive.splits(maxWidth)
         paneMode[0] = twoPane
 
         // 只有双栏才自动选中:右栏必须有东西可看。
         // 单栏(外屏)里"选中"没有任何去处 —— 点卡片是直接连接 —— 自动选中只会让
         // 第一张卡片一进来就带着高亮边框,看着像用户点过,实际没点过。
         LaunchedEffect(twoPane, shownHost?.id) {
-            if (twoPane && selectedId != shownHost?.id) shownHost?.let(onSelect)
+            if (twoPane && selectedId != shownHost?.id) shownHost?.let(onAutoSelect)
         }
 
         if (twoPane && hosts.isNotEmpty()) {
@@ -231,6 +244,7 @@ fun HomeScreen(
             val listWidth = adaptive.listPaneWidth(maxWidth).coerceAtMost(maxWidth - 280.dp)
             Row(Modifier.fillMaxSize().layerBackdrop(backdrop)) {
                 HostListPane(
+                    grid = grid,
                     modifier = Modifier
                         .width(listWidth)
                         .fillMaxHeight()
@@ -243,6 +257,8 @@ fun HomeScreen(
                     total = hosts.size,
                     selectedId = shownHost?.id,
                     onPrimary = onSelect,
+                    // 双栏:详情就在右边,卡片上不再放 ⓘ。
+                    onInfo = null,
                     onNew = onNew,
                     onEdit = onEdit,
                     onDelete = onDelete,
@@ -286,10 +302,10 @@ fun HomeScreen(
                         modifier = Modifier.fillMaxSize(),
                         bottomClearance = clearance,
                         host = host,
+                        running = host != null && host.id in running,
                         onConnect = onConnect,
                         onEdit = onEdit,
                         onDelete = onDelete,
-                        onNew = onNew,
                     )
                 }
             }
@@ -297,6 +313,7 @@ fun HomeScreen(
             FirstRun(Modifier.fillMaxSize().windowInsetsPadding(stableSafeDrawing()).padding(top = barPad))
         } else {
             HostListPane(
+                grid = grid,
                 // 内容通到边缘,从右边缘玻璃层底下穿过去(规范:scroll views extend
                 // beneath floating glass)。底部多留一段,最后一张卡片能滚出轨道之外。
                 modifier = Modifier.fillMaxSize().layerBackdrop(backdrop).windowInsetsPadding(stableSafeDrawing()),
@@ -305,6 +322,7 @@ fun HomeScreen(
                 // 单栏没有"当前选中"这个概念,别画高亮。
                 selectedId = null,
                 onPrimary = onConnect,
+                onInfo = onInfo,
                 onNew = onNew,
                 onEdit = onEdit,
                 onDelete = onDelete,
@@ -380,11 +398,14 @@ fun HomeScreen(
 
 @Composable
 private fun HostListPane(
+    grid: LazyGridState,
     modifier: Modifier,
     hosts: List<Host>,
     total: Int,
     selectedId: String?,
     onPrimary: (Host) -> Unit,
+    /** 卡片右端的 ⓘ(单栏才有):看这台主机的详情。 */
+    onInfo: ((Host) -> Unit)?,
     onNew: () -> Unit,
     onEdit: (Host) -> Unit,
     onDelete: (Host) -> Unit,
@@ -406,7 +427,6 @@ private fun HostListPane(
     bottomClearance: Dp,
 ) {
     val p = LocalXssh.current
-    val grid = rememberLazyGridState()
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
     // 同一时刻只开一张:开一张,别的自动合上。
@@ -419,6 +439,24 @@ private fun HostListPane(
     // 打开搜索时列表可能正滚在中间,搜索框在最上面看不见 —— 先滚回顶上。
     LaunchedEffect(searching) {
         if (searching) grid.animateScrollToItem(0)
+    }
+    // 右栏换成了列表里看不见的那一台(外屏看着详情时展开、方向键走到底):把它滚进来。
+    // 只挪到刚好露出来为止,不把它顶到最上面(那样标题会被推出去)。
+    LaunchedEffect(selectedId) {
+        val id = selectedId ?: return@LaunchedEffect
+        val index = hosts.indexOfFirst { it.id == id }.takeIf { it >= 0 } ?: return@LaunchedEffect
+        // 第 0 项是标题,卡片从 1 开始。
+        val item = index + 1
+        // 刚换成这一栏时列表还没排过版,等它排出第一屏再量。
+        val info = snapshotFlow { grid.layoutInfo }.first { it.visibleItemsInfo.isNotEmpty() }
+        val shown = info.visibleItemsInfo.firstOrNull { it.index == item }
+        val bottom = info.viewportEndOffset - with(density) { bottomClearance.roundToPx() }
+        when {
+            shown == null -> grid.animateScrollToItem(item)
+            shown.offset.y < 0 -> grid.animateScrollBy(shown.offset.y.toFloat())
+            shown.offset.y + shown.size.height > bottom ->
+                grid.animateScrollBy((shown.offset.y + shown.size.height - bottom).toFloat())
+        }
     }
     // 列表里的主机没了(刚删掉)就别再记着它。
     LaunchedEffect(hosts) {
@@ -517,6 +555,7 @@ private fun HostListPane(
                             running = host.id in running,
                             // 开着的时候点卡片是"合上",不是连接 —— 和 iOS 一致。
                             onPrimary = { if (openId != null) openId = null else onPrimary(it) },
+                            onInfo = onInfo?.let { info -> { if (openId != null) openId = null else info(it) } },
                             // 长按也能打开,给不知道要左滑的人一条路(不再弹那个菜单)。
                             onLongPress = {
                                 openId = host.id
@@ -617,6 +656,7 @@ private fun HostCard(
     selected: Boolean,
     running: Boolean,
     onPrimary: (Host) -> Unit,
+    onInfo: ((Host) -> Unit)?,
     onLongPress: () -> Unit,
 ) {
     val p = LocalXssh.current
@@ -675,6 +715,22 @@ private fun HostCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+            }
+            if (onInfo != null) {
+                // ⓘ(iOS 无线局域网列表的做法):点卡片 = 连接,点 ⓘ = 看这台主机的信息。
+                // 热区 44dp 伸进卡片的右内边距,图标本身和卡片右缘留出正常的内边距。
+                Box(
+                    Modifier
+                        .padding(start = 4.dp)
+                        .offset(x = 10.dp)
+                        .size(TouchMin)
+                        .clip(CircleShape)
+                        .clickable { onInfo(host) }
+                        .semantics { contentDescription = "主机信息" },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(XIcons.Info, null, tint = p.textDim, modifier = Modifier.size(22.dp))
+                }
             }
         }
     }
@@ -845,10 +901,10 @@ private fun HostDetailPane(
     /** 底部给悬浮按钮留的高度:详情铺满到右边缘,按钮浮在上面,最后一行要能滚到按钮之上。 */
     bottomClearance: Dp,
     host: Host?,
+    running: Boolean,
     onConnect: (Host) -> Unit,
     onEdit: (Host) -> Unit,
     onDelete: (Host) -> Unit,
-    onNew: () -> Unit,
 ) {
     val p = LocalXssh.current
     if (host == null) {
@@ -864,66 +920,39 @@ private fun HostDetailPane(
         return
     }
 
-    // 整栏**只有一条左缘**:折痕后 32dp。标题、标签、详情、按钮全部从这里起。
-    //
-    // 原来文字缩进到 32dp、按钮却在 16dp,于是「连接」「编辑」「删除」左右各比上面的
-    // 「认证」「已信任的主机密钥」多出 16dp —— 这一栏没有任何面板,按钮就是唯一的"盒子",
-    // 让它按盒子的 16dp 线走,只会显得比文字宽出一截。
+    // 和左栏关于折痕镜像:左栏卡片止于折痕前 32dp,这一栏的盒子(按钮、分组块)从折痕后 32dp 起;
+    // 文字再缩进一个盒子内边距,和左栏"卡片边 / 卡片里的字"是同一对线。
+    // 标题用和左栏「X-SSH」同一套字号、同一个顶距,两栏的大标题在一条基线上。
     Column(
         modifier
             .bounce()
             .verticalScroll(rememberScrollState())
-            .padding(start = Gutter * 2, end = Gutter, top = Gutter, bottom = bottomClearance),
+            // 折叠屏轨道浮在这一栏右下角,取值是右对齐的,右边让开它;直板机横屏只有一颗 ＋,不让。
+            .padding(
+                start = Gutter * 2,
+                end = if (LocalChrome.current == Chrome.Rail) RailSideClearance else Gutter,
+                top = Gutter,
+                bottom = bottomClearance,
+            ),
     ) {
-        PaneTitle(
-            Modifier.fillMaxWidth(),
-            host.label,
-            host.subtitle,
-            monoSubtitle = true,
+        HostInfoBody(
+            host = host,
+            running = running,
+            onConnect = onConnect,
+            onEdit = onEdit,
+            onDelete = onDelete,
+            textInset = BoxPad,
+            header = {
+                PaneTitle(
+                    Modifier.fillMaxWidth().padding(start = BoxPad),
+                    host.label,
+                    host.subtitle,
+                    monoSubtitle = true,
+                )
+            },
         )
-        // 只说需要注意的事:主机密钥还没确认、密码还没保存。一切正常就什么都不写。
-        if (host.keyFingerprint.isBlank()) {
-            Spacer(Modifier.height(GapItem))
-            Chip("主机密钥未确认", p.warn)
-        }
-        if (host.auth == AuthKind.PASSWORD && host.password.isEmpty()) {
-            Spacer(Modifier.height(24.dp))
-            DetailRow("密码", "未保存")
-        }
-        if (host.keyFingerprint.isNotBlank()) {
-            Spacer(Modifier.height(24.dp))
-            val (algorithm, rows) = fingerprintRows(host.keyFingerprint)
-            DetailRow(
-                if (algorithm.isBlank()) "主机密钥" else "主机密钥 · $algorithm",
-                rows.joinToString("\n"),
-            )
-        }
-
-        Spacer(Modifier.height(24.dp))
-        // 按钮组有宽度上限:平板横屏右栏有 900dp,拉满的「连接」扁得像一条横幅。
-        // 上限和编辑页的表单一致,两页的按钮 / 输入框看着是同一个尺度。
-        Column(Modifier.widthIn(max = DetailMaxWidth)) {
-            // 和编辑/删除同高(48dp):三颗按钮是一组,不该有一颗特别胖。
-            XsshButton("连接", modifier = Modifier.fillMaxWidth()) { onConnect(host) }
-            Spacer(Modifier.height(GapItem))
-            // 删除要点两下,和左滑一致:第一下变「确认删除」,换一台主机就复位。
-            var confirming by remember(host.id) { mutableStateOf(false) }
-            Row(horizontalArrangement = Arrangement.spacedBy(GapItem)) {
-                XsshButton("编辑", kind = ButtonKind.Ghost, modifier = Modifier.weight(1f)) { onEdit(host) }
-                XsshButton(
-                    if (confirming) "确认删除" else "删除",
-                    kind = ButtonKind.Danger,
-                    modifier = Modifier.weight(1f),
-                ) {
-                    if (confirming) onDelete(host) else confirming = true
-                }
-            }
-        }
     }
 }
-
-/** 详情栏里按钮组的宽度上限(与编辑页表单同宽)。 */
-private val DetailMaxWidth = 560.dp
 
 /** 栏标题(大标题 + 一行说明)。两栏共用同一套字号,基线才能横跨折痕对齐。 */
 @Composable
@@ -953,15 +982,5 @@ private fun PaneTitle(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-    }
-}
-
-@Composable
-private fun DetailRow(label: String, value: String) {
-    val p = LocalXssh.current
-    Column {
-        Text(label, color = p.textDim, fontSize = 13.sp)
-        Spacer(Modifier.height(4.dp))
-        Text(value, color = p.text, fontFamily = XsshFonts.monoUi, fontSize = 13.sp)
     }
 }

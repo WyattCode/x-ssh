@@ -156,21 +156,34 @@ data class DevTarget(
 
 sealed interface Screen {
     data object Home : Screen
-    data class Editor(val host: Host?) : Screen
-    data class Terminal(val host: Host) : Screen
+
+    /** 单栏的主机详情页(卡片上的 ⓘ)。只记 id:编辑保存后回来显示的是新内容。 */
+    data class HostInfo(val hostId: String) : Screen
+
+    /** [back]:从哪一页进来的,返回回到那里(详情页进来的回详情页)。 */
+    data class Editor(val host: Host?, val back: Screen = Home) : Screen
+    data class Terminal(val host: Host, val back: Screen = Home) : Screen
 
     /** 某条连接的文件页(从终端推进来,返回回到终端)。 */
-    data class Files(val host: Host) : Screen
+    data class Files(val terminal: Terminal) : Screen {
+        val host: Host get() = terminal.host
+    }
 }
 
-/** 返回回到哪一页:文件页回它的终端,其余回主机页。 */
-private fun Screen.parent(): Screen = if (this is Screen.Files) Screen.Terminal(host) else Screen.Home
+/** 返回回到哪一页。 */
+private fun Screen.parent(): Screen = when (this) {
+    Screen.Home -> Screen.Home
+    is Screen.HostInfo -> Screen.Home
+    is Screen.Editor -> back
+    is Screen.Terminal -> back
+    is Screen.Files -> terminal
+}
 
 /** 页面的层级:往深处走是"推入",往浅处走是"退出"(决定页面从哪边滑)。 */
 private fun Screen.depth(): Int = when (this) {
     Screen.Home -> 0
-    is Screen.Editor, is Screen.Terminal -> 1
-    is Screen.Files -> 2
+    is Screen.HostInfo -> 1
+    else -> parent().depth() + 1
 }
 
 /**
@@ -264,6 +277,7 @@ fun App(devTarget: DevTarget? = null) {
                     }
                 }
                 PhoneFlow(
+                    wide = LocalAdaptive.current.splits(maxWidth),
                     screen = screen,
                     onScreen = { screen = it },
                     hosts = hosts,
@@ -280,6 +294,8 @@ fun App(devTarget: DevTarget? = null) {
 /** 手机 / 折叠屏(以及缩成手机宽度的平板小窗)的页面流:主机页 → 终端 / 编辑页,整页推入。 */
 @Composable
 private fun PhoneFlow(
+    /** 主机页现在是不是左右两栏(折叠屏内屏横屏、直板机横屏)。 */
+    wide: Boolean,
     screen: Screen,
     onScreen: (Screen) -> Unit,
     hosts: List<Host>,
@@ -298,12 +314,56 @@ private fun PhoneFlow(
     // 拖动返回期间页面位移要和手指成正比:弹簧曲线按时间取进度,拉到 40% 画面就已经走完九成。
     val dragging = remember { mutableStateOf(false) }
     val windowInfo = LocalWindowInfo.current
+    // 窗口换形态(展开 / 合上)引起的换页不滑:页面是"变成"另一种摆法,不是往前往后走。
+    val snapNext = remember { booleanArrayOf(false) }
     LaunchedEffect(screen) {
-        if (seek.currentState != screen || seek.targetState != screen) seek.animateTo(screen)
+        if (seek.currentState != screen || seek.targetState != screen) {
+            if (snapNext[0]) seek.snapTo(screen) else seek.animateTo(screen)
+        }
+        snapNext[0] = false
     }
+
+    // ── 展开 / 合上 ────────────────────────────────────────────────
+    // 用户是不是"正在看某台主机的详情":单栏里推进了详情页,或者双栏里亲手点了一台。
+    // 自动选中的第一台不算 —— 否则一合上,外屏就总停在详情页,而外屏首先是"点一下就连"的遥控器。
+    var viewingDetail by rememberSaveable { mutableStateOf(false) }
+    val latestHosts by rememberUpdatedState(hosts)
+    val latestSelected by rememberUpdatedState(selectedId)
+    LaunchedEffect(wide) {
+        val now = currentScreen
+        when {
+            // 外屏看着详情 → 展开:变成双栏、右边就是这台。
+            wide && now is Screen.HostInfo -> {
+                onSelect(now.hostId)
+                snapNext[0] = true
+                onScreen(Screen.Home)
+            }
+            // 内屏右栏看着一台 → 合上:外屏接着显示这台的详情页,返回回到列表。
+            !wide && now == Screen.Home && viewingDetail -> {
+                val id = latestSelected?.takeIf { id -> latestHosts.any { it.id == id } }
+                if (id != null) {
+                    snapNext[0] = true
+                    onScreen(Screen.HostInfo(id))
+                } else {
+                    viewingDetail = false
+                }
+            }
+        }
+    }
+    /** 双栏时详情页不单独存在:回到它 = 回到主机页(右边选中它)。只算落点,不改状态。 */
+    fun resolve(target: Screen): Screen = if (wide && target is Screen.HostInfo) Screen.Home else target
+
+    /** 真的回到 [target] 时才改状态 —— 返回手势拉到一半又放回去,什么都不能变。 */
+    fun arrive(target: Screen) {
+        if (wide && target is Screen.HostInfo) onSelect(target.hostId)
+        if (target == Screen.Home && !wide) viewingDetail = false
+    }
+
+    fun land(target: Screen): Screen = resolve(target).also { arrive(target) }
     PredictiveBackHandler(enabled = screen != Screen.Home) { gesture ->
         dragging.value = true
-        val target = currentScreen.parent()
+        val parent = currentScreen.parent()
+        val target = resolve(parent)
         try {
             // 用手指的实际位置算进度,不用系统给的 progress:那个值带缓动,
             // 在这台机器上拉到屏幕三分之一就到 0.95,页面早早滑完,不再跟手。
@@ -316,7 +376,8 @@ private fun PhoneFlow(
             // 松手:从手指停下的位置接着滑完。
             seek.animateTo(target, Motion.page())
             // 返回只是离开这一屏,会话照跑(主机页会显示「运行中」)。
-            if (target == Screen.Home) onTerminalHost(null)
+            if (target !is Screen.Terminal && target !is Screen.Files) onTerminalHost(null)
+            arrive(parent)
             onScreen(target)
             // 页面已经停在目标上了,之后的推入 / 退出恢复成弹簧曲线。
             dragging.value = false
@@ -337,10 +398,21 @@ private fun PhoneFlow(
         is Screen.Home -> HomeScreen(
             hosts = hosts,
             selectedId = selectedId,
-            onSelect = { onSelect(it.id) },
+            onSelect = {
+                onSelect(it.id)
+                viewingDetail = true
+            },
+            onAutoSelect = { onSelect(it.id) },
             onConnect = {
+                // 从双栏连出去:回来再合上时回列表,不停在详情页。
+                viewingDetail = false
                 onTerminalHost(it.id)
                 onScreen(Screen.Terminal(it))
+            },
+            onInfo = {
+                onSelect(it.id)
+                viewingDetail = true
+                onScreen(Screen.HostInfo(it.id))
             },
             onNew = { onScreen(Screen.Editor(null)) },
             onEdit = { onScreen(Screen.Editor(it)) },
@@ -350,21 +422,43 @@ private fun PhoneFlow(
             },
         )
 
+        is Screen.HostInfo -> {
+            val host = hosts.firstOrNull { it.id == current.hostId }
+            // 主机没了(删掉了):这一页没东西可看。
+            LaunchedEffect(host == null) { if (host == null) onScreen(land(Screen.Home)) }
+            if (host != null) {
+                HostInfoScreen(
+                    host = host,
+                    onBack = { onScreen(land(Screen.Home)) },
+                    onConnect = {
+                        onTerminalHost(it.id)
+                        onScreen(Screen.Terminal(it, back = current))
+                    },
+                    onEdit = { onScreen(Screen.Editor(it, back = current)) },
+                    onDelete = { gone ->
+                        persist(hosts.filterNot { it.id == gone.id })
+                        if (selectedId == gone.id) onSelect(null)
+                        onScreen(land(Screen.Home))
+                    },
+                )
+            }
+        }
+
         is Screen.Editor -> HostEditorScreen(
             initial = current.host,
-            onBack = { onScreen(Screen.Home) },
+            onBack = { onScreen(land(current.back)) },
             onSave = { host ->
                 val list = hosts.toMutableList()
                 val index = list.indexOfFirst { it.id == host.id }
                 if (index >= 0) list[index] = host else list.add(host)
                 persist(list)
                 onSelect(host.id)
-                onScreen(Screen.Home)
+                onScreen(land(current.back))
             },
             onDelete = { host ->
                 persist(hosts.filterNot { it.id == host.id })
                 if (selectedId == host.id) onSelect(null)
-                onScreen(Screen.Home)
+                onScreen(land(Screen.Home))
             },
         )
 
@@ -372,7 +466,7 @@ private fun PhoneFlow(
             host = current.host,
             onExit = {
                 onTerminalHost(null)
-                onScreen(Screen.Home)
+                onScreen(land(current.back))
             },
             onTrustKey = { fingerprint ->
                 // 换一个 Host 实例 → 终端屏的 remember(host) 失效 → 带着新指纹重连。
@@ -380,24 +474,25 @@ private fun PhoneFlow(
                 if (hosts.any { it.id == trusted.id }) {
                     persist(hosts.map { if (it.id == trusted.id) it.copy(keyFingerprint = fingerprint) else it })
                 }
-                onScreen(Screen.Terminal(trusted))
+                onScreen(current.copy(host = trusted))
             },
-            onFiles = { onScreen(Screen.Files(current.host)) },
+            onFiles = { onScreen(Screen.Files(current)) },
             onEditHost = {
                 onTerminalHost(null)
-                onScreen(Screen.Editor(current.host))
+                // 填完回到进终端之前的那一页(详情页或主机页),再点连接就是用新密码连。
+                onScreen(Screen.Editor(current.host, back = current.back))
             },
         )
 
         is Screen.Files -> {
             val session = SessionRegistry.sessions.collectAsState().value[current.host.id]
             // 连接断了(对端关了 / 被断开):没有文件可看,退回终端页(那里有「重新连接」)。
-            LaunchedEffect(session == null) { if (session == null) onScreen(Screen.Terminal(current.host)) }
+            LaunchedEffect(session == null) { if (session == null) onScreen(current.terminal) }
             if (session != null) {
                 FilesPane(
                     host = current.host,
                     session = session,
-                    chrome = FilesChrome.Phone(onLeave = { onScreen(Screen.Terminal(current.host)) }),
+                    chrome = FilesChrome.Phone(onLeave = { onScreen(current.terminal) }),
                     focusRequest = 1,
                 )
             }
@@ -413,6 +508,7 @@ private fun PhoneFlow(
         contentKey = {
             when (it) {
                 Screen.Home -> "home"
+                is Screen.HostInfo -> "info:" + it.hostId
                 is Screen.Editor -> "editor"
                 is Screen.Terminal -> "term:" + it.host.id
                 is Screen.Files -> "files:" + it.host.id

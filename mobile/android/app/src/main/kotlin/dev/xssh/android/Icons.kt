@@ -271,6 +271,14 @@ object XIcons {
         moveTo(8.8f, 12f); lineTo(11.2f, 14.4f); lineTo(15.4f, 9.8f)
     }
 
+    /** 主机信息:圆圈里一个 i(iOS 列表行尾的 ⓘ)。 */
+    val Info = icon("info") {
+        moveTo(12f, 3.8f)
+        arcTo(8.2f, 8.2f, 0f, true, true, 11.99f, 3.8f)
+        moveTo(12f, 11f); lineTo(12f, 16.2f)
+        moveTo(12f, 7.9f); lineTo(12.01f, 7.9f)
+    }
+
     /** 警告:三角 + 感叹号(主机密钥变了、连接失败)。 */
     val Alert = icon("alert") {
         moveTo(12f, 4f); lineTo(21f, 19.5f); lineTo(3f, 19.5f); close()

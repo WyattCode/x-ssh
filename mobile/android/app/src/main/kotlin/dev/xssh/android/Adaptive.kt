@@ -68,6 +68,12 @@ data class Adaptive(
     val twoPane: Boolean get() = width == SizeClass.Expanded ||
         (bookFold != null && width != SizeClass.Compact)
 
+    /**
+     * 实测窗口宽 [width] 时主机页是不是左右两栏。主机页、连接页、页面流(展开 / 合上时
+     * 详情页和双栏互换)都按这一条判断,三处必须一致。
+     */
+    fun splits(width: Dp): Boolean = width >= 840.dp || (bookFold != null && width >= 600.dp)
+
     /** 一屏放得下所有终端快捷键(不必横向滚动)。 */
     val roomyKeys: Boolean get() = width != SizeClass.Compact
 }

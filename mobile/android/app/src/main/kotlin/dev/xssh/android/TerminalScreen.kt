@@ -1540,11 +1540,15 @@ private fun DrawScope.drawRun(
         textDecoration = decoration,
     )
 
+    // 颜色和下划线必须在**画的时候**给,不能只写在 style 里:TextMeasurer 的缓存只按影响排版的属性
+    // (字、字体、字号、粗细)比对,颜色不算。同一串字换了颜色再量,拿回来的是缓存里旧颜色的排版结果 ——
+    // 切换深浅色后,终端里原有的英文仍是上一个主题的颜色(浅色底上一片近白的字),中文却换了。
     val ascii = StringBuilder()
     var asciiStart = 0
     fun flush() {
         if (ascii.isEmpty()) return
-        drawText(measurer, ascii.toString(), topLeft = Offset((col0 + asciiStart) * cw, y), style = style)
+        val layout = measurer.measure(ascii.toString(), style)
+        drawText(layout, color = fg, topLeft = Offset((col0 + asciiStart) * cw, y), textDecoration = decoration)
         ascii.setLength(0)
     }
     cells.forEachIndexed { i, text ->
@@ -1564,10 +1568,10 @@ private fun DrawScope.drawRun(
         // 对齐基线:思源黑体的行高比英文字体高,按各自的行顶摆放的话中文会整体往下掉一截。
         val top = y + baseline - layout.firstBaseline
         if (width <= slot) {
-            drawText(layout, topLeft = Offset(x + (slot - width) / 2f, top))
+            drawText(layout, color = fg, topLeft = Offset(x + (slot - width) / 2f, top), textDecoration = decoration)
         } else {
             scale(scaleX = slot / width, scaleY = 1f, pivot = Offset(x, y)) {
-                drawText(layout, topLeft = Offset(x, top))
+                drawText(layout, color = fg, topLeft = Offset(x, top), textDecoration = decoration)
             }
         }
     }

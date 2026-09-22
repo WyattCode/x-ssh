@@ -1212,70 +1212,7 @@ private fun TabletHostDetail(
                     }
                 }
                 Spacer(Modifier.height(32.dp))
-                FormGroup(title = "连接") {
-                    InfoRow("地址", host.address, mono = true)
-                    FormDivider()
-                    InfoRow("端口", host.port.toString(), mono = true)
-                    FormDivider()
-                    InfoRow("用户名", host.username.ifBlank { "未设置" }, mono = host.username.isNotBlank())
-                    FormDivider()
-                    val login = when {
-                        host.keyMissing -> "私钥 · 未导入"
-                        host.auth == AuthKind.KEY -> "私钥" + host.keyName.takeIf { it.isNotEmpty() }?.let { " · $it" }.orEmpty()
-                        host.password.isEmpty() -> "密码 · 未保存"
-                        else -> "密码"
-                    }
-                    val attention = host.keyMissing || (host.auth == AuthKind.PASSWORD && host.password.isEmpty())
-                    InfoRow("登录方式", login, valueColor = if (attention) p.warn else null)
-                    if (host.auth == AuthKind.KEY && host.keyPublicFingerprint.isNotEmpty()) {
-                        FormDivider()
-                        InfoRow("私钥指纹", host.keyPublicFingerprint.removePrefix("SHA256:"), mono = true)
-                    }
-                }
-                Spacer(Modifier.height(24.dp))
-                FormGroup(title = "主机密钥") {
-                    if (host.keyFingerprint.isBlank()) {
-                        InfoRow("状态", "未确认", valueColor = p.warn)
-                    } else {
-                        val (algorithm, rows) = fingerprintRows(host.keyFingerprint)
-                        Column(Modifier.fillMaxWidth().padding(horizontal = BoxPad, vertical = 14.dp)) {
-                            Text(algorithm.ifBlank { "指纹" }, color = p.textDim, fontSize = 13.sp)
-                            Spacer(Modifier.height(6.dp))
-                            SelectionContainer {
-                                Column {
-                                    rows.forEach {
-                                        Text(it, color = p.text, fontSize = 15.sp, fontFamily = XsshFonts.monoUi)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-/** 只读的一行:左标签、右取值。取值可以用鼠标选中复制。 */
-@Composable
-private fun InfoRow(label: String, value: String, mono: Boolean = false, valueColor: Color? = null) {
-    val p = LocalXssh.current
-    Row(
-        Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = BoxPad),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(label, color = p.text, fontSize = 15.sp)
-        Spacer(Modifier.width(GapItem))
-        Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
-            SelectionContainer {
-                Text(
-                    value,
-                    color = valueColor ?: p.textDim,
-                    fontSize = 15.sp,
-                    fontFamily = if (mono) XsshFonts.monoUi else FontFamily.Default,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                HostInfoGroups(host)
             }
         }
     }

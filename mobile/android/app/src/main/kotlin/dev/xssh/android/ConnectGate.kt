@@ -238,7 +238,7 @@ private fun GatePage(host: Host, content: GateContent, tablet: Boolean, onExit: 
     val insets = stableSafeDrawing()
     val startInset = insets.asPaddingValues().calculateStartPadding(LocalLayoutDirection.current)
     BoxWithConstraints(Modifier.fillMaxSize().background(p.groupedBg).then(keys)) {
-        val twoPane = maxWidth >= 840.dp || (adaptive.bookFold != null && maxWidth >= 600.dp)
+        val twoPane = adaptive.splits(maxWidth)
         // 折叠屏的轨道在右下角:右边整列让开轨道,按钮不压在玻璃下面。
         val railPad = if (topBar) Gutter else Gutter * 2 + 56.dp
         if (twoPane) {
