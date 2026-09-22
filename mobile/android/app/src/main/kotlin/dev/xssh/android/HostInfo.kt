@@ -137,7 +137,7 @@ fun HostActions(
     onEdit: (Host) -> Unit,
     onDelete: (Host) -> Unit,
 ) {
-    Column(Modifier.widthIn(max = HostInfoMaxWidth)) {
+    Column(Modifier.widthIn(max = PageMaxWidth)) {
         XsshButton(if (running) "打开会话" else "连接", modifier = Modifier.fillMaxWidth()) { onConnect(host) }
         Spacer(Modifier.height(GapItem))
         var confirming by remember(host.id, running) { mutableStateOf(false) }
@@ -159,15 +159,6 @@ fun HostActions(
         }
     }
 }
-
-/**
- * 折叠屏上,取值右对齐的详情内容右边要让开轨道:轨道悬浮在右下角,
- * 压在「端口」「用户名」这些取值上面就读不到了(和连接页同一个量)。
- */
-val RailSideClearance = Gutter * 2 + 56.dp
-
-/** 详情内容的宽度上限(与编辑页表单同宽):平板横屏的右栏太宽,一行不能横跨过去。 */
-val HostInfoMaxWidth = 560.dp
 
 /** 图标块 + 主机名 + 地址。连着的时候图标块变绿(和卡片一致)。 */
 @Composable
@@ -231,13 +222,11 @@ fun ReadingPage(onBack: () -> Unit, content: @Composable ColumnScope.() -> Unit)
                 .windowInsetsPadding(stableSafeDrawing())
                 .bounce()
                 .verticalScroll(rememberScrollState())
+                // 版心:左右都是盒子线,和主机页、编辑页一样长(见 Components 的版心说明)。
+                // 轨道浮在右下角,内容从玻璃底下过;底部留够一整条轨道的高度,最后几行能滚到它上面看。
                 .padding(
                     start = Gutter,
-                    // **只看不改的页面右边让开轨道**(和连接页同一个量 88dp):这些页的取值是右对齐的,
-                    // 铺到边缘的话「未确认」「22」这种正好被玻璃切掉一半,停着不动就看不全 ——
-                    // 实测外屏上的「状态 未确认」就是这样。列表和编辑页铺满不受影响:
-                    // 列表是整行卡片(压住一角不影响读),编辑页聚焦时会自己把那一行滚到轨道上方。
-                    end = if (topBar) Gutter else RailSideClearance,
+                    end = Gutter,
                     top = (if (topBar) TopBarHeight else 0.dp) + Gutter,
                     bottom = if (topBar) 40.dp else RailClearance,
                 ),
@@ -274,13 +263,13 @@ fun HostInfoScreen(
 ) {
     val running = host.id in SessionRegistry.sessions.collectAsState().value
     ReadingPage(onBack) {
-        HostInfoBody(host, running, onConnect, onEdit, onDelete, textInset = BoxPad)
+        HostInfoBody(host, running, onConnect, onEdit, onDelete)
     }
 }
 
 /**
- * 详情正文:身份 → 按钮 → 两组信息。[textInset] 是文字相对盒子(按钮、分组块)左缘的缩进 ——
- * 盒子贴一条线、文字贴另一条线,和列表里"卡片边 / 卡片里的字"是同一对线。
+ * 详情正文:身份 → 按钮 → 两组信息。
+ * 图标块和下面的按钮、分组块都落在**盒子线**上(和连接页的身份块一样);标题线由各自的标题自己带。
  */
 @Composable
 fun HostInfoBody(
@@ -289,11 +278,10 @@ fun HostInfoBody(
     onConnect: (Host) -> Unit,
     onEdit: (Host) -> Unit,
     onDelete: (Host) -> Unit,
-    textInset: Dp,
     header: (@Composable () -> Unit)? = null,
 ) {
-    Column(Modifier.widthIn(max = HostInfoMaxWidth)) {
-        header?.invoke() ?: HostIdentity(host, running, Modifier.padding(start = textInset))
+    Column(Modifier.widthIn(max = PageMaxWidth)) {
+        header?.invoke() ?: HostIdentity(host, running)
         Spacer(Modifier.height(24.dp))
         HostActions(host, running, onConnect, onEdit, onDelete)
         Spacer(Modifier.height(32.dp))

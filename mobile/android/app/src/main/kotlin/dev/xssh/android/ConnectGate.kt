@@ -239,8 +239,6 @@ private fun GatePage(host: Host, content: GateContent, tablet: Boolean, onExit: 
     val startInset = insets.asPaddingValues().calculateStartPadding(LocalLayoutDirection.current)
     BoxWithConstraints(Modifier.fillMaxSize().background(p.groupedBg).then(keys)) {
         val twoPane = adaptive.splits(maxWidth)
-        // 折叠屏的轨道在右下角:右边整列让开轨道,按钮不压在玻璃下面。
-        val railPad = if (topBar) Gutter else Gutter * 2 + 56.dp
         if (twoPane) {
             val left = adaptive.listPaneWidth(maxWidth).coerceAtMost(maxWidth - 280.dp)
             Row(
@@ -256,7 +254,7 @@ private fun GatePage(host: Host, content: GateContent, tablet: Boolean, onExit: 
                     Modifier
                         .width(left)
                         .fillMaxHeight()
-                        .padding(start = startInset + Gutter + BoxPad, end = Gutter * 2, top = Gutter),
+                        .padding(start = startInset + Gutter, end = Gutter * 2, top = Gutter),
                 ) {
                     Identity(host, content)
                 }
@@ -267,9 +265,9 @@ private fun GatePage(host: Host, content: GateContent, tablet: Boolean, onExit: 
                         .fillMaxHeight()
                         .bounce()
                         .verticalScroll(rememberScrollState())
-                        .padding(start = Gutter * 2, end = railPad, top = Gutter, bottom = RailClearance),
+                        .padding(start = Gutter * 2, end = Gutter, top = Gutter, bottom = RailClearance),
                 ) {
-                    Column(Modifier.widthIn(max = 560.dp)) {
+                    Column(Modifier.widthIn(max = PageMaxWidth)) {
                         content.body(this)
                         Spacer(Modifier.height(24.dp))
                         content.actions(true)
@@ -285,14 +283,15 @@ private fun GatePage(host: Host, content: GateContent, tablet: Boolean, onExit: 
                     .windowInsetsPadding(insets.only(WindowInsetsSides.Vertical + WindowInsetsSides.End))
                     .bounce()
                     .verticalScroll(rememberScrollState())
+                    // 版心:左右都是盒子线,和主机页、编辑页、详情页一样长。
                     .padding(
-                        start = startInset + Gutter + BoxPad,
-                        end = if (topBar) Gutter + BoxPad else railPad,
+                        start = startInset + Gutter,
+                        end = Gutter,
                         top = (if (topBar) TopBarHeight else 0.dp) + Gutter,
                         bottom = if (topBar) 40.dp else RailClearance,
                     ),
             ) {
-                Column(Modifier.widthIn(max = 560.dp)) {
+                Column(Modifier.widthIn(max = PageMaxWidth)) {
                     Identity(host, content)
                     Spacer(Modifier.height(24.dp))
                     content.body(this)
@@ -322,6 +321,7 @@ private fun GatePage(host: Host, content: GateContent, tablet: Boolean, onExit: 
 @Composable
 private fun Identity(host: Host, content: GateContent) {
     val p = LocalXssh.current
+    // 图标块是"盒子",落在盒子线上;下面的文字走标题线(见 Components 的版心说明)。
     Column {
         Box(
             Modifier
@@ -333,6 +333,7 @@ private fun Identity(host: Host, content: GateContent) {
             Icon(content.icon, contentDescription = null, tint = content.tint, modifier = Modifier.size(30.dp))
         }
         Spacer(Modifier.height(18.dp))
+        Column(Modifier.padding(start = TitlePad)) {
         Text(
             content.title,
             color = p.text,
@@ -351,6 +352,7 @@ private fun Identity(host: Host, content: GateContent) {
         content.note?.let {
             Spacer(Modifier.height(14.dp))
             Text(it, color = content.noteColor, fontSize = 14.sp)
+        }
         }
     }
 }

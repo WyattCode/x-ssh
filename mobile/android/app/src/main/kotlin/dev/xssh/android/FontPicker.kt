@@ -154,14 +154,14 @@ fun FontList(modifier: Modifier = Modifier, onPicked: (() -> Unit)? = null) {
 fun FontScreen(onBack: () -> Unit) {
     val p = LocalXssh.current
     ReadingPage(onBack) {
-        Column(Modifier.widthIn(max = HostInfoMaxWidth)) {
+        Column(Modifier.widthIn(max = PageMaxWidth)) {
             // 大标题和主机页、编辑页同号字(34sp),三页推来推去看着是同一套。
             Text(
                 "终端字体",
                 color = p.text,
                 fontSize = 34.sp,
                 fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(start = BoxPad, bottom = 18.dp),
+                modifier = Modifier.padding(start = TitlePad, bottom = 18.dp),
             )
             FontList()
         }

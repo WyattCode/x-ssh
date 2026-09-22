@@ -492,7 +492,7 @@ private fun HostListPane(
                     PaneTitle(
                         Modifier
                             .fillMaxWidth()
-                            .padding(start = BoxPad, top = Gutter, bottom = 2.dp),
+                            .padding(start = TitlePad, top = Gutter, bottom = 2.dp),
                         "X-SSH",
                         if (total == 0) "还没有主机" else "$total 台主机",
                     )
@@ -915,13 +915,8 @@ private fun HostDetailPane(
         modifier
             .bounce()
             .verticalScroll(rememberScrollState())
-            // 折叠屏轨道浮在这一栏右下角,取值是右对齐的,右边让开它;直板机横屏只有一颗 ＋,不让。
-            .padding(
-                start = Gutter * 2,
-                end = if (LocalChrome.current == Chrome.Rail) RailSideClearance else Gutter,
-                top = Gutter,
-                bottom = bottomClearance,
-            ),
+            // 版心:盒子线左右各一条(折痕这侧留 32dp,和左栏镜像);轨道浮在右下角,内容从玻璃底下过。
+            .padding(start = Gutter * 2, end = Gutter, top = Gutter, bottom = bottomClearance),
     ) {
         HostInfoBody(
             host = host,
@@ -929,10 +924,9 @@ private fun HostDetailPane(
             onConnect = onConnect,
             onEdit = onEdit,
             onDelete = onDelete,
-            textInset = BoxPad,
             header = {
                 PaneTitle(
-                    Modifier.fillMaxWidth().padding(start = BoxPad),
+                    Modifier.fillMaxWidth().padding(start = TitlePad),
                     host.label,
                     host.subtitle,
                     monoSubtitle = true,

@@ -82,7 +82,8 @@ fun FormGroup(
                 title,
                 color = p.textDim,
                 fontSize = 13.sp,
-                modifier = Modifier.padding(start = BoxPad, bottom = 7.dp),
+                // 标题线(见 Components 里的版心说明)。
+                modifier = Modifier.padding(start = TitlePad, bottom = 7.dp),
             )
         }
         Column(
@@ -98,7 +99,7 @@ fun FormGroup(
                 footnote,
                 color = p.textDim,
                 fontSize = 13.sp,
-                modifier = Modifier.padding(start = BoxPad, end = BoxPad, top = 7.dp),
+                modifier = Modifier.padding(start = TitlePad, end = BoxPad, top = 7.dp),
             )
         }
     }

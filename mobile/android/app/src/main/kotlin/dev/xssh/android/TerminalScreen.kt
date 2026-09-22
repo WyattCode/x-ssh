@@ -1,5 +1,10 @@
 package dev.xssh.android
 
+import kotlinx.coroutines.Job
+import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.animation.core.exponentialDecay
+import androidx.compose.animation.core.animateDecay
+import androidx.compose.animation.core.AnimationState
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -629,6 +634,7 @@ private fun TerminalView(
                 },
         ) {
             TerminalCanvas(
+                canFling = !frame.modes.altScreen && !frame.modes.mouseReport,
                 rows = rows,
                 cursor = cursor,
                 fontSize = fontSize,
@@ -1234,6 +1240,11 @@ private fun TerminalCanvas(
     fontSize: Float,
     onGridSize: (cols: Int, rows: Int, cellWidthPx: Int, cellHeightPx: Int) -> Unit,
     onScroll: (lines: Int, col: Int, row: Int) -> Unit,
+    /**
+     * 松手后能不能接着惯性滑。翻本地回滚缓冲可以;**全屏程序(less / vim 这些)不行** ——
+     * 那时滚动是发方向键或鼠标事件给远端,惯性会一口气发几十下,光标窜出去老远。
+     */
+    canFling: Boolean,
     onSecondaryClick: (Offset) -> Unit,
     /** 选区落在视口里的部分(只用来画);选区本身在核心里。 */
     selection: TermSelection?,
@@ -1262,6 +1273,9 @@ private fun TerminalCanvas(
     val selectDone by rememberUpdatedState(onSelectionDone)
     val released by rememberUpdatedState(onMouseReleased)
     val haptic = LocalHapticFeedback.current
+    // 手指离开之后的惯性翻历史(见下面的 dragModifier)。新的触摸一来就取消。
+    val scope = rememberCoroutineScope()
+    val fling = remember { mutableStateOf<Job?>(null) }
     BoxWithConstraints(modifier.clipToBounds()) {
         // 画布的高度**等停下来再跟**。键盘 / 快捷键面板升起的 300ms 里可用高度每帧都在变,
         // 原来画布跟着每帧变高变矮,每一帧都要把整屏几千个字重画一遍,动画一路掉帧(实测
@@ -1305,6 +1319,8 @@ private fun TerminalCanvas(
             var clicks = 0
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = false)
+                // 一按下就停住上一次的惯性:手指按住了,画面就该跟手指走。
+                fling.value?.cancel()
                 if (down.type == PointerType.Mouse) {
                     // 鼠标 / 触控板按住拖 = 选择(滚动交给滚轮),和桌面终端一样。右键在 mouseModifier 里处理。
                     // 只排除右键 / 中键:触控板轻点、部分注入的鼠标事件不带按键状态,那也是"左键"。
@@ -1351,6 +1367,8 @@ private fun TerminalCanvas(
                 var travelled = 0f
                 var anchor: GridCell? = null
                 var carry = 0f
+                // 松手之后要接着滑一段(惯性):记下手指的速度。
+                val tracker = VelocityTracker()
                 while (true) {
                     val waiting = anchor == null && travelled < viewConfiguration.touchSlop
                     val event = if (waiting) {
@@ -1386,8 +1404,29 @@ private fun TerminalCanvas(
                         if (!sameCell(at, from)) selectUpdate(at)
                         continue
                     }
-                    if (!change.pressed) break
+                    if (!change.pressed) {
+                        // 松手:按离手时的速度接着滑,像列表一样惯性减速,不是"手一抬就定住"。
+                        val velocity = tracker.calculateVelocity().y
+                        if (canFling && kotlin.math.abs(velocity) > 80f) {
+                            val at = cellAt(change.position)
+                            fling.value = scope.launch {
+                                var rest = carry
+                                var last = 0f
+                                AnimationState(0f, velocity).animateDecay(exponentialDecay(frictionMultiplier = 1.6f)) {
+                                    rest += value - last
+                                    last = value
+                                    val lines = (rest / cell.second).toInt()
+                                    if (lines != 0) {
+                                        rest -= lines * cell.second
+                                        scrollBy(lines, at.first, at.second)
+                                    }
+                                }
+                            }
+                        }
+                        break
+                    }
                     val step = change.positionChange()
+                    tracker.addPosition(change.uptimeMillis, change.position)
                     travelled += kotlin.math.abs(step.x) + kotlin.math.abs(step.y)
                     carry += step.y
                     val moved = (carry / cell.second).toInt()

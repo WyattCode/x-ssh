@@ -214,7 +214,8 @@ fun HostEditorScreen(
           // "正在输入的那一行"右边(取值是右对齐的)—— 输入框聚焦时多滚一截按钮的高度,落到按钮上面。
           CompositionLocalProvider(LocalFieldClearance provides if (topBar) 0.dp else RailClearance) {
             Column(
-                Modifier.padding(start = startInset + Gutter + BoxPad, end = Gutter, top = Gutter),
+                // 标题线(见 Components 的版心说明):盒子线 + TitlePad。
+                Modifier.padding(start = startInset + Gutter + TitlePad, end = Gutter, top = Gutter),
             ) {
                 Text(
                     if (initial == null) "新建主机" else "编辑主机",
@@ -244,7 +245,7 @@ fun HostEditorScreen(
                     Column(Modifier.weight(1f)) {
                         Column(
                             Modifier
-                                .widthIn(max = 560.dp + Gutter * 3)
+                                .widthIn(max = PageMaxWidth + Gutter * 3)
                                 .padding(start = Gutter * 2, end = Gutter),
                             verticalArrangement = Arrangement.spacedBy(20.dp),
                         ) {
@@ -257,11 +258,10 @@ fun HostEditorScreen(
                 Column(
                     Modifier
                         // 一行里标签在左、取值在右,行太宽的话视线要横跨半块屏幕 —— 所以限宽。
-                        // 但**不能居中**:内屏竖屏内容区 536dp,比上限多出的 16dp 会被
-                        // 左右各分 8dp,面板里的文字就落在 40dp,和标题的 32dp 错开一截。
-                        // 限宽之后靠左,面板永远在 16dp、文字永远在 32dp。
+                        // 但**不能居中**:多出来的宽度左右一分,盒子就不在盒子线上了。
+                        // 限宽之后靠左,盒子永远在 16dp、盒内文字永远在 32dp(版心)。
                         .padding(start = startInset)
-                        .widthIn(max = 560.dp + Gutter * 2)
+                        .widthIn(max = PageMaxWidth + Gutter * 2)
                         .fillMaxWidth()
                         .padding(horizontal = Gutter),
                     verticalArrangement = Arrangement.spacedBy(20.dp),
