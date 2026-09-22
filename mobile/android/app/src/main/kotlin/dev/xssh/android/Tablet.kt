@@ -250,6 +250,7 @@ fun TabletApp(
     }
 
     var sheet by remember { mutableStateOf<SheetTarget?>(null) }
+    var fontSheet by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf<Host?>(null) }
     var query by rememberSaveable { mutableStateOf("") }
     val searchFocus = remember { FocusRequester() }
@@ -476,6 +477,7 @@ fun TabletApp(
                         onOpenHost = ::connect,
                         onCloseSession = ::disconnect,
                         onNew = { sheet = SheetTarget.New },
+                        onFonts = { fontSheet = true },
                         menuFor = ::menuFor,
                     )
                     Box(Modifier.width(0.5.dp).fillMaxHeight().background(p.border))
@@ -576,6 +578,7 @@ fun TabletApp(
 
     }
 
+    if (fontSheet) FontSheet(onDismiss = { fontSheet = false })
     sheet?.let { target ->
         val initial = (target as? SheetTarget.Edit)?.host
         HostSheet(
@@ -632,6 +635,7 @@ private fun Sidebar(
     onOpenHost: (Host) -> Unit,
     onCloseSession: (Host) -> Unit,
     onNew: () -> Unit,
+    onFonts: () -> Unit,
     menuFor: (Host) -> List<MenuAction>,
 ) {
     val p = LocalXssh.current
@@ -662,6 +666,7 @@ private fun Sidebar(
                     },
                 )
             }
+            ToolbarIcon(XIcons.Font, "终端字体") { onFonts() }
             ToolbarIcon(XIcons.Plus, "新建主机  Ctrl+N") { onNew() }
         }
         if (total > 0) {

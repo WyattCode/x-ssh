@@ -5,6 +5,8 @@ import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.Typeface
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import java.io.File
 import java.io.RandomAccessFile
 
@@ -84,7 +86,12 @@ object XsshFonts {
 
     fun init(context: android.content.Context) {
         appContext = context.applicationContext
+        TerminalFontChoice.load(context)
     }
+
+    /** 打包字体的 android Typeface(查某个字有没有字形用)。 */
+    internal fun typeface(res: Int): android.graphics.Typeface? =
+        appContext?.let { runCatching { androidx.core.content.res.ResourcesCompat.getFont(it, res) }.getOrNull() }
 
     /** 在 TTC 里找族名以 " SC" 结尾的那个字体(Noto Sans CJK SC)。读 'name' 表,不整个加载字体。 */
     private fun simplifiedIndex(file: File): Int? = RandomAccessFile(file, "r").use { f ->
@@ -131,5 +138,68 @@ object XsshFonts {
             }
         }
         null
+    }
+}
+
+/**
+ * 终端字体(只换英文;中文一律是系统思源黑体,画线字符一律是 Iosevka)。
+ *
+ * 能进这张表的只有一种字体:**英文每个字正好 0.5em 宽**。这样中文(1em)正好两格,不留缝、不挤扁 ——
+ * JetBrains Mono、Fira Code、Cascadia 这些原版是 0.6em,中文塞进两格左右各空一截,所以用 Iosevka 仿它们字形的
+ * 变体(SS14 / SS05 …)代替,宽度严格半格。
+ *
+ * 格子的大小和基线**不随字体变**,一律按 Iosevka 量(见 TerminalCanvas):换字体只换字形,行高、列宽、中文位置
+ * 都不动;制表符、方块、箭头、盲文这些要和格子严丝合缝的字也一律用 Iosevka 画 —— 否则换个行高不同的字体,
+ * 表格竖线就一段一段断开。
+ *
+ * [full]:字表和 Iosevka 一样全(Iosevka 的变体),所有窄字都用它;否则只有它真有字形、且截字时确认是半格宽的
+ * 那些字(拉丁、希腊、西里尔、标点)用它,其余交给 Iosevka。
+ */
+enum class TerminalFont(val id: String, val label: String, val regular: Int, val bold: Int, val full: Boolean) {
+    Iosevka("iosevka", "Iosevka", R.font.xssh_mono_regular, R.font.xssh_mono_bold, true),
+    JetBrains("jetbrains", "JetBrains Mono 风格", R.font.xssh_term_jetbrains_regular, R.font.xssh_term_jetbrains_bold, true),
+    Fira("fira", "Fira Mono 风格", R.font.xssh_term_fira_regular, R.font.xssh_term_fira_bold, true),
+    Menlo("menlo", "Menlo 风格", R.font.xssh_term_menlo_regular, R.font.xssh_term_menlo_bold, true),
+    Plex("plex", "IBM Plex Mono 风格", R.font.xssh_term_plex_regular, R.font.xssh_term_plex_bold, true),
+    Ubuntu("ubuntu", "Ubuntu Mono", R.font.xssh_term_ubuntu_regular, R.font.xssh_term_ubuntu_bold, false),
+    Inconsolata("inconsolata", "Inconsolata", R.font.xssh_term_inconsolata_regular, R.font.xssh_term_inconsolata_bold, false),
+    Noto("noto", "思源等宽", R.font.xssh_term_noto_regular, R.font.xssh_term_noto_bold, false),
+    ;
+
+    val family: FontFamily by lazy {
+        if (this == Iosevka) XsshFonts.mono else FontFamily(Font(regular, FontWeight.Normal), Font(bold, FontWeight.Bold))
+    }
+
+    private val glyphs = HashMap<Int, Boolean>()
+    private val paint by lazy { XsshFonts.typeface(regular)?.let { android.graphics.Paint().apply { typeface = it } } }
+
+    /** 这个字(按第一个码位)用不用这套字体画。只在画面线程上调。 */
+    fun draws(text: String): Boolean {
+        if (full) return true
+        val cp = text.codePointAt(0)
+        if (cp in 0x20..0x7E) return true
+        return glyphs.getOrPut(cp) { paint?.hasGlyph(String(Character.toChars(cp))) == true }
+    }
+
+    companion object {
+        fun of(id: String?): TerminalFont = entries.firstOrNull { it.id == id } ?: Iosevka
+    }
+}
+
+/** 当前的终端字体:所有终端画面读这里,选字体页写这里(同时记进偏好)。 */
+object TerminalFontChoice {
+    var current by androidx.compose.runtime.mutableStateOf(TerminalFont.Iosevka)
+        private set
+    private var prefs: UiPrefs? = null
+
+    fun load(context: android.content.Context) {
+        val p = UiPrefs(context)
+        prefs = p
+        current = TerminalFont.of(p.terminalFont)
+    }
+
+    fun choose(font: TerminalFont) {
+        current = font
+        prefs?.terminalFont = font.id
     }
 }

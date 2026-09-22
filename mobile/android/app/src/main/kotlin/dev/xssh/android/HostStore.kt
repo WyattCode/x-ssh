@@ -113,6 +113,13 @@ class HostStore(context: Context) {
 class UiPrefs(context: Context) {
     private val prefs = context.getSharedPreferences("xssh_ui", Context.MODE_PRIVATE)
 
+    /** 终端字体([TerminalFont.id])。 */
+    var terminalFont: String?
+        get() = prefs.getString(KEY_TERM_FONT, null)
+        set(value) {
+            prefs.edit().putString(KEY_TERM_FONT, value).apply()
+        }
+
     /** 终端字号。手指缩放调过之后要记住,否则每开一个会话都得重新捏一次。 */
     var terminalFontSize: Float
         get() = prefs.getFloat(KEY_FONT, 14f).coerceIn(FONT_MIN, FONT_MAX)
@@ -177,5 +184,6 @@ class UiPrefs(context: Context) {
         const val FONT_MIN = 9f
         const val FONT_MAX = 30f
         private const val KEY_FONT = "terminalFontSize"
+        private const val KEY_TERM_FONT = "terminalFont"
     }
 }

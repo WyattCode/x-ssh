@@ -121,6 +121,8 @@ fun HomeScreen(
     onConnect: (Host) -> Unit,
     /** 单栏卡片上的 ⓘ:推进这台主机的详情页。 */
     onInfo: (Host) -> Unit,
+    /** 选终端字体。 */
+    onFonts: () -> Unit,
     onNew: () -> Unit,
     onEdit: (Host) -> Unit,
     onDelete: (Host) -> Unit,
@@ -167,7 +169,8 @@ fun HomeScreen(
     // 折叠屏:按钮在右侧轨道;直板机:顶栏 + 右下角 ＋(见 Chrome)。
     val topBar = LocalChrome.current == Chrome.TopBar
     val barPad = if (topBar) TopBarHeight else 0.dp
-    val clearance = if (topBar) FabClearance else RailClearance
+    // 这一页的轨道比别的页多一颗(外观、字体、搜索三颗一个胶囊,再加 ＋)。
+    val clearance = if (topBar) FabClearance else RailClearance + 56.dp
 
     // 实体键盘(平板键盘套):Ctrl+N 新建、Ctrl+F 搜索、↑↓ 换主机、回车连接、Esc 收起搜索。
     // 键盘事件只发给有焦点的节点,所以这一页自己拿一个焦点(不是输入框,不会弹软键盘)。
@@ -344,8 +347,8 @@ fun HomeScreen(
         }
 
         val theme = LocalThemeControl.current
-        // 外观和搜索是"调整这一页怎么看"的两个操作,装进同一枚胶囊。
-        // 外观点一下切到下一个模式(跟随系统 → 浅色 → 深色 → …),不弹窗。
+        // 外观、字体、搜索都是"怎么看"的操作,装进同一枚胶囊。
+        // 外观点一下切到下一个模式(跟随系统 → 浅色 → 深色 → …),不弹窗;字体要挑,推一页出来。
         val viewActions: @Composable () -> Unit = {
             GlassGroup {
                 GlassItem(
@@ -364,6 +367,7 @@ fun HomeScreen(
                         },
                     )
                 }
+                GlassItem(XIcons.Font, "终端字体") { onFonts() }
                 // 一台主机都没有时不摆搜索 —— 没东西可搜。
                 if (hosts.isNotEmpty()) {
                     GlassItem(XIcons.Search, "搜索主机") {

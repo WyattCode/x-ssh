@@ -1240,20 +1240,9 @@ private fun TerminalCanvas(
     val p = LocalXssh.current
     // 缓存要够大:一屏中文每个字都要单独量一次宽度,默认 8 条会反复失效。
     val measurer = rememberTextMeasurer(cacheSize = 512)
-    // 英文 Iosevka、中文思源黑体(见 XsshFonts):同一套设计,中文正好两格宽。
-    val style = remember(fontSize, p.termFg) {
-        TextStyle(color = p.termFg, fontFamily = XsshFonts.mono, fontSize = fontSize.sp)
-    }
-    val wideStyle = remember(style) { XsshFonts.cjk?.let { style.copy(fontFamily = it) } ?: style }
-    val cell = remember(style, measurer) {
-        // 格宽用 100 个 M 的总宽度来算:单个 M 的像素宽度是取整过的,
-        // 差零点几像素,一行 80 列累积下来就是十几像素的漂移。
-        val wide = measurer.measure("M".repeat(100), style).size
-        val one = measurer.measure("M", style).size
-        (wide.width / 100f).coerceAtLeast(1f) to one.height.toFloat().coerceAtLeast(1f)
-    }
-    // 每一格的基线(英文字体的):中文、符号都对齐到这条线上,不按各自字体的行高往下掉。
-    val baseline = remember(style, measurer) { measurer.measure("M", style).firstBaseline }
+    // 英文按用户选的终端字体,中文思源黑体,画线字符 Iosevka;格子一律按 Iosevka 量(见 TerminalFont)。
+    val text = rememberTermText(TerminalFontChoice.current, fontSize, p.termFg, measurer)
+    val cell = text.cellWidth to text.cellHeight
 
     val scrollBy by rememberUpdatedState(onScroll)
     val secondary by rememberUpdatedState(onSecondaryClick)
@@ -1448,7 +1437,7 @@ private fun TerminalCanvas(
             rows.forEachIndexed { r, row ->
                 if (r >= gridRows) return@forEachIndexed
                 val y = r * ch
-                row.runs.forEach { run -> drawRun(run, y, cw, ch, style, wideStyle, baseline, measurer, p.termFg, p.termBg) }
+                row.runs.forEach { run -> drawRun(run, y, cw, ch, text, measurer, p.termFg, p.termBg) }
             }
             // 选区:半透明的强调色盖在字上,和系统文本选择一个样子。
             selection?.let { sel ->
@@ -1483,6 +1472,43 @@ private const val STYLE_UNDERLINE = 8
 private const val STYLE_INVERSE = 16
 private const val STYLE_STRIKE = 32
 
+/** 终端画字的一套字体和格子尺寸。终端画面和选字体页的示例共用,两处画出来一模一样。 */
+internal class TermText(
+    /** 英文(用户选的终端字体)。 */
+    val style: TextStyle,
+    /** 宽字符(中日韩,占两格):思源黑体。 */
+    val wide: TextStyle,
+    /** 制表符、方块、箭头等要和格子严丝合缝的字:Iosevka。 */
+    val symbol: TextStyle,
+    val cellWidth: Float,
+    val cellHeight: Float,
+    /** 格子的基线离格子顶部多远:所有字(不管哪套字体)都对齐到这条线上。 */
+    val baseline: Float,
+    val font: TerminalFont,
+)
+
+@Composable
+internal fun rememberTermText(font: TerminalFont, fontSize: Float, fg: Color, measurer: TextMeasurer): TermText =
+    remember(font, fontSize, fg, measurer) {
+        val symbol = TextStyle(color = fg, fontFamily = XsshFonts.mono, fontSize = fontSize.sp)
+        val style = if (font == TerminalFont.Iosevka) symbol else symbol.copy(fontFamily = font.family)
+        val wide = XsshFonts.cjk?.let { symbol.copy(fontFamily = it) } ?: symbol
+        // 格子一律按 Iosevka 量,换字体时行高、列宽、基线都不动(候选字体都是正好半格宽)。
+        // 格宽用 100 个 M 的总宽度来算:单个 M 的像素宽度是取整过的,
+        // 差零点几像素,一行 80 列累积下来就是十几像素的漂移。
+        val row = measurer.measure("M".repeat(100), symbol).size
+        val one = measurer.measure("M", symbol)
+        TermText(
+            style = style,
+            wide = wide,
+            symbol = symbol,
+            cellWidth = (row.width / 100f).coerceAtLeast(1f),
+            cellHeight = one.size.height.toFloat().coerceAtLeast(1f),
+            baseline = one.firstBaseline,
+            font = font,
+        )
+    }
+
 /**
  * 画一段样式相同的单元格。**每个字落在自己的列上**(`col × 格宽`):
  * - 可打印 ASCII 连成一串一起画(等宽字体里它们的步进正好是一格,省调用);
@@ -1492,16 +1518,12 @@ private const val STYLE_STRIKE = 32
  * 原来整行当一个字符串画:中文字形不正好是两格宽,后面的内容一路往右漂,
  * Codex 这类按列排版的界面整个错位,尾巴被裁掉。
  */
-private fun DrawScope.drawRun(
+internal fun DrawScope.drawRun(
     run: StyledRun,
     y: Float,
     cw: Float,
     ch: Float,
-    base: TextStyle,
-    /** 宽字符(中日韩,占两格)用的字:思源黑体。 */
-    wideBase: TextStyle,
-    /** 这一格的基线离格子顶部多远(英文字体的)。 */
-    baseline: Float,
+    text: TermText,
     measurer: TextMeasurer,
     defaultFg: Color,
     defaultBg: Color,
@@ -1527,18 +1549,24 @@ private fun DrawScope.drawRun(
         flags and STYLE_STRIKE != 0 -> TextDecoration.LineThrough
         else -> null
     }
-    val style = base.copy(
+    val baseline = text.baseline
+    val style = text.style.copy(
         color = fg,
         fontWeight = if (flags and STYLE_BOLD != 0) FontWeight.Bold else null,
         fontStyle = if (flags and STYLE_ITALIC != 0) FontStyle.Italic else null,
         textDecoration = decoration,
     )
-    val wideStyle = wideBase.copy(
+    val wideStyle = text.wide.copy(
         color = fg,
         fontWeight = style.fontWeight,
         fontStyle = style.fontStyle,
         textDecoration = decoration,
     )
+    val symbolStyle = if (text.font == TerminalFont.Iosevka) {
+        style
+    } else {
+        text.symbol.copy(color = fg, fontWeight = style.fontWeight, fontStyle = style.fontStyle, textDecoration = decoration)
+    }
 
     // 颜色和下划线必须在**画的时候**给,不能只写在 style 里:TextMeasurer 的缓存只按影响排版的属性
     // (字、字体、字号、粗细)比对,颜色不算。同一串字换了颜色再量,拿回来的是缓存里旧颜色的排版结果 ——
@@ -1548,21 +1576,30 @@ private fun DrawScope.drawRun(
     fun flush() {
         if (ascii.isEmpty()) return
         val layout = measurer.measure(ascii.toString(), style)
-        drawText(layout, color = fg, topLeft = Offset((col0 + asciiStart) * cw, y), textDecoration = decoration)
+        // 按格子的基线摆:换了字体,各家字体的行高不同,贴着格子顶画就会有的偏上、有的偏下。
+        val top = y + baseline - layout.firstBaseline
+        drawText(layout, color = fg, topLeft = Offset((col0 + asciiStart) * cw, top), textDecoration = decoration)
         ascii.setLength(0)
     }
-    cells.forEachIndexed { i, text ->
-        if (text.length == 1 && text[0].code in 0x20..0x7E) {
+    cells.forEachIndexed { i, glyph ->
+        if (glyph.length == 1 && glyph[0].code in 0x20..0x7E) {
             if (ascii.isEmpty()) asciiStart = i
-            ascii.append(text)
+            ascii.append(glyph)
             return@forEachIndexed
         }
         flush()
-        if (text.isEmpty()) return@forEachIndexed // 宽字符后面的占位格
+        if (glyph.isEmpty()) return@forEachIndexed // 宽字符后面的占位格
         val span = if (i + 1 < cells.size && cells[i + 1].isEmpty()) 2 else 1
         val slot = span * cw
-        // 占两格的(中日韩)用思源黑体;其它(制表符、箭头、希腊字母…)用和英文同一套的等宽字。
-        val layout = measurer.measure(text, if (span == 2) wideStyle else style)
+        // 占两格的(中日韩)用思源黑体;其它窄字:这套字体有(且是半格宽)就用它,否则 Iosevka(制表符、方块、箭头…)。
+        val layout = measurer.measure(
+            glyph,
+            when {
+                span == 2 -> wideStyle
+                text.font.draws(glyph) -> style
+                else -> symbolStyle
+            },
+        )
         val width = layout.size.width.toFloat()
         val x = (col0 + i) * cw
         // 对齐基线:思源黑体的行高比英文字体高,按各自的行顶摆放的话中文会整体往下掉一截。

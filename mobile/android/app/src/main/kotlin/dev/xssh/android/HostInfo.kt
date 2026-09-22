@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -192,7 +193,7 @@ fun HostIdentity(host: Host, running: Boolean, modifier: Modifier = Modifier) {
             Text(
                 host.label,
                 color = p.text,
-                fontSize = 26.sp,
+                fontSize = 28.sp,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -211,19 +212,14 @@ fun HostIdentity(host: Host, running: Boolean, modifier: Modifier = Modifier) {
 }
 
 /**
- * 单栏的主机详情页(外屏、内屏竖屏、直板机):卡片上的 ⓘ 推进来。
- * 折叠屏 ‹ 在右侧轨道(和编辑页、终端同一个落点),直板机 ‹ 在顶栏。
+ * 只看不改的整页(主机详情、终端字体)的外壳:内容铺满、可滚动、带回弹,
+ * ‹ 折叠屏在右侧轨道(和编辑页、终端同一个落点)、直板机在顶栏。
+ *
+ * 两页共用一个外壳,边距、‹ 的落点、底部留白就不会各写一套慢慢走偏。
  */
 @Composable
-fun HostInfoScreen(
-    host: Host,
-    onBack: () -> Unit,
-    onConnect: (Host) -> Unit,
-    onEdit: (Host) -> Unit,
-    onDelete: (Host) -> Unit,
-) {
+fun ReadingPage(onBack: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
     val p = LocalXssh.current
-    val running = host.id in SessionRegistry.sessions.collectAsState().value
     val topBar = LocalChrome.current == Chrome.TopBar
     val backdrop = rememberLayerBackdrop()
     Box(Modifier.fillMaxSize().background(p.bg)) {
@@ -237,13 +233,16 @@ fun HostInfoScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(
                     start = Gutter,
+                    // **只看不改的页面右边让开轨道**(和连接页同一个量 88dp):这些页的取值是右对齐的,
+                    // 铺到边缘的话「未确认」「22」这种正好被玻璃切掉一半,停着不动就看不全 ——
+                    // 实测外屏上的「状态 未确认」就是这样。列表和编辑页铺满不受影响:
+                    // 列表是整行卡片(压住一角不影响读),编辑页聚焦时会自己把那一行滚到轨道上方。
                     end = if (topBar) Gutter else RailSideClearance,
                     top = (if (topBar) TopBarHeight else 0.dp) + Gutter,
                     bottom = if (topBar) 40.dp else RailClearance,
                 ),
-        ) {
-            HostInfoBody(host, running, onConnect, onEdit, onDelete, textInset = BoxPad)
-        }
+            content = content,
+        )
         if (topBar) {
             TopBar(Modifier.align(Alignment.TopCenter), start = { GlassButton(XIcons.Back, "返回") { onBack() } })
         } else {
@@ -251,6 +250,23 @@ fun HostInfoScreen(
                 EdgeRail(Modifier.align(Alignment.BottomEnd)) { GlassButton(XIcons.Back, "返回") { onBack() } }
             }
         }
+    }
+}
+
+/**
+ * 单栏的主机详情页(外屏、内屏竖屏、直板机):卡片上的 ⓘ 推进来。
+ */
+@Composable
+fun HostInfoScreen(
+    host: Host,
+    onBack: () -> Unit,
+    onConnect: (Host) -> Unit,
+    onEdit: (Host) -> Unit,
+    onDelete: (Host) -> Unit,
+) {
+    val running = host.id in SessionRegistry.sessions.collectAsState().value
+    ReadingPage(onBack) {
+        HostInfoBody(host, running, onConnect, onEdit, onDelete, textInset = BoxPad)
     }
 }
 

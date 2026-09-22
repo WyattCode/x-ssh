@@ -160,6 +160,9 @@ sealed interface Screen {
     /** 单栏的主机详情页(卡片上的 ⓘ)。只记 id:编辑保存后回来显示的是新内容。 */
     data class HostInfo(val hostId: String) : Screen
 
+    /** 选终端字体。 */
+    data object Fonts : Screen
+
     /** [back]:从哪一页进来的,返回回到那里(详情页进来的回详情页)。 */
     data class Editor(val host: Host?, val back: Screen = Home) : Screen
     data class Terminal(val host: Host, val back: Screen = Home) : Screen
@@ -174,6 +177,7 @@ sealed interface Screen {
 private fun Screen.parent(): Screen = when (this) {
     Screen.Home -> Screen.Home
     is Screen.HostInfo -> Screen.Home
+    Screen.Fonts -> Screen.Home
     is Screen.Editor -> back
     is Screen.Terminal -> back
     is Screen.Files -> terminal
@@ -182,7 +186,7 @@ private fun Screen.parent(): Screen = when (this) {
 /** 页面的层级:往深处走是"推入",往浅处走是"退出"(决定页面从哪边滑)。 */
 private fun Screen.depth(): Int = when (this) {
     Screen.Home -> 0
-    is Screen.HostInfo -> 1
+    is Screen.HostInfo, Screen.Fonts -> 1
     else -> parent().depth() + 1
 }
 
@@ -414,6 +418,7 @@ private fun PhoneFlow(
                 viewingDetail = true
                 onScreen(Screen.HostInfo(it.id))
             },
+            onFonts = { onScreen(Screen.Fonts) },
             onNew = { onScreen(Screen.Editor(null)) },
             onEdit = { onScreen(Screen.Editor(it)) },
             onDelete = { host ->
@@ -443,6 +448,8 @@ private fun PhoneFlow(
                 )
             }
         }
+
+        Screen.Fonts -> FontScreen(onBack = { onScreen(Screen.Home) })
 
         is Screen.Editor -> HostEditorScreen(
             initial = current.host,
@@ -509,6 +516,7 @@ private fun PhoneFlow(
             when (it) {
                 Screen.Home -> "home"
                 is Screen.HostInfo -> "info:" + it.hostId
+                Screen.Fonts -> "fonts"
                 is Screen.Editor -> "editor"
                 is Screen.Terminal -> "term:" + it.host.id
                 is Screen.Files -> "files:" + it.host.id

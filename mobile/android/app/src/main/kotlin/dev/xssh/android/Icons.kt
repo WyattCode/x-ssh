@@ -271,6 +271,21 @@ object XIcons {
         moveTo(8.8f, 12f); lineTo(11.2f, 14.4f); lineTo(15.4f, 9.8f)
     }
 
+    /** 终端字体:大写 A 加小写 a。 */
+    val Font = icon("font") {
+        moveTo(2.6f, 18.5f); lineTo(7.6f, 6f); lineTo(12.6f, 18.5f)
+        moveTo(4.6f, 13.8f); lineTo(10.6f, 13.8f)
+        moveTo(21.4f, 11.6f); lineTo(21.4f, 18.5f)
+        moveTo(21.4f, 13.6f)
+        curveTo(21.4f, 11.9f, 20.2f, 11f, 18.6f, 11f)
+        curveTo(17.5f, 11f, 16.6f, 11.4f, 16.1f, 12f)
+        moveTo(21.4f, 15.6f)
+        lineTo(18.4f, 15.6f)
+        curveTo(16.8f, 15.6f, 15.8f, 16.3f, 15.8f, 17.3f)
+        curveTo(15.8f, 18.3f, 16.7f, 18.9f, 18f, 18.9f)
+        curveTo(19.7f, 18.9f, 21.4f, 17.8f, 21.4f, 16.2f)
+    }
+
     /** 主机信息:圆圈里一个 i(iOS 列表行尾的 ⓘ)。 */
     val Info = icon("info") {
         moveTo(12f, 3.8f)
