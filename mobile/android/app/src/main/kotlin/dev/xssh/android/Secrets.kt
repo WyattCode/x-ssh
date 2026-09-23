@@ -152,11 +152,15 @@ object Secrets {
     }
 
     /**
-     * 关掉这道锁:凭据写回不要认证的密钥名下,再销毁加锁的那把。
+     * 关掉这道锁:这台主机的凭据写回不要认证的密钥名下。
      *
-     * 读加锁的密文同样要密钥已解锁 —— 关锁总是紧跟着用户刚做完的一次认证
-     * (解锁窗口还开着),所以这里不额外弹框;真读不出来时返回 null,
-     * 调用方原样保留,开关弹回打开状态。
+     * 读加锁的密文要密钥已解锁 —— 调用方在保存前刚验过一次(见 `buildHostForSave`);
+     * 真读不出来时返回 null,调用方原样保留,开关弹回打开状态。
+     *
+     * **这里不销毁那把加锁的密钥。** 它是**所有**主机共用的一把:在一台主机上关掉开关
+     * 就把它删掉,别的加锁主机的 `L:` 密文立刻变成永远解不开的乱码(重新开锁生成的是
+     * 另一把密钥,密钥材料对不上)—— 那是不可逆的丢密码。留着不用没有代价:
+     * 它只在有 `L:` 密文时才会被读到,下次开锁直接复用,照样要求认证。
      */
     fun disableLock(values: List<String>): List<String>? {
         return runCatching {
@@ -169,7 +173,7 @@ object Secrets {
                     writePlain(readLocked(locked))
                 }
             }
-        }.getOrNull()?.also { deleteKey() }
+        }.getOrNull()
     }
 
     /**
@@ -180,18 +184,6 @@ object Secrets {
         val cipher = Cipher.getInstance(TRANSFORM).apply { init(Cipher.ENCRYPT_MODE, plainKey()) }
         val body = cipher.doFinal(plain.toByteArray(Charsets.UTF_8))
         return b64(cipher.iv) + ":" + b64(body)
-    }
-
-    /**
-     * 销毁加锁的密钥。
-     *
-     * 删不掉只记一条日志:**数据已经安全地写回普通密钥名下了**,密钥多留一会儿不影响
-     * 正确性(下次开锁会复用它、要求重新认证),[disableLock] 不该因此报失败。
-     */
-    private fun deleteKey() {
-        runCatching {
-            KeyStore.getInstance("AndroidKeyStore").apply { load(null) }.deleteEntry(LOCKED_ALIAS)
-        }.onFailure { android.util.Log.w("xssh", "delete lock key failed: ${it.javaClass.simpleName}") }
     }
 
     /** 不要认证的那把:不存在就现建一个(第一次存密码时)。 */

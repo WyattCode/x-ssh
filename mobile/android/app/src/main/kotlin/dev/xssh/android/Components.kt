@@ -658,8 +658,8 @@ private fun DrawScope.pressGlow(press: Press, dark: Boolean) {
 }
 
 /**
- * 开关。轨道用和分段选择器同一套图形语言(灰底轨道 + 亮一档的滑块),
- * 打开时滑块换成强调色 —— 一眼能看出它是"开着的",而不是靠滑块位置去猜。
+ * 开关。关着时和分段选择器同一套图形语言(灰底轨道 + 亮一档的滑块);
+ * 打开时**轨道**换成强调色 —— 一眼能看出它是"开着的",而不是靠滑块位置去猜。
  */
 @Composable
 fun XsshSwitch(checked: Boolean, onChange: (Boolean) -> Unit) {
@@ -690,7 +690,15 @@ fun XsshSwitch(checked: Boolean, onChange: (Boolean) -> Unit) {
                 .offset(x = 2.dp + knob.dp)
                 .size(28.dp)
                 .clip(CircleShape)
-                .background(if (p.dark) Color(0xFF636366) else Color.White),
+                // 打开时轨道是强调色,滑块**一律白色** —— 深色下沿用分段选择器那块灰滑块的话,
+                // 就是蓝底上一坨灰,糊成一团看不出滑块在哪。关着时才跟分段选择器一致。
+                .background(
+                    when {
+                        checked -> Color.White
+                        p.dark -> Color(0xFF636366)
+                        else -> Color.White
+                    },
+                ),
         )
     }
 }

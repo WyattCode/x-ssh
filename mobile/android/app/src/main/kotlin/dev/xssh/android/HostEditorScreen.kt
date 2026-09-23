@@ -374,7 +374,10 @@ class HostDraft(private val initial: Host?) {
             password != passwordAtOpen ||
             auth != (initial?.auth ?: AuthKind.PASSWORD) ||
             keyData != keyDataAtOpen ||
-            keyPassphrase != passphraseAtOpen
+            keyPassphrase != passphraseAtOpen ||
+            // 只拨了这个开关也是改过:漏掉它的话,平板浮层点外面就把这次改动静默丢了,
+            // 连「放弃未保存的修改?」都不问。
+            lockSecrets != originalLocked
 
     /**
      * 打开这一页时三条凭据的值。加锁主机解锁后 draft 里会有明文,
@@ -544,7 +547,11 @@ suspend fun buildHostForSave(activity: android.app.Activity, draft: HostDraft): 
     // 只有"要动那把密钥"时才验:开锁而手里没有任何明文要封的话,建密钥本身不需要认证。
     val hasPlain = host.password.isNotEmpty() || host.keyData.isNotEmpty() ||
         host.keyPassphrase.isNotEmpty()
-    val needsKey = if (wantsLock) hasPlain else true
+    // 关锁要读旧密文,所以看手里有没有密文要读 —— 一条都没有(开了锁但从没存过密码)
+    // 就别白弹一次框。
+    val hasSealed = listOf(host.lockedPassword, host.lockedKeyData, host.lockedKeyPassphrase)
+        .any { it != null && Secrets.isLocked(it) }
+    val needsKey = if (wantsLock) hasPlain else hasSealed
     if (needsKey && !unlockForWrite(activity)) {
         fail(if (wantsLock) "没能打开这道锁,请重试。" else "没能关掉这道锁,请重试。")
         return null

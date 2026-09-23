@@ -77,6 +77,13 @@ fun HostInfoGroups(host: Host) {
         val attention = (host.auth == AuthKind.KEY && !hasKey) ||
             (host.auth == AuthKind.PASSWORD && !hasPassword)
         InfoRow("登录方式", login, valueColor = if (attention) p.warn else null)
+        // 加了锁就在这里说一声:这一页是"把这台主机的情况全摊开"的地方,
+        // 而"连接前要验一次"这件事原来只有编辑页的开关知道 —— 用户在这页看不出来,
+        // 点了连接突然弹解锁框会一愣。
+        if (host.lockSecrets) {
+            FormDivider()
+            InfoRow("解锁", "生物识别或锁屏密码")
+        }
         if (host.auth == AuthKind.KEY && host.keyPublicFingerprint.isNotEmpty()) {
             FormDivider()
             InfoRow("私钥指纹", host.keyPublicFingerprint.removePrefix("SHA256:"), mono = true)
