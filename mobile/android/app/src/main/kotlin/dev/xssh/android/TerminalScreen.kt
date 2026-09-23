@@ -194,14 +194,21 @@ fun TerminalScreen(
         if (live != null) return@LaunchedEffect
         error = null
         pendingKey = null
+        // 开了「用生物识别解锁」的主机,列表里读到的密码是空的(没解锁就读不出来)。
+        // 先解锁再判断"有没有存" —— 顺序反了会把"还没解锁"报成"没有保存密码"。
+        val ready = unlockCredentials(context, host)
+        if (ready == null) {
+            error = "没能解锁已保存的凭据。"
+            return@LaunchedEffect
+        }
         // 密码认证却没有存密码(旧版本只放内存、或者新建时没填):拿空密码去连,
         // 服务端只会回一句笼统的认证失败,用户看不出是"没填"还是"填错"。
         // 也不要先弹权限框再失败 —— 在这里就说清楚。
-        if (host.auth == AuthKind.PASSWORD && host.password.isEmpty()) {
+        if (ready.auth == AuthKind.PASSWORD && ready.password.isEmpty()) {
             error = "这台主机还没有保存密码。"
             return@LaunchedEffect
         }
-        if (host.keyMissing) {
+        if (ready.keyMissing) {
             error = "这台主机还没有导入私钥。"
             return@LaunchedEffect
         }
@@ -228,7 +235,7 @@ fun TerminalScreen(
         // 系统一冻结连接就悄悄没了,而主机页还写着「运行中」。
         val result = withContext(Dispatchers.IO) {
             runCatching {
-                SessionRegistry.open(host, 80, 24).also { SessionService.ensureRunning(context) }
+                SessionRegistry.open(ready, 80, 24).also { SessionService.ensureRunning(context) }
             }
         }
         result
@@ -290,8 +297,14 @@ fun TerminalScreen(
         }
 
         failure != null -> frame {
-            val noPassword = host.auth == AuthKind.PASSWORD && host.password.isEmpty()
-            val keyProblem = host.keyMissing || failure.startsWith("这把私钥有口令") || failure.startsWith("私钥口令不对")
+            // 判"到底存没存密码"要看磁盘上那条密文,不能看 host.password ——
+            // 加了锁而这次没解开时它也是空的,那会把"没能解锁"错报成"没有保存密码",
+            // 还会把「重试」按钮藏掉,用户就没有再解锁一次的机会了。
+            // (私钥那边同理,已经收进 Host.keyMissing。)
+            val storedPassword = host.password.isNotEmpty() || host.lockedPassword != null
+            val noPassword = host.auth == AuthKind.PASSWORD && !storedPassword
+            val keyProblem = failure.startsWith("这把私钥有口令") ||
+                failure.startsWith("私钥口令不对")
             ConnectGate(
                 host = host,
                 failure = failure,
@@ -300,7 +313,6 @@ fun TerminalScreen(
                 // 没存密码 / 没导入私钥时,重试只会得到同一句话,不给这个按钮。
                 retry = if (noPassword || host.keyMissing) null else ({ attempt++ }),
                 onExit = onExit,
-                // 平板:能就地修的直接给按钮,打开编辑浮层 —— 不用先退回去再找编辑入口。
                 // 能就地修的直接给按钮,打开编辑页(平板是浮层)—— 不用先退回去再找编辑入口。
                 fix = (tablet?.onEdit ?: onEditHost)?.let { edit ->
                     when {

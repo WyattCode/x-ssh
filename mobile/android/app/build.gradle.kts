@@ -49,5 +49,10 @@ dependencies {
     // Liquid Glass:模糊 + 边缘折射(lens,AGSL 着色器)+ 高光 + 阴影,照 iOS 26 的材质定义做。
     // 折射要 Android 13+,模糊要 12+;更早的系统只剩半透明底色,不崩。
     implementation("io.github.kyant0:backdrop:2.0.1")
+    // 生物识别解锁主机密码。这里只用它的 `BiometricManager.canAuthenticate` 做
+    // "这台设备有没有可用的门禁"的判断(它一把算出生物识别和锁屏密码两种)。
+    // 真正弹解锁框走平台的 `android.hardware.biometrics.BiometricPrompt` ——
+    // 它才认 `setAllowedAuthenticators`(同时允许两种认证方式)。
+    implementation("androidx.biometric:biometric:1.1.0")
     implementation("net.java.dev.jna:jna:5.19.1@aar")
 }

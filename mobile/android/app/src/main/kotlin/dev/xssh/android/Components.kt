@@ -76,6 +76,7 @@ import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -103,6 +104,8 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription as contentDescriptionProperty
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.toggleableState
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -652,6 +655,44 @@ private fun DrawScope.pressGlow(press: Press, dark: Boolean) {
         radius = r,
         center = press.at,
     )
+}
+
+/**
+ * 开关。轨道用和分段选择器同一套图形语言(灰底轨道 + 亮一档的滑块),
+ * 打开时滑块换成强调色 —— 一眼能看出它是"开着的",而不是靠滑块位置去猜。
+ */
+@Composable
+fun XsshSwitch(checked: Boolean, onChange: (Boolean) -> Unit) {
+    val p = LocalXssh.current
+    val haptic = LocalHapticFeedback.current
+    // 轨道 52×32、滑块 28,两边留 2 —— 和 Material 的比例一致。
+    val knob by animateFloatAsState(if (checked) 20f else 0f, label = "switchKnob")
+    Box(
+        Modifier
+            .size(52.dp, 32.dp)
+            .clip(CircleShape)
+            .background(if (checked) p.accent else p.bgElev2)
+            // 自绘控件要自己给语义:读屏软件靠它念出"开 / 关"和"开关"这个角色,
+            // uiautomator 也靠它报状态(否则自动化里看不到这个开关到底开没开)。
+            .semantics {
+                role = Role.Switch
+                this.toggleableState = if (checked) ToggleableState.On else ToggleableState.Off
+                onClick { onChange(!checked); true }
+            }
+            .clickable(role = Role.Switch) {
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                onChange(!checked)
+            },
+    ) {
+        Box(
+            Modifier
+                .align(Alignment.CenterStart)
+                .offset(x = 2.dp + knob.dp)
+                .size(28.dp)
+                .clip(CircleShape)
+                .background(if (p.dark) Color(0xFF636366) else Color.White),
+        )
+    }
 }
 
 /**

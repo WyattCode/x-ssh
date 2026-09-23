@@ -94,10 +94,35 @@ fun HostEditorScreen(
     var keyMessage by remember { mutableStateOf<String?>(null) }
     val importKey = rememberKeyImporter(draft) { keyMessage = it }
 
+    // 加了锁的主机在列表里读到的凭据是空的(没解锁读不出来)。进这一页就先解锁补上,
+    // 否则密码格亮着空白 —— 用户以为没存过,顺手填一个就把它覆盖了。
+    val context = LocalContext.current
+    LaunchedEffect(initial?.id) {
+        val source = initial ?: return@LaunchedEffect
+        if (source.lockedPassword == null && source.lockedKeyData == null &&
+            source.lockedKeyPassphrase == null
+        ) {
+            return@LaunchedEffect
+        }
+        val unlocked = unlockCredentials(context, source) ?: run {
+            // 没解开(用户取消了、或者验证失败)。密码格这时是空的,而用户可能
+            // 顺手填一个就保存 —— 那会把一条他还没看见的密码覆盖掉。先说清楚。
+            draft.error = "没能解锁已保存的凭据,现在看不到原来的密码。"
+            return@LaunchedEffect
+        }
+        draft.fillUnlocked(unlocked)
+    }
+
     fun save() {
-        // 用私钥登录时要验一次口令(解私钥要几百毫秒),放到 IO 线程,别卡住界面。
+        // 用私钥登录时要验一次口令(解私钥要几百毫秒)、加锁开关要用密钥库并可能弹一次
+        // 解锁,都放到 IO 之外由 buildHostForSave 自己安排;这里只管收结果。
+        val activity = hostActivity(context)
+        if (activity == null) {
+            draft.error = "保存失败:找不到当前页面。"
+            return
+        }
         scope.launch {
-            val host = withContext(Dispatchers.IO) { draft.build() }
+            val host = buildHostForSave(activity, draft)
             host?.let(onSave)
         }
     }
@@ -324,6 +349,11 @@ class HostDraft(private val initial: Host?) {
     var keyLocked by mutableStateOf((initial?.keyPassphrase ?: "").isNotEmpty())
     var error by mutableStateOf<String?>(null)
 
+    var lockSecrets by mutableStateOf(initial?.lockSecrets ?: false)
+
+    /** 进来时这台主机是不是已经加了锁 —— 和 [lockSecrets] 一比就知道要不要重新加密。 */
+    val originalLocked: Boolean = initial?.lockSecrets ?: false
+
     /** 老数据 / 调试用的私钥文件路径(界面上不出现,保存时原样留下)。 */
     private val keyPath = initial?.keyPath.orEmpty()
 
@@ -338,10 +368,35 @@ class HostDraft(private val initial: Host?) {
             address != (initial?.address ?: "") ||
             port != (initial?.port ?: 22).toString() ||
             username != (initial?.username ?: "") ||
-            password != (initial?.password ?: "") ||
+            // 凭据比的是**解锁前**那份快照,不是 initial 上的明文。
+            // 加锁主机一进编辑页就会把明文灌进 draft,拿 initial(明文为空)去比,
+            // 什么都没做也会判成"改过" —— 关浮层时白弹一次"放弃未保存的修改?"。
+            password != passwordAtOpen ||
             auth != (initial?.auth ?: AuthKind.PASSWORD) ||
-            keyData != (initial?.keyData ?: "") ||
-            keyPassphrase != (initial?.keyPassphrase ?: "")
+            keyData != keyDataAtOpen ||
+            keyPassphrase != passphraseAtOpen
+
+    /**
+     * 打开这一页时三条凭据的值。加锁主机解锁后 draft 里会有明文,
+     * 把它记在这里,`dirty` 与"用户到底动过没有"才一致。
+     */
+    var passwordAtOpen = initial?.password ?: ""
+        private set
+    var keyDataAtOpen = initial?.keyData ?: ""
+        private set
+    var passphraseAtOpen = initial?.keyPassphrase ?: ""
+        private set
+
+    /** 解锁之后填明文:同时把"原始值"对齐过去,这样刚解锁不算改过。 */
+    fun fillUnlocked(unlocked: Host) {
+        password = unlocked.password
+        keyData = unlocked.keyData
+        keyPassphrase = unlocked.keyPassphrase
+        passwordAtOpen = unlocked.password
+        keyDataAtOpen = unlocked.keyData
+        passphraseAtOpen = unlocked.keyPassphrase
+        keyLocked = unlocked.keyPassphrase.isNotEmpty()
+    }
 
     /**
      * 导入一把私钥。返回要给用户看的一句话:null = 成功;带口令时返回提示并露出口令格
@@ -442,12 +497,93 @@ class HostDraft(private val initial: Host?) {
             keyPassphrase = if (key && keyLocked) keyPassphrase else "",
             keyName = if (key) keyName else "",
             keyPublicFingerprint = if (key) keyPublicFingerprint else "",
+            lockSecrets = lockSecrets,
+            // 没解锁就保存时,明文是空的 —— 把磁盘上那几条原样带过去,别覆盖成空。
+            // (用户只是改个名字,不该顺手把密码弄丢。)
+            lockedPassword = initial?.lockedPassword,
+            lockedKeyData = initial?.lockedKeyData,
+            lockedKeyPassphrase = initial?.lockedKeyPassphrase,
         )
     }
 }
 
 /** 私钥文件不会超过这个大小(4096 位 RSA 带口令也才 3KB 多);更大的多半选错了文件。 */
 private const val MaxKeyBytes = 64 * 1024
+
+/**
+ * 校验草稿,再按「用生物识别解锁」开关的状态把凭据加密,交给调用方保存。在 IO 线程调用。
+ *
+ * 开关一变就得**重新加密一遍**才生效,而这一步要用密钥库,所以不能塞进纯校验的
+ * [HostDraft.build]。任何一步失败都返回 null(草稿的 `error` 会写明原因),
+ * 不会写出一条"一半加锁一半没锁"的记录 —— 那种记录下次连接时谁都读不出来。
+ *
+ * 打开开关时**要弹一次解锁**:要求认证的密钥拿来做加密同样需要先验过,
+ * 否则 `init` 直接抛 `UserNotAuthenticatedException`。用户取消就当作失败。
+ */
+suspend fun buildHostForSave(activity: android.app.Activity, draft: HostDraft): Host? {
+    // 加锁开关没能生效时,把它拨回原状:开关留在"开"而磁盘上是"没锁",
+    // 用户以为锁上了 —— 界面必须说同一件事。
+    fun fail(message: String) {
+        draft.error = message
+        draft.lockSecrets = draft.originalLocked
+    }
+
+    val host = withContext(Dispatchers.IO) { draft.build() } ?: return null
+    val wantsLock = draft.lockSecrets
+    val wasLocked = draft.originalLocked
+    // 跟这道锁完全无关的一次保存(本来没锁、也没要开):什么都不用做。
+    if (!wantsLock && !wasLocked) return host
+
+    // **保存前一定要现验一次。**
+    //
+    // 那把要求认证的密钥只有几秒有效期(见 Secrets.AUTH_WINDOW_SECONDS),进编辑页时
+    // 解的那一次早过期了 —— 不补验的话:
+    //   - 关锁:`disableLock` 读不出旧密文,必然返回 null,永远是"没能关掉这道锁"。
+    //   - 改加锁主机的密码:`HostStore.writeSecret` 里 `writeLocked` 抛异常被吞掉,
+    //     退回写旧密文 —— 界面说保存成功,密码其实没变。
+    // 只有"要动那把密钥"时才验:开锁而手里没有任何明文要封的话,建密钥本身不需要认证。
+    val hasPlain = host.password.isNotEmpty() || host.keyData.isNotEmpty() ||
+        host.keyPassphrase.isNotEmpty()
+    val needsKey = if (wantsLock) hasPlain else true
+    if (needsKey && !unlockForWrite(activity)) {
+        fail(if (wantsLock) "没能打开这道锁,请重试。" else "没能关掉这道锁,请重试。")
+        return null
+    }
+    // 开关状态没变(一直锁着,只是改了点别的):密文由 HostStore.save 按 `lockSecrets`
+    // 重新封 —— 窗口刚验开,这一步这次会真的写进去。
+    if (wantsLock == wasLocked) return host
+
+    // 两条路都产出"三条密文",只是用的密钥不同;一律装回 Host 的 `locked*` 字段,
+    // 明文字段不落盘(见 HostStore.save)。
+    val sealed = if (wantsLock) {
+        withContext(Dispatchers.IO) {
+            Secrets.enableLock(listOf(host.password, host.keyData, host.keyPassphrase))
+        }
+    } else {
+        withContext(Dispatchers.IO) {
+            Secrets.disableLock(
+                listOf(host.lockedPassword, host.lockedKeyData, host.lockedKeyPassphrase)
+                    .map { it.orEmpty() },
+            )
+        }
+    }
+    if (sealed == null) {
+        fail(if (wantsLock) "没能打开这道锁,请重试。" else "没能关掉这道锁,请重试。")
+        return null
+    }
+
+    return host.copy(
+        lockSecrets = wantsLock,
+        password = "",
+        keyData = "",
+        keyPassphrase = "",
+        // 这次没封出内容的条目,沿用原来那条密文 —— 不能一律写 null:
+        // 那是"这条凭据没了"的意思,而这里可能只是这次用不到它。
+        lockedPassword = sealed[0].ifEmpty { host.lockedPassword },
+        lockedKeyData = sealed[1].ifEmpty { host.lockedKeyData },
+        lockedKeyPassphrase = sealed[2].ifEmpty { host.lockedKeyPassphrase },
+    )
+}
 
 /** 从系统文件选择器 / 拖放进来的文件里读私钥交给 [draft]。在 IO 线程调用。 */
 fun importKeyFrom(context: android.content.Context, uri: android.net.Uri, draft: HostDraft): String? {
@@ -510,6 +646,9 @@ fun CredentialFields(
     val p = LocalXssh.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    // 这台设备有没有可用的门禁。没有(平板没设锁屏密码之类)就不显示这一项 ——
+    // 显示了也打不开,只是个点了没反应的开关。
+    val lockAvailable = remember { Secrets.lockAvailable(context) }
     FormGroup {
         Row(
             Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(horizontal = BoxPad),
@@ -538,9 +677,7 @@ fun CredentialFields(
                 onComposing = onComposing,
             )
         }
-        return
-    }
-    FormGroup(footnote = keyMessage) {
+    } else FormGroup(footnote = keyMessage) {
         Row(
             Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(horizontal = BoxPad),
             verticalAlignment = Alignment.CenterVertically,
@@ -622,6 +759,24 @@ fun CredentialFields(
                         onMessage("公钥已复制")
                     }
                 }
+            }
+        }
+    }
+    // 这道锁管的是"已保存的密码 / 私钥 / 口令",和上面选密码还是私钥无关,所以单独一组。
+    if (lockAvailable) {
+        FormGroup(
+            footnote = if (draft.lockSecrets) {
+                "连接这台主机前要先验证一次(生物识别或锁屏密码)。"
+            } else {
+                null
+            },
+        ) {
+            Row(
+                Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(horizontal = BoxPad),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("用生物识别解锁", color = p.text, fontSize = 16.sp, modifier = Modifier.weight(1f))
+                XsshSwitch(draft.lockSecrets) { draft.lockSecrets = it }
             }
         }
     }

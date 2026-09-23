@@ -64,13 +64,18 @@ fun HostInfoGroups(host: Host) {
         FormDivider()
         InfoRow("用户名", host.username.ifBlank { "未设置" }, mono = host.username.isNotBlank())
         FormDivider()
+        // 判"到底存没存"要看磁盘上那条密文:加了锁而这次没解锁时,明文本来就是空的,
+        // 只看 `host.password` 会把"已保存但锁着"误报成"未保存"(用户以为密码丢了)。
+        val hasPassword = host.password.isNotEmpty() || host.lockedPassword != null
+        val hasKey = host.keyData.isNotEmpty() || host.keyPath.isNotEmpty() || host.lockedKeyData != null
         val login = when {
-            host.keyMissing -> "私钥 · 未导入"
+            host.auth == AuthKind.KEY && !hasKey -> "私钥 · 未导入"
             host.auth == AuthKind.KEY -> "私钥" + host.keyName.takeIf { it.isNotEmpty() }?.let { " · $it" }.orEmpty()
-            host.password.isEmpty() -> "密码 · 未保存"
+            !hasPassword -> "密码 · 未保存"
             else -> "密码"
         }
-        val attention = host.keyMissing || (host.auth == AuthKind.PASSWORD && host.password.isEmpty())
+        val attention = (host.auth == AuthKind.KEY && !hasKey) ||
+            (host.auth == AuthKind.PASSWORD && !hasPassword)
         InfoRow("登录方式", login, valueColor = if (attention) p.warn else null)
         if (host.auth == AuthKind.KEY && host.keyPublicFingerprint.isNotEmpty()) {
             FormDivider()

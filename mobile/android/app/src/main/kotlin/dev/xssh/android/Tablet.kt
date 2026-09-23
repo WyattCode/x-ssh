@@ -1257,7 +1257,10 @@ private fun HostSheet(
     val first = remember { FocusRequester() }
     val passwordFocus = remember { FocusRequester() }
     // 缺密码的主机(多半是从"这台主机还没有保存密码"点进来的):焦点直接落在密码那一格。
-    val wantsPassword = initial != null && initial.auth == AuthKind.PASSWORD && initial.password.isEmpty()
+    // 加锁的主机在这里长得一样(明文为空),但它其实**有**密码 —— 别把焦点抢过去,
+    // 否则用户一打开浮层就看见密码格被选中,像是要重填。
+    val wantsPassword = initial != null && initial.auth == AuthKind.PASSWORD &&
+        initial.password.isEmpty() && initial.lockedPassword == null
     // 输入法正在组词(拼音还没上屏)时,Esc 是取消拼音;否则 Esc 就是关浮层。
     // 两路判断:输入框报的 composition(标准输入法),以及 ImeBuffer 的推断(小米输入法不报)。
     var composing by remember { mutableStateOf(false) }
@@ -1313,9 +1316,13 @@ private fun HostSheet(
     }
 
     fun save() {
-        // 用私钥登录时要验一次口令(解私钥要几百毫秒),放到 IO 线程,别卡住界面。
+        val activity = hostActivity(context)
+        if (activity == null) {
+            draft.error = "保存失败:找不到当前页面。"
+            return
+        }
         scope.launch {
-            val host = withContext(Dispatchers.IO) { draft.build() }
+            val host = buildHostForSave(activity, draft)
             host?.let(onSave)
         }
     }

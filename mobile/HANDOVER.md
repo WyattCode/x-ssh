@@ -1267,6 +1267,33 @@ Esc、敲 n、回车「打开」→ 系统「打开方式」列出文字查看�
 之前那次是我自己按了 Esc 取消编辑,密码根本没存。`onSave` 里 `persist(list)` 当场写回 `hosts` 状态,
 详情页读的就是它,没有陈旧对象。
 
+### M3.47 「用生物识别解锁」:三个会丢密码 / 关不掉的 bug(第八次会话续)
+
+这套功能(Keystore 两把密钥 + BiometricPrompt,`Secrets.kt` / `SecretUnlock.kt` / `HostStore.kt` /
+`HostEditorScreen.kt`)原来一直在工作区里没提交。真机走一遍加锁 → 连接 → 关锁,挖出三个:
+
+1. **没加锁的主机全部连不上**(`SecretUnlock.unlockCredentials`)。它只读 `host.lockedPassword`,
+   而没加锁时那是 null —— 拿空密文"解锁"得到空串,再 `host.copy(password = "")`
+   把 `HostStore.load` 早就解好的明文抹掉。一律停在「这台主机还没有保存密码」。
+   改成 `locked == null` 时原样保留明文。
+2. **`HostStore.load` 漏读 `lockSecrets`**。每次加载都是 false:编辑页的开关显示成"关"
+   (磁盘上明明锁着),更要命的是保存时 `writeSecret` 按"没加锁"用普通密钥重新加密,
+   **用户没碰过开关,锁就被悄悄去掉了**。补上读取,并用密文的 `L:` 前缀兜底(老记录没这个字段)。
+3. **这道锁关不掉,加锁主机改密码也存不进去**(`buildHostForSave`)。那把要求认证的密钥窗口
+   原来只有 3 秒,进编辑页解的那次早过期:关锁要读旧密文 → `disableLock` 必然返回 null,
+   永远是「没能关掉这道锁」;一直锁着的主机改密码 → `writeLocked` 抛异常被 `getOrElse` **静默**
+   吞掉退回旧密文,界面说存好了、密码其实没变。改成**保存前凡是要动那把密钥就现验一次**,
+   窗口 3 秒 → 10 秒。
+
+**真机复核(18 Fold,`.review` 副本)**:开锁(密文变 `L:` 前缀、`lockSecrets: true`)→ 详情页显示
+「密码」而不是「未保存」→ 连接弹解锁、验完真的发起连接(报的是黑洞地址的 `ssh: Disconnected`,
+不是凭据错误)→ 编辑页开关正确显示「开」、密码解出来 → 关锁(密文变回普通、`lockSecrets: false`)
+→ 重启后直接连接不再弹框、密码没丢。整圈通过。
+
+**生物识别本身要用户的手**:自动化只能把流程推到弹框那一步,每次都得请用户验一下
+(框是系统安全窗口,截图全黑,只能靠 `dumpsys window | grep mCurrentFocus` 看到 `com.android.systemui`
+拿到焦点来判断它弹出来了)。
+
 ## 5. 关键坑(踩过,别再踩)
 
 1. **DSR 应答**:终端事件不回写 → 远端程序挂起(ConPTY 必现;vim 同理)。已修 + 单测。

@@ -34,9 +34,29 @@ data class Host(
     val keyName: String = "",
     /** 私钥对应公钥的指纹(SHA256:…),给用户对照服务器上的 authorized_keys。 */
     val keyPublicFingerprint: String = "",
+    /**
+     * 「用生物识别解锁」:密码 / 私钥 / 口令都要先解锁才能读。
+     * 和上面三个字段的关系是**二者必居其一** —— 开了锁之后明文就不再落盘。
+     */
+    val lockSecrets: Boolean = false,
+    /**
+     * 还没解锁时,磁盘上那几条**读不出来**的密文原样带着。
+     *
+     * 没有它们的话,「解锁之前保存一次主机」(改个端口、换个名字)就会把密码
+     * 加密成空串写回去 —— 用户下次连接发现密码没了,而他从没动过密码。
+     */
+    val lockedPassword: String? = null,
+    val lockedKeyData: String? = null,
+    val lockedKeyPassphrase: String? = null,
 ) {
-    /** 用私钥登录,但手里既没有导入的私钥、也没有私钥文件。 */
-    val keyMissing: Boolean get() = auth == AuthKind.KEY && keyData.isEmpty() && keyPath.isEmpty()
+    /**
+     * 用私钥登录,但手里既没有导入的私钥、也没有私钥文件。
+     *
+     * 加了锁而这次没解锁时,`keyData` 本来就是空的 —— 所以还要看磁盘上那条密文在不在
+     * ([lockedKeyData]),否则会把"锁着的私钥"误判成"没导入"。
+     */
+    val keyMissing: Boolean
+        get() = auth == AuthKind.KEY && keyData.isEmpty() && keyPath.isEmpty() && lockedKeyData == null
 
     val label: String get() = name.ifBlank { address }
 
@@ -73,15 +93,34 @@ class HostStore(context: Context) {
                     auth = if (item.optString("auth") == "key") AuthKind.KEY else AuthKind.PASSWORD,
                     keyPath = item.optString("keyPath"),
                     keyFingerprint = item.optString("keyFingerprint"),
-                    password = Secrets.open(item.optString("password")),
-                    keyData = Secrets.open(item.optString("keyData")),
-                    keyPassphrase = Secrets.open(item.optString("keyPassphrase")),
+                    password = readSecret(item.optString("password")),
+                    keyData = readSecret(item.optString("keyData")),
+                    keyPassphrase = readSecret(item.optString("keyPassphrase")),
                     keyName = item.optString("keyName"),
                     keyPublicFingerprint = item.optString("keyPublicFingerprint"),
+                    // **这一条不能漏**:漏了每次加载都是 false —— 编辑页的开关显示成"关"
+                    // (磁盘上明明锁着),而且保存时 `writeSecret` 会按"没加锁"用普通密钥
+                    // 重新加密,用户没碰过开关,锁就被悄悄去掉了。
+                    // 兜底看密文本身:老记录没有这个字段,但 `L:` 前缀就说明它是锁着的。
+                    lockSecrets = item.optBoolean("lockSecrets", false) ||
+                        Secrets.isLocked(item.optString("password")) ||
+                        Secrets.isLocked(item.optString("keyData")) ||
+                        Secrets.isLocked(item.optString("keyPassphrase")),
+                    /** 加锁的密文读不出来(还没解锁),原样带着走,别在保存时把它覆盖成空。 */
+                    lockedPassword = item.optString("password").takeIf { Secrets.isLocked(it) },
+                    lockedKeyData = item.optString("keyData").takeIf { Secrets.isLocked(it) },
+                    lockedKeyPassphrase = item.optString("keyPassphrase").takeIf { Secrets.isLocked(it) },
                 )
             }
         }.getOrDefault(emptyList())
     }
+
+    /**
+     * 读一条凭据。加锁的密文在没解锁时读出来是空串([Secrets.open] 只认没加锁的那把密钥)——
+     * 界面按"未保存"显示,用户连接时再解锁重读。原密文由 Host 里那几个 `locked*` 字段带着,
+     * 保存时不会被冲掉,所以这里读不到也不会丢东西。
+     */
+    private fun readSecret(sealed: String): String = Secrets.open(sealed)
 
     fun save(hosts: List<Host>) {
         val array = JSONArray()
@@ -95,14 +134,39 @@ class HostStore(context: Context) {
             item.put("auth", if (host.auth == AuthKind.PASSWORD) "password" else "key")
             item.put("keyPath", host.keyPath)
             item.put("keyFingerprint", host.keyFingerprint)
-            item.put("password", Secrets.seal(host.password))
-            item.put("keyData", Secrets.seal(host.keyData))
-            item.put("keyPassphrase", Secrets.seal(host.keyPassphrase))
+            // 三条凭据按这台主机**当前**的加锁状态写:
+            // - 加锁的:明文要重新封进这道锁(普通 `seal` 用的是另一把不带认证要求的密钥,
+            //   拿它写就等于把锁悄悄去掉了,而 `lockSecrets` 还写着 true)。
+            // - 没加锁的:明文直接加密;明文为空而手里还攥着一条老密文时原样写回,
+            //   免得"没解锁就保存"把密码覆盖成空。
+            item.put("password", writeSecret(host.password, host.lockedPassword, host.lockSecrets))
+            item.put("keyData", writeSecret(host.keyData, host.lockedKeyData, host.lockSecrets))
+            item.put(
+                "keyPassphrase",
+                writeSecret(host.keyPassphrase, host.lockedKeyPassphrase, host.lockSecrets),
+            )
+            item.put("lockSecrets", host.lockSecrets)
             item.put("keyName", host.keyName)
             item.put("keyPublicFingerprint", host.keyPublicFingerprint)
             array.put(item)
         }
         prefs.edit().putString(KEY_LIST, array.toString()).apply()
+    }
+
+    /**
+     * 写一条凭据。
+     *
+     * [locked] 是这台主机要不要走"要求认证"的那把密钥。它必须由调用方按主机当前的
+     * 加锁状态给 —— 用普通密钥写加锁主机的明文,锁会无声地消失。
+     *
+     * 明文为空时原样沿用 [sealed](磁盘上那条):没解锁就保存(只改了个端口)时
+     * 明文本来就是空的,拿空值去写就把密码弄丢了。
+     */
+    private fun writeSecret(plain: String, sealed: String?, locked: Boolean): String = when {
+        plain.isEmpty() -> sealed ?: ""
+        // 加锁状态下要重新封:窗口还开着才行(用户刚在编辑页验过),封不上就留着原来的。
+        locked -> runCatching { Secrets.writeLocked(plain) }.getOrElse { sealed ?: "" }
+        else -> Secrets.seal(plain)
     }
 
     private companion object {
