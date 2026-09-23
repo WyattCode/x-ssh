@@ -1074,7 +1074,7 @@ private fun PhoneFiles(
                     label = "fileDetail",
                 ) { entry ->
                     // 折叠屏的轨道浮在右栏右下角:按钮组整列让开轨道,别让「下载到…」「删除」压在玻璃底下。
-                    FileDetailPane(entry, bottomClearance = clearance, endPad = railSide(), actions = actions)
+                    FileDetailPane(entry, bottomInset = barsDp + navDp, endPad = railSide(), actions = actions)
                 }
             }
         } else {
@@ -1155,7 +1155,8 @@ private fun permissionString(mode: UInt): String {
 @Composable
 private fun FileDetailPane(
     entry: RemoteEntry?,
-    bottomClearance: androidx.compose.ui.unit.Dp,
+    /** 按钮组底下要让开的系统栏高度(导航条 / 手势条)。 */
+    bottomInset: androidx.compose.ui.unit.Dp,
     endPad: androidx.compose.ui.unit.Dp,
     actions: PhoneFileActions,
 ) {
@@ -1170,39 +1171,48 @@ private fun FileDetailPane(
         }
         return
     }
-    Column(
-        Modifier
-            .fillMaxSize()
-            .bounce()
-            .verticalScroll(rememberScrollState())
-            .padding(start = Gutter * 2, end = endPad, top = Gutter, bottom = bottomClearance),
-    ) {
-        Text(
-            entry.name,
-            Modifier.offset(x = -TitleOptical),
-            color = p.text,
-            fontSize = 28.sp,
-            fontWeight = FontWeight.Bold,
-            // 文件名常常很长(打包名、日志名):给两行,再长才省略(中间省略只对单行生效)。
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Spacer(Modifier.height(4.dp))
-        Text(
-            if (entry.isDir) "文件夹" else formatSize(entry.size.toLong()),
-            color = p.textDim,
-            fontSize = 13.sp,
-        )
-        Spacer(Modifier.height(24.dp))
-        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            formatTime(entry.modified.toLong()).takeIf { it.isNotEmpty() }?.let { FileDetailRow("修改时间", it, mono = false) }
-            if (entry.permissions > 0u) {
-                FileDetailRow("权限", "${permissionString(entry.permissions)}  ${entry.permissions.toString(8)}", mono = true)
+    // 信息在上面(放不下就自己滚),按钮组贴着栏底 —— 和主机详情页同一条规矩:
+    // 要看的在上、要按的在下。这里按钮有六颗、占得高,所以是**各占各的地方**,
+    // 不像主机详情那样浮在正文上面(那会遮掉小半页)。
+    Column(Modifier.fillMaxSize()) {
+        Column(
+            Modifier
+                .weight(1f)
+                .bounce()
+                .verticalScroll(rememberScrollState())
+                .padding(start = Gutter * 2, end = endPad, top = Gutter),
+        ) {
+            Text(
+                entry.name,
+                Modifier.offset(x = -TitleOptical),
+                color = p.text,
+                fontSize = 28.sp,
+                fontWeight = FontWeight.Bold,
+                // 文件名常常很长(打包名、日志名):给两行,再长才省略(中间省略只对单行生效)。
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                if (entry.isDir) "文件夹" else formatSize(entry.size.toLong()),
+                color = p.textDim,
+                fontSize = 13.sp,
+            )
+            Spacer(Modifier.height(24.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                formatTime(entry.modified.toLong()).takeIf { it.isNotEmpty() }?.let { FileDetailRow("修改时间", it, mono = false) }
+                if (entry.permissions > 0u) {
+                    FileDetailRow("权限", "${permissionString(entry.permissions)}  ${entry.permissions.toString(8)}", mono = true)
+                }
+                FileDetailRow("路径", entry.path, mono = true)
             }
-            FileDetailRow("路径", entry.path, mono = true)
         }
-        Spacer(Modifier.height(24.dp))
-        Column(Modifier.widthIn(max = 560.dp), verticalArrangement = Arrangement.spacedBy(GapItem)) {
+        Column(
+            Modifier
+                .widthIn(max = 560.dp)
+                .padding(start = Gutter * 2, end = endPad, top = 24.dp, bottom = bottomInset + Gutter),
+            verticalArrangement = Arrangement.spacedBy(GapItem),
+        ) {
             XsshButton("打开", modifier = Modifier.fillMaxWidth()) { actions.open(entry) }
             Row(horizontalArrangement = Arrangement.spacedBy(GapItem)) {
                 XsshButton("下载", kind = ButtonKind.Ghost, modifier = Modifier.weight(1f)) { actions.download(entry) }
