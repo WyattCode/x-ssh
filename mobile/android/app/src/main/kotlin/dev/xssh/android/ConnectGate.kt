@@ -143,20 +143,11 @@ fun ConnectGate(
             icon = XIcons.Terminal,
             tint = p.text,
             tile = p.bgElev2,
-            title = host.label,
+            // 标题写状态,不写主机名:三种状态(确认身份 / 正在连接 / 连接失败)的行数、落点
+            // 完全一样,连不上时只换图标、标题字和卡片内容,整页不会跳一行。
+            title = "正在连接",
             onEnter = null,
-            body = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(Modifier.size(18.dp), color = p.accent, strokeWidth = 2.dp, trackColor = p.bgElev2)
-                    Spacer(Modifier.width(12.dp))
-                    Text(
-                        // 等久了才报秒数:前两秒一闪而过,数字只会显得慌。
-                        if (waited < 3) "正在连接" else "正在连接 · 已等待 $waited 秒",
-                        color = p.textDim,
-                        fontSize = 15.sp,
-                    )
-                }
-            },
+            body = { StatusCard(waited) },
             actions = { stacked ->
                 GateButtons(stacked, primary = null, onPrimary = {}, secondary = "取消", onSecondary = onExit)
             },
@@ -366,11 +357,9 @@ private fun Identity(host: Host, content: GateContent) {
             overflow = TextOverflow.Ellipsis,
         )
         Spacer(Modifier.height(8.dp))
-        // 标题已经是主机名(连接中)时,这里只给地址。
-        if (content.title != host.label) {
-            Text(host.label, color = p.text, fontSize = 16.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Spacer(Modifier.height(2.dp))
-        }
+        // 三种状态一律「标题是状态、下面是哪台主机」,行数不随状态变(见 ConnectGate 的标题注释)。
+        Text(host.label, color = p.text, fontSize = 16.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Spacer(Modifier.height(2.dp))
         Text(host.subtitle, color = p.textDim, fontSize = 13.sp, fontFamily = XsshFonts.monoUi, maxLines = 1, overflow = TextOverflow.Ellipsis)
         content.note?.let {
             Spacer(Modifier.height(14.dp))
@@ -412,6 +401,37 @@ private fun FingerprintCard(label: String, value: String, color: Color) {
                 softWrap = false,
                 modifier = Modifier.padding(vertical = 2.dp),
             )
+        }
+    }
+}
+
+/**
+ * 正在连接:和指纹卡片、失败卡片同一个盒子。
+ *
+ * 曾经这里是一行裸的「转圈 + 正在连接」。三种状态里只有它不是卡片,于是它左边贴着盒子线 16dp、
+ * 上面的标题在标题线 28dp,右边又什么都没有 —— 外屏上看就是"没对齐、不对称"。
+ * 现在同样是一张铺满版心的卡片:三种状态的版式一模一样(图标块 → 标题 → 地址 → 卡片 → 按钮),
+ * 单栏、内屏双栏、平板卡片里都成立,状态之间切换也不会跳。
+ */
+@Composable
+private fun StatusCard(waited: Int) {
+    val p = LocalXssh.current
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(if (p.dark) p.bgElev2 else p.cardBg)
+            .padding(horizontal = 18.dp, vertical = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        CircularProgressIndicator(Modifier.size(18.dp), color = p.accent, strokeWidth = 2.dp, trackColor = p.bgElev2)
+        Spacer(Modifier.width(12.dp))
+        Text("正在建立连接", color = p.text, fontSize = 15.sp)
+        // 等久了才报秒数:前两秒一闪而过,数字只会显得慌。取值靠右,和详情页的「标签—取值」一个规矩。
+        if (waited >= 3) {
+            Spacer(Modifier.weight(1f))
+            Spacer(Modifier.width(12.dp))
+            Text("已等待 $waited 秒", color = p.textDim, fontSize = 13.sp, maxLines = 1)
         }
     }
 }
