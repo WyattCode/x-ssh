@@ -1,5 +1,6 @@
 package dev.xssh.android
 
+import android.app.Activity
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.material3.Icon
@@ -177,14 +178,16 @@ fun FormField(
         val activity = hostActivity(LocalContext.current)
         val owner = androidx.lifecycle.compose.LocalLifecycleOwner.current
         DisposableEffect(revealed, activity) {
-            if (revealed) {
-                activity?.window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
-            }
+            // **把值抄下来**。`onDispose` 里再读 `revealed` 读到的是**当时最新的那个**:
+            // 盖回去(true → false)时这个副作用重跑,onDispose 先执行,而那一刻
+            // `revealed` 已经是 false —— `clearFlags` 一次都不会跑,标志就永远挂着了。
+            // 实测:露一次明文之后整个进程的窗口都摘不掉 FLAG_SECURE,终端再也截不了图。
+            val held = revealed
+            if (held && activity != null) SecureWindow.acquire(activity)
             onDispose {
-                // 只有自己挂上的才摘 —— 同一页可能有两格(密码 + 私钥口令)同时露着。
-                if (revealed) {
-                    activity?.window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
-                }
+                // 只有自己挂上的才摘 —— 同一页可能有两格(密码 + 私钥口令)同时露着,
+                // 标志是整扇窗口的,谁都直接 clear 会把还露着的那一格也解了防。记个数。
+                if (held && activity != null) SecureWindow.release(activity)
             }
         }
         DisposableEffect(owner) {
@@ -403,3 +406,32 @@ fun syncedField(field: TextFieldValue, value: String): TextFieldValue {
 
 /** 表单行聚焦时,除了自己还要额外露出的高度(给悬浮在右下角的按钮让位)。 */
 val LocalFieldClearance = compositionLocalOf { 0.dp }
+
+/**
+ * 整扇窗口的 `FLAG_SECURE` 开关,**按露出明文的格子数记数**。
+ *
+ * 标志挂在窗口上,不是挂在某一格上:同一页可能有两格(密码 + 私钥口令)同时露着,
+ * 先盖回去的那一格要是直接 `clearFlags`,还露着的那一格就一起失了防护。
+ * 所以第一格挂上、最后一格摘掉。
+ *
+ * 只在主线程的组合里用,不加锁。Activity 用弱引用装,免得转屏后旧的那个被这张表拖住。
+ */
+private object SecureWindow {
+    private val held = java.util.WeakHashMap<Activity, Int>()
+
+    fun acquire(activity: Activity) {
+        val next = (held[activity] ?: 0) + 1
+        held[activity] = next
+        if (next == 1) activity.window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+    }
+
+    fun release(activity: Activity) {
+        val next = (held[activity] ?: 1) - 1
+        if (next > 0) {
+            held[activity] = next
+        } else {
+            held.remove(activity)
+            activity.window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+        }
+    }
+}
