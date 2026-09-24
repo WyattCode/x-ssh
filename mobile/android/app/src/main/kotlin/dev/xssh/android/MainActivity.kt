@@ -273,7 +273,13 @@ fun App(devTarget: DevTarget? = null) {
             ) {
                 // 从平板布局缩进来:右栏开着终端就接着显示它,否则回主机页。
                 LaunchedEffect(Unit) {
-                    val open = termHostId?.let { id -> hosts.firstOrNull { it.id == id } }
+                    // **会话还活着才接着显示**。只看 `termHostId` 的话,进程被系统杀掉之后
+                    // 重新打开(saved state 还在、SessionRegistry 已经空了),会一闪主机页
+                    // 然后自己钻进终端、重新拨号 —— 加锁的主机还会平白弹一次指纹框。
+                    // 上面 `screen` 的初始化早就加了这道判断,这里漏了(见 `remember { … }`)。
+                    val open = termHostId
+                        ?.takeIf { SessionRegistry[it] != null }
+                        ?.let { id -> hosts.firstOrNull { it.id == id } }
                     screen = when {
                         open != null -> Screen.Terminal(open)
                         screen is Screen.Terminal -> Screen.Home

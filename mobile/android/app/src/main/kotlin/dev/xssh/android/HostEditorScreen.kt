@@ -329,7 +329,12 @@ class HostDraft(private val initial: Host?) {
     var keyPublicFingerprint by mutableStateOf(initial?.keyPublicFingerprint ?: "")
     var keyPassphrase by mutableStateOf(initial?.keyPassphrase ?: "")
     /** 这把私钥带口令(口令那一格要露出来)。 */
-    var keyLocked by mutableStateOf((initial?.keyPassphrase ?: "").isNotEmpty())
+    // 加锁主机的口令明文是空的,但磁盘上那条密文在 —— 不算上它的话口令行根本不显示,
+    // 保存时 `keyPassphrase` 又被写成空,密文跟着被抹掉,下次连接报"这把私钥有口令"
+    // 却没有地方能填。
+    var keyLocked by mutableStateOf(
+        (initial?.keyPassphrase ?: "").isNotEmpty() || initial?.lockedKeyPassphrase != null,
+    )
     var error by mutableStateOf<String?>(null)
 
     var lockSecrets by mutableStateOf(initial?.lockSecrets ?: false)
@@ -342,8 +347,22 @@ class HostDraft(private val initial: Host?) {
 
     val isNew: Boolean get() = initial == null
 
-    /** 有私钥可用(导入过的,或者老数据里的私钥文件)。 */
-    val hasKey: Boolean get() = keyData.isNotEmpty() || keyPath.isNotEmpty()
+    /**
+     * 加锁主机:私钥 / 口令的密文在磁盘上,只是这一页没解开(解开要验指纹)。
+     * 判"有没有私钥""带不带口令"必须算上它们。
+     */
+    private val lockedKeyKept: Boolean = initial?.lockedKeyData != null
+    private val lockedPassphraseKept: Boolean = initial?.lockedKeyPassphrase != null
+
+    /**
+     * 有私钥可用(导入过的、老数据里的私钥文件,或者锁在磁盘上的那条密文)。
+     *
+     * 漏掉最后一种的话,一台"私钥登录 + 开了锁"的主机**永远存不下去**:
+     * `keyData` 是空的(故意不解开)、`keyPath` 也是空的(导入的私钥没有路径),
+     * 于是每次保存都被「还没有导入私钥」挡住 —— 连改个端口都不行。
+     * 而界面同时还亮着「生成新密钥」,点下去倒是能存了,代价是把原来那把私钥覆盖掉。
+     */
+    val hasKey: Boolean get() = keyData.isNotEmpty() || keyPath.isNotEmpty() || lockedKeyKept
 
     /** 改过没有 —— 平板浮层点外面关闭时,改过的内容不能悄悄丢掉。 */
     val dirty: Boolean
@@ -478,6 +497,7 @@ class HostDraft(private val initial: Host?) {
             lockedPassword = if (key) null else initial?.lockedPassword,
             lockedKeyData = if (key) initial?.lockedKeyData else null,
             lockedKeyPassphrase = if (key && keyLocked) initial?.lockedKeyPassphrase else null,
+            // 注:上面三条只在"换了登录方式"时清空(见那条注释);同种方式下原样带过去。
         )
     }
 }
@@ -505,21 +525,11 @@ suspend fun buildHostForSave(activity: android.app.Activity, draft: HostDraft): 
 
     val host = withContext(Dispatchers.IO) { draft.build() } ?: return null
 
-    // 这台设备已经没有可用的门禁了(用户把锁屏去掉、或者换了一种锁屏 —— 密钥库会把
-    // 那把要求认证的密钥直接作废)。此时:加锁的密文谁都读不出来了,而开关也不再显示
-    // (见 CredentialFields 里的 lockAvailable),用户既关不掉锁、又永远存不进新密码 ——
-    // 这台主机就成了死的,只能删掉重建。所以直接退回"没加锁":旧密文本来就已经是废的,
-    // 用户重填一次密码就能接着用。
-    if (!Secrets.lockAvailable(activity)) {
-        draft.lockSecrets = false
-        return host.copy(
-            lockSecrets = false,
-            lockedPassword = null,
-            lockedKeyData = null,
-            lockedKeyPassphrase = null,
-        )
-    }
-
+    // 这里**不能**因为「这台设备现在没有可用的门禁」就把三条密文清掉。
+    // 之前那版是这么写的,理由是"密文反正已经废了,清掉让用户重填" —— 但
+    // `canAuthenticate` 返回非 SUCCESS 的原因里有 `HW_UNAVAILABLE` 这种**临时**状态
+    // (传感器正忙、刚重启),那时候密钥其实好好的。结果是:用户只改了个主机名,
+    // 保存一下,三条凭据被静默删光。宁可让那台主机暂时连不上,也不能替用户扔东西。
     val wantsLock = draft.lockSecrets
     val wasLocked = draft.originalLocked
     // 跟这道锁完全无关的一次保存(本来没锁、也没要开):什么都不用做。
@@ -547,7 +557,16 @@ suspend fun buildHostForSave(activity: android.app.Activity, draft: HostDraft): 
     // 明文字段不落盘(见 HostStore.save)。
     val sealed = if (wantsLock) {
         withContext(Dispatchers.IO) {
-            Secrets.enableLock(listOf(host.password, host.keyData, host.keyPassphrase))
+            // 要封的是**明文**。用户没动那一格时手里没有明文,而 `locked*` 带着的可能是
+            // 一条**普通密钥**的密文(同一次会话里刚关过锁,又打开)—— 普通密钥不要认证,
+            // 现在就能解开。不这么做的话,那条普通密文会被原样留下、旁边却写着
+            // `lockSecrets: true`:界面显示"锁着",磁盘上却是谁都能读的,锁成了摆设。
+            val plain = listOf(
+                host.password.ifEmpty { Secrets.open(host.lockedPassword.orEmpty()) },
+                host.keyData.ifEmpty { Secrets.open(host.lockedKeyData.orEmpty()) },
+                host.keyPassphrase.ifEmpty { Secrets.open(host.lockedKeyPassphrase.orEmpty()) },
+            )
+            Secrets.enableLock(plain)
         }
     } else {
         withContext(Dispatchers.IO) {
@@ -562,16 +581,27 @@ suspend fun buildHostForSave(activity: android.app.Activity, draft: HostDraft): 
         return null
     }
 
+    // **这次打进去的明文优先。**
+    //
+    // 开锁那条路上明文已经被 `enableLock` 封好了,清掉是对的。
+    // 关锁那条路上 `disableLock` 交回来的是**旧密文**解出来再重封的结果 ——
+    // 原来这里一律 `password = ""`,于是"改密码 + 同时关锁"一起做时,
+    // 新密码被旧的顶掉了,而界面还说保存成功(改私钥同理)。
+    val keepPlain = !wantsLock
     return host.copy(
         lockSecrets = wantsLock,
-        password = "",
-        keyData = "",
-        keyPassphrase = "",
+        password = if (keepPlain) host.password else "",
+        keyData = if (keepPlain) host.keyData else "",
+        keyPassphrase = if (keepPlain) host.keyPassphrase else "",
         // 这次没封出内容的条目,沿用原来那条密文 —— 不能一律写 null:
         // 那是"这条凭据没了"的意思,而这里可能只是这次用不到它。
-        lockedPassword = sealed[0].ifEmpty { host.lockedPassword },
-        lockedKeyData = sealed[1].ifEmpty { host.lockedKeyData },
-        lockedKeyPassphrase = sealed[2].ifEmpty { host.lockedKeyPassphrase },
+        // 手里有明文时则让明文去写(见 HostStore.writeSecret),这里给 null。
+        lockedPassword = if (keepPlain && host.password.isNotEmpty()) null
+        else sealed[0].ifEmpty { host.lockedPassword },
+        lockedKeyData = if (keepPlain && host.keyData.isNotEmpty()) null
+        else sealed[1].ifEmpty { host.lockedKeyData },
+        lockedKeyPassphrase = if (keepPlain && host.keyPassphrase.isNotEmpty()) null
+        else sealed[2].ifEmpty { host.lockedKeyPassphrase },
     )
 }
 

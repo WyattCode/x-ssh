@@ -192,29 +192,31 @@ fun FormField(
             }
             // 用 TextFieldValue 才看得到组词区间(composition)。
             var field by remember { mutableStateOf(TextFieldValue(value, TextRange(value.length))) }
-            // 上一次交给外部的文字。**输入框自己的状态是唯一真相**,外部的 [value] 只有在
-            // 不等于它时才采纳 —— 那才说明外部真的改写过(端口只留数字、解锁后回填密码)。
+            // **上一帧外部给进来的 [value]**。判据只能是"它变了没有" ——
+            // 变了才说明外部真的改写过(端口只留数字、解锁后回填);没变就是外部还没追上,
+            // 这时候必须以输入框自己的状态为准。
             //
-            // 原来是"只要两边不一样就拿 value 覆盖"。但外部回来是异步的:打字稍快一点,
-            // 这一帧的 value 还是上一个字的内容,新敲进去的就被旧值盖掉。
-            // **实测 13 位的密码存下来只剩 8 位**,而且丢得静悄悄 —— 密码框是圆点,看不出来,
-            // 直到连服务器报「认证失败」才发现。(实体键盘那条路早就踩过同一个坑,见下面的
-            // onInterceptKeyBeforeSoftKeyboard;当时只修了那一边。)
-            var emitted by remember { mutableStateOf(value) }
-            val shown = if (value == emitted) field else syncedField(field, value)
+            // 原来是"只要 field.text != value 就拿 value 覆盖"。外部是异步回来的:
+            // 打字稍快一点,这一帧的 value 还是上一个字的内容,新敲进去的字被旧值盖掉。
+            // **13 位的密码存下来只剩 8 位**,而且丢得静悄悄 —— 密码框是圆点,看不出少了字,
+            // 直到连服务器报「认证失败」才发现。
+            //
+            // 中间还错过一版:判据写成"和我上次交出去的文字不一样"。那个量在每个写入点
+            // 都和 `field.text` 一起更新,于是 `value == 它` 恒等于 `value == field.text`,
+            // 而 `syncedField` 在相等时本来就原样返回 —— 两个分支塌成同一个表达式,
+            // 等于什么都没改。**判据必须是外部的值本身变没变。**
+            var lastValue by remember { mutableStateOf(value) }
+            val shown = if (value == lastValue) field else syncedField(field, value)
             SideEffect {
                 if (field != shown) field = shown
-                if (emitted != value) emitted = value
+                if (lastValue != value) lastValue = value
             }
             BasicTextField(
                 value = shown,
                 onValueChange = {
                     field = it
                     onComposing?.invoke(it.composition != null)
-                    if (it.text != emitted) {
-                        emitted = it.text
-                        onValue(it.text)
-                    }
+                    if (it.text != value) onValue(it.text)
                 },
                 singleLine = true,
                 textStyle = TextStyle(
@@ -250,7 +252,6 @@ fun FormField(
                                 val sel = current.selection
                                 val text = current.text.replaceRange(sel.min, sel.max, code.toChar().toString())
                                 field = TextFieldValue(text, TextRange(sel.min + 1))
-                                emitted = text
                                 onComposing?.invoke(false)
                                 onValue(text)
                                 true
@@ -316,14 +317,22 @@ fun FormAction(label: String, danger: Boolean = false, onClick: () -> Unit) {
  * 输入框自己的 TextFieldValue 和外部的取值对齐。
  *
  * 外部可能改写了文字(端口只留数字、限 5 位):只换文字不动光标的话,光标还停在过滤前的位置,
- * 后面输入的字就插错了地方(实测端口里敲 "8a0b8" 变成 "80228")。光标按"少了几个字"往回挪 ——
- * 被滤掉的正是刚敲的那个字时,光标原地不动;被截断时夹到末尾。
+ * 后面输入的字就插错了地方(实测端口里敲 "8a0b8" 变成 "80228")。
+ *
+ * 光标要停在"**它前面那些字里、活下来的那几个**"之后 —— 逐字对一遍就知道活了几个。
+ * 原来是按"总共少了几个字"整体往回挪,只在"被滤掉的正好在光标前面"时才对:
+ * 端口已经 5 位时在开头敲一个字,`take(5)` 砍掉的是**末尾**,光标却被往回挪了一格,
+ * 于是下一个字插到了刚敲的那个前面 —— 敲 9 再敲 8,得到的是 "89…"(实测字序颠倒)。
  */
 fun syncedField(field: TextFieldValue, value: String): TextFieldValue {
     if (field.text == value) return field
-    val removed = field.text.length - value.length
-    val cursor = (field.selection.end - removed).coerceIn(0, value.length)
-    return TextFieldValue(value, TextRange(cursor))
+    var before = 0
+    var kept = 0
+    while (before < field.selection.end && kept < value.length) {
+        if (field.text[before] == value[kept]) kept++
+        before++
+    }
+    return TextFieldValue(value, TextRange(kept))
 }
 
 /** 表单行聚焦时,除了自己还要额外露出的高度(给悬浮在右下角的按钮让位)。 */

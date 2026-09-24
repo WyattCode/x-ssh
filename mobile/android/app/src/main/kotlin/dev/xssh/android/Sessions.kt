@@ -117,6 +117,13 @@ class TerminalSession(
                 // 「运行中」,状态栏的常驻通知也一直挂着,而连接早就没了。
                 // 这一屏自己 remember 着 session 引用,摘牌不影响它继续显示最后的输出。
                 SessionRegistry.forget(this@TerminalSession)
+                // 队列和写协程也要收掉。只 `forget` 就 `break` 的话,`writer` 还挂在
+                // `for (op in outbox)` 上等下一条命令,进程级的作用域又一直活着 ——
+                // 于是每断一次线就永久漏一个协程,连带整个 TerminalSession
+                // (含一整屏的 `ScreenRow`)都回收不掉。而 `shutdown()` 这时已经走不到了:
+                // `SessionRegistry.close` 发现自己不在名单上就提前返回。
+                outbox.close()
+                writer.cancel()
                 break
             }
             idle = if (pumped.changed) 0 else idle + 1

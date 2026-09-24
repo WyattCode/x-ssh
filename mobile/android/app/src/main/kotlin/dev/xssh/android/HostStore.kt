@@ -171,7 +171,13 @@ class HostStore(context: Context) {
             android.util.Log.w("xssh", "seal locked secret failed: ${err.javaClass.simpleName} ${err.message}")
             sealed ?: ""
         }
-        else -> Secrets.seal(plain)
+        // `Secrets.seal` 出错时返回空串(它的兜底是"这次没存上,别崩")。直接写下去
+        // 就是**把原来那条密码抹掉** —— 用户只是重输了一次密码,结果连旧的一起没了。
+        // 封不上就留着旧的,并记一条日志(界面这一层看不见,只能靠日志发现)。
+        else -> Secrets.seal(plain).ifEmpty {
+            android.util.Log.w("xssh", "seal secret failed; keeping the previous ciphertext")
+            sealed ?: ""
+        }
     }
 
     private companion object {
