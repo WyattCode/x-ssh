@@ -267,7 +267,9 @@ impl Terminal {
 
     /// 尺寸变化(折叠、旋转、软键盘弹出)。
     pub fn resize(&mut self, cols: usize, rows: usize) {
-        self.size = Size::new(cols, rows);
+        // 和 `new` 一样夹住:0 行 / 0 列会让下面 `size.rows - 1` 这类减法在 usize 上溢,
+        // 进程直接 abort。构造函数夹了,这里原来漏了(界面那边碰巧也夹了,所以还没炸过)。
+        self.size = Size::new(cols.max(1), rows.max(1));
         self.term.resize(self.size);
     }
 

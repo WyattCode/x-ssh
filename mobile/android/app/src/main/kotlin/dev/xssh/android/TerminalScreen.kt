@@ -1329,8 +1329,11 @@ private fun TerminalCanvas(
         // 手势放在画布上(而不是外层):它先于外层的捏合缩放拿到事件并吃掉,
         // 否则单指拖动会被 transformable 当成平移吞掉,翻不动历史。
         // 按行取整,余量留到下一次,慢慢拖才不会卡顿。
+        // 上下界都要夹。只夹下界的话,手指拖出画布(滑到下面的按键面板上)时,
+        // 算出来的行号超出 PTY 的范围,鼠标事件就把一个不存在的位置报给了服务器。
         fun cellAt(position: Offset) =
-            (position.x / cell.first).toInt().coerceAtLeast(0) to (position.y / cell.second).toInt().coerceAtLeast(0)
+            (position.x / cell.first).toInt().coerceIn(0, (cols - 1).coerceAtLeast(0)) to
+                (position.y / cell.second).toInt().coerceIn(0, (gridRows - 1).coerceAtLeast(0))
         fun gridAt(position: Offset): GridCell {
             val col = (position.x / cell.first).toInt().coerceIn(0, cols - 1)
             return GridCell(
@@ -1340,7 +1343,11 @@ private fun TerminalCanvas(
             )
         }
         fun sameCell(a: GridCell, b: GridCell) = a.row == b.row && a.col == b.col
-        val dragModifier = Modifier.pointerInput(cell, cols, gridRows) {
+        // `canFling` **必须进 key**:手势协程一旦起来就一直用起来时捕获的那个值。
+        // 在 bash 里滑一次(canFling=true),再进 less / htop(canFling 变 false),
+        // 协程没有重起,还当自己能惯性 —— 松手之后一口气往服务器发几十个方向键 / 鼠标事件,
+        // less 猛跳、vim 里光标乱走。这一屏别的回调都走了 rememberUpdatedState,唯独漏了它。
+        val dragModifier = Modifier.pointerInput(cell, cols, gridRows, canFling) {
             // 连击判定跨手势,记在手势外面:双击选词,三击选整行。
             var lastClickAt = 0L
             var lastClickCell: GridCell? = null

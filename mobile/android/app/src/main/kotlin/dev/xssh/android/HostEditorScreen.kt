@@ -596,12 +596,12 @@ suspend fun buildHostForSave(activity: android.app.Activity, draft: HostDraft): 
         // 这次没封出内容的条目,沿用原来那条密文 —— 不能一律写 null:
         // 那是"这条凭据没了"的意思,而这里可能只是这次用不到它。
         // 手里有明文时则让明文去写(见 HostStore.writeSecret),这里给 null。
-        lockedPassword = if (keepPlain && host.password.isNotEmpty()) null
-        else sealed[0].ifEmpty { host.lockedPassword },
-        lockedKeyData = if (keepPlain && host.keyData.isNotEmpty()) null
-        else sealed[1].ifEmpty { host.lockedKeyData },
-        lockedKeyPassphrase = if (keepPlain && host.keyPassphrase.isNotEmpty()) null
-        else sealed[2].ifEmpty { host.lockedKeyPassphrase },
+        // 有明文时让明文去写(见 HostStore.writeSecret),但**旧密文仍然留着兜底** ——
+        // 写不进去(密钥库出错)时 `writeSecret` 会退回它。一律给 null 的话,
+        // "关锁 + 改密码"撞上一次密钥库故障,新旧两份就一起没了。
+        lockedPassword = sealed[0].ifEmpty { host.lockedPassword },
+        lockedKeyData = sealed[1].ifEmpty { host.lockedKeyData },
+        lockedKeyPassphrase = sealed[2].ifEmpty { host.lockedKeyPassphrase },
     )
 }
 

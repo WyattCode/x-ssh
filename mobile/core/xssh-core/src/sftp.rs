@@ -158,8 +158,22 @@ impl Sftp {
         // 放 /tmp 再改名可能跨设备失败。
         let temp = format!("{path}.xssh-part");
         self.block(async {
+            // 目标原来的权限位:改名之后要照原样补回去。
+            //
+            // 直接往目标写时,inode 不变,权限自然保留。改成"新建临时文件再改名"之后,
+            // 落地的是一个**新建**的文件,权限按服务端 umask 走 —— 覆盖一次
+            // `~/.ssh/authorized_keys`,0600 就变成 0644,sshd 直接不认那个文件了;
+            // 可执行脚本也会掉 +x。
+            let previous = self.session.metadata(path).await.ok();
+            // 先开临时文件。**开不出来就退回直接写目标**:目录不可写、而文件本身可写的情况
+            // (别人家目录下一个 group-writable 的文件)本来传得动,不能因为多了这道保护就传不了。
+            // 退回的那条路没有"传完再换"的保护,和以前一样。
+            let (mut file, staged) = match self.session.create(&temp).await {
+                Ok(file) => (file, true),
+                Err(_) => (self.session.create(path).await.map_err(sftp_err)?, false),
+            };
+
             let outcome = async {
-                let mut file = self.session.create(&temp).await.map_err(sftp_err)?;
                 let mut buffer = vec![0u8; CHUNK];
                 let mut done = 0u64;
                 loop {
@@ -182,11 +196,18 @@ impl Sftp {
             let done = match outcome {
                 Ok(done) => done,
                 Err(err) => {
-                    // 取消、写失败、读本地失败 —— 一律只收拾自己的临时文件,目标不动。
-                    let _ = self.session.remove_file(&temp).await;
+                    // 取消、写失败、读本地失败:只收拾自己的临时文件,目标不动。
+                    // 退回直写的那条路上没有临时文件可收 —— 目标已经被截断了,无能为力。
+                    if staged {
+                        let _ = self.session.remove_file(&temp).await;
+                    }
                     return Err(err);
                 }
             };
+
+            if !staged {
+                return Ok(done);
+            }
 
             // 盖过去。SFTP v3 的 rename 在目标已存在时会失败,所以先删一下;
             // 删和改名之间有一道很窄的缝,但比"取消就把原文件删掉"小得多。
@@ -195,6 +216,14 @@ impl Sftp {
             self.session.rename(&temp, path).await.map_err(|err| {
                 SshError::Sftp(format!("{}(内容已上传到 {temp})", sftp_err(err)))
             })?;
+            // 权限补回去(拿不到原来的就随服务端默认,总比把 0600 变成 0644 强)。
+            if let Some(permissions) = previous.and_then(|before| before.permissions) {
+                let keep = russh_sftp::protocol::FileAttributes {
+                    permissions: Some(permissions),
+                    ..Default::default()
+                };
+                let _ = self.session.set_metadata(path, keep).await;
+            }
             Ok(done)
         })
     }

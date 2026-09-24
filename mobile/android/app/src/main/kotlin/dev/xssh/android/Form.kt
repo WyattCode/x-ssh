@@ -163,6 +163,10 @@ fun FormField(
     // (加锁主机的密码格是空的、只显示「已保存」,那里也不该有眼睛)。
     // 离开这一页就恢复成盖着:`remember` 跟着输入框一起没了,不会把"看得见"留到下一次。
     var revealed by remember { mutableStateOf(false) }
+    // 内容被清空(全选删掉)时眼睛会消失,但"显示中"要是留着,
+    // 接着输的新密码就直接以明文出现 —— 用户并没有按过任何东西。
+    // 用副作用改,不在组合期间写状态(那会多跑一轮组合)。
+    LaunchedEffect(value.isEmpty()) { if (value.isEmpty()) revealed = false }
     // 切到后台就盖回去:明文密码不能留在多任务的缩略图里,回来时也该是常态(盖着)。
     if (secret) {
         val owner = androidx.lifecycle.compose.LocalLifecycleOwner.current
@@ -216,25 +220,19 @@ fun FormField(
             }
             // 用 TextFieldValue 才看得到组词区间(composition)。
             var field by remember { mutableStateOf(TextFieldValue(value, TextRange(value.length))) }
-            // **上一帧外部给进来的 [value]**。判据只能是"它变了没有" ——
-            // 变了才说明外部真的改写过(端口只留数字、解锁后回填);没变就是外部还没追上,
-            // 这时候必须以输入框自己的状态为准。
+            // 外部改写了值(端口只留数字)时以外部为准 —— `syncedField` 只在两边不一致时动手。
             //
-            // 原来是"只要 field.text != value 就拿 value 覆盖"。外部是异步回来的:
-            // 打字稍快一点,这一帧的 value 还是上一个字的内容,新敲进去的字被旧值盖掉。
-            // **13 位的密码存下来只剩 8 位**,而且丢得静悄悄 —— 密码框是圆点,看不出少了字,
-            // 直到连服务器报「认证失败」才发现。
-            //
-            // 中间还错过一版:判据写成"和我上次交出去的文字不一样"。那个量在每个写入点
-            // 都和 `field.text` 一起更新,于是 `value == 它` 恒等于 `value == field.text`,
-            // 而 `syncedField` 在相等时本来就原样返回 —— 两个分支塌成同一个表达式,
-            // 等于什么都没改。**判据必须是外部的值本身变没变。**
-            var lastValue by remember { mutableStateOf(value) }
-            val shown = if (value == lastValue) field else syncedField(field, value)
-            SideEffect {
-                if (field != shown) field = shown
-                if (lastValue != value) lastValue = value
-            }
+            // 这里**试过两版"聪明"的判据,都错了**,记下来别再来一遍:
+            //   1. "和我上次交出去的文字不一样才采纳":那个量在每个写入点都跟 `field.text`
+            //      一起更新,条件恒等于 `value != field.text` —— 和不加判据完全一样,空操作。
+            //   2. "外部这一帧的值和上一帧不一样才采纳":**过滤器拒绝一个字**时,外部的值
+            //      正好没变(端口 "8080" 里敲 a,过滤完还是 "8080"),于是判成"外部没改写",
+            //      那个字母就永远留在屏幕上,而存下去的是 "8080" —— 界面和数据对不上。
+            // 「外部还没追上」和「外部把这个字拒了」在外部看来是同一个值,判据分不开。
+            // 而 `onValue` 里 `draft.xxx = it` 是同步的快照写入,下一次组合读到的就是新值,
+            // "慢一拍"本来就不会发生 —— 所以不需要判据,老老实实每次对齐。
+            val shown = syncedField(field, value)
+            SideEffect { if (field != shown) field = shown }
             BasicTextField(
                 value = shown,
                 onValueChange = {
