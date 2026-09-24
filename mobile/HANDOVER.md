@@ -1316,6 +1316,12 @@ Esc、敲 n、回车「打开」→ 系统「打开方式」列出文字查看�
 
 真机看过:新那一行的排版和其它行一致;深色开关蓝轨白滑块。
 
+**第 1 条真机复核过(两台主机)**:建「锁A」「锁B」两台都加锁(两条都是 `L:` 密文)→ 关掉锁A
+(锁A 变回普通密文、`lockSecrets: false`,锁B 的 `L:` 密文一字节没动)→ **重启后连锁B,
+直接进「正在连接」**。密钥要是被销毁了,这里会停在「没能解锁已保存的凭据」——
+`load(LOCKED_ALIAS)` 抛的是 `IllegalStateException` 而不是 `UserNotAuthenticatedException`,
+`unlockSecret` 直接返回 null。所以这一屏就是密钥还在、`readLocked` 成功的证据。
+
 ## 5. 关键坑(踩过,别再踩)
 
 1. **DSR 应答**:终端事件不回写 → 远端程序挂起(ConPTY 必现;vim 同理)。已修 + 单测。
