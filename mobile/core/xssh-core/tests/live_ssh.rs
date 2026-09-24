@@ -193,3 +193,66 @@ fn sftp_round_trip_alongside_shell() {
     assert!(String::from_utf8_lossy(&seen).contains("after-sftp-ok"), "关掉 SFTP 后终端没反应");
     ssh.disconnect();
 }
+
+/// 上传到已存在的文件,中途取消 —— **原文件必须原封不动**。
+///
+/// 这条是为一个真实事故写的:原来 `upload` 直接往目标路径写(`create` 会截断),
+/// 取消时又 `remove_file(path)`,删掉的是用户原来那个文件。而上层把"会话断开"
+/// 也算作取消,所以传一半掉个线,服务器上那个文件就没了,界面只说一句「已取消」。
+#[test]
+#[ignore = "需要真实 sshd,见文件头"]
+fn cancelled_upload_leaves_the_target_alone() {
+    let Some(first) = target(None) else {
+        eprintln!("未设置 XSSH_TEST_* 环境变量,跳过");
+        return;
+    };
+    let fingerprint = match Ssh::connect(&first) {
+        Err(SshError::HostKeyUnknown { fingerprint }) => fingerprint,
+        Err(other) => panic!("首次握手意外失败: {other}"),
+        Ok(_) => panic!("没有已信任指纹却连上了"),
+    };
+    let ssh = Ssh::connect(&target(Some(fingerprint)).unwrap()).expect("带指纹连接");
+    let sftp = ssh.open_sftp().expect("开 SFTP");
+    let home = sftp.home().expect("家目录");
+    let path = format!("{home}/xssh-upload-test.txt");
+
+    const ORIGINAL: &[u8] = b"ORIGINAL-CONTENT-DO-NOT-LOSE\n";
+    sftp.upload(&path, &mut &ORIGINAL[..], ORIGINAL.len() as u64, &mut |_, _| true)
+        .expect("先放一个原始文件");
+
+    // 传一个大一点的,进度回调第一次就喊停 —— 模拟用户点取消 / 会话断开。
+    let big = vec![b'X'; 512 * 1024];
+    let mut ticks = 0;
+    let outcome = sftp.upload(&path, &mut &big[..], big.len() as u64, &mut |_, _| {
+        ticks += 1;
+        false
+    });
+    assert!(matches!(outcome, Err(SshError::Cancelled)), "取消应该报 Cancelled,实际 {outcome:?}");
+    assert!(ticks >= 1, "进度回调没被调用,这条测试没测到东西");
+
+    // 关键:原文件还在,内容一个字节没变。
+    let mut got = Vec::new();
+    sftp.download(&path, &mut got, &mut |_, _| true).expect("原文件还能读");
+    assert_eq!(got, ORIGINAL, "取消上传把原文件弄坏了");
+
+    // 临时文件不能留在服务器上。
+    let leftovers: Vec<_> = sftp
+        .list(&home)
+        .expect("列目录")
+        .into_iter()
+        .filter(|e| e.name.contains("xssh-upload-test") && e.name.ends_with(".xssh-part"))
+        .collect();
+    assert!(leftovers.is_empty(), "取消之后留下了临时文件: {leftovers:?}");
+
+    // 正常传完则要真的覆盖掉。
+    const REPLACED: &[u8] = b"REPLACED\n";
+    sftp.upload(&path, &mut &REPLACED[..], REPLACED.len() as u64, &mut |_, _| true)
+        .expect("正常上传");
+    let mut after = Vec::new();
+    sftp.download(&path, &mut after, &mut |_, _| true).expect("读回来");
+    assert_eq!(after, REPLACED, "正常上传没有覆盖成功");
+
+    sftp.remove(&path, false).expect("清理");
+    sftp.close();
+    ssh.disconnect();
+}
