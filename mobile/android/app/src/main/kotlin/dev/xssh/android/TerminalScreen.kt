@@ -234,9 +234,18 @@ fun TerminalScreen(
         // onSuccess 就不跑了 —— 会话已经登记在册,却没有任何东西托着进程,
         // 系统一冻结连接就悄悄没了,而主机页还写着「运行中」。
         val result = withContext(Dispatchers.IO) {
-            runCatching {
-                SessionRegistry.open(ready, 80, 24).also { SessionService.ensureRunning(context) }
-            }
+            runCatching { SessionRegistry.open(ready, 80, 24) }
+                .onSuccess {
+                    // **服务起不来不算连接失败。** 它和登记要在同一个不可取消的步骤里
+                    // (上面那段注释),但异常必须分开接:Android 12 起,应用退到后台时
+                    // `startForegroundService` 会抛 —— 连上之后按个 Home 就能撞上。
+                    // 混在一个 runCatching 里的话,界面报「连接失败」,而会话其实是活的、
+                    // 主机页还写着「运行中」,只是没人托着进程。
+                    runCatching { SessionService.ensureRunning(context) }
+                        .onFailure { err ->
+                            Log.w(TAG, "foreground service not started: ${err.javaClass.simpleName} ${err.message}")
+                        }
+                }
         }
         result
             .onSuccess { live = it }
@@ -762,7 +771,30 @@ private fun TerminalView(
                 onFont = { step ->
                     fontSize = (fontSize + step).coerceIn(UiPrefs.FONT_MIN, UiPrefs.FONT_MAX)
                 },
-                send = { bytes -> live.sendRaw(bytes) },
+                // 三条出口都在发完之后收掉粘滞键、清掉选区(和实体键盘那条路一致)。
+                send = { bytes ->
+                    // Ctrl 对已经是控制字节的键没有额外含义;Alt 是加 ESC 前缀(Alt+Tab 之类)。
+                    val out = if (alt) byteArrayOf(27) + bytes else bytes
+                    ctrl = false
+                    alt = false
+                    clearSelection()
+                    live.sendRaw(out)
+                },
+                type = { text ->
+                    val useCtrl = ctrl
+                    val useAlt = alt
+                    ctrl = false
+                    alt = false
+                    clearSelection()
+                    live.sendText(text, useCtrl, useAlt)
+                },
+                cursor = { c ->
+                    val out = KeyEncoder.cursor(c, frameState.value.modes, ctrl, alt)
+                    ctrl = false
+                    alt = false
+                    clearSelection()
+                    live.sendRaw(out.toByteArray())
+                },
             )
         }
     }
@@ -1072,21 +1104,40 @@ private fun TerminalKeys(
     onAlt: () -> Unit,
     onFont: (Float) -> Unit,
     send: (ByteArray) -> Unit,
+    type: (String) -> Unit,
+    cursor: (Char) -> Unit,
 ) {
-    val keys = KeyActions(ctrl, alt, onCtrl, onAlt, send)
+    val keys = KeyActions(ctrl, alt, onCtrl, onAlt, onFont, send, type, cursor)
     if (wrap) WideKeys(keys, keyWidth) else CompactKeys(keys, keyWidth)
 }
 
-/** 所有按键的动作集中在一处,两种排布共用。 */
+/**
+ * 所有按键的动作集中在一处,两种排布共用。
+ *
+ * 三条出口分开,是因为**粘滞的 Ctrl / Alt 对三种键的含义不一样**:
+ * 普通字符要变成控制字符(Ctrl+c → 0x03),方向键要变成 `ESC[1;5A` 这种带参数的序列,
+ * 而 Esc / Tab 这些本来就是控制字节的,Ctrl 对它们没有额外含义、Alt 则是加个 ESC 前缀。
+ *
+ * 原来只有一条 `send`,直接把字节丢给 `sendRaw` —— 粘滞键**既不生效也不清除**:
+ * 点了 Ctrl 再点 ↑,Ctrl 还亮着;接着在软键盘上打个 `c`,发出去的就成了 `^C`,
+ * 正在跑的命令当场被杀。三条出口现在都在发完之后把粘滞键收掉(和实体键盘一致:
+ * 修饰键作用于下一颗键,按完就松)。
+ */
 private class KeyActions(
     val ctrl: Boolean,
     val alt: Boolean,
     val onCtrl: () -> Unit,
     val onAlt: () -> Unit,
+    val onFont: (Float) -> Unit,
+    /** 已经是控制字节的键(Esc、Tab、^C、⌫、回车)。 */
     val send: (ByteArray) -> Unit,
+    /** 普通字符(`|`、`/`、`-`、`~`):按粘滞键变形,和软键盘打字走同一条路。 */
+    val type: (String) -> Unit,
+    /** 方向键:按 DECCKM 和粘滞键编码。 */
+    val cursor: (Char) -> Unit,
 ) {
     fun bytes(vararg b: Int) = send(ByteArray(b.size) { b[it].toByte() })
-    fun text(t: String) = send(t.toByteArray())
+    fun text(t: String) = type(t)
 }
 
 /*
@@ -1134,7 +1185,7 @@ private fun CompactKeys(k: KeyActions, keyWidth: Dp) {
             Flip({ KeyCap("Tab", cell) { k.bytes(9) } }, { KeyCap("^D", cell) { k.bytes(4) } })
             Flip({ KeyCap("^C", cell) { k.bytes(3) } }, { KeyCap("^Z", cell) { k.bytes(26) } })
             Flip(
-                { KeyCap("↑", cell, repeatable = true) { k.text("\u001b[A") } },
+                { KeyCap("↑", cell, repeatable = true) { k.cursor('A') } },
                 { KeyCap("⌫", cell, repeatable = true) { k.bytes(0x7F) } },
             )
             KeyCap("回车", key, emphasis = true, icon = XIcons.Return) { k.bytes(13) }
@@ -1143,15 +1194,15 @@ private fun CompactKeys(k: KeyActions, keyWidth: Dp) {
             KeyCap("Ctrl", key, active = k.ctrl, onPress = k.onCtrl)
             KeyCap("⋯", key, active = more) { more = !more }
             Flip(
-                { KeyCap("←", cell, repeatable = true) { k.text("\u001b[D") } },
+                { KeyCap("←", cell, repeatable = true) { k.cursor('D') } },
                 { KeyCap("^L", cell) { k.bytes(12) } },
             )
             Flip(
-                { KeyCap("↓", cell, repeatable = true) { k.text("\u001b[B") } },
+                { KeyCap("↓", cell, repeatable = true) { k.cursor('B') } },
                 { KeyCap("|", cell) { k.text("|") } },
             )
             Flip(
-                { KeyCap("→", cell, repeatable = true) { k.text("\u001b[C") } },
+                { KeyCap("→", cell, repeatable = true) { k.cursor('C') } },
                 { KeyCap("/", cell) { k.text("/") } },
             )
         }
@@ -1179,7 +1230,7 @@ private fun WideKeys(k: KeyActions, keyWidth: Dp) {
             KeyCap("^Z", key) { k.bytes(26) }
             KeyCap("^L", key) { k.bytes(12) }
             KeyCap("⌫", key, repeatable = true) { k.bytes(0x7F) }
-            KeyCap("↑", key, repeatable = true) { k.text("\u001b[A") }
+            KeyCap("↑", key, repeatable = true) { k.cursor('A') }
             KeyCap("回车", key, emphasis = true, icon = XIcons.Return) { k.bytes(13) }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(KeyGap)) {
@@ -1189,9 +1240,9 @@ private fun WideKeys(k: KeyActions, keyWidth: Dp) {
             KeyCap("/", key) { k.text("/") }
             KeyCap("-", key) { k.text("-") }
             KeyCap("~", key) { k.text("~") }
-            KeyCap("←", key, repeatable = true) { k.text("\u001b[D") }
-            KeyCap("↓", key, repeatable = true) { k.text("\u001b[B") }
-            KeyCap("→", key, repeatable = true) { k.text("\u001b[C") }
+            KeyCap("←", key, repeatable = true) { k.cursor('D') }
+            KeyCap("↓", key, repeatable = true) { k.cursor('B') }
+            KeyCap("→", key, repeatable = true) { k.cursor('C') }
         }
     }
 }

@@ -247,17 +247,39 @@ object SessionRegistry {
      */
     private val lock = Any()
 
+    /**
+     * 「全部断开」的次数。
+     *
+     * [open] 的握手要好几秒、而且**故意放在锁外面**(否则会把断开一起堵死),所以
+     * 「全部断开」看不见正在建立的那一条:它几秒后握完手、登记进名单、通知栏又亮起来 ——
+     * 用户刚说了全部断开,却冒出一个活着的会话。
+     * 记一个代数,握手前后各读一次:中间有人喊过停,这条新连接就地关掉。
+     */
+    private var closedGeneration = 0
+
     private val _sessions = MutableStateFlow<Map<String, TerminalSession>>(emptyMap())
     val sessions: StateFlow<Map<String, TerminalSession>> = _sessions
 
     operator fun get(hostId: String): TerminalSession? = _sessions.value[hostId]
 
-    /** 连接并登记(阻塞,在 IO 线程调用)。已经有会话就直接复用。 */
+    /**
+     * 连接并登记(阻塞,在 IO 线程调用)。已经有会话就直接复用。
+     *
+     * 握手期间用户点了「全部断开」的话,抛 [Cancelled] —— 界面按普通的连接失败处理。
+     */
     fun open(host: Host, cols: Int, rows: Int): TerminalSession {
-        synchronized(lock) { _sessions.value[host.id] }?.let { return it }
+        val generation = synchronized(lock) {
+            _sessions.value[host.id]?.let { return it }
+            closedGeneration
+        }
         // 真正的连接不能放在锁里 —— 它要好几秒,会把 close / 通知栏的全部断开一起堵死。
         val live = connectHost(host, cols, rows)
         synchronized(lock) {
+            if (closedGeneration != generation) {
+                // 这几秒里用户喊了「全部断开」。刚握完手的这条也算在内,不能让它活下来。
+                live.closeAsync()
+                throw Cancelled()
+            }
             _sessions.value[host.id]?.let { existing ->
                 // 这段时间里别人先连上了:把自己这条多余的连接关掉,别让它漏在外面。
                 live.closeAsync()
@@ -278,10 +300,14 @@ object SessionRegistry {
 
     fun closeAll() {
         val all = synchronized(lock) {
+            closedGeneration++
             _sessions.value.also { _sessions.value = emptyMap() }
         }
         all.values.forEach { it.shutdown() }
     }
+
+    /** 握手期间被「全部断开」打断。 */
+    class Cancelled : Exception("已全部断开")
 
     /**
      * 对端断开后把它从名单上摘掉。由会话自己的轮询循环调用 —— 连接它已经关过了,
