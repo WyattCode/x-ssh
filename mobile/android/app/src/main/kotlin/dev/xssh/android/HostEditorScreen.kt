@@ -95,7 +95,6 @@ fun HostEditorScreen(
     val importKey = rememberKeyImporter(draft) { keyMessage = it }
 
     val context = LocalContext.current
-    UnlockIntoDraft(initial, draft)
 
     fun save() {
         // 用私钥登录时要验一次口令(解私钥要几百毫秒)、加锁开关要用密钥库并可能弹一次
@@ -352,38 +351,23 @@ class HostDraft(private val initial: Host?) {
             address != (initial?.address ?: "") ||
             port != (initial?.port ?: 22).toString() ||
             username != (initial?.username ?: "") ||
-            // 凭据比的是**解锁前**那份快照,不是 initial 上的明文。
-            // 加锁主机一进编辑页就会把明文灌进 draft,拿 initial(明文为空)去比,
-            // 什么都没做也会判成"改过" —— 关浮层时白弹一次"放弃未保存的修改?"。
-            password != passwordAtOpen ||
+            password != (initial?.password ?: "") ||
             auth != (initial?.auth ?: AuthKind.PASSWORD) ||
-            keyData != keyDataAtOpen ||
-            keyPassphrase != passphraseAtOpen ||
+            keyData != (initial?.keyData ?: "") ||
+            keyPassphrase != (initial?.keyPassphrase ?: "") ||
             // 只拨了这个开关也是改过:漏掉它的话,平板浮层点外面就把这次改动静默丢了,
             // 连「放弃未保存的修改?」都不问。
             lockSecrets != originalLocked
 
     /**
-     * 打开这一页时三条凭据的值。加锁主机解锁后 draft 里会有明文,
-     * 把它记在这里,`dirty` 与"用户到底动过没有"才一致。
+     * 这台主机磁盘上有一条加锁的密码密文。
+     *
+     * 编辑页**不会**把它解出来填进密码格 —— 解密要验指纹,而改个端口、换个名字
+     * 不该要指纹(用户的原话:"修改一个 SSH 没有意义")。密码格因此是空的,
+     * 靠这个标记把占位字从「输入密码」换成「已保存」,免得看着像没存过。
+     * 空着保存不会动那条密文(见 HostStore.writeSecret);打了字才会覆盖。
      */
-    var passwordAtOpen = initial?.password ?: ""
-        private set
-    var keyDataAtOpen = initial?.keyData ?: ""
-        private set
-    var passphraseAtOpen = initial?.keyPassphrase ?: ""
-        private set
-
-    /** 解锁之后填明文:同时把"原始值"对齐过去,这样刚解锁不算改过。 */
-    fun fillUnlocked(unlocked: Host) {
-        password = unlocked.password
-        keyData = unlocked.keyData
-        keyPassphrase = unlocked.keyPassphrase
-        passwordAtOpen = unlocked.password
-        keyDataAtOpen = unlocked.keyData
-        passphraseAtOpen = unlocked.keyPassphrase
-        keyLocked = unlocked.keyPassphrase.isNotEmpty()
-    }
+    val lockedPasswordKept: Boolean = initial?.lockedPassword != null
 
     /**
      * 导入一把私钥。返回要给用户看的一句话:null = 成功;带口令时返回提示并露出口令格
@@ -502,32 +486,6 @@ class HostDraft(private val initial: Host?) {
 private const val MaxKeyBytes = 64 * 1024
 
 /**
- * 进编辑界面时把加锁的凭据解出来灌进草稿。
- *
- * **手机整页和平板浮层都要调这一个** —— 少调一边,那一边的密码格就亮着空白:
- * 用户以为没存过,顺手填一个就把原来的覆盖了。没加锁的主机什么都不做,不弹框。
- */
-@Composable
-fun UnlockIntoDraft(initial: Host?, draft: HostDraft) {
-    val context = LocalContext.current
-    LaunchedEffect(initial?.id) {
-        val source = initial ?: return@LaunchedEffect
-        if (source.lockedPassword == null && source.lockedKeyData == null &&
-            source.lockedKeyPassphrase == null
-        ) {
-            return@LaunchedEffect
-        }
-        val unlocked = unlockCredentials(context, source) ?: run {
-            // 没解开(用户取消了、或者验证失败)。密码格这时是空的,而用户可能
-            // 顺手填一个就保存 —— 那会把一条他还没看见的密码覆盖掉。先说清楚。
-            draft.error = "没能解锁已保存的凭据,现在看不到原来的密码。"
-            return@LaunchedEffect
-        }
-        draft.fillUnlocked(unlocked)
-    }
-}
-
-/**
  * 校验草稿,再按「用生物识别解锁」开关的状态把凭据加密,交给调用方保存。在 IO 线程调用。
  *
  * 开关一变就得**重新加密一遍**才生效,而这一步要用密钥库,所以不能塞进纯校验的
@@ -567,23 +525,18 @@ suspend fun buildHostForSave(activity: android.app.Activity, draft: HostDraft): 
     // 跟这道锁完全无关的一次保存(本来没锁、也没要开):什么都不用做。
     if (!wantsLock && !wasLocked) return host
 
-    // **保存前一定要现验一次。**
+    // **保存不弹指纹框。**
     //
-    // 那把要求认证的密钥只有几秒有效期(见 Secrets.AUTH_WINDOW_SECONDS),进编辑页时
-    // 解的那一次早过期了 —— 不补验的话:
-    //   - 关锁:`disableLock` 读不出旧密文,必然返回 null,永远是"没能关掉这道锁"。
-    //   - 改加锁主机的密码:`HostStore.writeSecret` 里 `writeLocked` 抛异常被吞掉,
-    //     退回写旧密文 —— 界面说保存成功,密码其实没变。
-    // 只有"要动那把密钥"时才验:开锁而手里没有任何明文要封的话,建密钥本身不需要认证。
-    val hasPlain = host.password.isNotEmpty() || host.keyData.isNotEmpty() ||
-        host.keyPassphrase.isNotEmpty()
-    // 关锁要读旧密文,所以看手里有没有密文要读 —— 一条都没有(开了锁但从没存过密码)
-    // 就别白弹一次框。
+    // 上锁走公钥加密,密钥库不要求认证(见 Secrets 里 LOCKED_ALIAS 的说明)。
+    // 用户在自己已解锁的设备上、自己的 App 里亲手打的密码,再验一次证明不了任何事 ——
+    // 值得验的只有"把密码读出来去连服务器"那一刻。
+    //
+    // 只有**关锁**例外:它要把旧密文读出来再换成普通密钥存,读要用私钥,那一步绕不过认证。
+    // 手里一条密文都没有(开了锁但从没存过密码)就别白弹一次框。
     val hasSealed = listOf(host.lockedPassword, host.lockedKeyData, host.lockedKeyPassphrase)
         .any { it != null && Secrets.isLocked(it) }
-    val needsKey = if (wantsLock) hasPlain else hasSealed
-    if (needsKey && !unlockForWrite(activity)) {
-        fail(if (wantsLock) "没能打开这道锁,请重试。" else "没能关掉这道锁,请重试。")
+    if (!wantsLock && hasSealed && !unlockForWrite(activity)) {
+        fail("没能关掉这道锁,请重试。")
         return null
     }
     // 开关状态没变(一直锁着,只是改了点别的):密文由 HostStore.save 按 `lockSecrets`
@@ -705,7 +658,8 @@ fun CredentialFields(
                 "密码",
                 draft.password,
                 { draft.password = it },
-                placeholder = "输入密码",
+                // 加锁的主机不解出来显示(解密要验指纹),但要让用户知道密码还在。
+                placeholder = if (draft.lockedPasswordKept) "已保存" else "输入密码",
                 secret = true,
                 keyboard = KeyboardType.Password,
                 imeAction = ImeAction.Done,

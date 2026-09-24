@@ -35,13 +35,13 @@ suspend fun unlockSecret(activity: Activity, sealed: String): String? {
     // 时验多少次都没用 —— 那种情况直接放弃,省得用户白按一次指纹还以为是自己按错了。
     val cause = direct.exceptionOrNull()
     if (cause !is android.security.keystore.UserNotAuthenticatedException) {
-        Log.w(TAG, "locked secret unreadable: ${cause?.javaClass?.simpleName} ${cause?.message}")
+        Log.w(TAG, "locked secret unreadable: ${cause?.javaClass?.simpleName} ${cause?.message} / cause=${cause?.cause}")
         return null
     }
     if (!authenticate(activity)) return null
     return withContext(Dispatchers.IO) {
         runCatching { Secrets.readLocked(sealed) }
-            .onFailure { Log.w(TAG, "unlock read failed: ${it.javaClass.simpleName} ${it.message}") }
+            .onFailure { Log.w(TAG, "unlock read failed: ${it.javaClass.simpleName} ${it.message} / cause=${it.cause}") }
             .getOrNull()
     }
 }

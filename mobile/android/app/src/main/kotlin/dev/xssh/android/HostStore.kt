@@ -164,8 +164,13 @@ class HostStore(context: Context) {
      */
     private fun writeSecret(plain: String, sealed: String?, locked: Boolean): String = when {
         plain.isEmpty() -> sealed ?: ""
-        // 加锁状态下要重新封:窗口还开着才行(用户刚在编辑页验过),封不上就留着原来的。
-        locked -> runCatching { Secrets.writeLocked(plain) }.getOrElse { sealed ?: "" }
+        // 加锁状态下要重新封。**封不上时记一条日志**:这里退回旧密文是为了不丢东西,
+        // 但它同时意味着"用户改了密码,界面说存好了,其实没改" —— 不打日志就完全看不见,
+        // 这个静默兜底已经骗过两轮排查了。
+        locked -> runCatching { Secrets.writeLocked(plain) }.getOrElse { err ->
+            android.util.Log.w("xssh", "seal locked secret failed: ${err.javaClass.simpleName} ${err.message}")
+            sealed ?: ""
+        }
         else -> Secrets.seal(plain)
     }
 

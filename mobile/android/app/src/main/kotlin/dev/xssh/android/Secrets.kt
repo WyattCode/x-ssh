@@ -9,6 +9,7 @@ import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
+import javax.crypto.spec.SecretKeySpec
 
 /**
  * 主机密码的加密存取。
@@ -28,20 +29,50 @@ object Secrets {
      * - [LOCKED_ALIAS]:要求认证的密钥。用户自己打开开关之后才生成,数据随之重新加密。
      */
     private const val PLAIN_ALIAS = "xssh_host_passwords"
-    private const val LOCKED_ALIAS = "xssh_host_passwords_locked"
+
+    /**
+     * 要求认证的那把,现在是一对 **RSA 密钥**,不再是对称密钥。
+     *
+     * 对称密钥"存"和"读"用的是同一把,所以存一次密码也得验一次指纹 —— 用户的原话:
+     * "人家输入密码点保存,你要识别一次干嘛呢?修改一个 SSH 没有意义。" 完全对:
+     * 密码是他本人在自己已解锁的设备上、在自己的 App 里亲手打进去的,再验一次什么都证明不了。
+     * **真正值得验的只有"把密码读出来去连服务器"那一刻。**
+     *
+     * 非对称正好能分开这两件事:密钥库对 RSA 的规矩是**只有私钥操作要认证**,
+     * 公钥加密不用。于是「上锁」(公钥加密,保存时)一声不响,「解锁」(私钥解密,连接时)才弹框。
+     */
+    private const val LOCKED_ALIAS = "xssh_host_secrets_rsa_v2"
+
+    /** 上一版那把要求认证的**对称**密钥。只用来读旧密文(见 [readLocked]),不再写新的。 */
+    private const val LEGACY_LOCKED_ALIAS = "xssh_host_passwords_locked"
+
+    /**
+     * OAEP 的参数**两边都要写死**。
+     *
+     * 加密用的是公钥,公钥可以导出,所以那一步跑在普通 JCA 里、MGF1 默认跟着主摘要走 SHA-256;
+     * 解密在密钥库里跑,它的 MGF1 默认是 **SHA-1**。不写死就是两边参数不一致,
+     * 解出来是乱码,报 `IllegalBlockSizeException`(实测)。统一成密钥库认的那套:
+     * 主摘要 SHA-256、MGF1 用 SHA-1(OAEP 里 MGF1 用 SHA-1 本身没有安全问题)。
+     */
+    private fun oaep() = javax.crypto.spec.OAEPParameterSpec(
+        "SHA-256",
+        "MGF1",
+        java.security.spec.MGF1ParameterSpec.SHA1,
+        javax.crypto.spec.PSource.PSpecified.DEFAULT,
+    )
+
     private const val TRANSFORM = "AES/GCM/NoPadding"
+    private const val RSA_TRANSFORM = "RSA/ECB/OAEPWithSHA-256AndMGF1Padding"
     private const val TAG_BITS = 128
 
     /** 加锁密文的前缀 —— 两条密钥的密文要在同一个字段里共存,靠它区分。 */
     private const val PREFIX = "L:"
 
     /**
-     * 解锁窗口(秒):人脸 / 指纹验证过一次,这几秒内可以连着读几台主机的密码。
+     * 解锁窗口(秒):验过一次之后,这几秒内可以连着解开几台主机的凭据
+     * (一台主机要解密码 + 私钥 + 口令三条,不能每条都弹一次框)。
      *
-     * 原来是 3 秒,太紧:保存一台加锁主机要走"验证 → 建 Host → 写 SharedPreferences"
-     * 好几步,中间任何一次卡顿窗口就关了,而 `writeLocked` 失败是**静默**退回旧密文的
-     * (见 HostStore.writeSecret)—— 用户改了密码,界面说存好了,其实没改。
-     * 10 秒足够走完一次保存,又不会让密钥长时间敞着。
+     * 只影响"读"。写不再需要认证(公钥加密),所以窗口不用留到够走完一次保存。
      */
     private const val AUTH_WINDOW_SECONDS = 10
 
@@ -75,32 +106,57 @@ object Secrets {
     fun isPlain(sealed: String): Boolean = sealed.isNotEmpty() && !isLocked(sealed)
 
     /**
-     * 解开一条加锁的密文。**只在这个密钥的解锁窗口还开着时才会成功** ——
+     * 解开一条加锁的密文。**这一步要用私钥,所以要求用户刚验证过** ——
      * 窗口过了会抛 `UserNotAuthenticatedException`,调用方据此去弹一次解锁,
      * 验完再调一次本方法。
+     *
+     * 两种格式都认:
+     * - `L:包着的AES密钥:iv:密文` —— 现在的写法(见 [writeLocked])。
+     * - `L:iv:密文` —— 上一版对称密钥写的老密文,用 [LEGACY_LOCKED_ALIAS] 读。
+     *   读出来之后调用方保存一次就会换成新格式(老密钥留着,不删,免得还没转完的读不出来)。
      */
     fun readLocked(sealed: String): String {
-        val parts = sealed.removePrefix(PREFIX).split(':', limit = 2)
+        val parts = sealed.removePrefix(PREFIX).split(':')
+        if (parts.size < 3) {
+            val cipher = Cipher.getInstance(TRANSFORM)
+            cipher.init(
+                Cipher.DECRYPT_MODE,
+                loadSecret(LEGACY_LOCKED_ALIAS),
+                GCMParameterSpec(TAG_BITS, unb64(parts[0])),
+            )
+            return String(cipher.doFinal(unb64(parts[1])), Charsets.UTF_8)
+        }
+        // 私钥解开那把一次性的 AES 密钥 —— **这一步才要认证**。
+        val unwrap = Cipher.getInstance(RSA_TRANSFORM)
+        unwrap.init(Cipher.DECRYPT_MODE, loadPrivate(LOCKED_ALIAS), oaep())
+        val key = SecretKeySpec(unwrap.doFinal(unb64(parts[0])), KeyProperties.KEY_ALGORITHM_AES)
         val cipher = Cipher.getInstance(TRANSFORM)
-        cipher.init(
-            Cipher.DECRYPT_MODE,
-            load(LOCKED_ALIAS),
-            GCMParameterSpec(TAG_BITS, unb64(parts[0])),
-        )
-        return String(cipher.doFinal(unb64(parts[1])), Charsets.UTF_8)
+        cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(TAG_BITS, unb64(parts[1])))
+        return String(cipher.doFinal(unb64(parts[2])), Charsets.UTF_8)
     }
 
-    /** 把明文加密进这道锁。同样要求解锁窗口开着;返回带 `L:` 前缀的密文。 */
+    /**
+     * 把明文加密进这道锁。**不需要认证** —— 用公钥。
+     *
+     * RSA 直接加密只装得下两百来字节,而私钥动辄几 KB,所以是常规的混合写法:
+     * 现摇一把一次性 AES 密钥加密正文,再用公钥把这把 AES 密钥包起来。
+     * 解开时反过来,那一步才要私钥、才要指纹。
+     */
     fun writeLocked(plain: String): String {
-        val cipher = Cipher.getInstance(TRANSFORM)
-        // 加密方向不预先知道 IV,由密钥库生成,再从 `cipher.iv` 读回来。
-        cipher.init(Cipher.ENCRYPT_MODE, load(LOCKED_ALIAS))
+        ensureLockKey()
+        val key = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES)
+            .apply { init(256) }
+            .generateKey()
+        val cipher = Cipher.getInstance(TRANSFORM).apply { init(Cipher.ENCRYPT_MODE, key) }
         val body = cipher.doFinal(plain.toByteArray(Charsets.UTF_8))
-        return PREFIX + b64(cipher.iv) + ":" + b64(body)
+        val wrap = Cipher.getInstance(RSA_TRANSFORM)
+            .apply { init(Cipher.ENCRYPT_MODE, publicKey(LOCKED_ALIAS), oaep()) }
+        return PREFIX + b64(wrap.doFinal(key.encoded)) + ":" + b64(cipher.iv) + ":" + b64(body)
     }
-    /** 加锁的密钥建出来没有;没有就现建一把([writeLocked] 需要它)。建密钥本身不要求认证。 */
+
+    /** 加锁的密钥对建出来没有;没有就现建一对。建密钥本身不要求认证。 */
     fun ensureLockKey() {
-        if (loadOrNull(LOCKED_ALIAS) == null) generate(LOCKED_ALIAS, AUTH)
+        if (loadOrNull(LOCKED_ALIAS) == null) generateRsa(LOCKED_ALIAS)
     }
 
     /**
@@ -140,7 +196,7 @@ object Secrets {
     /**
      * 打开"用生物识别解锁":把这批凭据逐条加密进这道锁。
      *
-     * 前置是**刚刚验过一次**(调用方弹过解锁框)—— 密钥在时间窗内可直接用于加密。
+     * **不需要认证**:加密走公钥(见 [writeLocked])。
      * 返回重新加密后的值;**任何一步失败都返回 null**,调用方原样保留旧值,
      * 不会留下一半加锁一半没锁、重装前谁都读不出来的状态。
      */
@@ -154,7 +210,7 @@ object Secrets {
     /**
      * 关掉这道锁:这台主机的凭据写回不要认证的密钥名下。
      *
-     * 读加锁的密文要密钥已解锁 —— 调用方在保存前刚验过一次(见 `buildHostForSave`);
+     * 读加锁的密文要用私钥,**这一步要用户验证一次**(调用方在关锁前弹框);
      * 真读不出来时返回 null,调用方原样保留,开关弹回打开状态。
      *
      * **这里不销毁那把加锁的密钥。** 它是**所有**主机共用的一把:在一台主机上关掉开关
@@ -187,14 +243,58 @@ object Secrets {
     }
 
     /** 不要认证的那把:不存在就现建一个(第一次存密码时)。 */
-    private fun plainKey(): SecretKey = loadOrNull(PLAIN_ALIAS) ?: generate(PLAIN_ALIAS, null)
+    private fun plainKey(): SecretKey = loadOrNull(PLAIN_ALIAS) as? SecretKey ?: generate(PLAIN_ALIAS, null)
 
-    private fun load(alias: String): SecretKey =
-        loadOrNull(alias) ?: throw IllegalStateException("密钥库里没有 $alias")
+    private fun loadSecret(alias: String): SecretKey =
+        loadOrNull(alias) as? SecretKey ?: throw IllegalStateException("密钥库里没有 $alias")
 
-    private fun loadOrNull(alias: String): SecretKey? {
+    private fun loadPrivate(alias: String): java.security.PrivateKey =
+        loadOrNull(alias) as? java.security.PrivateKey ?: throw IllegalStateException("密钥库里没有 $alias")
+
+    /**
+     * 取公钥。**要把它从密钥库里"摘出来"再用**:直接拿密钥库给的那个公钥对象去加密,
+     * Cipher 会落到 AndroidKeyStore provider 上,于是这把要求认证的密钥连公钥加密也被它管着,
+     * OAEP 参数还按它自己那套走 —— 两边对不上,解出来报 `IllegalBlockSizeException`。
+     * 用 KeyFactory 按编码重建一个普通的公钥对象,加密就走标准 provider,参数以我们传的为准。
+     */
+    private fun publicKey(alias: String): java.security.PublicKey {
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        return store.getKey(alias, null) as? SecretKey
+        val fromStore = store.getCertificate(alias)?.publicKey
+            ?: throw IllegalStateException("密钥库里没有 $alias 的公钥")
+        val factory = java.security.KeyFactory.getInstance(fromStore.algorithm)
+        return factory.generatePublic(java.security.spec.X509EncodedKeySpec(fromStore.encoded))
+    }
+
+    private fun loadOrNull(alias: String): java.security.Key? {
+        val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        return store.getKey(alias, null)
+    }
+
+    /**
+     * 建一对要求认证的 RSA 密钥。**私钥要认证,公钥不要** —— 这正是"存密码不弹框、
+     * 读密码才弹框"的来源(见 [LOCKED_ALIAS] 的说明)。
+     */
+    private fun generateRsa(alias: String) {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.R) {
+            throw IllegalStateException("要求认证的密钥需要 Android 11 及以上")
+        }
+        val generator = java.security.KeyPairGenerator.getInstance(
+            KeyProperties.KEY_ALGORITHM_RSA,
+            "AndroidKeyStore",
+        )
+        val builder = KeyGenParameterSpec.Builder(
+            alias,
+            KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT,
+        )
+            // **两个摘要都要授权**:OAEP 的主摘要是 SHA-256,而 MGF1 那一路密钥库默认走 SHA-1。
+            // 只授权 SHA-256 的话,解密时带 MGF1-SHA1 的参数会被密钥库拒掉,
+            // 报的是 `IllegalBlockSizeException`(实测,看不出真正原因)。
+            .setDigests(KeyProperties.DIGEST_SHA256, KeyProperties.DIGEST_SHA1)
+            .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_RSA_OAEP)
+            .setKeySize(2048)
+        requireAuth(builder, AUTH)
+        generator.initialize(builder.build())
+        generator.generateKeyPair()
     }
 
     private fun generate(alias: String, auth: Int?): SecretKey {
