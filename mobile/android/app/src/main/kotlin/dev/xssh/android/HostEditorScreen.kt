@@ -487,9 +487,13 @@ class HostDraft(private val initial: Host?) {
             lockSecrets = lockSecrets,
             // 没解锁就保存时,明文是空的 —— 把磁盘上那几条原样带过去,别覆盖成空。
             // (用户只是改个名字,不该顺手把密码弄丢。)
-            lockedPassword = initial?.lockedPassword,
-            lockedKeyData = initial?.lockedKeyData,
-            lockedKeyPassphrase = initial?.lockedKeyPassphrase,
+            //
+            // 但**要跟着上面那几条一起清**:换成私钥登录就不留密码(反之亦然)。
+            // 无条件透传的话,加锁的主机切过去密码密文还在、切回来又复活了,
+            // 而没加锁的主机早就清干净了 —— 同一个操作两种结果。
+            lockedPassword = if (key) null else initial?.lockedPassword,
+            lockedKeyData = if (key) initial?.lockedKeyData else null,
+            lockedKeyPassphrase = if (key && keyLocked) initial?.lockedKeyPassphrase else null,
         )
     }
 }
@@ -542,6 +546,22 @@ suspend fun buildHostForSave(activity: android.app.Activity, draft: HostDraft): 
     }
 
     val host = withContext(Dispatchers.IO) { draft.build() } ?: return null
+
+    // 这台设备已经没有可用的门禁了(用户把锁屏去掉、或者换了一种锁屏 —— 密钥库会把
+    // 那把要求认证的密钥直接作废)。此时:加锁的密文谁都读不出来了,而开关也不再显示
+    // (见 CredentialFields 里的 lockAvailable),用户既关不掉锁、又永远存不进新密码 ——
+    // 这台主机就成了死的,只能删掉重建。所以直接退回"没加锁":旧密文本来就已经是废的,
+    // 用户重填一次密码就能接着用。
+    if (!Secrets.lockAvailable(activity)) {
+        draft.lockSecrets = false
+        return host.copy(
+            lockSecrets = false,
+            lockedPassword = null,
+            lockedKeyData = null,
+            lockedKeyPassphrase = null,
+        )
+    }
+
     val wantsLock = draft.lockSecrets
     val wasLocked = draft.originalLocked
     // 跟这道锁完全无关的一次保存(本来没锁、也没要开):什么都不用做。
