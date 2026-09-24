@@ -137,6 +137,16 @@ impl Sftp {
     }
 
     /// 上传:[input] 的内容写到远端 [path](已存在就覆盖)。[total] 只用于进度显示,不知道就传 0。
+    ///
+    /// **先写同目录下的临时文件,整个传完再改名盖过去。**
+    ///
+    /// 原来是直接 `create(path)` 往目标上写 —— `create` 会把已有文件截断,而取消时又
+    /// `remove_file(path)`,删掉的其实是**用户原来那个文件**。更糟的是上层把"会话断开"
+    /// 也当成取消(RemoteFiles.close),所以传一半掉个线,服务器上那个文件就没了,
+    /// 界面还只说一句「已取消」。出错(写到一半网断)同样会在服务器上留下一个被截断、
+    /// 但名字看着完全正常的文件。
+    ///
+    /// 现在:传输过程中目标文件一直原封不动;取消或出错只删临时文件。
     pub fn upload(
         &self,
         path: &str,
@@ -144,25 +154,47 @@ impl Sftp {
         total: u64,
         progress: &mut dyn FnMut(u64, u64) -> bool,
     ) -> Result<u64, SshError> {
+        // 临时文件必须和目标**同一个目录**:改名只在同一个文件系统内才保证是原子的,
+        // 放 /tmp 再改名可能跨设备失败。
+        let temp = format!("{path}.xssh-part");
         self.block(async {
-            let mut file = self.session.create(path).await.map_err(sftp_err)?;
-            let mut buffer = vec![0u8; CHUNK];
-            let mut done = 0u64;
-            loop {
-                let n = input.read(&mut buffer)?;
-                if n == 0 {
-                    break;
+            let outcome = async {
+                let mut file = self.session.create(&temp).await.map_err(sftp_err)?;
+                let mut buffer = vec![0u8; CHUNK];
+                let mut done = 0u64;
+                loop {
+                    let n = input.read(&mut buffer)?;
+                    if n == 0 {
+                        break;
+                    }
+                    file.write_all(&buffer[..n]).await.map_err(sftp_err)?;
+                    done += n as u64;
+                    if !progress(done, total) {
+                        let _ = file.shutdown().await;
+                        return Err(SshError::Cancelled);
+                    }
                 }
-                file.write_all(&buffer[..n]).await.map_err(sftp_err)?;
-                done += n as u64;
-                if !progress(done, total) {
-                    // 取消:把传了一半的文件删掉,别在服务器上留个残缺的。
-                    let _ = file.shutdown().await;
-                    let _ = self.session.remove_file(path).await;
-                    return Err(SshError::Cancelled);
-                }
+                file.shutdown().await.map_err(sftp_err)?;
+                Ok(done)
             }
-            file.shutdown().await.map_err(sftp_err)?;
+            .await;
+
+            let done = match outcome {
+                Ok(done) => done,
+                Err(err) => {
+                    // 取消、写失败、读本地失败 —— 一律只收拾自己的临时文件,目标不动。
+                    let _ = self.session.remove_file(&temp).await;
+                    return Err(err);
+                }
+            };
+
+            // 盖过去。SFTP v3 的 rename 在目标已存在时会失败,所以先删一下;
+            // 删和改名之间有一道很窄的缝,但比"取消就把原文件删掉"小得多。
+            // 改名要是失败了,内容还在临时文件里,报错时把它的名字带出去,用户不至于两头空。
+            let _ = self.session.remove_file(path).await;
+            self.session.rename(&temp, path).await.map_err(|err| {
+                SshError::Sftp(format!("{}(内容已上传到 {temp})", sftp_err(err)))
+            })?;
             Ok(done)
         })
     }

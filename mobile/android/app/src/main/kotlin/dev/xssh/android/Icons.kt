@@ -294,6 +294,35 @@ object XIcons {
         moveTo(12f, 7.9f); lineTo(12.01f, 7.9f)
     }
 
+    /** 看一眼密码:眼睛。 */
+    val Eye = icon("eye") {
+        // 上下两道弧合成杏仁形,中间一个瞳孔。
+        moveTo(2.8f, 12f)
+        curveTo(5.2f, 7.6f, 8.4f, 5.4f, 12f, 5.4f)
+        curveTo(15.6f, 5.4f, 18.8f, 7.6f, 21.2f, 12f)
+        curveTo(18.8f, 16.4f, 15.6f, 18.6f, 12f, 18.6f)
+        curveTo(8.4f, 18.6f, 5.2f, 16.4f, 2.8f, 12f)
+        close()
+        moveTo(14.6f, 12f)
+        arcTo(2.6f, 2.6f, 0f, true, true, 14.59f, 12f)
+    }
+
+    /** 盖住密码:眼睛加一道斜杠。 */
+    val EyeOff = icon("eyeOff") {
+        // 斜杠盖过去,眼睛断成两截 —— 一眼看出是"关着的"。
+        moveTo(3.5f, 20.5f); lineTo(20.5f, 3.5f)
+        moveTo(9.9f, 14.1f)
+        arcTo(2.6f, 2.6f, 0f, false, true, 14.1f, 9.9f)
+        moveTo(7.3f, 7.2f)
+        curveTo(5.4f, 8.4f, 3.9f, 10f, 2.8f, 12f)
+        curveTo(5.2f, 16.4f, 8.4f, 18.6f, 12f, 18.6f)
+        curveTo(13.4f, 18.6f, 14.8f, 18.3f, 16f, 17.6f)
+        moveTo(19f, 15.2f)
+        curveTo(19.9f, 14.3f, 20.6f, 13.2f, 21.2f, 12f)
+        curveTo(18.8f, 7.6f, 15.6f, 5.4f, 12f, 5.4f)
+        curveTo(11f, 5.4f, 10.1f, 5.6f, 9.2f, 5.9f)
+    }
+
     /** 警告:三角 + 感叹号(主机密钥变了、连接失败)。 */
     val Alert = icon("alert") {
         moveTo(12f, 4f); lineTo(21f, 19.5f); lineTo(3f, 19.5f); close()

@@ -1,5 +1,11 @@
 package dev.xssh.android
 
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.material3.Icon
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.size
+import androidx.compose.animation.AnimatedVisibility
 import kotlinx.coroutines.delay
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.isImeVisible
@@ -150,6 +156,24 @@ fun FormField(
     asciiOnly: Boolean = false,
 ) {
     val p = LocalXssh.current
+    // 密码这一行右边的「眼睛」:按一下看一眼,再按一下盖回去。
+    //
+    // 默认**盖着**:密码框的常态是不给人看,肩后有人时才不至于一打开页面就暴露。
+    // 只在真有内容时才出现 —— 空框上放一个点了没反应的按钮没有意义
+    // (加锁主机的密码格是空的、只显示「已保存」,那里也不该有眼睛)。
+    // 离开这一页就恢复成盖着:`remember` 跟着输入框一起没了,不会把"看得见"留到下一次。
+    var revealed by remember { mutableStateOf(false) }
+    // 切到后台就盖回去:明文密码不能留在多任务的缩略图里,回来时也该是常态(盖着)。
+    if (secret) {
+        val owner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+        DisposableEffect(owner) {
+            val watch = androidx.lifecycle.LifecycleEventObserver { _, event ->
+                if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) revealed = false
+            }
+            owner.lifecycle.addObserver(watch)
+            onDispose { owner.lifecycle.removeObserver(watch) }
+        }
+    }
     // 聚焦时把这一行连同下面一截 [LocalFieldClearance] 一起滚进视野:
     // 右下角悬浮的按钮随键盘升起,不这样的话,正在输入的取值正好被按钮盖住。
     val clearance = LocalFieldClearance.current
@@ -226,7 +250,7 @@ fun FormField(
                     textAlign = TextAlign.End,
                 ),
                 visualTransformation =
-                    if (secret) PasswordVisualTransformation() else VisualTransformation.None,
+                    if (secret && !revealed) PasswordVisualTransformation() else VisualTransformation.None,
                 keyboardOptions = KeyboardOptions(keyboardType = keyboard, imeAction = imeAction),
                 keyboardActions = if (onDone != null) KeyboardActions(onDone = { onDone() }) else KeyboardActions.Default,
                 cursorBrush = SolidColor(p.accent),
@@ -259,6 +283,33 @@ fun FormField(
                         },
                     ),
             )
+        }
+        if (secret) {
+            // 出现 / 消失跟着走一套动效(和轨道上那些按钮同一个规矩:不"砰"地冒出来)。
+            AnimatedVisibility(visible = value.isNotEmpty(), enter = Motion.chipInRow, exit = Motion.chipOutRow) {
+                Row {
+                    Spacer(Modifier.width(GapItem))
+                    Box(
+                        Modifier
+                            // 图标 19dp,但手指要按的那块得够大(40×44,行高 52 装得下)。
+                            .size(40.dp, 44.dp)
+                            .clip(CircleShape)
+                            // **不能抢焦点**:`clickable` 默认是可聚焦的,点一下眼睛,
+                            // 输入框就失焦、键盘跟着收起来 —— 密码还没输完呢。
+                            .focusProperties { canFocus = false }
+                            .clickable(role = Role.Button) { revealed = !revealed },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            if (revealed) XIcons.EyeOff else XIcons.Eye,
+                            // 读屏念这一句就够,别再给 clickable 配 onClickLabel(会念两遍)。
+                            contentDescription = if (revealed) "隐藏密码" else "显示密码",
+                            tint = p.textDim,
+                            modifier = Modifier.size(19.dp),
+                        )
+                    }
+                }
+            }
         }
     }
 }
