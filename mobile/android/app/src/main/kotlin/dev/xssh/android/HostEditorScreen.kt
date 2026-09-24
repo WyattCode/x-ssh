@@ -94,24 +94,8 @@ fun HostEditorScreen(
     var keyMessage by remember { mutableStateOf<String?>(null) }
     val importKey = rememberKeyImporter(draft) { keyMessage = it }
 
-    // 加了锁的主机在列表里读到的凭据是空的(没解锁读不出来)。进这一页就先解锁补上,
-    // 否则密码格亮着空白 —— 用户以为没存过,顺手填一个就把它覆盖了。
     val context = LocalContext.current
-    LaunchedEffect(initial?.id) {
-        val source = initial ?: return@LaunchedEffect
-        if (source.lockedPassword == null && source.lockedKeyData == null &&
-            source.lockedKeyPassphrase == null
-        ) {
-            return@LaunchedEffect
-        }
-        val unlocked = unlockCredentials(context, source) ?: run {
-            // 没解开(用户取消了、或者验证失败)。密码格这时是空的,而用户可能
-            // 顺手填一个就保存 —— 那会把一条他还没看见的密码覆盖掉。先说清楚。
-            draft.error = "没能解锁已保存的凭据,现在看不到原来的密码。"
-            return@LaunchedEffect
-        }
-        draft.fillUnlocked(unlocked)
-    }
+    UnlockIntoDraft(initial, draft)
 
     fun save() {
         // 用私钥登录时要验一次口令(解私钥要几百毫秒)、加锁开关要用密钥库并可能弹一次
@@ -512,6 +496,32 @@ class HostDraft(private val initial: Host?) {
 
 /** 私钥文件不会超过这个大小(4096 位 RSA 带口令也才 3KB 多);更大的多半选错了文件。 */
 private const val MaxKeyBytes = 64 * 1024
+
+/**
+ * 进编辑界面时把加锁的凭据解出来灌进草稿。
+ *
+ * **手机整页和平板浮层都要调这一个** —— 少调一边,那一边的密码格就亮着空白:
+ * 用户以为没存过,顺手填一个就把原来的覆盖了。没加锁的主机什么都不做,不弹框。
+ */
+@Composable
+fun UnlockIntoDraft(initial: Host?, draft: HostDraft) {
+    val context = LocalContext.current
+    LaunchedEffect(initial?.id) {
+        val source = initial ?: return@LaunchedEffect
+        if (source.lockedPassword == null && source.lockedKeyData == null &&
+            source.lockedKeyPassphrase == null
+        ) {
+            return@LaunchedEffect
+        }
+        val unlocked = unlockCredentials(context, source) ?: run {
+            // 没解开(用户取消了、或者验证失败)。密码格这时是空的,而用户可能
+            // 顺手填一个就保存 —— 那会把一条他还没看见的密码覆盖掉。先说清楚。
+            draft.error = "没能解锁已保存的凭据,现在看不到原来的密码。"
+            return@LaunchedEffect
+        }
+        draft.fillUnlocked(unlocked)
+    }
+}
 
 /**
  * 校验草稿,再按「用生物识别解锁」开关的状态把凭据加密,交给调用方保存。在 IO 线程调用。

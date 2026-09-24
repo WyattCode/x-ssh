@@ -1253,6 +1253,8 @@ private fun HostSheet(
 ) {
     val p = LocalXssh.current
     val draft = remember(initial?.id) { HostDraft(initial) }
+    // 加锁的主机:和手机整页编辑器同一步,进来就把密码解出来填上(见 UnlockIntoDraft)。
+    UnlockIntoDraft(initial, draft)
     var confirmDiscard by remember { mutableStateOf(false) }
     val first = remember { FocusRequester() }
     val passwordFocus = remember { FocusRequester() }
