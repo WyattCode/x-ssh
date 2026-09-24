@@ -280,7 +280,10 @@ fun connectHost(host: Host, cols: Int = 80, rows: Int = 24): LiveTerminal {
     val session = try {
         Session.connect(config)
     } catch (e: Throwable) {
-        Log.w(TAG, "connect failed after ${elapsed()}ms: ${e.javaClass.simpleName} ${e.message}")
+        // 类名和消息之间要有分隔:uniffi 的异常类叫 `Message`,直接拼起来就是
+        // 「Message authentication failed」—— 读着像 MAC 校验失败,实际是普通的认证失败。
+        // (真按这个读下去会一路查到密钥交换和加密套件上,白花一个多小时。)
+        Log.w(TAG, "connect failed after ${elapsed()}ms: [${e.javaClass.simpleName}] ${e.message}")
         throw e
     }
     Log.i(TAG, "authenticated in ${elapsed()}ms")

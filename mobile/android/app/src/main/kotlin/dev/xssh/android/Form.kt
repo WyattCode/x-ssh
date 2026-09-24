@@ -190,17 +190,31 @@ fun FormField(
                     textAlign = TextAlign.End,
                 )
             }
-            // 用 TextFieldValue 才看得到组词区间(composition);外部改了值(端口只留数字)时以外部为准。
+            // 用 TextFieldValue 才看得到组词区间(composition)。
             var field by remember { mutableStateOf(TextFieldValue(value, TextRange(value.length))) }
-            val shown = syncedField(field, value)
-            // 外部改写过文字(端口只留数字)时,把自己的状态也对齐 —— 下面直接插字要基于最新内容。
-            SideEffect { if (field != shown) field = shown }
+            // 上一次交给外部的文字。**输入框自己的状态是唯一真相**,外部的 [value] 只有在
+            // 不等于它时才采纳 —— 那才说明外部真的改写过(端口只留数字、解锁后回填密码)。
+            //
+            // 原来是"只要两边不一样就拿 value 覆盖"。但外部回来是异步的:打字稍快一点,
+            // 这一帧的 value 还是上一个字的内容,新敲进去的就被旧值盖掉。
+            // **实测 13 位的密码存下来只剩 8 位**,而且丢得静悄悄 —— 密码框是圆点,看不出来,
+            // 直到连服务器报「认证失败」才发现。(实体键盘那条路早就踩过同一个坑,见下面的
+            // onInterceptKeyBeforeSoftKeyboard;当时只修了那一边。)
+            var emitted by remember { mutableStateOf(value) }
+            val shown = if (value == emitted) field else syncedField(field, value)
+            SideEffect {
+                if (field != shown) field = shown
+                if (emitted != value) emitted = value
+            }
             BasicTextField(
                 value = shown,
                 onValueChange = {
                     field = it
                     onComposing?.invoke(it.composition != null)
-                    if (it.text != value) onValue(it.text)
+                    if (it.text != emitted) {
+                        emitted = it.text
+                        onValue(it.text)
+                    }
                 },
                 singleLine = true,
                 textStyle = TextStyle(
@@ -236,6 +250,7 @@ fun FormField(
                                 val sel = current.selection
                                 val text = current.text.replaceRange(sel.min, sel.max, code.toChar().toString())
                                 field = TextFieldValue(text, TextRange(sel.min + 1))
+                                emitted = text
                                 onComposing?.invoke(false)
                                 onValue(text)
                                 true
