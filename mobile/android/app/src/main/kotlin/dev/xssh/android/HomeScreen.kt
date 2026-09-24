@@ -163,7 +163,11 @@ fun HomeScreen(
     // 原来是用 LaunchedEffect 去"自动选中第一台",而副作用要等第一次组合之后才跑 ——
     // 于是冷启动时右栏先渲染一帧「选择左边的主机」的空状态,下一帧才换成真内容,
     // 看上去就是打开应用闪跳一下(录屏第 296 帧拍到的就是这个)。
-    val shownHost = hosts.firstOrNull { it.id == selectedId } ?: hosts.firstOrNull()
+    // **右栏显示哪一台,要和左边列表(过滤之后的)一致。**
+    // 原来是从未过滤的 `hosts` 里取:搜索之后左边只剩 "prod-web"、右栏却还显示着
+    // 上一次选中的 "backup-nas",这时候按回车连的是 `filtered` 里的第一条 ——
+    // **连上的机器和屏幕上写着的不是同一台**。
+    val shownHost = filtered.firstOrNull { it.id == selectedId } ?: filtered.firstOrNull()
 
     // 浮在内容上的玻璃按钮(右侧轨道)要模糊、折射的,就是这一页的内容。
     val backdrop = rememberLayerBackdrop()
@@ -286,7 +290,10 @@ fun HomeScreen(
                     underRail = false,
                     // 双栏(直板机横屏)高度只有 400dp 上下,不再单独占一条顶栏:按钮浮在右上角。
                     topPad = 0.dp,
-                    bottomClearance = clearance,
+                    // 轨道既然不在这一栏上面,就**别按轨道的高度留白**。原来这里也传了
+                    // `clearance`(270dp):内屏横屏可视高度才 600dp 上下,等于左栏下面
+                    // 空掉快一半,而且把"选中项滚进视野"的算式也带偏 —— 每按一下 ↓ 都在滚。
+                    bottomClearance = Gutter,
                 )
                 // 两栏之间不画线:折痕本身就是分界,再补一条反而多余。
                 Spacer(Modifier.width(creaseWidth))

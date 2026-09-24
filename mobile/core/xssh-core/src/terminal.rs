@@ -274,13 +274,18 @@ impl Terminal {
     }
 
     /// 光标位置与可见性。
+    ///
+    /// `cursor.point` 是**网格坐标**,要加上显示偏移才是视口里的行 —— 和 [`Self::screen_runs`]
+    /// 里那一句 `row = line + offset` 是同一件事。原来这里直接用了网格行号:
+    /// 往回翻历史之后,光标的网格行永远在活动屏上(判定恒为"可见"),于是那道蓝色下划线
+    /// 被画到了历史内容中间某一行下面。正确的结果是它跟着内容滚出视口、不该画。
     pub fn cursor(&self) -> Cursor {
         let content = self.term.renderable_content();
-        let line = content.cursor.point.line.0;
-        let on_screen = line >= 0 && (line as usize) < self.size.rows;
+        let row = content.cursor.point.line.0 + content.display_offset as i32;
+        let on_screen = row >= 0 && (row as usize) < self.size.rows;
         Cursor {
             col: content.cursor.point.column.0,
-            row: line.max(0) as usize,
+            row: row.max(0) as usize,
             visible: on_screen && content.cursor.shape != CursorShape::Hidden,
         }
     }
@@ -649,6 +654,30 @@ fn palette(index: u8, base16: &[u32; 16]) -> u32 {
 
 #[cfg(test)]
 mod tests {
+
+    /// 往回翻历史之后,光标要跟着内容滚出视口 —— 不能还画在历史内容中间。
+    ///
+    /// 原来 `cursor()` 直接用网格行号、不加显示偏移:网格光标永远在活动屏上,
+    /// 于是判定恒为"可见",那道蓝色下划线被画到了回滚内容里随便某一行下面。
+    #[test]
+    fn cursor_follows_the_viewport_when_scrolled_back() {
+        let mut term = Terminal::new(20, 4);
+        for i in 0..40 {
+            term.feed(format!("line{i}
+").as_bytes());
+        }
+        let bottom = term.cursor();
+        assert!(bottom.visible, "贴底时光标该看得见");
+
+        term.scroll(10);
+        assert_eq!(term.scroll_offset(), 10);
+        assert!(!term.cursor().visible, "翻上去 10 行之后光标早出视口了,不该再画");
+
+        term.scroll_to_bottom();
+        let back = term.cursor();
+        assert!(back.visible, "回到底部又该看得见");
+        assert_eq!(back.row, bottom.row, "回到底部,行号该和原来一样");
+    }
 
     /// 往回翻之后,远端继续输出**不能**把视口拽回底部 —— 看日志时这是刚需。
     #[test]

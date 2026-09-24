@@ -127,7 +127,15 @@ fun rememberAdaptive(): Adaptive {
             Hinge(vertical = true, halfOpen = false, startDp = start.dp, sizeDp = size.dp)
         }
     }
-    val hinge = if (layout != null) observed else cached
+    // 量到了就用量到的,**没量到就用缓存的** —— 不管有没有收到过 layout。
+    //
+    // 原来写的是 `if (layout != null) observed else cached`:一旦收到过一次 layout
+    // (在外屏就会),这个条件就永远为真,缓存再也用不上。展开的那一瞬间窗口先变成 860dp
+    // 并重组,而 WindowInfoTracker 的新折痕还没到,`observed` 还是 null ——
+    // 于是 `hinge` 为 null、`listPaneWidth` 退回 38%,一两帧之后折痕到了再跳回去,
+    // 分栏线还是会闪一下,正是这份缓存本来要消掉的那个跳动。
+    // (缓存按窗口尺寸分别记,合上时那一档记的是 -1,所以真平板不会被误判成有折痕。)
+    val hinge = observed ?: cached
 
     // 量到了就记下来。只记竖直折痕(半折是临时状态,不该被缓存成初始值),
     // 而且只记**真能拿来分栏**的那种 —— 折叠之后系统仍会报一条折痕,位置却落在

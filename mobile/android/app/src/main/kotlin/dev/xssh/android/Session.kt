@@ -99,21 +99,34 @@ class LiveTerminal(
     }
 
     /** 开始选择(视口坐标)。 */
+    /**
+     * 核心里**有没有**选区。
+     *
+     * 和帧里的 `selection` 不是一回事:那个是"选区在当前视口里的范围",选区整个滚出视口
+     * 之后它是 null,而核心里那份还在。界面原来拿它当"有没有选区"用,于是选区滚出去之后
+     * 就再也清不掉了 —— 打字不清、`Ctrl+Shift+C` 还能把看不见的那段复制走。
+     */
+    var hasSelection = false
+        private set
+
     fun selectStart(row: Int, col: Int, rightHalf: Boolean, kind: uniffi.xssh_ffi.SelectKind) {
         if (closed) return
         runCatching { term.selectStart(row.toUInt(), col.toUInt(), rightHalf, kind) }
+        hasSelection = true
         dirty = true
     }
 
     fun selectUpdate(row: Int, col: Int, rightHalf: Boolean) {
         if (closed) return
         runCatching { term.selectUpdate(row.toUInt(), col.toUInt(), rightHalf) }
+        hasSelection = true
         dirty = true
     }
 
     fun selectClear() {
         if (closed) return
         runCatching { term.selectClear() }
+        hasSelection = false
         dirty = true
     }
 

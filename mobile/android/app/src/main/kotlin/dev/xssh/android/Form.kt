@@ -16,6 +16,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.unit.IntSize
@@ -167,9 +168,25 @@ fun FormField(
     // 接着输的新密码就直接以明文出现 —— 用户并没有按过任何东西。
     // 用副作用改,不在组合期间写状态(那会多跑一轮组合)。
     LaunchedEffect(value.isEmpty()) { if (value.isEmpty()) revealed = false }
-    // 切到后台就盖回去:明文密码不能留在多任务的缩略图里,回来时也该是常态(盖着)。
+    // 明文露着的时候给窗口挂上 FLAG_SECURE:多任务缩略图、截屏、录屏一律拿不到。
+    //
+    // 原来只在 `ON_STOP` 里把 `revealed` 收回去,**挡不住缩略图** —— 系统那张快照是在
+    // pause/stop 那一刻拍的,之后的重组来不及。收回去这件事还是要做(回到前台该是盖着的),
+    // 但真正管用的是这道标志:它一挂上,系统就不会拍这一屏。
     if (secret) {
+        val activity = hostActivity(LocalContext.current)
         val owner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+        DisposableEffect(revealed, activity) {
+            if (revealed) {
+                activity?.window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+            }
+            onDispose {
+                // 只有自己挂上的才摘 —— 同一页可能有两格(密码 + 私钥口令)同时露着。
+                if (revealed) {
+                    activity?.window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+                }
+            }
+        }
         DisposableEffect(owner) {
             val watch = androidx.lifecycle.LifecycleEventObserver { _, event ->
                 if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) revealed = false

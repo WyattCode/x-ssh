@@ -496,7 +496,10 @@ private fun TerminalView(
     // 能一直选进回滚历史;这里只拿它落在视口里的那一段来画。一敲键盘、点一下终端就清掉。
     val selection: () -> TermSelection? = { frameState.value.selection?.toTermSelection() }
     val copySelection: () -> Unit = { live.copySelection { copyText(context, it) } }
-    val clearSelection: () -> Unit = { if (frameState.value.selection != null) live.selectClear() }
+    // 判据是"核心里有没有选区"(`live.hasSelection`),**不是**"这一帧的视口里看不看得见"。
+    // 用后者的话,选区滚出视口之后 `frame.selection` 变成 null,这里就直接短路了 ——
+    // 核心里那份一直留着:打字不清它,回滚上去高亮还在,`Ctrl+Shift+C` 还会把它复制走。
+    val clearSelection: () -> Unit = { if (live.hasSelection) live.selectClear() }
 
     // 实体键盘。输入框模式下普通字符交给输入法(中文要组词),其余键(回车、方向、Esc、
     // Ctrl 组合……)一律在这里编码 —— 输入法不组词时会把它们放行,正好落到这里。

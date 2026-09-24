@@ -205,6 +205,14 @@ class TerminalSession(
 
     fun selectClear() = enqueue { live.selectClear(); publishFrame() }
 
+    /**
+     * 核心里有没有选区(见 [LiveTerminal.hasSelection])。
+     *
+     * 注意**不要**拿帧里的 `selection` 当这个用 —— 那个是"在当前视口里的范围",
+     * 选区滚出视口就是 null,而核心里那份还在。
+     */
+    val hasSelection: Boolean get() = live.hasSelection
+
     /** 取选中的文字交给 [onText](在主线程回调),然后清掉选区。 */
     fun copySelection(onText: (String) -> Unit) = enqueue {
         val text = live.selectionText()
