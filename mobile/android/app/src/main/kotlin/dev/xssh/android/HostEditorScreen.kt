@@ -771,13 +771,9 @@ fun CredentialFields(
     }
     // 这道锁管的是"已保存的密码 / 私钥 / 口令",和上面选密码还是私钥无关,所以单独一组。
     if (lockAvailable) {
-        FormGroup(
-            footnote = if (draft.lockSecrets) {
-                "连接这台主机前要先验证一次(生物识别或锁屏密码)。"
-            } else {
-                null
-            },
-        ) {
+        // 不写脚注:开关本身「用生物识别解锁」已经说清楚了,再补一句是重复。
+        // 要查这台主机锁没锁,详情页有「解锁」那一行。
+        FormGroup {
             Row(
                 Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(horizontal = BoxPad),
                 verticalAlignment = Alignment.CenterVertically,
