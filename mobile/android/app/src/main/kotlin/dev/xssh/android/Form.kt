@@ -1,6 +1,6 @@
 package dev.xssh.android
 
-import android.app.Activity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.material3.Icon
@@ -177,17 +177,30 @@ fun FormField(
     if (secret) {
         val activity = hostActivity(LocalContext.current)
         val owner = androidx.lifecycle.compose.LocalLifecycleOwner.current
-        DisposableEffect(revealed, activity) {
+        // **平板上这一格画在浮层自己的窗口里,不是 Activity 那扇**(新建 / 编辑主机是
+        // `Dialog`,`dumpsys window` 里是单独一条、带 DIM_BEHIND)。只给 Activity 挂标志
+        // 挡不住它:`FLAG_SECURE` 是按窗口算的。Compose 的 `Dialog` 默认 `SecureFlagPolicy.Inherit`
+        // 也救不了 —— 继承是在**浮层重组时**才重新求值的,而点眼睛只让最里层的输入框重组,
+        // `Dialog` 那层压根没再跑,浮层窗口就一直停在"创建时父窗口还没加密"的状态。
+        // 两扇都挂:浮层这扇管住浮层里画出来的明文,Activity 那扇管住整个任务的多任务快照。
+        val view = LocalView.current
+        val windows = remember(view, activity) {
+            listOfNotNull(
+                (view.parent as? androidx.compose.ui.window.DialogWindowProvider)?.window,
+                activity?.window,
+            )
+        }
+        DisposableEffect(revealed, windows) {
             // **把值抄下来**。`onDispose` 里再读 `revealed` 读到的是**当时最新的那个**:
             // 盖回去(true → false)时这个副作用重跑,onDispose 先执行,而那一刻
             // `revealed` 已经是 false —— `clearFlags` 一次都不会跑,标志就永远挂着了。
             // 实测:露一次明文之后整个进程的窗口都摘不掉 FLAG_SECURE,终端再也截不了图。
             val held = revealed
-            if (held && activity != null) SecureWindow.acquire(activity)
+            if (held) windows.forEach { SecureWindow.acquire(it) }
             onDispose {
                 // 只有自己挂上的才摘 —— 同一页可能有两格(密码 + 私钥口令)同时露着,
                 // 标志是整扇窗口的,谁都直接 clear 会把还露着的那一格也解了防。记个数。
-                if (held && activity != null) SecureWindow.release(activity)
+                if (held) windows.forEach { SecureWindow.release(it) }
             }
         }
         DisposableEffect(owner) {
@@ -408,30 +421,30 @@ fun syncedField(field: TextFieldValue, value: String): TextFieldValue {
 val LocalFieldClearance = compositionLocalOf { 0.dp }
 
 /**
- * 整扇窗口的 `FLAG_SECURE` 开关,**按露出明文的格子数记数**。
+ * 一扇窗口的 `FLAG_SECURE` 开关,**按露出明文的格子数记数**。
  *
  * 标志挂在窗口上,不是挂在某一格上:同一页可能有两格(密码 + 私钥口令)同时露着,
  * 先盖回去的那一格要是直接 `clearFlags`,还露着的那一格就一起失了防护。
- * 所以第一格挂上、最后一格摘掉。
+ * 所以第一格挂上、最后一格摘掉。一格可能同时占着两扇窗口(浮层 + Activity),各记各的。
  *
- * 只在主线程的组合里用,不加锁。Activity 用弱引用装,免得转屏后旧的那个被这张表拖住。
+ * 只在主线程的组合里用,不加锁。窗口用弱引用装,免得转屏 / 关浮层之后旧的那扇被这张表拖住。
  */
 private object SecureWindow {
-    private val held = java.util.WeakHashMap<Activity, Int>()
+    private val held = java.util.WeakHashMap<android.view.Window, Int>()
 
-    fun acquire(activity: Activity) {
-        val next = (held[activity] ?: 0) + 1
-        held[activity] = next
-        if (next == 1) activity.window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+    fun acquire(window: android.view.Window) {
+        val next = (held[window] ?: 0) + 1
+        held[window] = next
+        if (next == 1) window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
     }
 
-    fun release(activity: Activity) {
-        val next = (held[activity] ?: 1) - 1
+    fun release(window: android.view.Window) {
+        val next = (held[window] ?: 1) - 1
         if (next > 0) {
-            held[activity] = next
+            held[window] = next
         } else {
-            held.remove(activity)
-            activity.window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+            held.remove(window)
+            window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
         }
     }
 }

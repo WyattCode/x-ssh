@@ -1595,6 +1595,38 @@ uniffi 的异常类叫 `Message`,于是普通的「认证失败」打出来是 *
 真机读窗口 flag 验证:遮住 → 无 SECURE,露出 → SECURE,再遮住 → **无 SECURE**,
 再露 → SECURE,退出表单 → 无 SECURE。
 
+**二次复核又揪出一条:平板的浮层窗口没被保护**
+
+`FLAG_SECURE` 是**按窗口**算的,而平板上新建 / 编辑主机是个 `Dialog` ——
+`dumpsys window windows` 里它是**单独一扇**(带 `DIM_BEHIND`),明文就画在那扇上。
+只给 Activity 那扇挂标志挡不住它。真机证据(露出明文时):
+
+```
+Window #14 ... DIM_BEHIND ...      ← 浮层,无 SECURE
+Window #15 ... SECURE ...          ← Activity
+```
+
+Compose 的 `Dialog` 默认 `SecureFlagPolicy.Inherit` 救不了:继承是在**浮层那层重组时**
+才重新求值(`DialogWrapper.updateParameters` 挂在 `Dialog` 自己的 `SideEffect` 上),
+而点眼睛只让最里层的输入框重组,`Dialog` 那层没再跑,浮层窗口就一直停在
+"创建时父窗口还没加密"的状态。
+
+**当时没看出来是因为小米输入法自己也挂了 SECURE**(密码框聚焦时它会给自己那扇窗挂),
+整屏截图全黑,把这个洞盖住了 —— 靠输入法替我们挡,换个输入法或插实体键盘就漏。
+
+改法:`LocalView.current.parent as? DialogWindowProvider` 取浮层自己那扇窗,**两扇都挂**
+(浮层那扇管明文,Activity 那扇管整个任务的多任务快照);计数表从按 Activity 记改成按
+`Window` 记。真机验证(判据不受输入法影响,直接读 `dumpsys` 的 `fl=`):
+
+| | 浮层窗口 | Activity 窗口 |
+|---|---|---|
+| 盖着 | no-secure | no-secure |
+| 露出 | **SECURE** | **SECURE** |
+| 再盖 | no-secure | no-secure |
+| 再露 | **SECURE** | **SECURE** |
+
+多任务缩略图仍然是空白(没被这次改动弄回去)。
+
 ## 5. 关键坑(踩过,别再踩)
 
 1. **DSR 应答**:终端事件不回写 → 远端程序挂起(ConPTY 必现;vim 同理)。已修 + 单测。
@@ -1780,6 +1812,14 @@ uniffi 的异常类叫 `Message`,于是普通的「认证失败」打出来是 *
 100. **`onDispose` 里读 State 读到的是"现在",不是"当初"**。`DisposableEffect(flag)` 在
     `flag` 翻转时重跑,onDispose 先执行,那一刻 `flag` 已经是新值 —— 想"只撤销自己做过的事"
     必须在副作用体里把值抄成局部变量。实测代价:`FLAG_SECURE` 挂上再也摘不掉。
+100b. **`FLAG_SECURE` 按窗口算,平板的浮层是另一扇窗**。手机上编辑页和主界面同属
+    Activity 那扇窗,平板上是 `Dialog`(`dumpsys window windows` 里带 `DIM_BEHIND` 的那条),
+    只挂 Activity 挡不住浮层里画出来的东西。Compose `Dialog` 的 `SecureFlagPolicy.Inherit`
+    只在浮层那层重组时求值,靠不住。取窗口:`LocalView.current.parent as? DialogWindowProvider`。
+100c. **小米输入法给密码框挂 SECURE,会把整屏截图弄黑**。这会**掩盖**应用自己的漏洞
+    (看起来"保护住了",其实是输入法在挡)。测应用的保护要用不受输入法影响的判据:
+    读 `dumpsys window` 的 `fl=`,或看最近任务缩略图(那张快照里没有输入法)。
+    锁屏时 `screencap` 同样全黑 —— 测之前先确认 `showing=false`。
 101. **验一条"闪一下"的界面 bug,先想清楚有没有对照**。逐帧录像能证明"看不到跳动",
     不等于证明"代码走了那条分支" —— 面板淡入期间旧代码可能同样看不出来。
     没有阴性对照就老实写"现象上过、路径未证实",别把两者混为一谈。
