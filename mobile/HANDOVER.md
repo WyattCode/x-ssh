@@ -1877,15 +1877,17 @@ Compose 的 `Dialog` 默认 `SecureFlagPolicy.Inherit` 救不了:继承是在**�
 
 ## 7. 设备现状(2026-09-25 更新,第九次会话结束)
 
-三台都是同一个签名(这台 PC 的 debug keystore),`install -r` 直接覆盖。代码最新是 `7b40498`
-(只改了注释);装在设备上的是 `2dbdae0` 编出来的包,行为完全一样。
+三台现在都是同一个签名(这台 PC 的 debug keystore),`install -r` 直接覆盖。三台装的都是最新代码
+(Fold / Pad 是 `2dbdae0` 编的包,17 Ultra 是 `7b40498` 编的包,两者只差注释,行为一样)。
 
 - **18 Fold**(`SERIAL0000000002`,User 0):最新版,2026-09-25 20:39 装。主机只有用户自己的 `DGX Node 0`
   (`203.0.113.10:2222`,密码加锁),测试主机 `LoopTarget` 已删,这条记录测前测后逐字段一致。
   自动旋转 = 关(`accelerometer_rotation=0`,这是用户现在的设置,别当成要"恢复成开")、常亮关、录屏文件已删。
 - **Pad 9 Pro Max**(`SERIAL0000000001`):最新版。主机只有 `DGX Node 0`(`192.168.1.100:22`,密码加锁),
   `xssh_hosts.xml` md5 `d8cc9d08…` 测前测后一致;常亮关;`wm size` 已 reset。
-- **17 Ultra**(`4ba14696`):这次没碰,还是 2026-09-22 的版本(见 7.1)。
+- **17 Ultra**(`4ba14696`):2026-09-26 07:32 **卸载重装**成最新版。7.1 里说 09-22 已经换成这台电脑的签名,
+  **那句是错的** —— `install -r` 报 `INSTALL_FAILED_UPDATE_INCOMPATIBLE`。卸载前查过:没有主机记录,
+  只有外观 = 深色(装好后已切回深色)。旧的 `xssh_ui.xml` 备份在会话 scratchpad 里,没有别的数据。
 - **PC**:测试 sshd 已关(另外杀掉了一个早上 10:50 留下来、同样占 2222 的旧 sshd);`adb reverse` 已清;
   `authorized_keys` 已还原成只有 `xssh-dev` 那一把(测试时加过 App 生成的公钥,已删)。
   本机靶机只绑回环的配置写法见 M3.56:`Port 2222` + `ListenAddress 127.0.0.1` + `PerSourcePenalties no`,
