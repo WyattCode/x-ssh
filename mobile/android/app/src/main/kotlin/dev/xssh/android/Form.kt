@@ -1,5 +1,6 @@
 package dev.xssh.android
 
+import android.view.WindowManager.LayoutParams.FLAG_SECURE
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.runtime.DisposableEffect
@@ -198,8 +199,7 @@ fun FormField(
             val held = revealed
             if (held) windows.forEach { SecureWindow.acquire(it) }
             onDispose {
-                // 只有自己挂上的才摘 —— 同一页可能有两格(密码 + 私钥口令)同时露着,
-                // 标志是整扇窗口的,谁都直接 clear 会把还露着的那一格也解了防。记个数。
+                // 只摘自己挂上的那一份(见 SecureWindow:按窗口记数)。
                 if (held) windows.forEach { SecureWindow.release(it) }
             }
         }
@@ -421,11 +421,11 @@ fun syncedField(field: TextFieldValue, value: String): TextFieldValue {
 val LocalFieldClearance = compositionLocalOf { 0.dp }
 
 /**
- * 一扇窗口的 `FLAG_SECURE` 开关,**按露出明文的格子数记数**。
+ * 一扇窗口的 `FLAG_SECURE` 开关,**按露出明文的格子数记数**:第一格挂上、最后一格摘掉。
  *
- * 标志挂在窗口上,不是挂在某一格上:同一页可能有两格(密码 + 私钥口令)同时露着,
- * 先盖回去的那一格要是直接 `clearFlags`,还露着的那一格就一起失了防护。
- * 所以第一格挂上、最后一格摘掉。一格可能同时占着两扇窗口(浮层 + Activity),各记各的。
+ * 标志挂在窗口上,不是挂在某一格上。现在的编辑页里密码和私钥口令**不会同时出现**
+ * (登录方式二选一),计数是防着以后:哪天一页上有两格秘密,先盖回去的那一格直接
+ * `clearFlags` 就会把还露着的那一格一起解了防。一格同时占着两扇窗口(浮层 + Activity),各记各的。
  *
  * 只在主线程的组合里用,不加锁。窗口用弱引用装,免得转屏 / 关浮层之后旧的那扇被这张表拖住。
  */
@@ -435,7 +435,7 @@ private object SecureWindow {
     fun acquire(window: android.view.Window) {
         val next = (held[window] ?: 0) + 1
         held[window] = next
-        if (next == 1) window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+        if (next == 1) window.addFlags(FLAG_SECURE)
     }
 
     fun release(window: android.view.Window) {
@@ -444,7 +444,7 @@ private object SecureWindow {
             held[window] = next
         } else {
             held.remove(window)
-            window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+            window.clearFlags(FLAG_SECURE)
         }
     }
 }
