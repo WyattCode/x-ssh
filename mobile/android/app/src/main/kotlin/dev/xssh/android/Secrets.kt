@@ -181,6 +181,9 @@ object Secrets {
      * 解密没有加锁的密文。损坏、或密钥已不在(重装过)时返回空串。
      *
      * 加锁的密文在这里读不出来 —— 调用方先看 [isLocked],别把"要解锁"当成"密码丢了"。
+     *
+     * **空串有歧义**:既可能是"这台主机本来就没存密码",也可能是"存了但读不出来"
+     * (密钥库被清、密文损坏)。加载主机时两者已经分开记了,见 `Host.unreadableSecrets`。
      */
     fun open(sealed: String): String {
         if (sealed.isEmpty() || isLocked(sealed)) return ""

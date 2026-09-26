@@ -9,8 +9,54 @@ import {
   sanitizePasteText,
   isPrivateKey,
   sanitizeKeyName,
-  shouldSkipKeyFile
+  shouldSkipKeyFile,
+  windowsJoin,
+  windowsParent,
+  isWindowsPath,
+  localJoin,
+  localParent,
+  treeDirMode
 } from './fsUtils'
+
+describe('windowsJoin', () => {
+  it('joins with a backslash', () => {
+    expect(windowsJoin('C:\\Users', 'file.txt')).toBe('C:\\Users\\file.txt')
+  })
+
+  it('collapses trailing separators of either kind', () => {
+    expect(windowsJoin('C:\\Users\\\\', 'a')).toBe('C:\\Users\\a')
+    expect(windowsJoin('C:/Users/', 'a')).toBe('C:/Users\\a')
+  })
+
+  it('joins under a drive root without doubling the separator', () => {
+    expect(windowsJoin('C:\\', 'Users')).toBe('C:\\Users')
+  })
+})
+
+describe('windowsParent', () => {
+  it('returns the containing directory', () => {
+    expect(windowsParent('C:\\Users\\user\\a.txt')).toBe('C:\\Users\\user')
+  })
+
+  it('accepts forward slashes too', () => {
+    expect(windowsParent('C:/Users/user')).toBe('C:/Users')
+  })
+
+  it('lands on the drive root, never on a bare drive letter', () => {
+    // `C:` alone is "the current directory on C" to Windows (normalize gives
+    // `C:.`), so going up from C:\Users must reach C:\ itself — and C:\ has
+    // nothing above it (returning '' would blank the drawer's path).
+    expect(windowsParent('C:\\Users')).toBe('C:\\')
+    expect(windowsParent('C:/Users')).toBe('C:\\')
+    expect(windowsParent('C:\\')).toBe('C:\\')
+    expect(windowsParent('C:')).toBe('C:\\')
+  })
+
+  it('returns the input when there is nothing to strip', () => {
+    expect(windowsParent('')).toBe('')
+    expect(windowsParent('folder')).toBe('folder')
+  })
+})
 
 describe('posixJoin', () => {
   it('joins a dir and name', () => {
@@ -177,5 +223,51 @@ describe('shouldSkipKeyFile', () => {
     expect(shouldSkipKeyFile('prod-key-01234567.pub')).toBe(true)
     expect(shouldSkipKeyFile('id_rsa-1a2b3c4d.pub')).toBe(true)
     expect(shouldSkipKeyFile('my-key-01234567.pub')).toBe(true)
+  })
+})
+
+describe('local paths follow the shape of the path', () => {
+  it('recognises Windows drive and UNC paths', () => {
+    for (const p of ['C:\\Users', 'c:/Users', 'D:', '\\\\server\\share']) {
+      expect(isWindowsPath(p), p).toBe(true)
+    }
+    for (const p of ['/Users/me', '/', 'relative', '']) {
+      expect(isWindowsPath(p), p).toBe(false)
+    }
+  })
+
+  it('joins with the separator of the machine the path came from', () => {
+    expect(localJoin('C:\\Users\\me', 'a.txt')).toBe('C:\\Users\\me\\a.txt')
+    // macOS / Linux: this used to produce `/Users/me\a.txt`.
+    expect(localJoin('/Users/me', 'a.txt')).toBe('/Users/me/a.txt')
+    expect(localJoin('/', 'etc')).toBe('/etc')
+  })
+
+  it('goes up with the rules of the machine the path came from', () => {
+    expect(localParent('C:\\Users\\me')).toBe('C:\\Users')
+    expect(localParent('C:\\Users')).toBe('C:\\')
+    expect(localParent('/Users/me')).toBe('/Users')
+    expect(localParent('/Users')).toBe('/')
+  })
+})
+
+describe('treeDirMode', () => {
+  it('lets a folder be entered wherever it can be read', () => {
+    expect(treeDirMode(0o644)).toBe(0o755)
+    expect(treeDirMode(0o600)).toBe(0o700)
+    expect(treeDirMode(0o640)).toBe(0o750)
+  })
+
+  it('leaves an already-searchable or unreadable mode alone', () => {
+    expect(treeDirMode(0o755)).toBe(0o755)
+    expect(treeDirMode(0o700)).toBe(0o700)
+    expect(treeDirMode(0o000)).toBe(0o000)
+    // write without read: nothing to list, so no search bit either
+    expect(treeDirMode(0o200)).toBe(0o200)
+  })
+
+  it('keeps the special bits', () => {
+    expect(treeDirMode(0o4644)).toBe(0o4755)
+    expect(treeDirMode(0o1644)).toBe(0o1755)
   })
 })

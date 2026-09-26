@@ -73,12 +73,12 @@ private fun FontSample(font: TerminalFont, modifier: Modifier = Modifier) {
                 val cells = StringBuilder()
                 var width = 0
                 chunk.forEach { ch ->
-                    if (cells.isNotEmpty()) cells.append('')
+                    if (cells.isNotEmpty()) cells.append('\u001F')
                     cells.append(ch)
                     width++
                     // 占两格的字后面跟一个空占位格(和核心送上来的画面同一个约定)。
                     if (ch.code > 0x2E80) {
-                        cells.append('')
+                        cells.append('\u001F')
                         width++
                     }
                 }
@@ -94,7 +94,7 @@ private fun FontSample(font: TerminalFont, modifier: Modifier = Modifier) {
             }
         }
     }
-    val cols = rows.maxOf { line -> line.sumOf { it.cells.count { c -> c == '' } + 1 } }
+    val cols = rows.maxOf { line -> line.sumOf { it.cells.count { c -> c == '\u001F' } + 1 } }
     val density = LocalDensity.current
     val width = with(density) { (text.cellWidth * cols).toDp() }
     val height = with(density) { (text.cellHeight * rows.size).toDp() }

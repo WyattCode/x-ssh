@@ -1688,9 +1688,15 @@ Compose 的 `Dialog` 默认 `SecureFlagPolicy.Inherit` 救不了:继承是在**�
 **3. 「没存过」和「存了但读不出来」分不开(`Secrets.kt` / `HostInfo.kt`)**
 
 重装、清了应用数据、密钥库被换掉之后,磁盘上的密文永久解不开,而 `Secrets.open` 返回空串 ——
-界面说「未保存」,用户以为自己从没存过,反复重填也存不上。新增 `SecretState { None, Readable, Unreadable }`
-与 `Secrets.readPlainOrNull`,`brokenSecrets(host)` 在详情页标出「密码 读不出来」。
-加锁的密文不算坏(那是等着解锁),这个区分有测试。
+界面说「未保存」,用户以为自己从没存过。现在 `HostStore.load` 解密时就把"原文不空、明文却空、又不是加锁的"
+记进 `Host.unreadableSecrets`(`unreadableSecrets(sealed, plain)`),详情页据此标出「凭据 · 密码 读不出来」,
+「登录方式」不再说「未保存」。加锁的密文不算坏(那是等着解锁)。测试:`UnreadableSecretsTest`。
+
+> **第一版是坏的,二次复核时改掉(第十二次会话)**:原来是在详情页拿 `host.locked*` 去判(`brokenSecrets`),
+> 可 `load` 只把**加锁**的密文放进 `locked*`,而加锁的又被排除在外 —— 这一行**永远不出现**。
+> 测试之所以是绿的,是因为它手工造了 `Host(lockedPassword = "YWJj:ZGVm")`,一个 `load` 永远产生不了的状态。
+> `SecretState` / `readPlainOrNull` / `brokenSecrets` 随之删掉;新测试只用 `load` 真会给的形态,
+> 并做过阴性对照(去掉"加锁不算"这一条,正好是覆盖它的两条测试失败)。
 
 **4. 安卓单测从零建起(`app/src/test/`)**
 
@@ -1700,7 +1706,7 @@ Compose 的 `Dialog` 默认 `SecureFlagPolicy.Inherit` 救不了:继承是在**�
 | 测试 | 钉住的性质 |
 |---|---|
 | `CredentialCarryTest` | 换登录方式时三条密文的取舍、加锁记录不带普通密文 |
-| `SecretStateTest` | 「没存」vs「读不出来」vs「加锁待解」三态可辨 |
+| `UnreadableSecretsTest` | 「没存」vs「读不出来」vs「加锁待解」可辨,输入只用 `load` 真会给的形态 |
 | `LocalNetworkTest` | 局域网判定边界(172.15 vs 172.16、100.63 vs 100.64、回环不算) |
 | `KeyEncoderTest` | 方向键 DECCKM、Ctrl 映射、SGR/X10 滚轮、括号粘贴 |
 
@@ -1983,6 +1989,10 @@ APK 是这一版交叉编译过的(`.so` 与源文件 strip 后哈希一致 —�
 101. **验一条"闪一下"的界面 bug,先想清楚有没有对照**。逐帧录像能证明"看不到跳动",
     不等于证明"代码走了那条分支" —— 面板淡入期间旧代码可能同样看不出来。
     没有阴性对照就老实写"现象上过、路径未证实",别把两者混为一谈。
+106. **测试别手工造生产代码产生不了的状态**(第十二次会话):`SecretStateTest` 造了 `Host(lockedPassword = 普通密文)`,
+     而 `HostStore.load` 只往 `locked*` 里放加锁的密文 —— 测试全绿,功能从来没生效过。写测试前先查清楚
+     被测函数的输入在生产里是**谁、怎么**造出来的;最好直接测那个造的地方。
+
 ## 6. 已知问题 / 待办
 
 **已知问题**

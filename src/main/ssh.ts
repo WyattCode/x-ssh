@@ -23,7 +23,7 @@ import type {
 } from '../shared/types'
 import { KnownHosts } from './knownHosts'
 import { friendlyError } from './friendlyError'
-import { posixJoin, parentOf, clampConcurrency, buildPackCommand, buildExtractCommand } from '../shared/fsUtils'
+import { posixJoin, parentOf, clampConcurrency, buildPackCommand, buildExtractCommand, treeDirMode } from '../shared/fsUtils'
 
 /** Streams a local file through SHA-256 and resolves its lowercase hex digest. */
 function sha256File(p: string): Promise<string> {
@@ -1208,6 +1208,11 @@ export class SshManager {
   private lastProgressAt = new Map<string, number>()
   private static readonly PROGRESS_INTERVAL = 100
 
+  /** The `error` text used for a cancelled job. Kept as a constant so the
+   *  progress event can recognise it when stamping the `cancelled` flag; the
+   *  renderer must not depend on this string. */
+  private static readonly CANCELLED_TEXT = '已取消'
+
   private emitProgress(p: SftpProgress): void {
     // Continuous-sync jobs run silently: no per-file progress, no UI toasts.
     if (this.quietJobs.has(p.id)) return
@@ -1226,7 +1231,12 @@ export class SshManager {
     // pane. The mapping is torn down in each job's finally, not here, so a job
     // that throws before its terminal event still cleans up.
     const sessionId = this.jobSession.get(p.id)
-    if (!this.sender.isDestroyed()) this.sender.send(IPC.sftpProgress, { ...p, sessionId })
+    // Mark cancellation structurally rather than leaving the renderer to match
+    // on the message text. It used to compare against the Chinese literal, so
+    // an English UI read a cancelled transfer as a failure — and moving the
+    // wording into i18n would have broken it for every language at once.
+    const cancelled = this.cancelledJobs.has(p.id) && p.error === SshManager.CANCELLED_TEXT
+    if (!this.sender.isDestroyed()) this.sender.send(IPC.sftpProgress, { ...p, sessionId, cancelled })
   }
 
   private readdirFull(
@@ -1461,7 +1471,7 @@ export class SshManager {
       }
     }
 
-    if (this.cancelledJobs.has(jobId)) emit('', 'up', false, '已取消')
+    if (this.cancelledJobs.has(jobId)) emit('', 'up', false, SshManager.CANCELLED_TEXT)
     else if (errors) emit('', 'up', false, `${errors} 项失败`)
     else {
       const t = bytesDone || 1
@@ -1639,13 +1649,13 @@ export class SshManager {
         if (err) rej(err)
         else res()
       }
-      const abort = (): void => finish(new Error('已取消'))
+      const abort = (): void => finish(new Error(SshManager.CANCELLED_TEXT))
       set.add(abort)
 
       // Waits (with cancellation) until the job is no longer paused.
       const waitUnpaused = async (): Promise<void> => {
         while (!settled && this.isPaused(jobId)) await new Promise((r) => setTimeout(r, 150))
-        if (settled) throw new Error('已取消')
+        if (settled) throw new Error(SshManager.CANCELLED_TEXT)
       }
       // Leaky-bucket rate budget: allow `rate` bytes/sec with a small burst.
       const rate = this.jobRate.get(jobId) ?? 0
@@ -1843,7 +1853,7 @@ export class SshManager {
       await walkP
       await workers
       if (this.cancelledJobs.has(jobId)) {
-        emit(label, false, '已取消')
+        emit(label, false, SshManager.CANCELLED_TEXT)
       } else if (walkError) {
         emit(label, false, friendlyError((walkError as Error).message), true)
       } else if (failures.length) {
@@ -2085,7 +2095,7 @@ export class SshManager {
         await walkP
         await workers
         if (this.cancelledJobs.has(jobId)) {
-          emit(label, false, '已取消')
+          emit(label, false, SshManager.CANCELLED_TEXT)
         } else if (walkError) {
           emit(label, false, friendlyError((walkError as Error).message), true)
         } else if (failures) {
@@ -2208,7 +2218,13 @@ export class SshManager {
     }
   }
 
-  /** Changes permissions on a path; when recursive, applies the same mode to every descendant. */
+  /**
+   * Changes permissions on a path. When recursive, files get `mode` exactly and
+   * directories get [treeDirMode] of it: one mode fanned out over files and
+   * folders alike used to strip the search bit from every folder (644 applied to
+   * a tree), leaving them impossible to enter. A single, non-recursive change is
+   * applied exactly as asked, whatever the entry is.
+   */
   async chmod(
     sessionId: string,
     path: string,
@@ -2221,7 +2237,7 @@ export class SshManager {
     // never strip a directory's own r/x before we've finished reading it, which
     // would otherwise abort the walk and leave the tree half-changed.
     if (recursive && isDir) await this.chmodChildren(sftp, path, mode)
-    await this.chmodOne(sftp, path, mode)
+    await this.chmodOne(sftp, path, recursive && isDir ? treeDirMode(mode) : mode)
   }
 
   private chmodOne(sftp: SFTPWrapper, path: string, mode: number): Promise<void> {
@@ -2234,8 +2250,9 @@ export class SshManager {
     >((res, rej) => sftp.readdir(dir, (e, l) => (e ? rej(e) : res(l as never))))
     for (const it of list) {
       const child = this.posixJoin(dir, it.filename)
-      if (it.attrs.isDirectory()) await this.chmodChildren(sftp, child, mode)
-      await this.chmodOne(sftp, child, mode)
+      const isFolder = it.attrs.isDirectory()
+      if (isFolder) await this.chmodChildren(sftp, child, mode)
+      await this.chmodOne(sftp, child, isFolder ? treeDirMode(mode) : mode)
     }
   }
 

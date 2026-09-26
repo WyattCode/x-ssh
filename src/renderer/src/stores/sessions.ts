@@ -5,6 +5,7 @@ import { useToast } from '../composables/toast'
 import { useConfirm } from '../composables/confirm'
 import { useSnippetVars } from '../composables/snippetVars'
 import { clampConcurrency } from '../../../shared/fsUtils'
+import { decideStatusEvent, shouldReviveOnOnline } from '../lib/reconnect'
 import {
   buildFlatTree,
   buildGrid,
@@ -53,6 +54,54 @@ function toPlain<T>(value: T): T {
 // (double-clicked "reconnect", a manual retry racing a scheduled one) which
 // would otherwise orphan a live SSH session by overwriting its id.
 const inFlight = new Set<string>()
+
+// Sessions the store has deliberately closed (a reconnect replacing a dead
+// session, a tab being torn down). Main still emits their final error/closed
+// event, which would otherwise be attributed to whatever pane now holds that
+// id — or, worse, read as a fresh drop and restart the reconnect loop.
+//
+// Bounded: an id is normally removed when its event arrives, but a session that
+// is gone without a word would accumulate forever. Only the most recent few
+// matter — an event later than that belongs to a session nothing is waiting on.
+const retiredSessions = new Set<string>()
+const RETIRED_KEEP = 64
+
+function retireSession(sessionId: string): void {
+  retiredSessions.add(sessionId)
+  while (retiredSessions.size > RETIRED_KEEP) {
+    const oldest = retiredSessions.values().next().value
+    if (oldest === undefined) break
+    retiredSessions.delete(oldest)
+  }
+}
+
+/**
+ * The current tabs as the persisted shape: layout tree + panes in depth-first
+ * order, with secrets stripped. Shared by `persistTabs` and `saveSnapshot`,
+ * which had grown two identical copies.
+ */
+function serializeTabs(tabs: { title: string; layout: LayoutNode; panes: Pane[]; activePaneId: string }[]): PersistedTab[] {
+  return tabs.map((t) => {
+    const byId = new Map(t.panes.map((p) => [p.id, p]))
+    // A predicate rather than `.filter(p => !!p)`: it drops the panes a stale
+    // layout still refers to and tells the compiler they are gone, so nothing
+    // below needs a non-null assertion.
+    const ordered = collectPaneIds(t.layout)
+      .map((id) => byId.get(id))
+      .filter((p): p is Pane => p !== undefined)
+    return {
+      title: t.title,
+      tree: plainLayout(t.layout),
+      activeIndex: Math.max(0, ordered.findIndex((p) => p.id === t.activePaneId)),
+      panes: ordered.map((p) => {
+        const params = { ...toRaw(p.params) }
+        delete params.password
+        delete params.passphrase
+        return { params, cwd: p.lastSftpPath }
+      })
+    }
+  })
+}
 
 /** A job whose transfer has been cancelled in the main process. */
 function isCancelled(t: Pick<SftpProgress, 'error'>): boolean {
@@ -465,7 +514,13 @@ export const useSessions = defineStore('sessions', {
     },
 
     async saveSetting(key: string, value: unknown): Promise<void> {
-      await window.api.settings.set(key, toPlain(value))
+      // Main refuses keys outside its allowlist. Swallowing that would recreate
+      // the "interface said it saved but nothing was written" bug class, so log
+      // it loudly instead — a rejected key means the key list is out of date.
+      const r = await window.api.settings.set(key, toPlain(value))
+      if (r && r.ok === false) {
+        console.error(`settings: not saved — main refused key "${key}": ${r.error ?? ''}`)
+      }
     },
 
     /** Registers the global show/hide hotkey ('' = disable). Persists on success. */
@@ -493,11 +548,19 @@ export const useSessions = defineStore('sessions', {
       toast(t('app.networkOnline'), 'success')
       for (const tab of this.tabs) {
         for (const pane of tab.panes) {
-          // Only revive genuinely-dropped sessions (errorCode is unset for a
-          // drop; a never-connected host that failed auth/connect keeps it set),
-          // so a network blip doesn't hammer a host that can't authenticate.
-          const dropped = pane.status === 'error' && !pane.errorCode && !pane.sshSessionId
-          if (dropped && pane.params && this.autoReconnect) {
+          // Only revive genuinely-dropped sessions. A pane whose last attempt
+          // returned a code (bad credentials, changed host key, locked app) is
+          // skipped — but runConnect clears errorCode as a new attempt starts,
+          // so one that has since been retried is eligible again.
+          if (
+            shouldReviveOnOnline({
+              status: pane.status,
+              errorCode: pane.errorCode,
+              sessionId: pane.sshSessionId,
+              autoReconnect: this.autoReconnect
+            }) &&
+            pane.params
+          ) {
             this.cancelReconnect(pane)
             this.scheduleReconnect(pane.id)
           }
@@ -566,25 +629,7 @@ export const useSessions = defineStore('sessions', {
     /** Persists every tab (layout + panes, minus secrets) so it can be restored. */
     persistTabs(): void {
       if (!this.restoreTabs) return
-      const list = this.tabs.map((t) => {
-        // Persist panes in the layout's depth-first order so the tree's indices
-        // line up exactly with the panes column on restore.
-        const ids = collectPaneIds(t.layout)
-        const byId = new Map(t.panes.map((p) => [p.id, p]))
-        const ordered = ids.map((id) => byId.get(id)).filter((p) => !!p)
-        return {
-          title: t.title,
-          tree: plainLayout(t.layout),
-          activeIndex: Math.max(0, ordered.findIndex((p) => p!.id === t.activePaneId)),
-          panes: ordered.map((p) => {
-            const params = { ...toRaw(p!.params) }
-            delete params.password
-            delete params.passphrase
-            return { params, cwd: p!.lastSftpPath }
-          })
-        }
-      })
-      void window.api.settings.set('openTabs', list)
+      void window.api.settings.set('openTabs', serializeTabs(this.tabs))
     },
 
     /** Recreates last session's tabs (layout + splits). If `restoreConnect` is
@@ -823,23 +868,12 @@ export const useSessions = defineStore('sessions', {
       this.transferPanelOpen = open ?? !this.transferPanelOpen
     },    /** Captures the current tab layout (minus secrets) as a named snapshot. */
     async saveSnapshot(name: string): Promise<void> {
-      const list = this.tabs.map((t) => {
-        const ids = collectPaneIds(t.layout)
-        const byId = new Map(t.panes.map((p) => [p.id, p]))
-        const ordered = ids.map((id) => byId.get(id)).filter((p) => !!p)
-        return {
-          title: t.title,
-          tree: plainLayout(t.layout),
-          activeIndex: Math.max(0, ordered.findIndex((p) => p!.id === t.activePaneId)),
-          panes: ordered.map((p) => {
-            const params = { ...toRaw(p!.params) }
-            delete params.password
-            delete params.passphrase
-            return { params, cwd: p!.lastSftpPath }
-          })
-        }
-      }) as PersistedTab[]
-      const snap: Snapshot = { id: uid('snap'), name, savedAt: Date.now(), tabs: list }
+      const snap: Snapshot = {
+        id: uid('snap'),
+        name,
+        savedAt: Date.now(),
+        tabs: serializeTabs(this.tabs)
+      }
       this.snapshots = [snap, ...this.snapshots].slice(0, 30)
       await window.api.settings.set('snapshots', toPlain(this.snapshots))
     },
@@ -1065,8 +1099,15 @@ export const useSessions = defineStore('sessions', {
       const found = this.findPane(paneId)
       if (!found) return
       this.cancelReconnect(found.pane)
-      if (found.pane.sshSessionId) {
-        void window.api.ssh.disconnect(found.pane.sshSessionId)
+      // Mark the session as deliberately retired *before* asking main to drop
+      // it. Disconnecting is asynchronous: its `error`/`closed` event can land
+      // after runConnect started, and if it were still attributed to a live
+      // session it would tear down the replacement we just opened. Recording
+      // the id here lets applyEvent recognise the stale event and ignore it.
+      const retiring = found.pane.sshSessionId
+      if (retiring) {
+        retireSession(retiring)
+        void window.api.ssh.disconnect(retiring)
         found.pane.sshSessionId = undefined
       }
       await this.runConnect(paneId)
@@ -1078,6 +1119,12 @@ export const useSessions = defineStore('sessions', {
       if (!found || inFlight.has(paneId)) return // ignore overlapping connects
       found.pane.status = 'connecting'
       found.pane.message = undefined
+      // Clear the previous failure's code as we start. Leaving it set kept
+      // handleNetworkOnline's `!errorCode` guard permanently false for a pane
+      // that had failed once (e.g. with 'locked'), so the automatic revivers
+      // went blind to it even after the cause was gone. The outcome of *this*
+      // attempt is what should decide the state, not the last one's.
+      found.pane.errorCode = undefined
 
       inFlight.add(paneId)
       let result: Awaited<ReturnType<typeof window.api.ssh.connect>>
@@ -1122,12 +1169,20 @@ export const useSessions = defineStore('sessions', {
         }
       } else {
         live.pane.status = 'error'
+        // Map the codes main uses to their own wording. Anything unmapped keeps
+        // main's message, which is already user-facing (friendlyError).
         const msg =
           result.code === 'jump_needs_password'
             ? t('app.jumpNeedsPassword')
-            : (result.error ?? t('app.connectFail'))
+            : result.code === 'locked'
+              ? t('app.locked')
+              : (result.error ?? t('app.connectFail'))
         live.pane.message = msg
         live.pane.errorCode = result.code
+        // A locked app is not a connection failure — it needs the unlock screen.
+        // Re-read the lock status so LockScreen (gated on `lockLocked`) appears
+        // even if this pane was started before the app was locked.
+        if (result.code === 'locked') void this.loadLockStatus()
         // Avoid stacking toasts during an auto-reconnect storm (each attempt
         // re-enters runConnect); only shout for the first, user-initiated try.
         if (!live.pane.reconnectAttempt) toast(msg, 'error')
@@ -1178,37 +1233,42 @@ export const useSessions = defineStore('sessions', {
 
     /** Applies a status event coming from the main process. */
     applyEvent(sessionId: string, status: SessionStatus, message?: string): void {
+      // A session this store retired on purpose (a reconnect replacing it, or its
+      // tab closing). Its trailing event says nothing about whatever pane now holds
+      // that id, and acting on it would cancel the replacement we just opened.
+      if (retiredSessions.delete(sessionId)) return
       const pane = this.paneBySession(sessionId)
       if (!pane) return
-      // The session was live iff its id is still set (only assigned on a
-      // successful connect). We key on this rather than the live `status`
-      // because a dropped session can emit `closed` before `error`, which would
-      // otherwise flip status to 'closed' and defeat the reconnect trigger.
-      const hadLiveSession = !!pane.sshSessionId
-      if (status === 'error' && hadLiveSession) {
-        // Drop the dead id so the terminal unmounts and the error / reconnect
-        // UI shows — regardless of whether auto-reconnect is enabled. Clearing
-        // it also makes any trailing `closed` for this session a no-op.
-        pane.sshSessionId = undefined
-        pane.status = 'error'
+      const action = decideStatusEvent({
+        paneSessionId: pane.sshSessionId,
+        status,
+        autoReconnect: this.autoReconnect
+      })
+      if (action.kind === 'ignore') return
+      if (action.kind === 'setStatus') {
+        // A clean `closed` (e.g. the user typed `exit`) keeps sshSessionId set
+        // so the "session closed · reconnect" banner shows; no auto-reconnect.
+        pane.status = status
         if (message) pane.message = message
-        // When auto-reconnect is on, the "reconnecting…" banner communicates the
-        // drop without us flooding a toast per attempt.
-        if (!this.autoReconnect) toast(message ?? t('app.sessionLost'), 'error')
-        if (this.notifications) {
-          window.api.notify(
-            t('app.sessionDisconnected'),
-            `${pane.params.username}@${pane.params.host}${pane.params.port !== 22 ? `:${pane.params.port}` : ''}\n${message ?? t('app.sessionLost')}`,
-            true
-          )
-        }
-        if (this.autoReconnect) this.scheduleReconnect(pane.id)
         return
       }
-      // A clean `closed` (e.g. the user typed `exit`) keeps sshSessionId set so
-      // the "session closed · reconnect" banner shows; no auto-reconnect.
-      pane.status = status
+      // Drop the dead id so the terminal unmounts and the error / reconnect UI
+      // shows — regardless of whether auto-reconnect is enabled. Clearing it
+      // also makes any trailing `closed` for this session a no-op.
+      pane.sshSessionId = undefined
+      pane.status = 'error'
       if (message) pane.message = message
+      // When auto-reconnect is on, the "reconnecting…" banner communicates the
+      // drop without us flooding a toast per attempt.
+      if (!this.autoReconnect) toast(message ?? t('app.sessionLost'), 'error')
+      if (this.notifications) {
+        window.api.notify(
+          t('app.sessionDisconnected'),
+          `${pane.params.username}@${pane.params.host}${pane.params.port !== 22 ? `:${pane.params.port}` : ''}\n${message ?? t('app.sessionLost')}`,
+          true
+        )
+      }
+      if (action.scheduleRetry) this.scheduleReconnect(pane.id)
     },
 
     cancelReconnect(pane: Pane): void {
@@ -1262,7 +1322,10 @@ export const useSessions = defineStore('sessions', {
         })
         if (!ok) return
         // Let the remote shell wind down gracefully before dropping the link.
-        void window.api.ssh.input(pane.sshSessionId!, 'exit\n')
+        // Re-read the id: `confirm` awaited, and the session may have dropped in
+        // the meantime — asserting it here would send `undefined` over IPC.
+        const live = pane.sshSessionId
+        if (live) void window.api.ssh.input(live, 'exit\n')
       }
       this.cancelReconnect(pane)
       if (pane.sshSessionId) void window.api.ssh.disconnect(pane.sshSessionId)

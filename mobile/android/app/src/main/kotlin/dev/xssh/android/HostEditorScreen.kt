@@ -472,6 +472,7 @@ class HostDraft(private val initial: Host?) {
         // 没改就必须留下,否则编辑一下备注就把信任关系抹了。
         val sameEndpoint = initial != null && initial.address == newAddress && initial.port == newPort
         val key = auth == AuthKind.KEY
+        val kept = carriedSecrets(key = key, keyLocked = keyLocked)
         return Host(
             id = initial?.id ?: UUID.randomUUID().toString(),
             name = name.trim(),
@@ -489,18 +490,35 @@ class HostDraft(private val initial: Host?) {
             keyPublicFingerprint = if (key) keyPublicFingerprint else "",
             lockSecrets = lockSecrets,
             // 没解锁就保存时,明文是空的 —— 把磁盘上那几条原样带过去,别覆盖成空。
-            // (用户只是改个名字,不该顺手把密码弄丢。)
-            //
-            // 但**要跟着上面那几条一起清**:换成私钥登录就不留密码(反之亦然)。
-            // 无条件透传的话,加锁的主机切过去密码密文还在、切回来又复活了,
-            // 而没加锁的主机早就清干净了 —— 同一个操作两种结果。
-            lockedPassword = if (key) null else initial?.lockedPassword,
-            lockedKeyData = if (key) initial?.lockedKeyData else null,
-            lockedKeyPassphrase = if (key && keyLocked) initial?.lockedKeyPassphrase else null,
-            // 注:上面三条只在"换了登录方式"时清空(见那条注释);同种方式下原样带过去。
+            // (用户只是改个名字,不该顺手把密码弄丢。取舍规则见 carriedSecrets,抽出去是为了能测。)
+            lockedPassword = kept.lockedPassword,
+            lockedKeyData = kept.lockedKeyData,
+            lockedKeyPassphrase = kept.lockedKeyPassphrase,
         )
     }
+
+    /**
+     * 这次保存要带走的旧密文。抽成函数是为了能单测 —— 它决定"换登录方式时哪条秘密该丢",
+     * 判错的代价是用户的密码永久消失,而这种错在真机上要连一次才看得出来。
+     *
+     * 换成私钥登录就不留密码(反之亦然),与上面几条明文同步:没加锁的主机切过去密码就没了,
+     * 加锁的却原样留着、切回来又复活 —— 同一个操作两种结果。
+     *
+     * 没换登录方式时一律原样带过去:加锁主机的明文是空的(没解锁),密文就是唯一那份凭据。
+     */
+    internal fun carriedSecrets(key: Boolean, keyLocked: Boolean): CarriedSecrets = CarriedSecrets(
+        lockedPassword = if (key) null else initial?.lockedPassword,
+        lockedKeyData = if (key) initial?.lockedKeyData else null,
+        lockedKeyPassphrase = if (key && keyLocked) initial?.lockedKeyPassphrase else null,
+    )
 }
+
+/** [HostDraft.carriedSecrets] 的结果:三条要原样写回磁盘的加锁密文。 */
+data class CarriedSecrets(
+    val lockedPassword: String?,
+    val lockedKeyData: String?,
+    val lockedKeyPassphrase: String?,
+)
 
 /** 私钥文件不会超过这个大小(4096 位 RSA 带口令也才 3KB 多);更大的多半选错了文件。 */
 private const val MaxKeyBytes = 64 * 1024
@@ -599,10 +617,29 @@ suspend fun buildHostForSave(activity: android.app.Activity, draft: HostDraft): 
         // 有明文时让明文去写(见 HostStore.writeSecret),但**旧密文仍然留着兜底** ——
         // 写不进去(密钥库出错)时 `writeSecret` 会退回它。一律给 null 的话,
         // "关锁 + 改密码"撞上一次密钥库故障,新旧两份就一起没了。
-        lockedPassword = sealed[0].ifEmpty { host.lockedPassword },
-        lockedKeyData = sealed[1].ifEmpty { host.lockedKeyData },
-        lockedKeyPassphrase = sealed[2].ifEmpty { host.lockedKeyPassphrase },
+        //
+        // 但兜底的那条**必须是新状态认得的密文**:开锁之后拿一条普通密钥的密文写回
+        // `lockSecrets = true` 的记录,`writeSecret` 见明文为空就原样写下去,下次
+        // `open()` 读不出来 —— 界面写着"锁着",实际那条密码谁也解不开。宁可这次不带,
+        // 也不能留下一条自相矛盾的记录;真丢了明文的那条路见 carriedLocked。
+        lockedPassword = carriedLocked(sealed[0], host.lockedPassword, wantsLock),
+        lockedKeyData = carriedLocked(sealed[1], host.lockedKeyData, wantsLock),
+        lockedKeyPassphrase = carriedLocked(sealed[2], host.lockedKeyPassphrase, wantsLock),
     )
+}
+
+/**
+ * 这一条要写回磁盘的密文:这次封出来的 `[sealed]` 优先,空串时沿用旧的那条 `[previous]`。
+ *
+ * **[locking] 为真(这台主机要加锁)时,旧的普通密钥密文不能沿用** —— 它会和
+ * `lockSecrets = true` 一起落盘,而 `Secrets.open()` 只认普通密钥、`readLocked()` 只认
+ * `L:` 前缀,两边都读不出它。真到那一步,密码是永久没了的,比"这次不带"严重得多。
+ */
+internal fun carriedLocked(sealed: String, previous: String?, locking: Boolean): String? = when {
+    sealed.isNotEmpty() -> sealed
+    previous == null -> null
+    locking && !Secrets.isLocked(previous) -> null
+    else -> previous
 }
 
 /** 从系统文件选择器 / 拖放进来的文件里读私钥交给 [draft]。在 IO 线程调用。 */

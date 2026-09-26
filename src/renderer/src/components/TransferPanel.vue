@@ -3,6 +3,12 @@ import { computed, ref } from 'vue'
 import { useSessions } from '../stores/sessions'
 import { useI18n } from '../lib/i18n'
 import { canRevealHistory } from '../lib/transferHistory'
+import {
+  pct as pctOf,
+  formatBytes,
+  formatSpeed,
+  formatAgo
+} from '../lib/transferFormat'
 import type { SftpProgress, TransferHistoryItem } from '../../../shared/types'
 import Icon from './Icon.vue'
 
@@ -37,29 +43,6 @@ const active = computed(() =>
 // Recent finished transfers for the clean status badge.
 const recent = computed(() => store.transferHistory.slice(0, 12))
 
-function isCancelled(t2: SftpProgress): boolean {
-  return t2.error === '已取消'
-}
-function pct(t2: SftpProgress): number {
-  if (!t2.total) return t2.done ? 100 : 0
-  return Math.min(100, Math.round((t2.transferred / t2.total) * 100))
-}
-function fmtBytes(n: number): string {
-  if (!n) return '0 B'
-  const u = ['B', 'KB', 'MB', 'GB', 'TB']
-  const i = Math.min(u.length - 1, Math.floor(Math.log(n) / Math.log(1024)))
-  return `${(n / 1024 ** i).toFixed(i ? 1 : 0)} ${u[i]}`
-}
-function fmtSpeed(id: string): string {
-  const s = store.transferSpeeds[id]
-  return s && s > 0.5 ? `${fmtBytes(s)}/s` : ''
-}
-function statusText(t2: SftpProgress): string {
-  if (isCancelled(t2)) return t('sfp.cancelled')
-  if (t2.error) return t2.error
-  if (t2.done) return t('sfp.done')
-  return `${pct(t2)}%`
-}
 function histStatus(h: TransferHistoryItem): string {
   if (h.status === 'cancelled') return t('sfp.cancelled')
   if (h.status === 'error') return h.error || t('sfp.failed')
@@ -75,13 +58,19 @@ function canReveal(h: TransferHistoryItem): boolean {
   return canRevealHistory(h) || (h.direction === 'up' && !!h.localPaths?.[0])
 }
 function timeAgo(at: number): string {
-  const d = Date.now() - at
-  const m = Math.floor(d / 60000)
-  if (m < 1) return t('sfp.justNow')
-  if (m < 60) return t('sfp.minAgo', { n: m })
-  const h = Math.floor(m / 60)
-  if (h < 24) return t('sfp.hrAgo', { n: h })
-  return t('sfp.dayAgo', { n: Math.floor(h / 24) })
+  return formatAgo(at, t)
+}
+
+function fmtBytes(n: number): string {
+  return formatBytes(n)
+}
+
+function pct(t2: SftpProgress): number {
+  return pctOf(t2)
+}
+
+function fmtSpeed(id: string): string {
+  return formatSpeed(store.transferSpeeds[id])
 }
 </script>
 

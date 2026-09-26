@@ -208,6 +208,9 @@ export interface SftpProgress {
   localPaths?: string[]
   done?: boolean
   error?: string
+  /** True when the transfer was cancelled (not a failure). Set by main so the
+   *  UI never has to match on the `error` wording. */
+  cancelled?: boolean
 }
 
 /** Fully-resolved (secrets included) connection spec for a ProxyJump hop. */
@@ -298,4 +301,11 @@ export interface UiPrefs {
   sftpShowHidden?: boolean
   sftpWidth?: number
   lang?: 'zh' | 'en'
+}
+
+/** Result of a `settings:set`. Main refuses keys outside its allowlist
+ *  (see shared/settingsKeys.ts) rather than writing them. */
+export interface SettingsWriteResult {
+  ok: boolean
+  error?: string
 }

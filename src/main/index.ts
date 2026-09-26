@@ -8,6 +8,8 @@ import { spawn } from 'node:child_process'
 import { IPC, PREFS_ARG } from '../shared/ipc'
 import type { ConnectParams, Host, HostForward, ForwardMode, JumpConfig, LocalEntry, Snippet, UiPrefs, UploadOverwrite } from '../shared/types'
 import { readLaunchTarget, targetFromUrl, PROTOCOL, compareVersions } from '../shared/launchTarget'
+import { isRendererSettableKey } from '../shared/settingsKeys'
+import { resolveDir, resolveInside } from '../shared/localPaths'
 import { SshManager } from './ssh'
 import { HostStore } from './store'
 import { KnownHosts } from './knownHosts'
@@ -26,6 +28,19 @@ const activeEdits = new Set<string>()
 // mousedown are ready by the time the drag gesture reaches startDrag.
 const dragCache = new Map<string, Promise<{ dir: string; local: string }>>()
 let sshManager: SshManager | null = null
+
+/**
+ * The window's SSH manager, for handlers that cannot run before it exists.
+ *
+ * Handlers that can be reached before the window is up (a stray IPC from a
+ * reloading renderer, a fire-and-forget `send`) must check `sshManager`
+ * themselves rather than using this — otherwise they would throw inside the
+ * handler instead of failing cleanly.
+ */
+function requireSshManager(): SshManager {
+  if (!sshManager) throw new Error('窗口尚未就绪')
+  return sshManager
+}
 
 // ---- System tray ----
 // A minimized/closed window can be tucked into the tray instead of quitting, so
@@ -106,8 +121,6 @@ let launchTargetFetchDone = false
 /** The active window's webContents, used to push late-arriving targets. */
 let targetSender: Electron.WebContents | null = null
 
-/** Name of the CLI switch that carries a launch target (repeatable). */
-
 /** Hand a resolved target to the renderer (queued until the window is up). */
 function pushLaunchTarget(target: string): void {
   if (launchTargetFetchDone && targetSender && !targetSender.isDestroyed()) {
@@ -139,7 +152,7 @@ function prefetchDrag(sessionId: string, items: DragItem[]): Promise<{ dir: stri
     p = (async () => {
       const dir = await mkdtemp(join(tmpdir(), 'xssh-drag-'))
       for (const it of items) {
-        await sshManager!.downloadTree(sessionId, it.remotePath, dir, it.name, it.isDir)
+        await requireSshManager().downloadTree(sessionId, it.remotePath, dir, it.name, it.isDir)
       }
       // A single file drags out as that file; multiple items (or a folder)
       // land in a temporary directory, which Explorer accepts as a drop.
@@ -243,7 +256,7 @@ async function resolveUploadOverwrite(
 ): Promise<UploadOverwrite | 'cancel'> {
   if (overwrite) return overwrite
   if (!names.length) return 'overwrite'
-  const conflicts = await sshManager!.remoteConflicts(sessionId, remoteDir, names)
+  const conflicts = await requireSshManager().remoteConflicts(sessionId, remoteDir, names)
   if (!conflicts.length) return 'overwrite'
   const { response } = await dialog.showMessageBox({
     type: 'warning',
@@ -426,7 +439,7 @@ async function withTempHosts(
           params.jump = jump
         }
       }
-      const r = await sshManager!.connect(params)
+      const r = await requireSshManager().connect(params)
       if (!r.ok || !r.sessionId) {
         results.push({ host: hostLabel, ok: false, error: r.error ?? '连接失败' })
         continue
@@ -437,7 +450,7 @@ async function withTempHosts(
         results.push({ host: hostLabel, ok: true })
       } finally {
         try {
-          sshManager!.disconnect(sid)
+          requireSshManager().disconnect(sid)
         } catch {
           /* ignore */
         }
@@ -651,15 +664,18 @@ function createWindow(saved?: SavedBounds, prefs: UiPrefs = {}): void {
   const { x: dx, y: dy, width: sw, height: sh } = screen.getDisplayNearestPoint(
     screen.getCursorScreenPoint()
   ).workArea
-  const useSaved = !!saved && saved.width >= 680 && saved.height >= 440
+  // A saved size is only used when it is large enough to be usable; below that
+  // it is as if there were none. Narrowed here so the rest of the function can
+  // use `restore` directly instead of asserting the same thing three times.
+  const restore = saved && saved.width >= 680 && saved.height >= 440 ? saved : undefined
   // Whatever the source, the size is clamped to that display's work area: one
   // saved on a larger monitor (or before a scaling change) would otherwise
   // centre half off-screen, putting the title bar out of reach above the top
   // edge. The 1440/920 cap shapes only the first-run default — a size the user
   // picked themselves comes back as-is.
   // reqW/reqH: what we asked the OS for, kept for persistBounds() below.
-  const reqW = Math.min(useSaved ? saved!.width : Math.min(1440, Math.round(sw * 0.66)), sw)
-  const reqH = Math.min(useSaved ? saved!.height : Math.min(920, Math.round(sh * 0.8)), sh)
+  const reqW = Math.min(restore ? restore.width : Math.min(1440, Math.round(sw * 0.66)), sw)
+  const reqH = Math.min(restore ? restore.height : Math.min(920, Math.round(sh * 0.8)), sh)
   const win = new BrowserWindow({
     width: reqW,
     height: reqH,
@@ -686,7 +702,7 @@ function createWindow(saved?: SavedBounds, prefs: UiPrefs = {}): void {
     }
   })
 
-  if (useSaved && saved!.maximized) win.maximize()
+  if (restore?.maximized) win.maximize()
   mainWindow = win
 
   // Remember the size (debounced) so it restores next launch. Position is
@@ -934,12 +950,20 @@ function registerIpc(): void {
   })
 
   // ---- Local FS browsing for the dual-panel SFTP drawer ----
+  // Every handler below takes its paths from the renderer. `resolveDir` /
+  // `resolveInside` are what keep a name from walking out of the directory it
+  // was meant for — see shared/localPaths.ts for why `join()` alone is not
+  // enough.
   ipcMain.handle(IPC.localHome, () => homedir())
   ipcMain.handle(
     IPC.localList,
     async (_e, dir: string): Promise<{ path: string; entries: LocalEntry[] }> => {
+      const resolved = resolveDir(dir)
+      // Echo the caller's own path back rather than an empty one: the drawer
+      // assigns `r.path` to its current directory, so returning '' would blank
+      // the pane and make every later navigation a no-op with no explanation.
+      if (!resolved) return { path: dir, entries: [] }
       try {
-        const resolved = join(dir)
         const st = await stat(resolved)
         if (!st.isDirectory()) return { path: resolved, entries: [] }
         const names = await readdir(resolved, { withFileTypes: true })
@@ -965,14 +989,18 @@ function registerIpc(): void {
         const entries = dirs.sort(sort).concat(files.sort(sort))
         return { path: resolved, entries }
       } catch {
-        return { path: dir, entries: [] }
+        return { path: resolved, entries: [] }
       }
     }
   )
   // Read a local file's text (for comparing against a remote file).
   ipcMain.handle(IPC.localReadText, async (_e, p: string) => {
     try {
-      const content = await readFile(p, 'utf8')
+      // A path the user picked via `localPickFile`, or one already inside a
+      // listed directory. Normalize, and refuse embedded NULs.
+      const target = resolveDir(p)
+      if (!target) return { ok: false, error: '路径无效' }
+      const content = await readFile(target, 'utf8')
       return { ok: true, content }
     } catch (e) {
       return { ok: false, error: friendlyError((e as Error).message) }
@@ -988,8 +1016,9 @@ function registerIpc(): void {
   ipcMain.handle(
     IPC.localCreate,
     async (_e, dir: string, name: string, kind: 'file' | 'folder') => {
+      const target = resolveInside(dir, name)
+      if (!target) return { ok: false, error: '文件名不能用' }
       try {
-        const target = join(dir, name)
         if (kind === 'folder') await mkdir(target)
         else await writeFile(target, '')
         return { ok: true }
@@ -1001,8 +1030,11 @@ function registerIpc(): void {
   ipcMain.handle(
     IPC.localRename,
     async (_e, dir: string, oldName: string, newName: string) => {
+      const from = resolveInside(dir, oldName)
+      const to = resolveInside(dir, newName)
+      if (!from || !to) return { ok: false, error: '文件名不能用' }
       try {
-        await rename(join(dir, oldName), join(dir, newName))
+        await rename(from, to)
         return { ok: true }
       } catch (e) {
         return { ok: false, error: friendlyError((e as Error).message) }
@@ -1012,8 +1044,12 @@ function registerIpc(): void {
   ipcMain.handle(
     IPC.localDelete,
     async (_e, dir: string, name: string, isDir: boolean) => {
+      const target = resolveInside(dir, name)
+      // Without this, `name` of "../.." plus recursive removal is a way to wipe
+      // an arbitrary directory from the renderer.
+      if (!target) return { ok: false, error: '文件名不能用' }
       try {
-        await rm(join(dir, name), { recursive: isDir, force: isDir })
+        await rm(target, { recursive: isDir, force: isDir })
         return { ok: true }
       } catch (e) {
         return { ok: false, error: friendlyError((e as Error).message) }
@@ -1125,12 +1161,15 @@ function registerIpc(): void {
         filters: [{ name: 'Log', extensions: ['log', 'txt'] }]
       })
       if (res.canceled || !res.filePath) return { ok: false, canceled: true }
-      const ok = sshManager!.startLog(sessionId, res.filePath)
+      // `sshManager` is null until the window is created; a non-null assertion
+      // here would throw inside the IPC handler instead of failing cleanly.
+      if (!sshManager) return { ok: false, error: '窗口尚未就绪' }
+      const ok = sshManager.startLog(sessionId, res.filePath)
       return { ok, canceled: false, path: res.filePath }
     }
   )
   ipcMain.on(IPC.sessionLogStop, (_e, sessionId: string) => {
-    sshManager!.stopLog(sessionId)
+    sshManager?.stopLog(sessionId)
   })
 
   // ---- SSH stream (fire-and-forget) ----
@@ -1173,7 +1212,7 @@ function registerIpc(): void {
       if (res.canceled || !res.filePath) return { ok: false, canceled: true }
       try {
         // Save-As: one file into the chosen path (dir + chosen basename).
-        await sshManager!.downloadJob(
+        await requireSshManager().downloadJob(
           sessionId,
           [{ path: remotePath, name: basename(res.filePath), isDir: false }],
           dirname(res.filePath),
@@ -1379,7 +1418,7 @@ function registerIpc(): void {
     IPC.sftpExtract,
     async (_e, sessionId: string, remoteDir: string, archiveFileName: string) => {
       try {
-        const r = await sshManager!.extractArchive(sessionId, remoteDir, archiveFileName)
+        const r = await requireSshManager().extractArchive(sessionId, remoteDir, archiveFileName)
         return r
       } catch (e) {
         return { ok: false, error: friendlyError((e as Error).message) }
@@ -1412,7 +1451,7 @@ function registerIpc(): void {
   )
   ipcMain.handle(IPC.sftpMkdir, async (_e, sessionId: string, path: string) => {
     try {
-      await sshManager!.mkdir(sessionId, path)
+      await requireSshManager().mkdir(sessionId, path)
       return { ok: true }
     } catch (e) {
       return { ok: false, error: friendlyError((e as Error).message) }
@@ -1420,7 +1459,7 @@ function registerIpc(): void {
   })
   ipcMain.handle(IPC.sftpCreateFile, async (_e, sessionId: string, path: string) => {
     try {
-      await sshManager!.createFile(sessionId, path)
+      await requireSshManager().createFile(sessionId, path)
       return { ok: true }
     } catch (e) {
       return { ok: false, error: friendlyError((e as Error).message) }
@@ -1430,7 +1469,7 @@ function registerIpc(): void {
     IPC.sftpRename,
     async (_e, sessionId: string, oldPath: string, newPath: string) => {
       try {
-        await sshManager!.rename(sessionId, oldPath, newPath)
+        await requireSshManager().rename(sessionId, oldPath, newPath)
         return { ok: true }
       } catch (e) {
         return { ok: false, error: friendlyError((e as Error).message) }
@@ -1441,7 +1480,7 @@ function registerIpc(): void {
     IPC.sftpDelete,
     async (_e, sessionId: string, path: string, isDir: boolean) => {
       try {
-        await sshManager!.deletePath(sessionId, path, isDir)
+        await requireSshManager().deletePath(sessionId, path, isDir)
         return { ok: true }
       } catch (e) {
         return { ok: false, error: friendlyError((e as Error).message) }
@@ -1459,7 +1498,7 @@ function registerIpc(): void {
       isDir: boolean
     ) => {
       try {
-        await sshManager!.chmod(sessionId, path, mode, recursive, isDir)
+        await requireSshManager().chmod(sessionId, path, mode, recursive, isDir)
         return { ok: true }
       } catch (e) {
         return { ok: false, error: friendlyError((e as Error).message) }
@@ -1480,14 +1519,14 @@ function registerIpc(): void {
   })
   ipcMain.handle(IPC.sftpReadText, async (_e, sessionId: string, path: string) => {
     try {
-      return { ok: true, content: await sshManager!.readTextFile(sessionId, path) }
+      return { ok: true, content: await requireSshManager().readTextFile(sessionId, path) }
     } catch (e) {
       return { ok: false, error: friendlyError((e as Error).message) }
     }
   })
   ipcMain.handle(IPC.sftpReadBinary, async (_e, sessionId: string, path: string) => {
     try {
-      const base64 = await sshManager!.readBinaryFile(sessionId, path)
+      const base64 = await requireSshManager().readBinaryFile(sessionId, path)
       return { ok: true, base64 }
     } catch (e) {
       return { ok: false, error: friendlyError((e as Error).message) }
@@ -1497,7 +1536,7 @@ function registerIpc(): void {
     IPC.sftpWriteText,
     async (_e, sessionId: string, path: string, content: string) => {
       try {
-        await sshManager!.writeTextFile(sessionId, path, content)
+        await requireSshManager().writeTextFile(sessionId, path, content)
         return { ok: true }
       } catch (e) {
         return { ok: false, error: friendlyError((e as Error).message) }
@@ -1512,7 +1551,7 @@ function registerIpc(): void {
       try {
         const dir = await mkdtemp(join(tmpdir(), 'xssh-edit-'))
         const local = join(dir, name)
-        await sshManager!.downloadTree(sessionId, remotePath, dir, name, false)
+        await requireSshManager().downloadTree(sessionId, remotePath, dir, name, false)
 
         const editor = await settings.get<string>('externalEditor')
         if (editor) spawn(editor, [local], { detached: true, stdio: 'ignore' }).unref()
@@ -1550,7 +1589,7 @@ function registerIpc(): void {
       const remotePath = path
       const dir = await mkdtemp(join(tmpdir(), 'xssh-open-'))
       const local = join(dir, name)
-      await sshManager!.downloadTree(sessionId, remotePath, dir, name, false)
+      await requireSshManager().downloadTree(sessionId, remotePath, dir, name, false)
       if (program) spawn(program, [local], { detached: true, stdio: 'ignore' }).unref()
       else await shell.openPath(local)
       setTimeout(() => void rm(dir, { recursive: true, force: true }).catch(() => undefined), 30 * 60 * 1000)
@@ -1597,8 +1636,15 @@ function registerIpc(): void {
   // ---- Settings ----
   ipcMain.handle(IPC.settingsGet, (_e, key: string) => settings.get(key))
   ipcMain.handle(IPC.settingsSet, async (_e, key: string, value: unknown) => {
+    // The settings map also holds the master-lock record, the connection audit
+    // log and the persisted session history. Without this check the renderer
+    // could overwrite any of them by key name.
+    if (!isRendererSettableKey(key)) {
+      return { ok: false, error: `refusing to write settings key: ${String(key)}` }
+    }
     if (key === 'minimizeToTray') minimizeToTray = Boolean(value)
-    return settings.set(key, value)
+    await settings.set(key, value)
+    return { ok: true }
   })
   ipcMain.handle(IPC.connLogList, async () => (await settings.get<ConnLogEntry[]>('connectionLog')) ?? [])
   ipcMain.handle(IPC.connLogPush, async (_e, entry: ConnLogEntry) => {
@@ -1746,7 +1792,7 @@ function registerIpc(): void {
     if (!sshManager) return { ok: false, error: '窗口未就绪' }
     const results = await withTempHosts(hostIds, async (sid) => {
       const cmd = `umask 077; mkdir -p ~/.ssh && chmod 700 ~/.ssh\ncat >> ~/.ssh/authorized_keys <<'XSSH'\n${pub}\nXSSH\ntouch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys`
-      await sshManager!.execCommand(sid, cmd)
+      await requireSshManager().execCommand(sid, cmd)
     })
     return { ok: true, results }
   })
@@ -1769,7 +1815,7 @@ function registerIpc(): void {
       // if/fi (not a bare &&-chain) so a host without authorized_keys exits 0
       // ("nothing to do") while a real failure (permissions, disk) exits non-zero.
       const cmd = `k=${JSON.stringify(keyPart)}; if [ -f "$HOME/.ssh/authorized_keys" ]; then awk -v k="$k" 'index($0,k)==0' "$HOME/.ssh/authorized_keys" > "$HOME/.ssh/authorized_keys.xssh" && cat "$HOME/.ssh/authorized_keys.xssh" > "$HOME/.ssh/authorized_keys" && rm -f "$HOME/.ssh/authorized_keys.xssh"; fi`
-      await sshManager!.execCommand(sid, cmd)
+      await requireSshManager().execCommand(sid, cmd)
     })
     return { ok: true, results }
   })

@@ -65,9 +65,16 @@ fun HostInfoGroups(host: Host) {
         InfoRow("用户名", host.username.ifBlank { "未设置" }, mono = host.username.isNotBlank())
         FormDivider()
         // 判"到底存没存"要看磁盘上那条密文:加了锁而这次没解锁时,明文本来就是空的,
+        // 有密文、但这次读不出来(重装过、密钥库被清):那不是"没存过",是**出事了**。
+        // 一律说「未保存」的话,用户会以为自己从没存过密码。解不开这件事是加载时记下的
+        // (见 Host.unreadableSecrets) —— 原来在这里拿 `locked*` 去判,可那几个字段只装加锁的密文,
+        // 而加锁的又被排除在外,于是这一行永远不出现。
+        val broken = host.unreadableSecrets
         // 只看 `host.password` 会把"已保存但锁着"误报成"未保存"(用户以为密码丢了)。
-        val hasPassword = host.password.isNotEmpty() || host.lockedPassword != null
-        val hasKey = host.keyData.isNotEmpty() || host.keyPath.isNotEmpty() || host.lockedKeyData != null
+        // 解不开的也算"存过":它下面单独有一行说「读不出来」,这里别再说成「未保存」。
+        val hasPassword = host.password.isNotEmpty() || host.lockedPassword != null || "密码" in broken
+        val hasKey = host.keyData.isNotEmpty() || host.keyPath.isNotEmpty() || host.lockedKeyData != null ||
+            "私钥" in broken
         val login = when {
             host.auth == AuthKind.KEY && !hasKey -> "私钥 · 未导入"
             host.auth == AuthKind.KEY -> "私钥" + host.keyName.takeIf { it.isNotEmpty() }?.let { " · $it" }.orEmpty()
@@ -75,8 +82,13 @@ fun HostInfoGroups(host: Host) {
             else -> "密码"
         }
         val attention = (host.auth == AuthKind.KEY && !hasKey) ||
-            (host.auth == AuthKind.PASSWORD && !hasPassword)
+            (host.auth == AuthKind.PASSWORD && !hasPassword) ||
+            broken.isNotEmpty()
         InfoRow("登录方式", login, valueColor = if (attention) p.warn else null)
+        if (broken.isNotEmpty()) {
+            FormDivider()
+            InfoRow("凭据", broken.joinToString("、") + " 读不出来", valueColor = p.warn)
+        }
         // 加了锁就在这里说一声:这一页是"把这台主机的情况全摊开"的地方,
         // 而"连接前要验一次"这件事原来只有编辑页的开关知道 —— 用户在这页看不出来,
         // 点了连接突然弹解锁框会一愣。

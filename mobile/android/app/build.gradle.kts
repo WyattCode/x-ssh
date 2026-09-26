@@ -35,6 +35,10 @@ android {
             useLegacyPackaging = true
         }
     }
+
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
 }
 
 dependencies {
@@ -55,4 +59,7 @@ dependencies {
     // 它才认 `setAllowedAuthenticators`(同时允许两种认证方式)。
     implementation("androidx.biometric:biometric:1.1.0")
     implementation("net.java.dev.jna:jna:5.19.1@aar")
+
+    // 纯逻辑单测(JVM,不碰设备):凭据取舍、密文形态、路径/前缀这类判错的代价是丢密码。
+    testImplementation("junit:junit:4.13.2")
 }

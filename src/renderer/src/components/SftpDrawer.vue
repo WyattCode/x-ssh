@@ -1,8 +1,16 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import type { FileEntry, LocalEntry, SftpProgress, TransferHistoryItem } from '../../../shared/types'
-import { posixJoin, parentOf } from '../../../shared/fsUtils'
+import { posixJoin, parentOf, localJoin, localParent } from '../../../shared/fsUtils'
 import { canRetryHistory, buildRetryItems, canRevealHistory } from '../lib/transferHistory'
+import {
+  isCancelled,
+  pct as pctOf,
+  formatBytes,
+  formatSpeed,
+  formatAgo,
+  transferStatusText
+} from '../lib/transferFormat'
 import { globMatch } from '../lib/glob'
 import { useConfirm } from '../composables/confirm'
 import { useI18n } from '../lib/i18n'
@@ -10,6 +18,8 @@ import { useToast } from '../composables/toast'
 import { useSessions } from '../stores/sessions'
 import Icon from './Icon.vue'
 import FileDiff from './FileDiff.vue'
+import PermDialog from './PermDialog.vue'
+import DirDiffDialog from './DirDiffDialog.vue'
 
 const { confirm } = useConfirm()
 const { t: tt } = useI18n()
@@ -65,15 +75,6 @@ const localPath = ref('')
 const localEntries = ref<LocalEntry[]>([])
 const localLoading = ref(false)
 const localError = ref('')
-function localJoin(a: string, b: string): string {
-  return a.replace(/[\\/]+$/, '') + '\\' + b
-}
-function localParent(p: string): string {
-  const norm = p.replace(/[\\/]+$/, '')
-  if (!norm) return p
-  const idx = Math.max(norm.lastIndexOf('\\'), norm.lastIndexOf('/'))
-  return idx > 0 ? norm.slice(0, idx) : norm
-}
 async function refreshLocal(dir?: string): Promise<void> {
   const prev = localPath.value
   if (dir) localPath.value = dir
@@ -1064,40 +1065,14 @@ function runMore(fn: () => void): void {
 const sync = reactive({ open: false, local: '', remote: '', mode: 'both' as 'up' | 'down' | 'both', del: false, watch: false, interval: 5 })
 const watchActive = ref(false)
 // ---- Directory tree diff (rsync-style, read-only) ----
-const dirDiff = reactive({
-  open: false,
-  local: '',
-  remote: '',
-  busy: false,
-  err: '',
-  onlyLocal: [] as string[],
-  onlyRemote: [] as string[],
-  sizeDiff: [] as string[],
-  done: false
-})
+// The dialog itself lives in DirDiffDialog.vue; the drawer only seeds the two
+// paths from the panes it is currently showing.
+const dirDiff = reactive({ open: false, local: "", remote: "" })
 function openDirDiff(): void {
   if (!props.sessionId) return
   dirDiff.local = localPath.value
   dirDiff.remote = path.value
-  dirDiff.done = false
-  dirDiff.err = ''
   dirDiff.open = true
-}
-async function runDirDiff(): Promise<void> {
-  if (!props.sessionId || !dirDiff.local || !dirDiff.remote) return
-  dirDiff.busy = true
-  dirDiff.err = ''
-  const r = await window.api.sftp.diffDirs(props.sessionId, dirDiff.local, dirDiff.remote)
-  dirDiff.busy = false
-  if (!r.ok) {
-    dirDiff.err = r.error ?? tt('dirDiff.fail')
-    dirDiff.done = false
-    return
-  }
-  dirDiff.onlyLocal = r.onlyLocal ?? []
-  dirDiff.onlyRemote = r.onlyRemote ?? []
-  dirDiff.sizeDiff = r.sizeDiff ?? []
-  dirDiff.done = true
 }
 function openSyncDialog(): void {
   if (!props.sessionId) return
@@ -1200,11 +1175,7 @@ async function jumpBookmark(p: string): Promise<void> {
   await load(p)
 }
 function fmtAgo(at: number): string {
-  const s = Math.floor((Date.now() - at) / 1000)
-  if (s < 60) return tt('sfp.justNow')
-  if (s < 3600) return tt('sfp.minAgo', { n: Math.floor(s / 60) })
-  if (s < 86400) return tt('sfp.hrAgo', { n: Math.floor(s / 3600) })
-  return tt('sfp.dayAgo', { n: Math.floor(s / 86400) })
+  return formatAgo(at, tt)
 }
 
 // ---- terminal ↔ file panel linkage ----
@@ -1250,131 +1221,40 @@ function cancelTransfer(id: string): void {
 function canRetry(h: TransferHistoryItem): boolean {
   return canRetryHistory(h) && !!props.sessionId
 }
-function isCancelled(t: SftpProgress): boolean {
-  return t.error === '已取消'
-}
 function fmtSpeed(id: string): string {
-  const s = store.transferSpeeds[id]
-  return s && s > 0.5 ? `${fmtSize(s)}/s` : ''
+  return formatSpeed(store.transferSpeeds[id])
 }
 function statusText(t: SftpProgress): string {
-  if (isCancelled(t)) return tt('sfp.cancelled')
-  if (t.error) return t.error
-  if (t.done) return tt('sfp.done')
-  return pct(t) + '%'
+  return transferStatusText(t, tt)
 }
 
 // ---- permissions (chmod) ----
+// The dialog itself lives in PermDialog.vue; the drawer only tracks which
+// entries it was opened for, and reloads the listing when it closes.
 const perm = reactive({
   open: false,
   targets: [] as FileEntry[],
-  bits: 0o755,
-  recursive: false,
-  busy: false,
-  error: ''
-})
-const permDialogEl = ref<HTMLElement>()
-const octalText = ref('755')
-const permGroups = computed(() => [
-  { label: tt('sfp.permOwner'), bits: [{ l: tt('sfp.read'), m: 0o400 }, { l: tt('sfp.write'), m: 0o200 }, { l: tt('sfp.execute'), m: 0o100 }] },
-  { label: tt('sfp.permGroup'), bits: [{ l: tt('sfp.read'), m: 0o040 }, { l: tt('sfp.write'), m: 0o020 }, { l: tt('sfp.execute'), m: 0o010 }] },
-  { label: tt('sfp.permOther'), bits: [{ l: tt('sfp.read'), m: 0o004 }, { l: tt('sfp.write'), m: 0o002 }, { l: tt('sfp.execute'), m: 0o001 }] }
-])
-const permHasDir = computed(() => perm.targets.some((t) => t.isDir))
-// Live "rwxr-xr-x" preview of the current bits.
-const permSymbolic = computed(() => {
-  const tri = (b: number): string =>
-    (b & 4 ? 'r' : '-') + (b & 2 ? 'w' : '-') + (b & 1 ? 'x' : '-')
-  const m = perm.bits
-  return tri((m >> 6) & 7) + tri((m >> 3) & 7) + tri(m & 7)
+  initialMode: undefined as number | undefined
 })
 
-function syncOctal(): void {
-  octalText.value = perm.bits.toString(8).padStart(3, '0')
-}
-function toggleBit(mask: number): void {
-  perm.bits ^= mask
-  syncOctal()
-}
-function onOctalInput(e: Event): void {
-  const el = e.target as HTMLInputElement
-  const v = el.value.replace(/[^0-7]/g, '').slice(0, 4)
-  // Force the field back to the sanitized text; without this a rejected char
-  // (e.g. "8") stays visible while state silently ignores it.
-  if (el.value !== v) el.value = v
-  octalText.value = v
-  perm.bits = v ? parseInt(v, 8) & 0o7777 : 0
-}
 function openPerm(): void {
   const items = selectedEntries()
   if (!items.length) return
   perm.targets = items
-  // Prefill from the right-clicked entry's current mode when known, else 755.
-  const base = menu.target?.mode ?? items[0].mode ?? 0o755
-  perm.bits = base & 0o7777
-  perm.recursive = false
-  perm.error = ''
-  syncOctal()
+  // Prefill from the right-clicked entry's current mode when known.
+  perm.initialMode = menu.target?.mode ?? items[0].mode
   perm.open = true
-  nextTick(() => permDialogEl.value?.focus())
 }
-async function applyPerm(): Promise<void> {
-  if (!props.sessionId || !perm.targets.length || perm.busy) return
-  if (!octalText.value) {
-    perm.error = tt('sfp.permInput')
-    return
-  }
-  perm.busy = true
-  perm.error = ''
-  const mode = perm.bits & 0o7777
-  const failed: string[] = []
-  try {
-    // Apply to every target; don't abort on the first failure so one bad item
-    // doesn't hide the outcome of the rest.
-    for (const it of perm.targets) {
-      const r = await window.api.sftp.chmod(
-        props.sessionId,
-        posixJoin(path.value, it.name),
-        mode,
-        perm.recursive,
-        it.isDir
-      )
-      if (!r.ok) failed.push(it.name)
-    }
-    if (failed.length) {
-      perm.error =
-        failed.length === perm.targets.length
-          ? tt('sfp.permFail')
-          : tt('sfp.permFailMany', { n: failed.length, list: failed.join('、') })
-    } else {
-      perm.open = false
-    }
-  } catch (e) {
-    perm.error = (e as Error).message
-  } finally {
-    perm.busy = false
-    // Reload regardless so the listing reflects whatever did change.
-    await load(path.value)
-  }
+
+function onPermClose(payload: { applied: boolean }): void {
+  perm.open = false
+  // Restore focus to the drawer so its shortcuts stay live.
+  nextTick(() => drawerEl.value?.focus())
+  if (payload.applied) void load(path.value)
 }
-function onPermKey(e: KeyboardEvent): void {
-  e.stopPropagation() // don't let the drawer's global shortcuts fire while the dialog is open
-  if (e.key === 'Escape') perm.open = false
-  else if (e.key === 'Enter') applyPerm()
-}
-// Restore focus to the drawer when the dialog closes so shortcuts stay live.
-watch(
-  () => perm.open,
-  (open) => {
-    if (!open) nextTick(() => drawerEl.value?.focus())
-  }
-)
 
 function fmtSize(n: number): string {
-  if (n < 1024) return `${n} B`
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} K`
-  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} M`
-  return `${(n / 1024 / 1024 / 1024).toFixed(1)} G`
+  return formatBytes(n)
 }
 function fmtTime(sec: number): string {
   if (!sec) return ''
@@ -1382,8 +1262,7 @@ function fmtTime(sec: number): string {
   const p = (n: number): string => String(n).padStart(2, '0')
   return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
-const pct = (t: SftpProgress): number =>
-  t.total > 0 ? Math.min(100, Math.round((t.transferred / t.total) * 100)) : 0
+const pct = (t: SftpProgress): number => pctOf(t)
 </script>
 
 <template>
@@ -1711,48 +1590,14 @@ const pct = (t: SftpProgress): number =>
       </div>
     </div>
 
-    <div v-if="perm.open" class="pm-overlay" @mousedown.self="perm.open = false">
-      <div ref="permDialogEl" class="pm-dialog" tabindex="-1" @keydown="onPermKey">
-        <div class="pm-head">
-          <span>{{ tt('sfp.perm') }}</span>
-          <button class="pm-x" :title="tt('sfp.close')" @click="perm.open = false"><Icon name="close" /></button>
-        </div>
-        <p class="pm-target">
-          {{ perm.targets.length === 1 ? perm.targets[0].name : tt('sfp.permSelected', { n: perm.targets.length }) }}
-        </p>
-        <div class="pm-grid">
-          <div v-for="g in permGroups" :key="g.label" class="pm-col">
-            <div class="pm-col-h">{{ g.label }}</div>
-            <label v-for="b in g.bits" :key="b.m" class="pm-check">
-              <input type="checkbox" :checked="(perm.bits & b.m) !== 0" @change="toggleBit(b.m)" />
-              <span>{{ b.l }}</span>
-            </label>
-          </div>
-        </div>
-        <div class="pm-oct">
-          <span class="pm-oct-l">{{ tt('sfp.permValue') }}</span>
-          <input
-            class="pm-oct-i"
-            :value="octalText"
-            spellcheck="false"
-            maxlength="4"
-            @input="onOctalInput"
-          />
-          <span class="pm-sym">{{ permSymbolic }}</span>
-        </div>
-        <label v-if="permHasDir" class="pm-recur">
-          <input v-model="perm.recursive" type="checkbox" />
-          <span>{{ tt('sfp.permRecursive') }}</span>
-        </label>
-        <p v-if="perm.error" class="pm-err">{{ perm.error }}</p>
-        <div class="pm-foot">
-          <button class="pm-btn ghost" @click="perm.open = false">{{ tt('sfp.cancel') }}</button>
-          <button class="pm-btn primary" :disabled="perm.busy" @click="applyPerm">
-            {{ perm.busy ? tt('sfp.applying') : tt('sfp.ok') }}
-          </button>
-        </div>
-      </div>
-    </div>
+    <PermDialog
+      v-if="perm.open && props.sessionId"
+      :session-id="props.sessionId"
+      :dir="path"
+      :targets="perm.targets"
+      :initial-mode="perm.initialMode"
+      @close="onPermClose"
+    />
 
     <div v-if="sync.open" class="pm-overlay" @mousedown.self="sync.open = false">
       <div class="pm-dialog sync-dialog">
@@ -1798,45 +1643,13 @@ const pct = (t: SftpProgress): number =>
       </div>
     </div>
 
-    <div v-if="dirDiff.open" class="pm-overlay" @mousedown.self="dirDiff.open = false">
-      <div class="pm-dialog sync-dialog" @keydown.esc="dirDiff.open = false">
-        <div class="pm-head">
-          <span>{{ tt('sfp.dirDiff') }}</span>
-          <button class="pm-x" :title="tt('sfp.close')" @click="dirDiff.open = false"><Icon name="close" /></button>
-        </div>
-        <label class="sync-field">
-          <span>{{ tt('sfp.syncLocal') }}</span>
-          <input v-model="dirDiff.local" spellcheck="false" />
-        </label>
-        <label class="sync-field">
-          <span>{{ tt('sfp.syncRemote') }}</span>
-          <input v-model="dirDiff.remote" spellcheck="false" />
-        </label>
-        <p class="pm-err" v-if="!dirDiff.local || !dirDiff.remote">{{ tt('sfp.syncPathsRequired') }}</p>
-        <div v-if="dirDiff.done" class="dd-body">
-          <div v-if="!dirDiff.onlyRemote.length && !dirDiff.onlyLocal.length && !dirDiff.sizeDiff.length" class="dd-empty">{{ tt('dirDiff.same') }}</div>
-          <div v-for="g in [
-            { label: tt('dirDiff.onlyRemote'), items: dirDiff.onlyRemote, cls: 'rr' },
-            { label: tt('dirDiff.onlyLocal'), items: dirDiff.onlyLocal, cls: 'll' },
-            { label: tt('dirDiff.sizeDiff'), items: dirDiff.sizeDiff, cls: 'df' }
-          ].filter((g) => g.items.length)" :key="g.cls" class="dd-group">
-            <div class="dd-h">
-              <Icon :name="g.cls === 'll' ? 'upload' : g.cls === 'df' ? 'diff' : 'download'" :size="13" />
-              <span>{{ g.label }}</span>
-              <em>{{ g.items.length }}</em>
-            </div>
-            <div v-for="f in g.items" :key="f" class="dd-row" :title="f">{{ f }}</div>
-          </div>
-        </div>
-        <p v-if="dirDiff.err" class="pm-err">{{ dirDiff.err }}</p>
-        <div class="pm-foot">
-          <button class="pm-btn ghost" @click="dirDiff.open = false">{{ tt('sfp.close') }}</button>
-          <button class="pm-btn primary" :disabled="dirDiff.busy || !dirDiff.local || !dirDiff.remote" @click="runDirDiff">
-            {{ dirDiff.busy ? tt('dirDiff.scanning') : tt('dirDiff.run') }}
-          </button>
-        </div>
-      </div>
-    </div>
+    <DirDiffDialog
+      v-if="dirDiff.open && props.sessionId"
+      :session-id="props.sessionId"
+      :local-path="dirDiff.local"
+      :remote-path="dirDiff.remote"
+      @close="dirDiff.open = false"
+    />
 
     <div v-if="deploy.open" class="pm-overlay" @mousedown.self="deploy.open = false">
       <div class="pm-dialog sync-dialog" @keydown.esc="deploy.open = false">
@@ -2612,27 +2425,6 @@ const pct = (t: SftpProgress): number =>
   background: rgba(255, 107, 107, 0.12);
 }
 
-/* ---- permission (chmod) dialog ---- */
-.pm-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.4);
-  backdrop-filter: blur(2px);
-  display: flex;
-  justify-content: center;
-  align-items: flex-start;
-  padding-top: 16vh;
-  z-index: 120;
-}
-.pm-dialog {
-  width: min(380px, 92vw);
-  background-color: color-mix(in srgb, var(--bg-elev) 92%, transparent);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow), 0 0 0 1px rgba(255, 255, 255, 0.04) inset;
-  padding: 16px 18px 18px;
-  outline: none;
-}
 .sync-dialog {
   display: flex;
   flex-direction: column;
@@ -2645,48 +2437,6 @@ const pct = (t: SftpProgress): number =>
   font-size: 12.5px;
   color: var(--text-dim);
 }
-.dd-body {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  max-height: 42vh;
-  overflow: auto;
-  padding-right: 2px;
-}
-.dd-empty {
-  color: var(--text-faint);
-  font-size: 12.5px;
-  margin: 0;
-}
-.dd-group {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.dd-h {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--text-faint);
-  padding-bottom: 2px;
-}
-.dd-h em {
-  font-style: normal;
-  color: var(--text-faint);
-  opacity: 0.8;
-}
-.dd-row {
-  font-family: var(--font-mono, monospace);
-  font-size: 11.5px;
-  color: var(--text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  padding: 1px 0;
-}
 .sync-field input,
 .sync-field select,
 .sync-field textarea {
@@ -2698,148 +2448,6 @@ const pct = (t: SftpProgress): number =>
   border-radius: 6px;
   color: var(--text);
   outline: none;
-}
-.pm-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 15px;
-  font-weight: 600;
-}
-.pm-x {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  border-radius: 5px;
-  color: var(--text-dim);
-}
-.pm-x:hover {
-  background: var(--bg-elev-2);
-  color: var(--text);
-}
-.pm-target {
-  margin-top: 4px;
-  font-size: 12px;
-  color: var(--text-faint);
-  font-family: var(--font-mono);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.pm-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-  margin-top: 14px;
-}
-.pm-col {
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 9px 10px;
-}
-.pm-col-h {
-  font-size: 11px;
-  color: var(--text-dim);
-  margin-bottom: 7px;
-}
-.pm-check {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 3px 0;
-  font-size: 12.5px;
-  color: var(--text);
-  cursor: pointer;
-}
-.pm-check input,
-.pm-recur input {
-  accent-color: var(--accent);
-  width: 14px;
-  height: 14px;
-  cursor: pointer;
-}
-.pm-oct {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 14px;
-}
-.pm-oct-l {
-  font-size: 12.5px;
-  color: var(--text-dim);
-}
-.pm-oct-i {
-  width: 84px;
-  height: 32px;
-  padding: 0 12px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color: var(--text);
-  font-family: var(--font-mono);
-  font-size: 15px;
-  letter-spacing: 0.14em;
-  outline: none;
-}
-.pm-oct-i:focus {
-  border-color: var(--accent);
-}
-.pm-sym {
-  flex: 1;
-  text-align: right;
-  font-family: var(--font-mono);
-  font-size: 13px;
-  letter-spacing: 0.08em;
-  color: var(--text-faint);
-}
-.pm-recur {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 14px;
-  font-size: 12.5px;
-
-  color: var(--text-dim);
-  cursor: pointer;
-}
-.pm-err {
-  margin-top: 12px;
-  font-size: 12px;
-  color: var(--danger);
-}
-.pm-foot {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 18px;
-}
-.pm-btn {
-  height: 32px;
-  padding: 0 16px;
-  border-radius: var(--radius-sm);
-  font-size: 13px;
-}
-.pm-btn.ghost {
-  color: var(--text-dim);
-  border: 1px solid var(--border);
-}
-.pm-btn.ghost:hover {
-  background: var(--bg-elev-2);
-  color: var(--text);
-}
-.pm-btn.primary {
-  background: var(--accent);
-  color: #fff;
-  font-weight: 500;
-}
-.pm-btn.primary:hover {
-  filter: brightness(1.08);
-}
-.pm-btn.primary:disabled {
-  opacity: 0.55;
 }
 .bm-menu {
   width: 220px;

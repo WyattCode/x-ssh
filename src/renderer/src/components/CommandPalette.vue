@@ -199,7 +199,9 @@ const sections = computed<{ id: string; title: string; items: Item[] }[]>(() => 
   add('actions', t('pal.actions'), actions)
 
   // Named session snapshots: capture & restore the whole tab layout.
-  if (store.snapshots.length || true) {
+  // Always shown — the save action is the entry point, so the section is not
+  // conditional on there being anything saved yet.
+  {
     const snaps: Item[] = []
     snaps.push({
       kind: 'action',
@@ -252,12 +254,11 @@ watch(
   () => store.paletteOpen,
   (open) => {
     if (open) {
-      // A launch target seeds the query so Enter connects straight away.
+      // A launch target seeds the query, and the first item is the match for it,
+      // so the default selection (0) already points at "connect to…".
       query.value = store.paletteSeed ?? ''
       store.paletteSeed = null
-      // If a quick-connect target was seeded, auto-select its "connect to…" item.
-      if (query.value.trim()) selected.value = 0
-      else selected.value = 0
+      selected.value = 0
       pending.value = null
       password.value = ''
       remember.value = true

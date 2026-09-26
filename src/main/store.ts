@@ -2,6 +2,17 @@ import { app, safeStorage } from 'electron'
 import { join } from 'node:path'
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import type { Host } from '../shared/types'
+
+/**
+ * Drop the fields that describe the *current session* rather than the saved
+ * profile, so they never reach hosts.json: the two `hasSaved*` flags are filled
+ * in by `list()` from the secrets map.
+ */
+function stripRuntimeFlags(host: Host): Host {
+  const { hasSavedPassword: _p, hasSavedPassphrase: _pp, ...rest } = host
+  return rest
+}
+
 /**
  * Flat-file host store. Hosts live in hosts.json (non-secret metadata).
  * Passwords, when the user opts to save them, are encrypted per-OS via
@@ -88,9 +99,7 @@ export class HostStore {
   ): Promise<Host[]> {
     await this.ensureLoaded()
     // Never persist runtime-only flags.
-    const { hasSavedPassword: _p, hasSavedPassphrase: _pp, ...clean } = host
-    void _p
-    void _pp
+    const clean = stripRuntimeFlags(host)
     const idx = this.hosts.findIndex((h) => h.id === clean.id)
     if (idx >= 0) this.hosts[idx] = clean
     else this.hosts.push(clean)
@@ -163,10 +172,8 @@ export class HostStore {
     const newSecrets: Record<string, string> = {}
     for (const h of data.hosts) {
       if (!h || typeof h.id !== 'string' || typeof h.host !== 'string') continue
-      const { password, passphrase, hasSavedPassword: _p, hasSavedPassphrase: _pp, ...clean } = h
-      void _p
-      void _pp
-      imported.push(clean as Host)
+      const { password, passphrase, ...rest } = h
+      imported.push(stripRuntimeFlags(rest))
       if (password) newSecrets[h.id as string] = password
       if (passphrase) newSecrets[this.ppKey(h.id as string)] = passphrase
     }

@@ -14,7 +14,8 @@ import type {
   Snippet,
   UiPrefs,
   LocalEntry,
-  UploadOverwrite
+  UploadOverwrite,
+  SettingsWriteResult
 } from '../shared/types'
 
 /** Startup preferences main passed as a launch argument — no IPC, no storage. */
@@ -269,7 +270,8 @@ const api = {
   settings: {
     get: <T = unknown>(key: string): Promise<T | undefined> =>
       ipcRenderer.invoke(IPC.settingsGet, key),
-    set: (key: string, value: unknown): Promise<void> =>
+    /** Resolves `{ ok: false }` when main refuses the key — see SettingsWriteResult. */
+    set: (key: string, value: unknown): Promise<SettingsWriteResult> =>
       ipcRenderer.invoke(IPC.settingsSet, key, value)
   },
   /** Opens a terminal link in the default browser (http/https only). */

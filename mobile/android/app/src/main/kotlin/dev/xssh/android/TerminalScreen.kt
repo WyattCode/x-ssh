@@ -1842,7 +1842,7 @@ private fun isHan(c: Char): Boolean = when (c.code) {
 }
 
 /** 单元格之间的分隔符(见 Rust 的 `Term::rows`)。 */
-private const val CELL_SEPARATOR = ''
+private const val CELL_SEPARATOR = '\u001F'
 
 @Composable
 internal fun rememberTermPaints(font: TerminalFont, fontSize: Float): TermPaints {

@@ -789,7 +789,7 @@ mod tests {
     fn custom_palette_changes_named_colors() {
         let mut t = Terminal::new(20, 2);
         t.set_palette(&[0, 0x112233]);
-        t.feed(b"[31mr");
+        t.feed(b"\x1b[31mr");
         assert_eq!(t.screen_runs()[0][0].fg, 0xFF112233, "红色走自定义 16 色");
     }
 
