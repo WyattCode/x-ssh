@@ -256,7 +256,9 @@ fun HomeScreen(
         val detailContent = ((maxWidth - listWidth - creaseWidth) - Gutter * 2 - railSide())
             .coerceAtMost(PageMaxWidth)
         val creaseGap = creaseGapFor(listWidth, Gutter, detailContent)
-        if (twoPane && hosts.isNotEmpty()) {
+        // 真分成了两栏(一台主机都没有时是整屏的 FirstRun,不分栏)。
+        val split = twoPane && hosts.isNotEmpty()
+        if (split) {
             Row(Modifier.fillMaxSize().layerBackdrop(backdrop)) {
                 HostListPane(
                     grid = grid,
@@ -382,13 +384,13 @@ fun HomeScreen(
             // 横屏双栏时只铺在左栏(列表)底下:右栏是详情,自己钉着「连接 / 编辑 / 删除」,别叠在一起。
             CompositionLocalProvider(LocalBackdrop provides backdrop) {
                 BottomBar(
-                    if (twoPane && hosts.isNotEmpty()) {
+                    if (split) {
                         // ＋ 的右缘落在卡片的右缘上(卡片止于折痕前 creaseGap,底栏自己带了一条 Gutter)。
                         Modifier.align(Alignment.BottomStart).width(listWidth).padding(end = creaseGap - Gutter)
                     } else {
                         Modifier.align(Alignment.BottomCenter)
                     },
-                    sides = if (twoPane && hosts.isNotEmpty()) {
+                    sides = if (split) {
                         WindowInsetsSides.Start + WindowInsetsSides.Bottom
                     } else {
                         WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom
