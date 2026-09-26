@@ -985,19 +985,10 @@ private fun TerminalView(
             // 直板机:最底下一行放按钮(靠右)。**占自己的一行,不浮在终端上** ——
             // 提示符就在终端最底下一行,浮着的玻璃会把正在敲的命令盖住。键盘弹起时这一行跟着升到键盘上方。
             // 左下角空着,不是按钮:在文件页连点 ‹ 退回来,多点的那一下落在这里,无害。
+            // 按钮和别的页一样大(56dp)、离底一样远:用户要的是从文件页退回来按钮不跳。
+            // 代价是终端少一行左右,用户选了统一。
             if (bottomBar) {
-                Row(
-                    Modifier.fillMaxWidth().padding(start = Gutter, end = Gutter, bottom = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Spacer(Modifier.weight(1f))
-                    CompositionLocalProvider(LocalGlassSize provides 44.dp, LocalGlassRow provides true) {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) { actions() }
-                    }
-                }
+                BottomBar(insets = false, end = { actions() })
             }
         }
         if (!bottomBar && tablet == null) {

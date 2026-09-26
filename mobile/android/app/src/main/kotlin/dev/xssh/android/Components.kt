@@ -855,6 +855,11 @@ fun BottomBar(
      * 不是屏幕边缘,传 `Start + Bottom`,否则屏幕右边的挖孔会把它的右端莫名其妙往里推。
      */
     sides: WindowInsetsSides = WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom,
+    /**
+     * 自己避让系统区域。终端页把底栏放进一个已经避让过的 Column 里(它占自己的一行,不浮在终端上),
+     * 那里传 false,否则导航条的高度会算两遍。按钮大小、离底、间距不变 —— 换页时按钮落在同一个位置。
+     */
+    insets: Boolean = true,
     start: @Composable RowScope.() -> Unit = {},
     end: @Composable RowScope.() -> Unit = {},
 ) {
@@ -862,7 +867,7 @@ fun BottomBar(
         Row(
             modifier
                 .fillMaxWidth()
-                .windowInsetsPadding(stableSafeDrawing().only(sides))
+                .then(if (insets) Modifier.windowInsetsPadding(stableSafeDrawing().only(sides)) else Modifier)
                 .padding(start = Gutter, end = Gutter, bottom = Gutter),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(GapItem),
