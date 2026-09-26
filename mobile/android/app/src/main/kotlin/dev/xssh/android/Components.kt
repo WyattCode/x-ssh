@@ -590,7 +590,7 @@ private fun Modifier.liquidGlass(
             },
         )
     } else {
-        // 没有背景源(顶栏里的按钮,或系统太老):浅填充 + 细边,形状和交互不变。
+        // 没有背景源(终端底栏里的按钮,或系统太老):浅填充 + 细边,形状和交互不变。
         // 不用 glassTint:那是叠在模糊背景上的亮度层,单独放在纯色底上几乎看不见。
         graphicsLayer {
             val s = 1f + 0.08f * press()
@@ -748,7 +748,7 @@ fun GlassGroup(content: @Composable () -> Unit) {
     val shape = RoundedCornerShape(size / 2)
     // 组内按钮按下时的光要被胶囊的圆头裁住。
     if (LocalGlassRow.current) {
-        // 顶栏里横着排。
+        // 底栏 / 工具栏里横着排。
         Row(
             Modifier.height(size).liquidGlass(shape, press = { 0f }).clip(shape),
             verticalAlignment = Alignment.CenterVertically,
@@ -762,7 +762,7 @@ fun GlassGroup(content: @Composable () -> Unit) {
 }
 
 /**
- * 外观(跟随系统 → 浅色 → 深色)。**每一页的轨道 / 顶栏最上面都有它** ——
+ * 外观(跟随系统 → 浅色 → 深色)。**每一页的轨道 / 底栏里都有它** ——
  * 用户在终端里看着输出想换个深浅色,不该先退回主机页。
  */
 @Composable
@@ -773,7 +773,7 @@ fun ThemeGlassItem() {
 
 /**
  * 会来会去的按钮(「回到底部」、连上才有的「文件」)统一的出现 / 消失动效。
- * 竖轨道里往上长,顶栏(横着排)里往右长 —— 按 [LocalGlassRow] 自己选,调用方不用管。
+ * 竖轨道里往上长,底栏(横着排)里往右长 —— 按 [LocalGlassRow] 自己选,调用方不用管。
  */
 @Composable
 fun GlassReveal(visible: Boolean, content: @Composable () -> Unit) {
@@ -785,7 +785,7 @@ fun GlassReveal(visible: Boolean, content: @Composable () -> Unit) {
     ) { content() }
 }
 
-/** 横着的工具栏(平板、直板机顶栏)上同样的东西。 */
+/** 横着的工具栏(平板、直板机底栏)上同样的东西。 */
 @Composable
 fun GlassRevealRow(visible: Boolean, content: @Composable () -> Unit) {
     AnimatedVisibility(visible, enter = Motion.chipInRow, exit = Motion.chipOutRow) { content() }
@@ -821,50 +821,51 @@ fun GlassItem(icon: ImageVector, contentDescription: String, tint: Color? = null
     }
 }
 
-/** 玻璃按钮的直径:轨道里 56dp,顶栏里 44dp(由 [TopBar] 提供)。 */
+/** 玻璃按钮的直径:轨道和底栏里 56dp,终端底栏 / 平板工具栏里小一号(调用方提供)。 */
 val LocalGlassSize = compositionLocalOf { 56.dp }
 
-/** 胶囊横着排(顶栏)还是竖着排(轨道)。 */
+/** 胶囊横着排(底栏、工具栏)还是竖着排(轨道)。 */
 val LocalGlassRow = compositionLocalOf { false }
 
 private fun glassIconSize(button: Dp): Dp = if (button < 56.dp) 21.dp else 23.dp
 
-/** 顶栏高度(不含状态栏)。 */
-val TopBarHeight = 56.dp
-
-/** 直板机的列表底部留白:只有右下角一颗 ＋,不像轨道那样一整列。 */
-val FabClearance = 56.dp + 16.dp + Gutter
+/**
+ * 直板机底栏占掉的高度:按钮 56 + 离底 16 + 上面再空一条 16。
+ * 可滚动的页面底部留这么多,最后一行能滚到底栏上面;钉在页底的大按钮([PinnedActions])
+ * 也垫这么高,叠在底栏上面而不是被它压住。
+ */
+val BarClearance = 56.dp + Gutter * 2
 
 /**
- * 直板机的顶栏(见 [Chrome.TopBar]):左边是返回之类,右边是这一页的操作。
- * 铺一层页面底色,内容从它底下滚过去;按钮是同一套玻璃按钮,只是小一号、横着排。
+ * 直板机的底栏(见 [Chrome.BottomBar]):**左边**是返回 / 次要操作,**右边**是这一页的主操作 ——
+ * 安卓底部操作栏的惯例(Material 的 bottom app bar:动作在左、主按钮在右)。
+ *
+ * 和折叠屏的 [EdgeRail] 是同一套东西横过来:同样的玻璃按钮、同样悬浮在内容上(内容从底下滚过)、
+ * 同样**跟着键盘升起来**(用含输入法的 [stableSafeDrawing])。中间空着的那一段不拦触摸,
+ * 点得到压在底下的卡片。
+ *
+ * **返回永远在左下角**。连点返回一路退回去时,下一下落在的地方必须无害:终端页左下角是空的
+ * (按钮靠右),主机页左下角是外观胶囊 —— 都不会断开会话(见 Files 页轨道那条实测的教训)。
  */
 @Composable
-fun TopBar(
+fun BottomBar(
     modifier: Modifier = Modifier,
-    /** 铺页面底色、内容从底下滚过(竖屏);false 时只是浮在右上角的一排按钮(横屏双栏,省高度)。 */
-    solid: Boolean = true,
+    /**
+     * 要避让的系统区域。整页宽的底栏两边都让;只铺在左栏底下的(横屏双栏)右边挨着的是折痕 / 右栏,
+     * 不是屏幕边缘,传 `Start + Bottom`,否则屏幕右边的挖孔会把它的右端莫名其妙往里推。
+     */
+    sides: WindowInsetsSides = WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom,
     start: @Composable RowScope.() -> Unit = {},
     end: @Composable RowScope.() -> Unit = {},
 ) {
-    val p = LocalXssh.current
-    CompositionLocalProvider(
-        LocalGlassSize provides 44.dp,
-        LocalGlassRow provides true,
-        // 顶栏底下是纯色,没有可以折射的内容。
-        LocalBackdrop provides null,
-    ) {
+    CompositionLocalProvider(LocalGlassRow provides true) {
         Row(
             modifier
                 .fillMaxWidth()
-                // 铺了底色的顶栏要把触摸"吃掉":它盖在列表 / 表单上面,不拦的话点顶栏的空白处
-                // 会点到压在底下看不见的卡片或输入框。
-                .then(if (solid) Modifier.background(p.bg).pointerInput(Unit) { detectTapGestures() } else Modifier)
-                .windowInsetsPadding(stableSafeDrawing().only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
-                .height(TopBarHeight)
-                .padding(horizontal = Gutter),
+                .windowInsetsPadding(stableSafeDrawing().only(sides))
+                .padding(start = Gutter, end = Gutter, bottom = Gutter),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(GapItem),
         ) {
             start()
             Spacer(Modifier.weight(1f))

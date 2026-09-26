@@ -172,11 +172,10 @@ fun HomeScreen(
     // 浮在内容上的玻璃按钮(右侧轨道)要模糊、折射的,就是这一页的内容。
     val backdrop = rememberLayerBackdrop()
 
-    // 折叠屏:按钮在右侧轨道;直板机:顶栏 + 右下角 ＋(见 Chrome)。
-    val topBar = LocalChrome.current == Chrome.TopBar
-    val barPad = if (topBar) TopBarHeight else 0.dp
+    // 折叠屏:按钮在右侧轨道;直板机:按钮全在底栏(见 Chrome)。两种都不在顶上占地方。
+    val bottomBar = LocalChrome.current == Chrome.BottomBar
     // 这一页的轨道比别的页多一颗(外观、字体、搜索三颗一个胶囊,再加 ＋)。
-    val clearance = if (topBar) FabClearance else RailClearance + 56.dp
+    val clearance = if (bottomBar) BarClearance else RailClearance + 56.dp
 
     // 实体键盘(平板键盘套):Ctrl+N 新建、Ctrl+F 搜索、↑↓ 换主机、回车连接、Esc 收起搜索。
     // 键盘事件只发给有焦点的节点,所以这一页自己拿一个焦点(不是输入框,不会弹软键盘)。
@@ -248,15 +247,16 @@ fun HomeScreen(
             if (twoPane && selectedId != shownHost?.id) shownHost?.let(onAutoSelect)
         }
 
+        // 再兜一层:左栏无论如何不能吃掉整个窗口。
+        // 这几个量放在分支外面:直板机横屏的底栏只铺在左栏底下,右端要和左栏卡片的右缘对齐,也要用。
+        val listWidth = adaptive.listPaneWidth(maxWidth).coerceAtMost(maxWidth - 280.dp)
+        val creaseWidth = maxOf(1.dp, adaptive.bookFold?.sizeDp ?: 0.dp)
+        // 两栏内容一样宽(式子见 creaseGapFor)。右栏正文自己还限宽 PageMaxWidth
+        // (见 HostInfoBody),超过就不再变长,左栏也跟着停。
+        val detailContent = ((maxWidth - listWidth - creaseWidth) - Gutter * 2 - railSide())
+            .coerceAtMost(PageMaxWidth)
+        val creaseGap = creaseGapFor(listWidth, Gutter, detailContent)
         if (twoPane && hosts.isNotEmpty()) {
-            // 再兜一层:左栏无论如何不能吃掉整个窗口。
-            val listWidth = adaptive.listPaneWidth(maxWidth).coerceAtMost(maxWidth - 280.dp)
-            val creaseWidth = maxOf(1.dp, adaptive.bookFold?.sizeDp ?: 0.dp)
-            // 两栏内容一样宽(式子见 creaseGapFor)。右栏正文自己还限宽 PageMaxWidth
-            // (见 HostInfoBody),超过就不再变长,左栏也跟着停。
-            val detailContent = ((maxWidth - listWidth - creaseWidth) - Gutter * 2 - railSide())
-                .coerceAtMost(PageMaxWidth)
-            val creaseGap = creaseGapFor(listWidth, Gutter, detailContent)
             Row(Modifier.fillMaxSize().layerBackdrop(backdrop)) {
                 HostListPane(
                     grid = grid,
@@ -286,14 +286,14 @@ fun HomeScreen(
                     large = false,
                     // 见上面 creaseGap 的算法:收到和右栏一样宽。
                     creaseGap = creaseGap,
-                    // 双栏时轨道在右栏上方,不压列表。
-                    underRail = false,
-                    // 双栏(直板机横屏)高度只有 400dp 上下,不再单独占一条顶栏:按钮浮在右上角。
+                    // 折叠屏双栏:轨道在右栏上方,不压列表。直板机横屏:底栏压在这一栏底下。
+                    underRail = bottomBar,
                     topPad = 0.dp,
                     // 轨道既然不在这一栏上面,就**别按轨道的高度留白**。原来这里也传了
                     // `clearance`(270dp):内屏横屏可视高度才 600dp 上下,等于左栏下面
                     // 空掉快一半,而且把"选中项滚进视野"的算式也带偏 —— 每按一下 ↓ 都在滚。
-                    bottomClearance = Gutter,
+                    // 直板机横屏:底栏就铺在这一栏底下(右栏是详情,自己钉着「连接」),这里要让开它。
+                    bottomClearance = if (bottomBar) BarClearance else Gutter,
                 )
                 // 两栏之间不画线:折痕本身就是分界,再补一条反而多余。
                 Spacer(Modifier.width(creaseWidth))
@@ -325,7 +325,7 @@ fun HomeScreen(
                 }
             }
         } else if (hosts.isEmpty()) {
-            FirstRun(Modifier.fillMaxSize().windowInsetsPadding(stableSafeDrawing()).padding(top = barPad))
+            FirstRun(Modifier.fillMaxSize().windowInsetsPadding(stableSafeDrawing()))
         } else {
             HostListPane(
                 grid = grid,
@@ -354,7 +354,7 @@ fun HomeScreen(
                 // 单栏:右边让开轨道(卡片右端的 ⓘ 不被玻璃压住)。
                 creaseGap = railSide(),
                 underRail = true,
-                topPad = barPad,
+                topPad = 0.dp,
                 bottomClearance = clearance,
             )
         }
@@ -377,12 +377,25 @@ fun HomeScreen(
         // 主操作:无色玻璃、正文色图标(参考图里"+"就是这样)。
         val newHost: @Composable () -> Unit = { GlassButton(XIcons.Plus, "新建主机") { onNew() } }
 
-        if (topBar) {
-            // 直板机:外观 / 搜索在顶栏右边,＋ 是右下角的悬浮按钮 —— 安卓的惯例。
-            // 横屏双栏省高度:按钮浮在右上角,不铺底色、不占一条。
-            TopBar(Modifier.align(Alignment.TopCenter), solid = !twoPane || hosts.isEmpty(), end = { viewActions() })
+        if (bottomBar) {
+            // 直板机:底栏。左边外观 / 字体 / 搜索,右边 ＋ —— 安卓底部操作栏的排法(动作在左、主按钮在右)。
+            // 横屏双栏时只铺在左栏(列表)底下:右栏是详情,自己钉着「连接 / 编辑 / 删除」,别叠在一起。
             CompositionLocalProvider(LocalBackdrop provides backdrop) {
-                EdgeRail(Modifier.align(Alignment.BottomEnd)) { newHost() }
+                BottomBar(
+                    if (twoPane && hosts.isNotEmpty()) {
+                        // ＋ 的右缘落在卡片的右缘上(卡片止于折痕前 creaseGap,底栏自己带了一条 Gutter)。
+                        Modifier.align(Alignment.BottomStart).width(listWidth).padding(end = creaseGap - Gutter)
+                    } else {
+                        Modifier.align(Alignment.BottomCenter)
+                    },
+                    sides = if (twoPane && hosts.isNotEmpty()) {
+                        WindowInsetsSides.Start + WindowInsetsSides.Bottom
+                    } else {
+                        WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom
+                    },
+                    start = { viewActions() },
+                    end = { newHost() },
+                )
             }
         } else {
             // 折叠屏:chrome 全在右侧这条轨道里,界面四角不散落按钮;列表从玻璃底下滚过去。
@@ -420,11 +433,11 @@ private fun HostListPane(
     large: Boolean,
     /** 靠折痕(或屏幕右缘)那一侧的留白。 */
     creaseGap: Dp,
-    /** 列表是否从右侧轨道底下穿过(单栏为真):左滑露出的按钮不能落在轨道底下。 */
+    /** 列表底部是否压着按钮(轨道或底栏):左滑露出的按钮不能落在它们底下。 */
     underRail: Boolean,
-    /** 顶栏的高度(直板机),标题要从它下面开始。 */
+    /** 标题上面额外留的高度(现在各形态顶上都没有按钮,都是 0)。 */
     topPad: Dp,
-    /** 列表底部给按钮留的高度:折叠屏是整条轨道,直板机只有一颗 ＋。 */
+    /** 列表底部给按钮留的高度:折叠屏是整条轨道,直板机是底栏。 */
     bottomClearance: Dp,
 ) {
     val p = LocalXssh.current

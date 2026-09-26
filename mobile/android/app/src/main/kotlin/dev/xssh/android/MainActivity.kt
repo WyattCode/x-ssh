@@ -239,7 +239,7 @@ fun App(devTarget: DevTarget? = null) {
     }
 
     // 平板:窗口够宽(≥ 600dp)就是平板那一整套交互;小窗、窄分屏缩到手机宽度时退回手机的页面,
-    // 按钮按直板机的顶栏摆。两套共用上面这些状态,窗口来回缩放时正在看的东西不丢。
+    // 按钮按直板机的底栏摆。两套共用上面这些状态,窗口来回缩放时正在看的东西不丢。
     val chrome = LocalChrome.current
     BoxWithConstraints(Modifier.fillMaxSize()) {
         if (chrome == Chrome.Tablet && maxWidth >= 600.dp) {
@@ -269,7 +269,7 @@ fun App(devTarget: DevTarget? = null) {
             )
         } else {
             CompositionLocalProvider(
-                LocalChrome provides if (chrome == Chrome.Tablet) Chrome.TopBar else chrome,
+                LocalChrome provides if (chrome == Chrome.Tablet) Chrome.BottomBar else chrome,
             ) {
                 // 从平板布局缩进来:右栏开着终端就接着显示它,否则回主机页。
                 LaunchedEffect(Unit) {

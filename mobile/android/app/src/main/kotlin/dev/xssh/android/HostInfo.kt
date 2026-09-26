@@ -216,7 +216,7 @@ fun HostIdentity(host: Host, running: Boolean, modifier: Modifier = Modifier) {
 
 /**
  * 只看不改的整页(主机详情、终端字体)的外壳:内容铺满、可滚动、带回弹,
- * ‹ 折叠屏在右侧轨道(和编辑页、终端同一个落点)、直板机在顶栏。
+ * ‹ 折叠屏在右侧轨道(和编辑页、终端同一个落点)、直板机在底栏左边。
  *
  * 两页共用一个外壳,边距、‹ 的落点、底部留白就不会各写一套慢慢走偏。
  */
@@ -228,7 +228,7 @@ fun ReadingPage(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val p = LocalXssh.current
-    val topBar = LocalChrome.current == Chrome.TopBar
+    val bottomBar = LocalChrome.current == Chrome.BottomBar
     val backdrop = rememberLayerBackdrop()
     var actionsHeight by remember { mutableStateOf(0.dp) }
     Box(Modifier.fillMaxSize().background(p.bg)) {
@@ -244,25 +244,32 @@ fun ReadingPage(
                 .padding(
                     start = Gutter,
                     end = railSide(),
-                    top = (if (topBar) TopBarHeight else 0.dp) + Gutter,
-                    // 底部让开钉住的操作条;没有操作条时照旧给轨道留白。
-                    bottom = if (actions != null) actionsHeight + Gutter else if (topBar) 40.dp else RailClearance,
+                    top = Gutter,
+                    // 底部让开钉住的操作条;没有操作条时给轨道 / 底栏留白。
+                    bottom = if (actions != null) actionsHeight + Gutter else if (bottomBar) BarClearance else RailClearance,
                 ),
             content = content,
         )
         if (actions != null) {
             // 安全区在滚动那一层加过了,这里自己再加一次 —— 它不在那一层里面。
             Box(Modifier.fillMaxSize().windowInsetsPadding(stableSafeDrawing())) {
-                PinnedActions(onHeight = { actionsHeight = it }, content = actions)
+                // 直板机:大按钮叠在底栏上面(底栏在最下面一条,‹ 和外观在里面)。
+                PinnedActions(
+                    onHeight = { actionsHeight = it },
+                    bottom = if (bottomBar) BarClearance else Gutter,
+                    content = actions,
+                )
             }
         }
         // 外观在最上面:每一页都有,位置一样(见 ThemeGlassItem)。
-        if (topBar) {
-            TopBar(
-                Modifier.align(Alignment.TopCenter),
-                start = { GlassButton(XIcons.Back, "返回") { onBack() } },
-                end = { GlassGroup { ThemeGlassItem() } },
-            )
+        if (bottomBar) {
+            CompositionLocalProvider(LocalBackdrop provides backdrop) {
+                BottomBar(
+                    Modifier.align(Alignment.BottomCenter),
+                    start = { GlassButton(XIcons.Back, "返回") { onBack() } },
+                    end = { GlassGroup { ThemeGlassItem() } },
+                )
+            }
         } else {
             CompositionLocalProvider(LocalBackdrop provides backdrop) {
                 EdgeRail(Modifier.align(Alignment.BottomEnd)) {

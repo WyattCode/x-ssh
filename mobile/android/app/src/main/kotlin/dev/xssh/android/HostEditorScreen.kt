@@ -164,8 +164,8 @@ fun HostEditorScreen(
     // 整个页面量一次,和主机页同一条式子、同样量整个窗口。
     // 分组表单:浅色是浅灰底 + 白色分组块,深色是纯黑底 + 深灰分组块(iOS 设置页那种)。
     val backdrop = rememberLayerBackdrop()
-    // 折叠屏:‹ ✓ 在右侧轨道;直板机:顶栏左边 ‹、右边 ✓(见 Chrome)。
-    val topBar = LocalChrome.current == Chrome.TopBar
+    // 折叠屏:‹ ✓ 在右侧轨道;直板机:底栏左边 ‹、右边 ✓(见 Chrome)。
+    val bottomBar = LocalChrome.current == Chrome.BottomBar
     // 实体键盘:Ctrl+S 保存、Esc 返回(不保存)。
     val hardKeyboard = LocalConfiguration.current.hasHardKeyboard()
     val pageFocus = remember { FocusRequester() }
@@ -215,13 +215,11 @@ fun HostEditorScreen(
                     stableSafeDrawing().only(WindowInsetsSides.Vertical + WindowInsetsSides.End),
                 )
                 .bounce()
-                .verticalScroll(rememberScrollState())
-                // 直板机按钮在顶栏,标题从顶栏下面开始。
-                .padding(top = if (topBar) TopBarHeight else 0.dp),
+                .verticalScroll(rememberScrollState()),
         ) {
-          // 表单铺满到右边缘,‹ ✓ 悬浮在右下角。键盘弹起时按钮跟着升到键盘上方,正好压在
-          // "正在输入的那一行"右边(取值是右对齐的)—— 输入框聚焦时多滚一截按钮的高度,落到按钮上面。
-          CompositionLocalProvider(LocalFieldClearance provides if (topBar) 0.dp else RailClearance) {
+          // 表单铺满到右边缘,‹ ✓ 悬浮在底部(轨道或底栏)。键盘弹起时按钮跟着升到键盘上方,正好压在
+          // "正在输入的那一行"上 —— 输入框聚焦时多滚一截按钮的高度,落到按钮上面。
+          CompositionLocalProvider(LocalFieldClearance provides if (bottomBar) BarClearance else RailClearance) {
             Column(
                 // 标题线(见 Components 的版心说明):盒子线 + TitlePad。
                 Modifier.padding(start = startInset + Gutter + TitlePad, end = railSide(), top = Gutter),
@@ -285,20 +283,22 @@ fun HostEditorScreen(
                     danger()
                 }
             }
-            // 最后一组要能滚到右下角悬浮的按钮上面。
-            Spacer(Modifier.height(if (topBar) 40.dp else RailClearance))
+            // 最后一组要能滚到底部悬浮的按钮上面。
+            Spacer(Modifier.height(if (bottomBar) BarClearance else RailClearance))
           }
         }
 
-        if (topBar) {
-            TopBar(
-                Modifier.align(Alignment.TopCenter),
-                start = { GlassButton(XIcons.Back, "返回") { onBack() } },
-                end = {
-                    GlassGroup { ThemeGlassItem() }
-                    GlassButton(XIcons.Check, "保存") { save() }
-                },
-            )
+        if (bottomBar) {
+            CompositionLocalProvider(LocalBackdrop provides backdrop) {
+                BottomBar(
+                    Modifier.align(Alignment.BottomCenter),
+                    start = { GlassButton(XIcons.Back, "返回") { onBack() } },
+                    end = {
+                        GlassGroup { ThemeGlassItem() }
+                        GlassButton(XIcons.Check, "保存") { save() }
+                    },
+                )
+            }
         } else {
             // 和主机页的 ⌕ ＋ 落在同一对位置上:点 ＋ 进来,按钮原地换成 ‹ ✓,一像素不动。
             CompositionLocalProvider(LocalBackdrop provides backdrop) {

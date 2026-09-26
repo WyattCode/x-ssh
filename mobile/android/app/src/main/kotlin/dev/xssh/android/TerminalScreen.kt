@@ -162,7 +162,7 @@ fun TerminalScreen(
     host: Host,
     onExit: () -> Unit,
     onTrustKey: (String) -> Unit = {},
-    /** 放在平板右栏里时不为空:工具栏换成平板那套,不再画手机的轨道 / 顶栏按钮。 */
+    /** 放在平板右栏里时不为空:工具栏换成平板那套,不再画手机的轨道 / 底栏按钮。 */
     tablet: TabletTerminalChrome? = null,
     /** 手机 / 折叠屏:打开这条连接的文件页(平板走 [tablet] 里的开关)。 */
     onFiles: (() -> Unit)? = null,
@@ -848,8 +848,8 @@ private fun TerminalView(
         }
     }
 
-    // 折叠屏:⌨ ✕ 在右侧轨道;直板机:放进顶部的主机名这一行右边,按键面板铺满整宽(见 Chrome)。
-    val topBar = LocalChrome.current == Chrome.TopBar
+    // 折叠屏:⌨ ✕ 在右侧轨道;直板机:和主机名一起放在最底下一行(见 bottomBarRow),按键面板铺满整宽。
+    val bottomBar = LocalChrome.current == Chrome.BottomBar
     val header: @Composable () -> Unit = {
         if (tablet != null) {
             // 平板:工具栏在终端上面 —— 侧边栏开关、主机名、输入相关的开关、「更多」和「断开」。
@@ -910,18 +910,11 @@ private fun TerminalView(
                     }
                 }
             }
-        } else if (topBar) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.weight(1f)) { HostLine(host = host, dead = dead) }
-                CompositionLocalProvider(LocalGlassSize provides 40.dp, LocalGlassRow provides true) {
-                    Row(
-                        Modifier.padding(end = Gutter),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) { actions() }
-                }
-            }
         } else {
+            // 折叠屏和直板机都一样:顶上只有一行细字(哪台机器 / 已断开),**没有按钮**。
+            // 直板机原来这一行右边挤着四颗按钮,全屏程序的头几行被压着(用户实测的抱怨);
+            // 按钮挪到底下以后,名字留在顶上 —— 标题在上、操作在下,安卓手机的通常排法,
+            // 也和折叠屏同一个样子。试过把名字放到底下按钮左边,用户否掉了。
             HostLine(host = host, dead = dead)
         }
     }
@@ -989,8 +982,25 @@ private fun TerminalView(
             canvas(Modifier.weight(1f).fillMaxWidth())
             hiddenInput()
             AnimatedVisibility(showKeys, enter = Motion.keyboardIn, exit = Motion.keyboardOut) { keys() }
+            // 直板机:最底下一行放按钮(靠右)。**占自己的一行,不浮在终端上** ——
+            // 提示符就在终端最底下一行,浮着的玻璃会把正在敲的命令盖住。键盘弹起时这一行跟着升到键盘上方。
+            // 左下角空着,不是按钮:在文件页连点 ‹ 退回来,多点的那一下落在这里,无害。
+            if (bottomBar) {
+                Row(
+                    Modifier.fillMaxWidth().padding(start = Gutter, end = Gutter, bottom = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Spacer(Modifier.weight(1f))
+                    CompositionLocalProvider(LocalGlassSize provides 44.dp, LocalGlassRow provides true) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) { actions() }
+                    }
+                }
+            }
         }
-        if (!topBar && tablet == null) {
+        if (!bottomBar && tablet == null) {
             CompositionLocalProvider(LocalBackdrop provides backdrop) {
                 EdgeRail(Modifier.align(Alignment.BottomEnd), content = actions)
             }
@@ -1061,7 +1071,7 @@ private fun HostLine(host: Host, dead: Boolean) {
         // 圆点占住 16dp 那条线(与终端文字、第一个按键同缘),名字落在 32dp 文字线上。
         StatusDot(if (dead) p.danger else p.ok)
         Spacer(Modifier.width(7.dp))
-        // 地址要么整条放得下就显示,要么干脆不显示 —— 直板机顶栏右边排了四颗按钮,
+        // 地址要么整条放得下就显示,要么干脆不显示 —— 以前直板机这一行右边排了四颗按钮,
         // 原来地址被截成「user@12…」,半截地址比没有更难看,也看不出是哪台机器。
         // 「已断开」是状态,必须显示,放不下时顶掉的是名字(名字自己省略)。
         val detail = if (dead) "已断开" else host.subtitle

@@ -178,16 +178,18 @@ fun Adaptive.listPaneWidth(totalDp: Dp): Dp {
  *
  * - [Rail]:折叠屏(小米 Fold 这一类)—— 右侧一条竖轨道,iPhone Duo 的思路:外屏、内屏两种形态
  *   按钮都在同一个位置,手指记得住。
- * - [TopBar]:直板机和平板 —— 回到安卓的惯例:顶栏放返回和页面操作,主操作(＋)是右下角的悬浮按钮。
+ * - [BottomBar]:直板机 —— 安卓手机的惯例:**所有按钮在屏幕底部一条**,左边是返回 / 次要操作,
+ *   右边是这一页的主操作(＋、✓)。顶部不放任何按钮:握着直板机时拇指够得着的是下半截,
+ *   而且终端页的顶上一排按钮会压掉 SSH 的输出(用户实测的抱怨)。见 [BottomBar] 组件。
  *   直板机只有一种形态,右侧竖轨道只会白白占掉一条宽度,终端按键也被挤窄。
  *
  * - [Tablet]:平板 —— 不是换个按钮位置,是**另一套交互**(见 Tablet.kt):侧边栏常驻、终端在右栏打开、
  *   新建 / 编辑是居中浮层、工具栏在内容顶上、鼠标悬停 / 右键菜单 / 键盘快捷键齐全。
- *   窗口被缩到 600dp 以下(小窗、窄分屏)时退回手机那套页面,此时按 [TopBar] 摆按钮。
+ *   窗口被缩到 600dp 以下(小窗、窄分屏)时退回手机那套页面,此时按 [BottomBar] 摆按钮。
  *
  * 前两种视觉(Liquid Glass、配色、卡片)完全一样,变的只是按钮的位置。
  */
-enum class Chrome { Rail, TopBar, Tablet }
+enum class Chrome { Rail, BottomBar, Tablet }
 
 val LocalChrome = staticCompositionLocalOf { Chrome.Rail }
 
@@ -207,5 +209,5 @@ fun detectChrome(context: Context): Chrome {
         // Android 11 以前没有 maximumWindowMetrics;那时还没有平板小窗,配置里的最短边就是屏幕的。
         context.resources.configuration.smallestScreenWidthDp.toFloat()
     }
-    return if (shortestDp >= 600f) Chrome.Tablet else Chrome.TopBar
+    return if (shortestDp >= 600f) Chrome.Tablet else Chrome.BottomBar
 }

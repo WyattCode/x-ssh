@@ -883,7 +883,7 @@ private class PhoneFileActions(
 
 /**
  * 手机 / 折叠屏的文件页:和主机页、编辑页同一套版式 —— 大标题(当前文件夹)+ 路径(点一下手动输入),
- * 列表每项两行(名字 / 大小·时间);折叠屏按钮在右侧轨道(上传 / 新建文件夹 + ‹),直板机在顶栏。
+ * 列表每项两行(名字 / 大小·时间);折叠屏按钮在右侧轨道(上传 / 新建文件夹 + ‹),直板机在底栏(左 ‹、右操作)。
  *
  * 宽屏(折叠屏内屏横着、≥ 840dp)和主机页一样**关于折痕分两栏**:左栏是列表,右栏是选中文件的详情和操作
  * (打开 / 下载 / 下载到… / 重命名 / 删除)—— 行不再横跨折痕。单栏时点文件直接打开,长按出菜单。
@@ -916,7 +916,7 @@ private fun PhoneFiles(
     val p = LocalXssh.current
     val density = LocalDensity.current
     val adaptive = LocalAdaptive.current
-    val topBar = LocalChrome.current == Chrome.TopBar
+    val bottomBar = LocalChrome.current == Chrome.BottomBar
     val backdrop = rememberLayerBackdrop()
     val insets = stableSafeDrawing()
     val startInset = insets.asPaddingValues().calculateStartPadding(LocalLayoutDirection.current)
@@ -942,16 +942,24 @@ private fun PhoneFiles(
         val twoPane = pageWidth >= 840.dp || (adaptive.bookFold != null && pageWidth >= 600.dp)
         val listWidth = if (twoPane) adaptive.listPaneWidth(pageWidth).coerceAtMost(pageWidth - 280.dp) else pageWidth
         val rowStart = startInset + Gutter + BoxPad
-        val clearance = (if (topBar) 40.dp else RailClearance) + barsDp + navDp
+        val clearance = (if (bottomBar) BarClearance else RailClearance) + barsDp + navDp
+        // 双栏:右栏让开了轨道,左栏就收到同样宽,别一边长一边短(同主机页、编辑页,见 creaseGapFor)。
+        // 放在外面算:直板机横屏的底栏只铺在左栏底下,右端要和左栏的行对齐。
+        val creaseWidth = maxOf(1.dp, adaptive.bookFold?.sizeDp ?: 0.dp)
+        val listEnd = creaseGapFor(
+            listWidth,
+            startInset + Gutter,
+            (pageWidth - listWidth - creaseWidth) - Gutter * 2 - railSide(),
+        )
 
         val list: @Composable (Modifier, androidx.compose.ui.unit.Dp) -> Unit = { listModifier, endPad ->
             LazyColumn(
                 listModifier.then(dropModifier).bounce(),
                 state = listState,
                 contentPadding = PaddingValues(
-                    top = if (topBar && !twoPane) TopBarHeight else 0.dp,
-                    // 最后一项要能滚到轨道 / 底部的条上面(双栏时轨道在右栏,左栏只让底部的条)。
-                    bottom = if (twoPane) 24.dp + barsDp + navDp else clearance,
+                    // 最后一项要能滚到轨道 / 底栏 / 底部的条上面。折叠屏双栏时轨道在右栏,左栏只让底部的条;
+                    // 直板机横屏的底栏就铺在这一栏底下,照样要让。
+                    bottom = if (twoPane && !bottomBar) 24.dp + barsDp + navDp else clearance,
                 ),
             ) {
                 item(key = "title") {
@@ -1058,13 +1066,7 @@ private fun PhoneFiles(
                     .background(p.bg)
                     .windowInsetsPadding(insets.only(WindowInsetsSides.Top)),
             ) {
-                // 右栏让开了轨道,左栏就收到同样宽,别一边长一边短(同主机页、编辑页,见 creaseGapFor)。
-                val creaseWidth = maxOf(1.dp, adaptive.bookFold?.sizeDp ?: 0.dp)
-                val rightContent = (pageWidth - listWidth - creaseWidth) - Gutter * 2 - railSide()
-                list(
-                    Modifier.width(listWidth).fillMaxHeight(),
-                    creaseGapFor(listWidth, startInset + Gutter, rightContent),
-                )
+                list(Modifier.width(listWidth).fillMaxHeight(), listEnd)
                 Spacer(Modifier.width(creaseWidth))
                 AnimatedContent(
                     targetState = shown,
@@ -1089,17 +1091,28 @@ private fun PhoneFiles(
             )
         }
 
-        if (topBar) {
-            TopBar(
-                Modifier.align(Alignment.TopCenter),
-                // 双栏(横屏)省高度:按钮浮在上面,不铺底色(同主机页)。
-                solid = !twoPane,
-                start = { GlassButton(XIcons.Back, "返回") { onBack() } },
-                end = {
-                    GlassGroup { ThemeGlassItem() }
-                    railActions()
-                },
-            )
+        if (bottomBar) {
+            CompositionLocalProvider(LocalBackdrop provides backdrop) {
+                // 直板机:底栏,左 ‹ 右操作。底部有条(多选 / 传输)时整条往上让,叠在条上面。
+                // 横屏双栏只铺在左栏(列表)底下:右栏是文件详情,自己有「下载到… / 删除」(同主机页)。
+                BottomBar(
+                    if (twoPane) {
+                        Modifier.align(Alignment.BottomStart).width(listWidth).padding(end = listEnd - Gutter, bottom = barsDp)
+                    } else {
+                        Modifier.align(Alignment.BottomCenter).padding(bottom = barsDp)
+                    },
+                    sides = if (twoPane) {
+                        WindowInsetsSides.Start + WindowInsetsSides.Bottom
+                    } else {
+                        WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom
+                    },
+                    start = { GlassButton(XIcons.Back, "返回") { onBack() } },
+                    end = {
+                        GlassGroup { ThemeGlassItem() }
+                        railActions()
+                    },
+                )
+            }
         } else {
             CompositionLocalProvider(LocalBackdrop provides backdrop) {
                 // 和终端页的轨道同一个位置;底部有条时整条往上让。

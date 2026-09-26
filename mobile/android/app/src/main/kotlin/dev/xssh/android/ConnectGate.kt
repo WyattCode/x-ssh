@@ -63,7 +63,7 @@ import androidx.compose.runtime.setValue
    - **平板**:右栏里居中一张浮起的卡片(iPad 的 form sheet),侧边栏照常可用;回车 = 主操作,Esc = 返回。
      密钥变了时回车**不**做任何事 —— 这个决定必须用手点,不能被顺手一敲回车带过去。
    - **折叠屏**:内屏横着关于折痕分两栏(左:这是哪台主机、出了什么事;右:指纹和操作),外屏单栏;‹ 在右侧轨道。
-   - **直板机**:单栏,‹ 在顶栏。
+   - **直板机**:单栏,‹ 在底栏左边,「确认 / 取消」叠在底栏上面。
 
    版式:图标块(盾牌 / 警告 / 终端)→ 大标题 → 主机名与地址 → 内容卡片(指纹分组大字 / 失败原因)→ 按钮(同主机详情页)。
 */
@@ -228,7 +228,7 @@ private fun GatePage(host: Host, content: GateContent, tablet: Boolean, onExit: 
     }
 
     val adaptive = LocalAdaptive.current
-    val topBar = LocalChrome.current == Chrome.TopBar
+    val bottomBar = LocalChrome.current == Chrome.BottomBar
     val backdrop = rememberLayerBackdrop()
     val insets = stableSafeDrawing()
     val startInset = insets.asPaddingValues().calculateStartPadding(LocalLayoutDirection.current)
@@ -246,8 +246,7 @@ private fun GatePage(host: Host, content: GateContent, tablet: Boolean, onExit: 
                     .fillMaxSize()
                     .layerBackdrop(backdrop)
                     .background(p.groupedBg)
-                    .windowInsetsPadding(insets.only(WindowInsetsSides.Vertical))
-                    .padding(top = if (topBar) TopBarHeight else 0.dp),
+                    .windowInsetsPadding(insets.only(WindowInsetsSides.Vertical)),
             ) {
                 // 左栏止于折痕前 32dp,右栏从折痕后 32dp 起(同主机页、编辑页)。
                 Column(
@@ -265,7 +264,12 @@ private fun GatePage(host: Host, content: GateContent, tablet: Boolean, onExit: 
                         .fillMaxHeight()
                         .bounce()
                         .verticalScroll(rememberScrollState())
-                        .padding(start = Gutter * 2, end = railSide(), top = Gutter, bottom = RailClearance),
+                        .padding(
+                            start = Gutter * 2,
+                            end = railSide(),
+                            top = Gutter,
+                            bottom = if (bottomBar) BarClearance else RailClearance,
+                        ),
                 ) {
                     Column(Modifier.widthIn(max = PageMaxWidth)) {
                         content.body(this)
@@ -289,7 +293,7 @@ private fun GatePage(host: Host, content: GateContent, tablet: Boolean, onExit: 
                     .padding(
                         start = startInset + Gutter,
                         end = railSide(),
-                        top = (if (topBar) TopBarHeight else 0.dp) + Gutter,
+                        top = Gutter,
                         bottom = actionsHeight + Gutter,
                     ),
             ) {
@@ -307,18 +311,22 @@ private fun GatePage(host: Host, content: GateContent, tablet: Boolean, onExit: 
                 PinnedActions(
                     onHeight = { actionsHeight = it },
                     start = startInset + Gutter,
+                    // 直板机:「确认 / 取消」叠在底栏上面。
+                    bottom = if (bottomBar) BarClearance else Gutter,
                     background = p.groupedBg,
                 ) {
                     Column(Modifier.widthIn(max = PageMaxWidth)) { content.actions(true) }
                 }
             }
         }
-        if (topBar) {
-            TopBar(
-                Modifier.align(Alignment.TopCenter),
-                start = { GlassButton(XIcons.Back, "返回") { onExit() } },
-                end = { GlassGroup { ThemeGlassItem() } },
-            )
+        if (bottomBar) {
+            CompositionLocalProvider(LocalBackdrop provides backdrop) {
+                BottomBar(
+                    Modifier.align(Alignment.BottomCenter),
+                    start = { GlassButton(XIcons.Back, "返回") { onExit() } },
+                    end = { GlassGroup { ThemeGlassItem() } },
+                )
+            }
         } else {
             CompositionLocalProvider(LocalBackdrop provides backdrop) {
                 EdgeRail(Modifier.align(Alignment.BottomEnd)) {
