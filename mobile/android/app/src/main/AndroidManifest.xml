@@ -2,6 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- 断线自动重连:网络一恢复就马上重试(见 SessionService 的网络回调)。普通权限,不弹框。 -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Android 16+ 访问局域网地址需要单独授权;缺了它连内网主机会直接超时。 -->
     <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
     <!--

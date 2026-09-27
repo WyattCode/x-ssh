@@ -338,6 +338,7 @@ class HostDraft(private val initial: Host?) {
     var error by mutableStateOf<String?>(null)
 
     var lockSecrets by mutableStateOf(initial?.lockSecrets ?: false)
+    var tmux by mutableStateOf(initial?.tmux ?: false)
 
     /** 进来时这台主机是不是已经加了锁 —— 和 [lockSecrets] 一比就知道要不要重新加密。 */
     val originalLocked: Boolean = initial?.lockSecrets ?: false
@@ -375,8 +376,9 @@ class HostDraft(private val initial: Host?) {
             keyData != (initial?.keyData ?: "") ||
             keyPassphrase != (initial?.keyPassphrase ?: "") ||
             // 只拨了这个开关也是改过:漏掉它的话,平板浮层点外面就把这次改动静默丢了,
-            // 连「放弃未保存的修改?」都不问。
-            lockSecrets != originalLocked
+            // 连「放弃未保存的修改?」都不问。tmux 那个开关同理。
+            lockSecrets != originalLocked ||
+            tmux != (initial?.tmux ?: false)
 
     /**
      * 这台主机磁盘上有一条加锁的密码密文。
@@ -489,6 +491,7 @@ class HostDraft(private val initial: Host?) {
             keyName = if (key) keyName else "",
             keyPublicFingerprint = if (key) keyPublicFingerprint else "",
             lockSecrets = lockSecrets,
+            tmux = tmux,
             // 没解锁就保存时,明文是空的 —— 把磁盘上那几条原样带过去,别覆盖成空。
             // (用户只是改个名字,不该顺手把密码弄丢。取舍规则见 carriedSecrets,抽出去是为了能测。)
             lockedPassword = kept.lockedPassword,
@@ -832,6 +835,16 @@ fun CredentialFields(
                 Text("用生物识别解锁", color = p.text, fontSize = 16.sp, modifier = Modifier.weight(1f))
                 XsshSwitch(draft.lockSecrets) { draft.lockSecrets = it }
             }
+        }
+    }
+    // 连上之后做什么,和凭据无关,单独一组。放在这个函数里是因为手机整页和平板浮层都用它。
+    FormGroup {
+        Row(
+            Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(horizontal = BoxPad),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("连接后进入 tmux", color = p.text, fontSize = 16.sp, modifier = Modifier.weight(1f))
+            XsshSwitch(draft.tmux) { draft.tmux = it }
         }
     }
 }

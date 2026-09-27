@@ -7,6 +7,8 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.Network
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.ServiceCompat
@@ -30,11 +32,26 @@ class SessionService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    /**
+     * 默认网络换了(Wi-Fi 断了切到 5G、出了电梯、飞行模式关掉):告诉会话表,
+     * 正在等下一次重连的会话别再干等倒计时,马上去试。
+     *
+     * 挂在前台服务上而不是界面上:最需要它的时候,恰恰是应用在后台、界面根本不在。
+     * 服务只在有会话时活着,没有会话也就不必听。
+     */
+    private val networkWatch = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+            SessionRegistry.onNetworkAvailable()
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         ensureChannel(this)
         // 必须先进前台再做别的:Android 要求 startForegroundService 之后尽快调用。
         startForeground(NOTIFICATION_ID, buildNotification(0))
+        runCatching { getSystemService(ConnectivityManager::class.java)?.registerDefaultNetworkCallback(networkWatch) }
+            .onFailure { android.util.Log.w(TAG, "network watch not registered: ${it.message}") }
         scope.launch {
             SessionRegistry.sessions.collectLatest { sessions ->
                 if (sessions.isEmpty()) {
@@ -56,6 +73,7 @@ class SessionService : Service() {
     }
 
     override fun onDestroy() {
+        runCatching { getSystemService(ConnectivityManager::class.java)?.unregisterNetworkCallback(networkWatch) }
         scope.cancel()
         super.onDestroy()
     }

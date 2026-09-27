@@ -70,7 +70,17 @@ const val DownloadFolder = "X-SSH"
 /** 传输里的一步(一个文件)。[undo] 在它失败 / 被取消时清理半截产物。 */
 private class Step(val name: String, val size: Long, val run: (TransferListener) -> Unit, val undo: () -> Unit = {})
 
-class RemoteFiles(private val session: Session, private val scope: CoroutineScope) {
+class RemoteFiles(session: Session, private val scope: CoroutineScope) {
+    /** 当前连接。断线重连后换成新的那条(见 [rebind]),旧连接上的 SFTP 通道随之作废。 */
+    @Volatile
+    private var session: Session = session
+
+    /** 断线重连:改用新连接,旧通道丢掉,下次用到时在新连接上重开。 */
+    fun rebind(newSession: Session) {
+        session = newSession
+        reset()
+    }
+
     private val lock = Any()
     private var sftp: Sftp? = null
     private var closed = false

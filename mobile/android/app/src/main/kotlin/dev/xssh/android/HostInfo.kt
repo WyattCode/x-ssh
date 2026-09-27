@@ -96,6 +96,11 @@ fun HostInfoGroups(host: Host) {
             FormDivider()
             InfoRow("解锁", "生物识别或锁屏密码")
         }
+        // 这一页是"把这台主机的情况全摊开"的地方:连上会自动进 tmux,在这里也说一声。
+        if (host.tmux) {
+            FormDivider()
+            InfoRow("连接后", "进入 tmux")
+        }
         if (host.auth == AuthKind.KEY && host.keyPublicFingerprint.isNotEmpty()) {
             FormDivider()
             InfoRow("私钥指纹", host.keyPublicFingerprint.removePrefix("SHA256:"), mono = true)

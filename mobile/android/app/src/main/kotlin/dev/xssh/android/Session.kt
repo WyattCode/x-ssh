@@ -25,8 +25,13 @@ private val sessionCleanup = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 /** logcat 标签。连接卡住时用 `adb logcat -s xssh` 看停在哪一步。 */
 const val TAG = "xssh"
 
-/** 一帧的结果:连接是否还在、屏幕内容有没有变过。 */
-data class Pumped(val alive: Boolean, val changed: Boolean)
+/**
+ * 一帧的结果:连接是否还在、屏幕内容有没有变过。
+ *
+ * [dropped] 只在 `alive = false` 时有意义:为真是**传输断了**(网络、服务器没了,该自动重连),
+ * 为假是**正常结束**(`exit`、tmux 里 detach,或者我们自己关的),不该连回去。见 [linkOutcome]。
+ */
+data class Pumped(val alive: Boolean, val changed: Boolean, val dropped: Boolean = false)
 
 /** 从核心取回的一帧画面。 */
 data class Snapshot(
@@ -40,12 +45,32 @@ data class Snapshot(
 
 /** 一条活动会话:SSH 连接 + 通道 + 终端状态机。所有方法都必须在 IO 线程调用。 */
 class LiveTerminal(
-    val session: Session,
-    val shell: Shell,
+    session: Session,
+    shell: Shell,
     val term: Term,
-    val cols: Int,
-    val rows: Int,
+    cols: Int,
+    rows: Int,
 ) {
+    /**
+     * 底下那条连接。断线重连时整条换掉([reattach]),而 [term] —— 屏幕、回滚历史、选区 —— 留着:
+     * 用户连回来看到的还是断线前的输出,不是一块空屏。
+     */
+    @Volatile
+    var session: Session = session
+        private set
+
+    @Volatile
+    private var shell: Shell = shell
+
+    /** 现在的行列数(跟着 [resizeGrid] 走)。重连时新通道按它开,不然全屏程序会按 80×24 画。 */
+    @Volatile
+    var cols: Int = cols
+        private set
+
+    @Volatile
+    var rows: Int = rows
+        private set
+
     /**
      * 屏幕内容自上次取走之后有没有变过。首帧必须为真(要取一次初始画面),
      * 改了行列数也算变 —— 那时没有新数据,但折行结果不一样了。
@@ -74,9 +99,40 @@ class LiveTerminal(
         return try {
             pumpOnce()
         } catch (e: IllegalStateException) {
-            // 和 close() 撞上了:对象刚被释放。按"连接已断"处理。
+            // 和 close() 撞上了:对象刚被释放。按"连接已断"处理 —— 是我们自己关的,不算掉线。
             Pumped(alive = false, changed = false)
         }
+    }
+
+    /**
+     * 断线重连:换上新的连接和通道,屏幕([term])原样留着。
+     *
+     * 旧的那两个对象已经死了,这里释放掉(每条连接在 Rust 里各有一个 tokio 运行时,
+     * 不释放就漏两个线程)。新通道按**现在**的行列数调一次,再往屏幕上写一行分隔。
+     */
+    fun reattach(newSession: Session, newShell: Shell) {
+        val oldSession: Session
+        val oldShell: Shell
+        synchronized(this) {
+            if (closed) {
+                // 重连的这几秒里用户点了断开:新连接没人要了,关掉。
+                runCatching { newSession.disconnect() }
+                runCatching { newShell.destroy() }
+                runCatching { newSession.destroy() }
+                return
+            }
+            oldSession = session
+            oldShell = shell
+            session = newSession
+            shell = newShell
+        }
+        runCatching { oldShell.destroy() }
+        runCatching { oldSession.disconnect() }
+        runCatching { oldSession.destroy() }
+        runCatching { newShell.resize(cols.toUInt(), rows.toUInt()) }
+        runCatching { term.scrollToBottom() }
+        runCatching { term.feed(RECONNECTED_MARKER.toByteArray()) }
+        dirty = true
     }
 
     /** 当前画面(样式段 + 光标 + 回滚偏移 + 输入模式)。关闭后返回 null。 */
@@ -141,21 +197,16 @@ class LiveTerminal(
     }
 
     private fun pumpOnce(): Pumped {
-        var alive = true
         var changed = false
-        for (event in shell.poll()) {
-            when (event) {
-                is ServerEvent.Data -> {
-                    recording?.data(event.data)
-                    term.feed(event.data)
-                    changed = true
-                }
-                is ServerEvent.Eof -> Unit
-                is ServerEvent.Close -> alive = false
-                is ServerEvent.Disconnected -> alive = false
-                is ServerEvent.ExitStatus -> Unit
+        val events = shell.poll()
+        for (event in events) {
+            if (event is ServerEvent.Data) {
+                recording?.data(event.data)
+                term.feed(event.data)
+                changed = true
             }
         }
+        val outcome = linkOutcome(events)
         // 同步刷新(CSI ? 2026)超时要宿主自己触发,否则攒着的那一帧永远放不出来 ——
         // Codex 进去整屏空白就是这个(见 Rust Terminal::tick)。每一帧都调。
         if (term.tick()) changed = true
@@ -168,7 +219,11 @@ class LiveTerminal(
             changed = true
             dirty = false
         }
-        return Pumped(alive, changed)
+        return Pumped(
+            alive = outcome == LinkOutcome.Alive,
+            changed = changed,
+            dropped = outcome == LinkOutcome.Dropped,
+        )
     }
 
     fun sendRaw(bytes: ByteArray) {
@@ -231,6 +286,8 @@ class LiveTerminal(
 
     fun resizeGrid(cols: Int, rows: Int, cellWidthPx: Int, cellHeightPx: Int) {
         if (closed) return
+        this.cols = cols
+        this.rows = rows
         runCatching { shell.resize(cols.toUInt(), rows.toUInt()) }
         runCatching { term.resize(cols.toUInt(), rows.toUInt()) }
         recording?.resize(cols, rows)
@@ -271,6 +328,18 @@ class LiveTerminal(
 
 /** 建立连接并打开 shell(在 IO 线程调用)。 */
 fun connectHost(host: Host, cols: Int = 80, rows: Int = 24): LiveTerminal {
+    val (session, shell) = openTransport(host, cols, rows)
+    return LiveTerminal(session, shell, Term(cols.toUInt(), rows.toUInt()), cols, rows)
+}
+
+/**
+ * 连上并认证,打开交互通道(在 IO 线程调用)。首次连接和断线重连都走这里。
+ *
+ * 主机开了「连接后进入 tmux」时,通道里直接跑 [TMUX_COMMAND](带 PTY 的 exec),
+ * 而不是先开 shell 再把命令敲进去 —— 后者要等提示符出来,中间还会被 `.bashrc` 的输出搅乱。
+ * exec 本身失败(服务器不给 exec、Windows 的 OpenSSH 没有 sh)就退回普通 shell。
+ */
+fun openTransport(host: Host, cols: Int, rows: Int): Pair<Session, Shell> {
     val auth = when (host.auth) {
         AuthKind.PASSWORD -> AuthMethod.Password(host.password)
         // 导入的私钥:解密后的文本只在内存里交给核心;老数据 / 调试用的私钥文件路径照旧。
@@ -303,13 +372,20 @@ fun connectHost(host: Host, cols: Int = 80, rows: Int = 24): LiveTerminal {
     // 连接已经建立了,再开 shell 才失败(服务端不给 pty、通道数满了)的话,
     // 这条连接就没人认领了 —— 调用方只看到异常,拿不到 session,关不掉。
     val shell = try {
-        session.openShell(cols.toUInt(), rows.toUInt(), "xterm-256color")
+        val tmux = if (host.tmux) {
+            runCatching { session.openExec(cols.toUInt(), rows.toUInt(), "xterm-256color", TMUX_COMMAND) }
+                .onFailure { Log.w(TAG, "tmux exec refused, falling back to a shell: ${it.message}") }
+                .getOrNull()
+        } else {
+            null
+        }
+        tmux ?: session.openShell(cols.toUInt(), rows.toUInt(), "xterm-256color")
     } catch (e: Throwable) {
         Log.w(TAG, "open shell failed after ${elapsed()}ms: ${e.message}")
         runCatching { session.disconnect() }
         runCatching { session.destroy() }
         throw e
     }
-    Log.i(TAG, "shell open in ${elapsed()}ms")
-    return LiveTerminal(session, shell, Term(cols.toUInt(), rows.toUInt()), cols, rows)
+    Log.i(TAG, "shell open in ${elapsed()}ms (tmux=${host.tmux})")
+    return session to shell
 }

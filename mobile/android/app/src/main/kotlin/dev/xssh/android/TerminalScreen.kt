@@ -464,6 +464,8 @@ private fun TerminalView(
     // 真正每帧都在变的行内容和光标只在**画**的时候读(见 TerminalCanvas 的画布 lambda),
     // 变了就只重画,不重组、不重新布局。
     val dead by remember { derivedStateOf { !frameState.value.alive } }
+    // 断线后正在自动重连的第几次;0 = 没在重连。
+    val reconnecting by remember { derivedStateOf { frameState.value.reconnecting } }
     val scrolled by remember { derivedStateOf { frameState.value.scrollOffset > 0 } }
     val hasSelection by remember { derivedStateOf { frameState.value.selection != null } }
     val canFling by remember {
@@ -857,8 +859,16 @@ private fun TerminalView(
                 sidebarVisible = tablet.sidebarVisible,
                 onToggleSidebar = tablet.onToggleSidebar,
                 title = host.label,
-                subtitle = if (dead) "已断开" else host.subtitle,
-                dot = if (dead) p.danger else p.ok,
+                subtitle = when {
+                    dead -> "已断开"
+                    reconnecting > 0 -> reconnectingText(reconnecting)
+                    else -> host.subtitle
+                },
+                dot = when {
+                    dead -> p.danger
+                    reconnecting > 0 -> p.warn
+                    else -> p.ok
+                },
             ) {
                 GlassRevealRow(!dead) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -915,7 +925,7 @@ private fun TerminalView(
             // 直板机原来这一行右边挤着四颗按钮,全屏程序的头几行被压着(用户实测的抱怨);
             // 按钮挪到底下以后,名字留在顶上 —— 标题在上、操作在下,安卓手机的通常排法,
             // 也和折叠屏同一个样子。试过把名字放到底下按钮左边,用户否掉了。
-            HostLine(host = host, dead = dead)
+            HostLine(host = host, dead = dead, reconnecting = reconnecting)
         }
     }
 
@@ -999,6 +1009,9 @@ private fun TerminalView(
     }
 }
 
+/** 「重连中」那行字:第一次只说在重连,之后带上次数,让人知道它一直在试、没卡死。 */
+private fun reconnectingText(attempt: Int): String = if (attempt <= 1) "重连中…" else "重连中 · 第 $attempt 次"
+
 /** 鼠标滚轮一格翻几行。 */
 private const val WheelLines = 3f
 
@@ -1053,25 +1066,41 @@ private fun FloatingKeys(columns: Int, content: @Composable (keyWidth: Dp) -> Un
  * 原来这里是一条 56dp 的 bgElev 横条,还塞着键盘和断开两个按钮,把终端从顶上压掉一块。
  */
 @Composable
-private fun HostLine(host: Host, dead: Boolean) {
+private fun HostLine(host: Host, dead: Boolean, reconnecting: Int = 0) {
     val p = LocalXssh.current
     Row(
         Modifier.fillMaxWidth().padding(start = Gutter, end = Gutter, top = 10.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // 圆点占住 16dp 那条线(与终端文字、第一个按键同缘),名字落在 32dp 文字线上。
-        StatusDot(if (dead) p.danger else p.ok)
+        StatusDot(
+            when {
+                dead -> p.danger
+                reconnecting > 0 -> p.warn
+                else -> p.ok
+            },
+        )
         Spacer(Modifier.width(7.dp))
         // 地址要么整条放得下就显示,要么干脆不显示 —— 以前直板机这一行右边排了四颗按钮,
         // 原来地址被截成「user@12…」,半截地址比没有更难看,也看不出是哪台机器。
         // 「已断开」是状态,必须显示,放不下时顶掉的是名字(名字自己省略)。
-        val detail = if (dead) "已断开" else host.subtitle
+        // 重连中和已断开一样是状态,必须显示(放不下时顶掉的是名字)。
+        val detail = when {
+            dead -> "已断开"
+            reconnecting > 0 -> reconnectingText(reconnecting)
+            else -> host.subtitle
+        }
+        val status = dead || reconnecting > 0
         androidx.compose.ui.layout.Layout(
             content = {
                 Text(host.label, color = p.text, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
                     text = detail,
-                    color = if (dead) p.danger else p.textFaint,
+                    color = when {
+                        dead -> p.danger
+                        reconnecting > 0 -> p.warn
+                        else -> p.textFaint
+                    },
                     fontFamily = XsshFonts.monoUi,
                     fontSize = 11.sp,
                     maxLines = 1,
@@ -1083,7 +1112,7 @@ private fun HostLine(host: Host, dead: Boolean) {
             val loose = constraints.copy(minWidth = 0)
             val detailPlaceable = measurables[1].measure(androidx.compose.ui.unit.Constraints())
             val labelFull = measurables[0].maxIntrinsicWidth(constraints.maxHeight)
-            val showDetail = dead || labelFull + gap + detailPlaceable.width <= constraints.maxWidth
+            val showDetail = status || labelFull + gap + detailPlaceable.width <= constraints.maxWidth
             val labelMax = if (showDetail) (constraints.maxWidth - gap - detailPlaceable.width).coerceAtLeast(0) else constraints.maxWidth
             val labelPlaceable = measurables[0].measure(loose.copy(maxWidth = labelMax))
             val height = maxOf(labelPlaceable.height, if (showDetail) detailPlaceable.height else 0)

@@ -40,6 +40,11 @@ data class Host(
      */
     val lockSecrets: Boolean = false,
     /**
+     * 「连接后进入 tmux」:通道里直接跑 `tmux new-session -A -s xssh`(见 [TMUX_COMMAND])。
+     * 断线自动重连回来接上的还是同一个 tmux 会话,正在跑的命令不受影响。服务器没装 tmux 时退回普通 shell。
+     */
+    val tmux: Boolean = false,
+    /**
      * 还没解锁时,磁盘上那几条**读不出来**的密文原样带着。
      *
      * 没有它们的话,「解锁之前保存一次主机」(改个端口、换个名字)就会把密码
@@ -130,6 +135,7 @@ class HostStore(context: Context) {
                     keyPassphrase = plain[2],
                     keyName = item.optString("keyName"),
                     keyPublicFingerprint = item.optString("keyPublicFingerprint"),
+                    tmux = item.optBoolean("tmux", false),
                     // **这一条不能漏**:漏了每次加载都是 false —— 编辑页的开关显示成"关"
                     // (磁盘上明明锁着),而且保存时 `writeSecret` 会按"没加锁"用普通密钥
                     // 重新加密,用户没碰过开关,锁就被悄悄去掉了。
@@ -181,6 +187,7 @@ class HostStore(context: Context) {
             item.put("lockSecrets", host.lockSecrets)
             item.put("keyName", host.keyName)
             item.put("keyPublicFingerprint", host.keyPublicFingerprint)
+            item.put("tmux", host.tmux)
             array.put(item)
         }
         prefs.edit().putString(KEY_LIST, array.toString()).apply()

@@ -7,11 +7,14 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import android.util.Log
 import uniffi.xssh_ffi.CursorState
 import uniffi.xssh_ffi.InputModes
@@ -66,6 +69,11 @@ data class TerminalFrame(
     val modes: InputModes = DefaultInputModes,
     /** 选区在视口里的部分;null = 没选,或选区整个在视口外。 */
     val selection: uniffi.xssh_ffi.ViewSelection? = null,
+    /**
+     * 断线后正在自动重连的第几次(从 1 起);0 = 没在重连。
+     * 重连期间 [alive] 仍为真:会话还在,只是底下那条连接在换 —— 界面说「重连中」,不说「已断开」。
+     */
+    val reconnecting: Int = 0,
 )
 
 /**
@@ -76,12 +84,24 @@ data class TerminalFrame(
  * **无界队列**里堆的(`mpsc::unbounded_channel`),没人收就一直涨。
  */
 class TerminalSession(
-    val hostId: String,
-    val label: String,
-    val subtitle: String,
+    host: Host,
     private val live: LiveTerminal,
     scope: CoroutineScope,
 ) {
+    val hostId: String = host.id
+    val label: String = host.label
+    val subtitle: String = host.subtitle
+
+    /**
+     * 断线自动重连要用的**已解锁**凭据。
+     *
+     * 加了生物识别锁的主机,连接那一刻验过一次指纹;之后的自动重连是**同一次连接的延续**,
+     * 不再弹框 —— 否则切到后台时根本没人能按,而这正是最需要自动重连的时候。
+     * 会话结束(用户断开、对端正常退出、重连放弃)就清掉,不在内存里多留。
+     */
+    @Volatile
+    private var credentials: Host? = host
+
     /** 同一条连接上的文件(SFTP),第一次打开文件面板时才开通道。 */
     val files = RemoteFiles(live.session, scope)
 
@@ -103,8 +123,11 @@ class TerminalSession(
                 if (p.changed && watched) publishFrame()
                 p
             }
+            // 传输断了(网络换了、服务器没了):先自己连回去。连回来就接着转,屏幕原样留着。
+            if (!pumped.alive && pumped.dropped && reconnect()) continue
             if (!pumped.alive) {
                 Log.i(TAG, "peer closed ($label)")
+                credentials = null
                 _frame.value = _frame.value.copy(alive = false)
                 withContext(NonCancellable + Dispatchers.IO) {
                     files.close()
@@ -153,6 +176,41 @@ class TerminalSession(
 
     private fun enqueue(op: () -> Unit) {
         outbox.trySend(op)
+    }
+
+    /**
+     * 断线后自动重连。连上返回 true(屏幕和回滚历史都还在,下面多一行「连接已恢复」);
+     * 放弃返回 false,由调用方按"对端断了"收尾。
+     *
+     * 间隔按 [ReconnectPolicy.delayMillis] 走,网络一恢复就提前试([SessionRegistry.awaitRetry]):
+     * Wi-Fi 换到 5G 那一下不必干等倒计时。主机密钥变了、凭据错了这类"再试也没用"的直接放弃 ——
+     * 尤其是主机密钥,自动重连绝不能替用户接受一把新的。
+     *
+     * 这段时间里用户点「断开」:[shutdown] 取消轮询协程,这里的等待和连接随之中断。
+     */
+    private suspend fun reconnect(): Boolean {
+        val host = credentials ?: return false
+        Log.i(TAG, "link dropped ($label), reconnecting")
+        for (attempt in 1..ReconnectPolicy.MAX_ATTEMPTS) {
+            _frame.value = _frame.value.copy(reconnecting = attempt)
+            SessionRegistry.awaitRetry(ReconnectPolicy.delayMillis(attempt))
+            val result = withContext(Dispatchers.IO) {
+                runCatching { openTransport(host, live.cols, live.rows) }
+            }
+            val transport = result.getOrNull()
+            if (transport != null) {
+                withContext(Dispatchers.IO) { live.reattach(transport.first, transport.second) }
+                files.rebind(live.session)
+                _frame.value = _frame.value.copy(reconnecting = 0)
+                Log.i(TAG, "reconnected ($label) on attempt $attempt")
+                return true
+            }
+            val error = result.exceptionOrNull() ?: continue
+            Log.w(TAG, "reconnect $attempt failed ($label): [${error.javaClass.simpleName}] ${error.message}")
+            if (ReconnectPolicy.isPermanent(error)) break
+        }
+        _frame.value = _frame.value.copy(reconnecting = 0)
+        return false
     }
 
     fun sendRaw(bytes: ByteArray) = enqueue { live.sendRaw(bytes) }
@@ -228,6 +286,7 @@ class TerminalSession(
     fun scrollToBottom() = enqueue { live.scrollToBottom(); publishFrame() }
 
     internal fun shutdown() {
+        credentials = null
         job.cancel()
         outbox.close()
         writer.cancel()
@@ -293,7 +352,7 @@ object SessionRegistry {
                 live.closeAsync()
                 return existing
             }
-            val session = TerminalSession(host.id, host.label, host.subtitle, live, scope)
+            val session = TerminalSession(host, live, scope)
             _sessions.value = _sessions.value + (host.id to session)
             return session
         }
@@ -316,6 +375,19 @@ object SessionRegistry {
 
     /** 握手期间被「全部断开」打断。 */
     class Cancelled : Exception("已全部断开")
+
+    /** 网络恢复的信号(见 [SessionService] 里的网络回调)。只留最新一次,没人等就丢掉。 */
+    private val networkBack = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+
+    /** 系统报告有可用的网络了:正在等下一次重连的会话立刻去试。 */
+    fun onNetworkAvailable() {
+        networkBack.tryEmit(Unit)
+    }
+
+    /** 等 [millis] 毫秒再重连;这期间网络恢复就提前返回。 */
+    suspend fun awaitRetry(millis: Long) {
+        withTimeoutOrNull(millis) { networkBack.first() }
+    }
 
     /**
      * 对端断开后把它从名单上摘掉。由会话自己的轮询循环调用 —— 连接它已经关过了,
