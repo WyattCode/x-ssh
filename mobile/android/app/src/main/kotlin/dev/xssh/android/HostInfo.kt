@@ -33,6 +33,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -57,16 +58,24 @@ import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 @Composable
 fun HostInfoGroups(host: Host) {
     val p = LocalXssh.current
-    FormGroup(title = "连接") {
-        InfoRow("地址", host.address, mono = true)
+    FormGroup(title = stringResource(R.string.host_group_connection)) {
+        InfoRow(stringResource(R.string.host_address), host.address, mono = true)
         FormDivider()
-        InfoRow("端口", host.port.toString(), mono = true)
+        InfoRow(stringResource(R.string.host_port), host.port.toString(), mono = true)
         FormDivider()
-        InfoRow("用户名", host.username.ifBlank { "未设置" }, mono = host.username.isNotBlank())
+        InfoRow(
+            stringResource(R.string.host_username),
+            host.username.ifBlank { stringResource(R.string.host_not_set) },
+            mono = host.username.isNotBlank(),
+        )
         FormDivider()
         if (host.jumpHostId.isNotEmpty()) {
             val jump = LocalHosts.current.firstOrNull { it.id == host.jumpHostId }
-            InfoRow("跳板机", jump?.label ?: "已删除", valueColor = if (jump == null) p.warn else null)
+            InfoRow(
+                stringResource(R.string.host_jump_host),
+                jump?.label ?: stringResource(R.string.host_deleted),
+                valueColor = if (jump == null) p.warn else null,
+            )
             FormDivider()
         }
         // 判"到底存没存"要看磁盘上那条密文:加了锁而这次没解锁时,明文本来就是空的,
@@ -77,49 +86,51 @@ fun HostInfoGroups(host: Host) {
         val broken = host.unreadableSecrets
         // 只看 `host.password` 会把"已保存但锁着"误报成"未保存"(用户以为密码丢了)。
         // 解不开的也算"存过":它下面单独有一行说「读不出来」,这里别再说成「未保存」。
-        val hasPassword = host.password.isNotEmpty() || host.lockedPassword != null || "密码" in broken
+        val hasPassword = host.password.isNotEmpty() || host.lockedPassword != null || SecretField.Password in broken
         val hasKey = host.keyData.isNotEmpty() || host.keyPath.isNotEmpty() || host.lockedKeyData != null ||
-            "私钥" in broken
+            SecretField.PrivateKey in broken
         val login = when {
-            host.auth == AuthKind.KEY && !hasKey -> "私钥 · 未导入"
-            host.auth == AuthKind.KEY -> "私钥" + host.keyName.takeIf { it.isNotEmpty() }?.let { " · $it" }.orEmpty()
-            !hasPassword -> "密码 · 未保存"
-            else -> "密码"
+            host.auth == AuthKind.KEY && !hasKey -> stringResource(R.string.host_login_key_not_imported)
+            host.auth == AuthKind.KEY && host.keyName.isNotEmpty() ->
+                stringResource(R.string.host_login_key_named, host.keyName)
+            host.auth == AuthKind.KEY -> stringResource(R.string.host_private_key)
+            !hasPassword -> stringResource(R.string.host_login_password_not_saved)
+            else -> stringResource(R.string.host_password)
         }
         val attention = (host.auth == AuthKind.KEY && !hasKey) ||
             (host.auth == AuthKind.PASSWORD && !hasPassword) ||
             broken.isNotEmpty()
-        InfoRow("登录方式", login, valueColor = if (attention) p.warn else null)
+        InfoRow(stringResource(R.string.host_login_method), login, valueColor = if (attention) p.warn else null)
         if (broken.isNotEmpty()) {
             FormDivider()
-            InfoRow("凭据", broken.joinToString("、") + " 读不出来", valueColor = p.warn)
+            InfoRow(stringResource(R.string.host_credentials), unreadableText(broken), valueColor = p.warn)
         }
         // 加了锁就在这里说一声:这一页是"把这台主机的情况全摊开"的地方,
         // 而"连接前要验一次"这件事原来只有编辑页的开关知道 —— 用户在这页看不出来,
         // 点了连接突然弹解锁框会一愣。
         if (host.lockSecrets) {
             FormDivider()
-            InfoRow("解锁", "生物识别或锁屏密码")
+            InfoRow(stringResource(R.string.host_unlock), stringResource(R.string.host_unlock_biometric_or_pin))
         }
         // 这一页是"把这台主机的情况全摊开"的地方:连上会自动进 tmux,在这里也说一声。
         if (host.tmux) {
             FormDivider()
-            InfoRow("连接后", "进入 tmux")
+            InfoRow(stringResource(R.string.host_after_connect), stringResource(R.string.host_enter_tmux))
         }
         if (host.auth == AuthKind.KEY && host.keyPublicFingerprint.isNotEmpty()) {
             FormDivider()
-            InfoRow("私钥指纹", host.keyPublicFingerprint.removePrefix("SHA256:"), mono = true)
+            InfoRow(stringResource(R.string.host_key_fingerprint), host.keyPublicFingerprint.removePrefix("SHA256:"), mono = true)
         }
     }
     Spacer(Modifier.height(24.dp))
-    FormGroup(title = "主机密钥") {
+    FormGroup(title = stringResource(R.string.host_group_host_key)) {
         if (host.keyFingerprint.isBlank()) {
-            InfoRow("状态", "未确认", valueColor = p.warn)
+            InfoRow(stringResource(R.string.host_status), stringResource(R.string.host_unconfirmed), valueColor = p.warn)
         } else {
             // 指纹 11 字一组、两组一行(和确认主机身份那一页同一个断法),逐段比对时断点落在同一处。
             val (algorithm, rows) = fingerprintRows(host.keyFingerprint)
             Column(Modifier.fillMaxWidth().padding(horizontal = BoxPad, vertical = 14.dp)) {
-                Text(algorithm.ifBlank { "指纹" }, color = p.textDim, fontSize = 13.sp)
+                Text(algorithm.ifBlank { stringResource(R.string.host_fingerprint) }, color = p.textDim, fontSize = 13.sp)
                 Spacer(Modifier.height(6.dp))
                 SelectionContainer {
                     Column {
@@ -130,6 +141,30 @@ fun HostInfoGroups(host: Host) {
                 }
             }
         }
+    }
+}
+
+/** 凭据给用户看的名字。 */
+@Composable
+private fun secretName(field: SecretField): String = stringResource(
+    when (field) {
+        SecretField.Password -> R.string.host_password
+        SecretField.PrivateKey -> R.string.host_private_key
+        SecretField.Passphrase -> R.string.host_passphrase
+    },
+)
+
+/**
+ * 「密码、私钥 读不出来」。最多三条,按条数各一句 —— 列表的连接词和语序交给译文,
+ * 不在代码里拼分隔符(英文的 ", " 带空格,资源里的首尾空格会被裁掉)。
+ */
+@Composable
+private fun unreadableText(broken: List<SecretField>): String {
+    val names = broken.map { secretName(it) }
+    return when (names.size) {
+        1 -> stringResource(R.string.host_unreadable_1, names[0])
+        2 -> stringResource(R.string.host_unreadable_2, names[0], names[1])
+        else -> stringResource(R.string.host_unreadable_3, names[0], names[1], names[2])
     }
 }
 
@@ -172,18 +207,21 @@ fun HostActions(
     onDelete: (Host) -> Unit,
 ) {
     Column(Modifier.widthIn(max = PageMaxWidth)) {
-        XsshButton(if (running) "打开会话" else "连接", modifier = Modifier.fillMaxWidth()) { onConnect(host) }
+        XsshButton(
+            stringResource(if (running) R.string.host_open_session else R.string.host_connect),
+            modifier = Modifier.fillMaxWidth(),
+        ) { onConnect(host) }
         Spacer(Modifier.height(GapItem))
         var confirming by remember(host.id, running) { mutableStateOf(false) }
         Row(horizontalArrangement = Arrangement.spacedBy(GapItem)) {
-            XsshButton("编辑", kind = ButtonKind.Ghost, modifier = Modifier.weight(1f)) { onEdit(host) }
+            XsshButton(stringResource(R.string.host_edit), kind = ButtonKind.Ghost, modifier = Modifier.weight(1f)) { onEdit(host) }
             if (running) {
-                XsshButton("断开", kind = ButtonKind.Danger, modifier = Modifier.weight(1f)) {
+                XsshButton(stringResource(R.string.host_disconnect), kind = ButtonKind.Danger, modifier = Modifier.weight(1f)) {
                     SessionRegistry.close(host.id)
                 }
             } else {
                 XsshButton(
-                    if (confirming) "确认删除" else "删除",
+                    stringResource(if (confirming) R.string.host_confirm_delete else R.string.host_delete),
                     kind = ButtonKind.Danger,
                     modifier = Modifier.weight(1f),
                 ) {
@@ -288,7 +326,7 @@ fun ReadingPage(
             CompositionLocalProvider(LocalBackdrop provides backdrop) {
                 BottomBar(
                     Modifier.align(Alignment.BottomCenter),
-                    start = { GlassButton(XIcons.Back, "返回") { onBack() } },
+                    start = { GlassButton(XIcons.Back, stringResource(R.string.host_back)) { onBack() } },
                     end = { GlassGroup { ThemeGlassItem() } },
                 )
             }
@@ -296,7 +334,7 @@ fun ReadingPage(
             CompositionLocalProvider(LocalBackdrop provides backdrop) {
                 EdgeRail(Modifier.align(Alignment.BottomEnd)) {
                     GlassGroup { ThemeGlassItem() }
-                    GlassButton(XIcons.Back, "返回") { onBack() }
+                    GlassButton(XIcons.Back, stringResource(R.string.host_back)) { onBack() }
                 }
             }
         }

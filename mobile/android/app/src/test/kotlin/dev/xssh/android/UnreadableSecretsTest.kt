@@ -21,13 +21,13 @@ class UnreadableSecretsTest {
 
     @Test
     fun `nothing saved is not unreadable`() {
-        assertEquals(emptyList<String>(), unreadableSecrets(listOf("", "", ""), listOf("", "", "")))
+        assertEquals(emptyList<SecretField>(), unreadableSecrets(listOf("", "", ""), listOf("", "", "")))
     }
 
     @Test
     fun `a sealed value that decrypted is fine`() {
         assertEquals(
-            emptyList<String>(),
+            emptyList<SecretField>(),
             unreadableSecrets(listOf(plainSealed, "", ""), listOf("hunter2", "", "")),
         )
     }
@@ -35,23 +35,23 @@ class UnreadableSecretsTest {
     @Test
     fun `a sealed value that no longer decrypts is reported`() {
         // 形态对(不空、也不是 L: 前缀),但这把密钥已经不在 —— 重装之后的必然结果。
-        assertEquals(listOf("密码"), unreadableSecrets(listOf(plainSealed, "", ""), listOf("", "", "")))
+        assertEquals(listOf(SecretField.Password), unreadableSecrets(listOf(plainSealed, "", ""), listOf("", "", "")))
     }
 
     @Test
     fun `a locked value waiting for unlock is not reported`() {
         // `open` 本来就不读加锁的那条,明文为空是正常的:它等的是连接时的解锁,不是坏了。
-        assertEquals(emptyList<String>(), unreadableSecrets(listOf(locked, "", ""), listOf("", "", "")))
+        assertEquals(emptyList<SecretField>(), unreadableSecrets(listOf(locked, "", ""), listOf("", "", "")))
     }
 
     @Test
     fun `every kind is reported in field order`() {
         assertEquals(
-            listOf("密码", "私钥", "口令"),
+            listOf(SecretField.Password, SecretField.PrivateKey, SecretField.Passphrase),
             unreadableSecrets(listOf(plainSealed, plainSealed, plainSealed), listOf("", "", "")),
         )
         assertEquals(
-            listOf("私钥"),
+            listOf(SecretField.PrivateKey),
             unreadableSecrets(listOf(locked, plainSealed, ""), listOf("", "", "")),
         )
     }
@@ -60,9 +60,9 @@ class UnreadableSecretsTest {
     fun `a host loaded with a broken password carries the report and no locked copy`() {
         // load 给"解不开的普通密文"造出来的就是这个形态:明文空、locked* 为 null、报告里有它。
         // 详情页只能看 unreadableSecrets —— 看 locked* 的话这里什么都看不到(原来的 bug)。
-        val host = Host(address = "192.168.1.10", unreadableSecrets = listOf("密码"))
+        val host = Host(address = "192.168.1.10", unreadableSecrets = listOf(SecretField.Password))
         assertEquals(null, host.lockedPassword)
         assertEquals("", host.password)
-        assertEquals(listOf("密码"), host.unreadableSecrets)
+        assertEquals(listOf(SecretField.Password), host.unreadableSecrets)
     }
 }

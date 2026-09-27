@@ -111,7 +111,7 @@ class LiveTerminal(
      * 旧的那两个对象已经死了,这里释放掉(每条连接在 Rust 里各有一个 tokio 运行时,
      * 不释放就漏两个线程)。新通道按**现在**的行列数调一次,再往屏幕上写一行分隔。
      */
-    fun reattach(newSession: Session, newShell: Shell) {
+    fun reattach(newSession: Session, newShell: Shell, marker: String) {
         val oldSession: Session
         val oldShell: Shell
         synchronized(this) {
@@ -132,7 +132,7 @@ class LiveTerminal(
         runCatching { oldSession.destroy() }
         runCatching { newShell.resize(cols.toUInt(), rows.toUInt()) }
         runCatching { term.scrollToBottom() }
-        runCatching { term.feed(RECONNECTED_MARKER.toByteArray()) }
+        runCatching { term.feed(marker.toByteArray()) }
         dirty = true
     }
 

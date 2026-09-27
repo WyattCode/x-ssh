@@ -126,6 +126,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
@@ -157,6 +158,9 @@ private val SENTINELS = arrayOf("\u200b", "\u200c")
 /** 等用户裁决的主机密钥:[fingerprint] 是服务端这次给出的指纹;[jump] = 说的是跳板机的密钥。 */
 private data class PendingKey(val fingerprint: String, val changed: Boolean, val jump: Boolean = false)
 
+/** 错误页上那句话是哪一类:决定给不给「填写口令」按钮(原来靠比对中文原文,换了语言就失效)。 */
+private enum class FailureKind { Other, KeyPassphrase }
+
 @Composable
 fun TerminalScreen(
     host: Host,
@@ -179,7 +183,10 @@ fun TerminalScreen(
     val jumpGone = host.jumpHostId.isNotEmpty() && jumpHost == null
     // 已经连着就直接接管,不重连、也不再问一次主机密钥。
     var live by remember(host, jumpHost) { mutableStateOf(SessionRegistry[host.id]) }
-    var error by remember(host, jumpHost) { mutableStateOf<String?>(null) }
+    // 错误页那句话**存成「怎么说」而不是说好的字**:换界面语言时界面不重建(见 Manifest 的 configChanges),
+    // 存成字的话平板上开着错误页去设置里换语言,别处都变了,就这句还是旧语言。显示时再按当前语言取。
+    var error by remember(host, jumpHost) { mutableStateOf<((android.content.Context) -> String)?>(null) }
+    var errorKind by remember(host, jumpHost) { mutableStateOf(FailureKind.Other) }
     var pendingKey by remember(host, jumpHost) { mutableStateOf<PendingKey?>(null) }
     var attempt by remember(host, jumpHost) { mutableStateOf(0) }
     // 这一屏里已经解锁过的凭据(本机, 跳板机)。确认完主机密钥重连时直接用,不再弹指纹:
@@ -207,9 +214,10 @@ fun TerminalScreen(
     LaunchedEffect(host, jumpHost, attempt) {
         if (live != null) return@LaunchedEffect
         error = null
+        errorKind = FailureKind.Other
         pendingKey = null
         if (jumpGone) {
-            error = JumpGoneText
+            error = { it.getString(R.string.term_err_jump_gone) }
             return@LaunchedEffect
         }
         // 开了「用生物识别解锁」的主机,列表里读到的密码是空的(没解锁就读不出来)。
@@ -217,33 +225,33 @@ fun TerminalScreen(
         val cached = unlocked
         val ready = if (cached != null) host.withSecretsOf(cached.first) else unlockCredentials(context, host)
         if (ready == null) {
-            error = "没能解锁已保存的凭据。"
+            error = { it.getString(R.string.term_err_unlock_failed) }
             return@LaunchedEffect
         }
         // 跳板机的凭据同样要解锁。两台都加了锁时一般只弹一次:第一次验过之后解锁窗口还开着。
         val readyJump = jumpHost?.let { jump ->
             cached?.second?.let { jump.withSecretsOf(it) } ?: unlockCredentials(context, jump) ?: run {
-                error = "没能解锁跳板机「${jump.label}」的凭据。"
+                error = { it.getString(R.string.term_err_unlock_jump_failed, jump.label) }
                 return@LaunchedEffect
             }
         }
         if (readyJump != null && readyJump.auth == AuthKind.PASSWORD && readyJump.password.isEmpty()) {
-            error = "跳板机「${readyJump.label}」还没有保存密码。"
+            error = { it.getString(R.string.term_err_jump_no_password, readyJump.label) }
             return@LaunchedEffect
         }
         if (readyJump != null && readyJump.keyMissing) {
-            error = "跳板机「${readyJump.label}」还没有导入私钥。"
+            error = { it.getString(R.string.term_err_jump_no_key, readyJump.label) }
             return@LaunchedEffect
         }
         // 密码认证却没有存密码(旧版本只放内存、或者新建时没填):拿空密码去连,
         // 服务端只会回一句笼统的认证失败,用户看不出是"没填"还是"填错"。
         // 也不要先弹权限框再失败 —— 在这里就说清楚。
         if (ready.auth == AuthKind.PASSWORD && ready.password.isEmpty()) {
-            error = "这台主机还没有保存密码。"
+            error = { it.getString(R.string.term_err_no_password) }
             return@LaunchedEffect
         }
         if (ready.keyMissing) {
-            error = "这台主机还没有导入私钥。"
+            error = { it.getString(R.string.term_err_no_key) }
             return@LaunchedEffect
         }
         unlocked = ready to readyJump
@@ -299,7 +307,7 @@ fun TerminalScreen(
                             failure is FfiException.HostKeyChanged ||
                             failure is FfiException.JumpHostKeyUnknown ||
                             failure is FfiException.JumpHostKeyChanged) ->
-                        error = "服务端密钥校验未通过,但没拿到指纹(${failure.javaClass.simpleName})。"
+                        error = { it.getString(R.string.term_err_no_fingerprint, failure.javaClass.simpleName) }
 
                     failure is FfiException.HostKeyUnknown ->
                         pendingKey = PendingKey(fingerprint, changed = false)
@@ -315,20 +323,34 @@ fun TerminalScreen(
                         pendingKey = PendingKey(fingerprint, changed = true, jump = true)
 
                     failure is FfiException.KeyEncrypted && readyJump != null && isJumpFailure(failure.message) ->
-                        error = if (readyJump.keyPassphrase.isEmpty()) {
-                            "跳板机「${readyJump.label}」的私钥有口令。"
-                        } else {
-                            "跳板机「${readyJump.label}」的私钥口令不对。"
+                        error = { c ->
+                            if (readyJump.keyPassphrase.isEmpty()) {
+                                c.getString(R.string.term_err_jump_key_passphrase_needed, readyJump.label)
+                            } else {
+                                c.getString(R.string.term_err_jump_key_passphrase_wrong, readyJump.label)
+                            }
                         }
 
                     // 看**解锁后**的口令:加锁主机的 host.keyPassphrase 永远是空的,填错了口令也会被说成"有口令"。
-                    failure is FfiException.KeyEncrypted ->
-                        error = if (ready.keyPassphrase.isEmpty()) "这把私钥有口令。" else "私钥口令不对。"
+                    failure is FfiException.KeyEncrypted -> {
+                        val passphraseMissing = ready.keyPassphrase.isEmpty()
+                        error = { c ->
+                            c.getString(
+                                if (passphraseMissing) R.string.term_err_key_passphrase_needed
+                                else R.string.term_err_key_passphrase_wrong,
+                            )
+                        }
+                        errorKind = FailureKind.KeyPassphrase
+                    }
+
+                    // 握手期间点了「全部断开」(见 SessionRegistry.open)。
+                    failure is SessionRegistry.Cancelled ->
+                        error = { it.getString(R.string.term_err_cancelled) }
 
                     else -> {
                         val message = failure.message?.ifBlank { null } ?: failure.toString()
-                        error = readyJump?.let { jumpFailureText(message, it, host) }
-                            ?: LocalNetwork.hintFor(context, direct, message)
+                        val jumpText = readyJump?.let { jumpFailure(message, it, host) }
+                        error = { c -> jumpText?.format(c) ?: LocalNetwork.hintFor(c, direct, message) }
                     }
                 }
             }
@@ -336,7 +358,9 @@ fun TerminalScreen(
 
     // 先绑成局部变量:onTrust 是稍后才执行的,直接在里面 pendingKey!! 等于赌它那时还不是 null。
     val pending = pendingKey
-    val failure = error
+    // 读一下 LocalConfiguration:换了界面语言它会变,这一句随之按新语言重取。
+    val failure = error?.let { phrase -> androidx.compose.ui.platform.LocalConfiguration.current; phrase(context) }
+    val failureKind = errorKind
     val session = live
     // 平板右栏:确认页 / 错误页 / 连接中上面也要有工具栏(侧边栏开关、主机名),不能是一整块没有出口的页面。
     val frame: @Composable (@Composable () -> Unit) -> Unit = { content ->
@@ -378,13 +402,16 @@ fun TerminalScreen(
             // (私钥那边同理,已经收进 Host.keyMissing。)
             val storedPassword = host.password.isNotEmpty() || host.lockedPassword != null
             val noPassword = host.auth == AuthKind.PASSWORD && !storedPassword
-            val keyProblem = failure.startsWith("这把私钥有口令") ||
-                failure.startsWith("私钥口令不对")
+            val keyProblem = failureKind == FailureKind.KeyPassphrase
             // 跳板机没存凭据:重试只会得到同一句话(去跳板机那台的编辑页补上)。
             val jumpNoCredentials = jumpHost != null && (
                 (jumpHost.auth == AuthKind.PASSWORD && jumpHost.password.isEmpty() && jumpHost.lockedPassword == null) ||
                     jumpHost.keyMissing
                 )
+            val fixPickJump = stringResource(R.string.term_fix_pick_jump)
+            val fixPassword = stringResource(R.string.term_fix_enter_password)
+            val fixKey = stringResource(R.string.term_fix_import_key)
+            val fixPassphrase = stringResource(R.string.term_fix_enter_passphrase)
             ConnectGate(
                 host = host,
                 failure = failure,
@@ -396,10 +423,10 @@ fun TerminalScreen(
                 // 能就地修的直接给按钮,打开编辑页(平板是浮层)—— 不用先退回去再找编辑入口。
                 fix = (tablet?.onEdit ?: onEditHost)?.let { edit ->
                     when {
-                        jumpGone -> "重新选跳板机" to edit
-                        noPassword -> "填写密码" to edit
-                        host.keyMissing -> "导入私钥" to edit
-                        keyProblem -> "填写口令" to edit
+                        jumpGone -> fixPickJump to edit
+                        noPassword -> fixPassword to edit
+                        host.keyMissing -> fixKey to edit
+                        keyProblem -> fixPassphrase to edit
                         else -> null
                     }
                 },
@@ -500,7 +527,7 @@ private fun TerminalView(
         imeMode = !imeMode
         focusInput()
         // 「输入法」而不是「中」:输入法自己可能正处在英文状态(Shift 切过),说"中"不一定对。
-        modePill = if (imeMode) "输入法" else "英文"
+        modePill = context.getString(if (imeMode) R.string.term_mode_ime else R.string.term_mode_english)
         modePillTick++
     }
     // 插着实体键盘就直接能打字:焦点不在输入框上(直通)时不会弹软键盘。
@@ -646,17 +673,17 @@ private fun TerminalView(
 
     // 右键 / 工具栏「更多」里的终端操作(平板)。手机上右键仍是直接粘贴。
     fun terminalMenu(): List<MenuAction> = buildList {
-        if (hasSelection) add(MenuAction("复制", shortcut = "Ctrl+Shift+C") { copySelection() })
-        add(MenuAction("粘贴", shortcut = "Ctrl+Shift+V") { paste() })
-        add(MenuAction("清屏", shortcut = "Ctrl+L") { live.sendRaw(byteArrayOf(12)) })
-        add(MenuAction("放大字号", shortcut = "Ctrl+Shift+=") {
+        if (hasSelection) add(MenuAction(context.getString(R.string.term_menu_copy), shortcut = "Ctrl+Shift+C") { copySelection() })
+        add(MenuAction(context.getString(R.string.term_menu_paste), shortcut = "Ctrl+Shift+V") { paste() })
+        add(MenuAction(context.getString(R.string.term_menu_clear), shortcut = "Ctrl+L") { live.sendRaw(byteArrayOf(12)) })
+        add(MenuAction(context.getString(R.string.term_menu_font_bigger), shortcut = "Ctrl+Shift+=") {
             fontSize = (fontSize + 1f).coerceIn(UiPrefs.FONT_MIN, UiPrefs.FONT_MAX)
         })
-        add(MenuAction("缩小字号", shortcut = "Ctrl+Shift+-") {
+        add(MenuAction(context.getString(R.string.term_menu_font_smaller), shortcut = "Ctrl+Shift+-") {
             fontSize = (fontSize - 1f).coerceIn(UiPrefs.FONT_MIN, UiPrefs.FONT_MAX)
         })
-        add(MenuAction("命令片段…") { snippetsOpen = true })
-        tablet?.let { add(MenuAction("编辑主机…", shortcut = "Ctrl+Shift+E") { it.onEdit() }) }
+        add(MenuAction(context.getString(R.string.term_menu_snippets)) { snippetsOpen = true })
+        tablet?.let { add(MenuAction(context.getString(R.string.term_menu_edit_host), shortcut = "Ctrl+Shift+E") { it.onEdit() }) }
     }
     var canvasMenuAt by remember { mutableStateOf<DpOffset?>(null) }
     var canvasHeight by remember { mutableIntStateOf(0) }
@@ -892,25 +919,25 @@ private fun TerminalView(
         GlassReveal(!imeUp && !barCrowded) { GlassGroup { ThemeGlassItem() } }
         // 文件(SFTP):单独一颗,在输入那枚胶囊上面 —— 它是"换一页",不是输入。
         // 断开之后它会消失,所以长出来 / 收回去都带动效(见 GlassReveal)。
-        GlassReveal(onFiles != null && !dead) { GlassButton(XIcons.Folder, "文件") { onFiles?.invoke() } }
+        GlassReveal(onFiles != null && !dead) { GlassButton(XIcons.Folder, stringResource(R.string.term_files)) { onFiles?.invoke() } }
         // 输入相关的操作装进同一枚胶囊:键盘常驻在下(和主机页的搜索同一个位置),
         // 快捷键面板的开关在它上面(开着时图标变蓝);回到底部只在翻历史时出现,加在最上面 ——
         // 胶囊往上长,键盘不动。
         GlassGroup {
             // 翻历史时才有:胶囊往上长出这一颗,不是凭空"砰"地出现。
             GlassReveal(scrolled) {
-                GlassItem(XIcons.ArrowDown, "回到底部") {
+                GlassItem(XIcons.ArrowDown, stringResource(R.string.term_scroll_bottom)) {
                     live.scrollToBottom()
                 }
             }
             // 命令片段也是"输入":点一下把存好的命令发出去。断开 / 重连中没东西可发,收起来。
             // 键盘弹着时也收起(同外观):外屏键盘占掉一半高度,轨道不能再多一颗;正在打字的人要的是键盘。
             GlassReveal(!dead && reconnecting == 0 && !imeUp) {
-                GlassItem(XIcons.Bolt, "命令片段") { snippetsOpen = true }
+                GlassItem(XIcons.Bolt, stringResource(R.string.term_snippets)) { snippetsOpen = true }
             }
             GlassItem(
                 XIcons.Command,
-                if (showKeys) "收起快捷键" else "显示快捷键",
+                stringResource(if (showKeys) R.string.term_hide_keys else R.string.term_show_keys),
                 tint = if (showKeys) p.accent else null,
             ) { showKeys = !showKeys }
             // 键盘按钮是开关:没弹出就弹出,弹着就收起(和 ⌘ 一样,开着时图标变蓝)。
@@ -922,12 +949,12 @@ private fun TerminalView(
             val imeOn = imeFocused && (imeVisible || hardKeyboard)
             GlassItem(
                 XIcons.Keyboard,
-                if (imeOn) "收起键盘" else "调出键盘",
+                stringResource(if (imeOn) R.string.term_hide_keyboard else R.string.term_show_keyboard),
                 tint = if (imeOn) p.accent else null,
             ) { toggleIme(imeOn) }
         }
         // 断开是危险操作,单独一颗、红色图标,放在最下面(和 ＋ / ✓ 同一个位置)。
-        GlassButton(XIcons.Close, "断开连接", tint = p.danger) {
+        GlassButton(XIcons.Close, stringResource(R.string.term_disconnect_session), tint = p.danger) {
                 SessionRegistry.close(host.id)
                 onExit()
         }
@@ -943,7 +970,7 @@ private fun TerminalView(
                 onToggleSidebar = tablet.onToggleSidebar,
                 title = host.label,
                 subtitle = when {
-                    dead -> "已断开"
+                    dead -> stringResource(R.string.term_disconnected)
                     reconnecting > 0 -> reconnectingText(reconnecting)
                     else -> host.subtitle
                 },
@@ -960,14 +987,14 @@ private fun TerminalView(
                     }
                 }
                 GlassRevealRow(scrolled) {
-                    ToolbarIcon(XIcons.ArrowDown, "回到底部") { live.scrollToBottom() }
+                    ToolbarIcon(XIcons.ArrowDown, stringResource(R.string.term_scroll_bottom)) { live.scrollToBottom() }
                 }
                 GlassRevealRow(!dead && reconnecting == 0) {
-                    ToolbarIcon(XIcons.Bolt, "命令片段") { snippetsOpen = true }
+                    ToolbarIcon(XIcons.Bolt, stringResource(R.string.term_snippets)) { snippetsOpen = true }
                 }
                 ToolbarIcon(
                     XIcons.Command,
-                    if (showKeys) "收起快捷键栏" else "显示快捷键栏",
+                    stringResource(if (showKeys) R.string.term_hide_key_bar else R.string.term_show_key_bar),
                     active = showKeys,
                 ) { showKeys = !showKeys }
                 @OptIn(ExperimentalLayoutApi::class)
@@ -976,16 +1003,16 @@ private fun TerminalView(
                 ToolbarIcon(
                     XIcons.Keyboard,
                     when {
-                        hardKeyboard && imeOn -> "输入法  Ctrl+Shift+Space 切回英文"
-                        hardKeyboard -> "英文直通  Shift 切到输入法"
-                        imeOn -> "收起键盘"
-                        else -> "调出键盘"
+                        hardKeyboard && imeOn -> stringResource(R.string.term_ime_hint_ime)
+                        hardKeyboard -> stringResource(R.string.term_ime_hint_direct)
+                        imeOn -> stringResource(R.string.term_hide_keyboard)
+                        else -> stringResource(R.string.term_show_keyboard)
                     },
                     active = imeOn,
                 ) { toggleIme(imeOn) }
                 var moreOpen by remember { mutableStateOf(false) }
                 Box {
-                    ToolbarIcon(XIcons.More, "更多") { moreOpen = true }
+                    ToolbarIcon(XIcons.More, stringResource(R.string.term_more)) { moreOpen = true }
                     CompositionLocalProvider(LocalRestoreFocus provides restoreFocus) {
                         ContextMenu(
                             at = if (moreOpen) DpOffset.Zero else null,
@@ -997,10 +1024,10 @@ private fun TerminalView(
                 Spacer(Modifier.width(4.dp))
                 if (dead) {
                     // 对端断了(服务器重启、网络掉了):最常见的下一步是重连,放在最显眼的位置。
-                    ToolbarTextButton("关闭", p.textDim) { onExit() }
-                    ToolbarTextButton("重新连接", p.accent, bold = true) { onReconnect() }
+                    ToolbarTextButton(stringResource(R.string.term_close), p.textDim) { onExit() }
+                    ToolbarTextButton(stringResource(R.string.term_reconnect), p.accent, bold = true) { onReconnect() }
                 } else {
-                    ToolbarTextButton("断开", p.danger) {
+                    ToolbarTextButton(stringResource(R.string.term_disconnect), p.danger) {
                         SessionRegistry.close(host.id)
                         onExit()
                     }
@@ -1119,29 +1146,46 @@ private fun TerminalView(
 private fun Host.withSecretsOf(other: Host): Host =
     copy(password = other.password, keyData = other.keyData, keyPassphrase = other.keyPassphrase)
 
-/** 设的跳板机已经被删掉了。 */
-private const val JumpGoneText = "这台主机的跳板机已经删除了。"
-
 /** 核心报的错是不是跳板机那一跳的(见 Rust `SshError::Jump` / `Tunnel` 的 Display)。 */
 private fun isJumpFailure(message: String?): Boolean = message.orEmpty().startsWith("jump host")
+
+/** 跳板机那一跳出的错:[jump] 是跳板机的名字,[reason] 是核心报的原因(英文原文)。 */
+internal sealed class JumpFailure {
+    abstract val jump: String
+    abstract val reason: String
+
+    /** 跳板机本身连上了,但从它那儿连不到目标 [target](`地址:端口`)。 */
+    data class Tunnel(override val jump: String, val target: String, override val reason: String) : JumpFailure()
+
+    /** 跳板机这一跳本身就失败了(连不上、认证失败……)。 */
+    data class Hop(override val jump: String, override val reason: String) : JumpFailure()
+}
 
 /**
  * 跳板机那一跳的错误换成人话:说清是**哪一台**出的事,用户才知道去改哪台主机。
  * 不是跳板机的错就返回 null,由调用方照常处理。
+ * 不碰 Context(有纯 JVM 单测),成文交给 [format]。
  */
-internal fun jumpFailureText(message: String, jump: Host, target: Host): String? {
+internal fun jumpFailure(message: String, jump: Host, target: Host): JumpFailure? {
     val tunnel = "jump host could not open a tunnel: "
     val hop = "jump host: "
     return when {
         message.startsWith(tunnel) ->
-            "跳板机「${jump.label}」连不到 ${target.address}:${target.port}。\n" + message.removePrefix(tunnel)
-        message.startsWith(hop) -> "跳板机「${jump.label}」:" + message.removePrefix(hop)
+            JumpFailure.Tunnel(jump.label, "${target.address}:${target.port}", message.removePrefix(tunnel))
+        message.startsWith(hop) -> JumpFailure.Hop(jump.label, message.removePrefix(hop))
         else -> null
     }
 }
 
+private fun JumpFailure.format(context: android.content.Context): String = when (this) {
+    is JumpFailure.Tunnel -> context.getString(R.string.term_jump_tunnel_failed, jump, target, reason)
+    is JumpFailure.Hop -> context.getString(R.string.term_jump_hop_failed, jump, reason)
+}
+
 /** 「重连中」那行字:第一次只说在重连,之后带上次数,让人知道它一直在试、没卡死。 */
-private fun reconnectingText(attempt: Int): String = if (attempt <= 1) "重连中…" else "重连中 · 第 $attempt 次"
+@Composable
+private fun reconnectingText(attempt: Int): String =
+    if (attempt <= 1) stringResource(R.string.term_reconnecting) else stringResource(R.string.term_reconnecting_n, attempt)
 
 /** 鼠标滚轮一格翻几行。 */
 private const val WheelLines = 3f
@@ -1217,7 +1261,7 @@ private fun HostLine(host: Host, dead: Boolean, reconnecting: Int = 0) {
         // 「已断开」是状态,必须显示,放不下时顶掉的是名字(名字自己省略)。
         // 重连中和已断开一样是状态,必须显示(放不下时顶掉的是名字)。
         val detail = when {
-            dead -> "已断开"
+            dead -> stringResource(R.string.term_disconnected)
             reconnecting > 0 -> reconnectingText(reconnecting)
             else -> host.subtitle
         }
@@ -1352,7 +1396,7 @@ private fun CompactKeys(k: KeyActions, keyWidth: Dp) {
                 { KeyCap("↑", cell, repeatable = true) { k.cursor('A') } },
                 { KeyCap("⌫", cell, repeatable = true) { k.bytes(0x7F) } },
             )
-            KeyCap("回车", key, emphasis = true, icon = XIcons.Return) { k.bytes(13) }
+            KeyCap(stringResource(R.string.term_key_enter), key, emphasis = true, icon = XIcons.Return) { k.bytes(13) }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(KeyGap)) {
             KeyCap("Ctrl", key, active = k.ctrl, onPress = k.onCtrl)
@@ -1395,7 +1439,7 @@ private fun WideKeys(k: KeyActions, keyWidth: Dp) {
             KeyCap("^L", key) { k.bytes(12) }
             KeyCap("⌫", key, repeatable = true) { k.bytes(0x7F) }
             KeyCap("↑", key, repeatable = true) { k.cursor('A') }
-            KeyCap("回车", key, emphasis = true, icon = XIcons.Return) { k.bytes(13) }
+            KeyCap(stringResource(R.string.term_key_enter), key, emphasis = true, icon = XIcons.Return) { k.bytes(13) }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(KeyGap)) {
             KeyCap("Ctrl", key, active = k.ctrl, onPress = k.onCtrl)

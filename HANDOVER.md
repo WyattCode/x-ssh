@@ -11,7 +11,7 @@
 ## 常用命令(Windows/PowerShell)
 - 必须用 `npm.cmd`(直接 `npm` 会因执行策略失败)。
 - 校验: `npm.cmd run typecheck`、`npm.cmd run build`
-- **单元测试**: `npm.cmd run test`(Vitest 2,与 Vite 5 兼容;共 **218** 用例,全部落在纯逻辑层:`src/shared/*`、`src/renderer/src/lib/*`、`composables/*`)。**没有任何组件测试**,界面交互只能人工验。)
+- **单元测试**: `npm.cmd run test`(Vitest 2,与 Vite 5 兼容;共 **267** 用例,全部落在纯逻辑层:`src/shared/*`、`src/renderer/src/lib/*`、`composables/*`)。**没有任何组件测试**,界面交互只能人工验。)
 - **i18n 键对称校验**: `npm.cmd run lint:i18n`(现在串跑两个脚本:桌面端 `scripts/lint-i18n.mjs` + 移动端 `scripts/lint-i18n-mobile.mjs`;桌面端 638/638 全对称)。
 - 打包: `npm.cmd run dist` → `release\X-SSH Setup 0.2.1.exe`(NSIS)+ `release\win-unpacked\X-SSH.exe` + `.blockmap`。
 - 无代码签名,SmartScreen 可能提示(正常)。
@@ -25,7 +25,11 @@
   - `settingsKeys.ts` —— `settings:set` 的**键白名单**。settings 文件里还住着 `masterLock`(应用主锁的记录)、`connectionLog`、会话历史,所以这一层是必需的,不是洁癖;顺带有一条测试会扫源码,确保渲染层真在用的键都登记过(**加了新偏好却忘了登记,运行时会静默写不进去**)。
   - `localPaths.ts` —— `local:*` 那组 IPC 的路径规则。渲染层同时给目录和条目名,`join(dir, "../..")` 走得出去、`join(dir, "/etc/passwd")` 会整个顶掉 dir,所以条目名必须是**单段**。
 - **渲染层的纯逻辑**(`src/renderer/src/lib/`):`reconnect.ts`(重连决策:什么事件该触发重试、退避、网络恢复后该不该复活)、`transferFormat.ts`(字节/速率/相对时间/取消判定)、`fileMode.ts`(chmod 的八进制 ↔ 位 ↔ 符号三种表示必须一致),以及 `paneLayout.ts`、`imeSync.ts`、`shortcuts.ts` 等。
-- i18n:`src/renderer/src/lib/i18n.ts`,定义 `zh` 与 `en` 两个字典。**两个键集合必须一致**(现 638/638,`npm.cmd run lint:i18n` 校验)。**移动端是另一套**(Compose 里目前是硬编码中文,还没有 i18n 层),它的资源对称性由 `scripts/lint-i18n-mobile.mjs` 看着。
+- i18n:`src/renderer/src/lib/i18n.ts`,定义 `zh`(简体)、`zh-TW`(繁体,台湾用语)、`en` 三个字典。**三个键集合必须一致**(现 640/640/640,`npm.cmd run lint:i18n` 校验)。语言偏好 `lang` 可以是 `zh` / `zh-TW` / `en` / `system`,没存过就跟随系统(`src/shared/lang.ts`:Hant 或 TW/HK/MO → 繁体,其余 zh → 简体,其余 → 英文;主进程把 `app.getPreferredSystemLanguages()` 传给渲染层)。**移动端是另一套**(Android 资源 values / values-zh / values-b+zh+Hant,见 mobile/HANDOVER.md M3.62),对称性由 `scripts/lint-i18n-mobile.mjs` 看着。
+- **设置文件不能丢**(`src/main/settings.ts`,第十二次会话续修的):用户报"外部编辑器之类的设置过一阵就丢"。原因是关窗时存 `windowBounds` 不 await、紧接着退出,进程死在 `writeFile`(先截断)半路,settings.json 只剩半截;下次启动读不出来就当成空的,第一次 `set()` 把只含一个键的文件写回去,其余全丢(用户那份文件里当时只剩清空之后新写的 7 个键)。现在:每次写先把完整内容写进 `settings.json.bak`,再用临时文件 + rename 替换主文件(Windows 上 EPERM 就重试,一直失败才退回直接写);读的时候主文件缺失 / 空 / 半截就用备份,坏掉的主文件另存 `settings.json.corrupt`;`set()` **同步**排进写队列(原来先 await 一下才排,退出时 flush 会漏掉那一笔);`will-quit` 里等写完(最多 3 秒)再退。`src/main/settings.test.ts` 8 条,其中"半截文件启动后再写一项"那条拿旧实现跑是失败的(阴性对照做过)。
+  - **二次复核扩大到所有数据文件**:`hosts.json`(主机列表)、`secrets.bin`、`known_hosts.json` 原来也是直接 `writeFile`,而且主机库读失败时**什么保护都没有** —— 半截的 hosts.json 读成空列表,下一次保存(连接时的 `touch` 就会存)把空列表写回去,所有主机没了。现在共用 `src/main/durableFile.ts`(`writeDurable` 先写 `.bak` 再临时文件 + rename、同一文件在进程内排队写;`readDurable` 主文件坏了读备份、坏文件另存 `.corrupt`;`sweepTemps` 清崩溃留下的临时文件)。主机库 / known_hosts 读不出来且备份也坏时,**不会用空内容覆盖**(和 secrets 原有规则一样)。`durableFile.test.ts` 7 条、`store.test.ts` 3 条,store 那三条拿旧实现跑全失败(阴性对照)。
+  - 退出要等写完,窗口销毁后缩放防抖回调再读 bounds 会抛错弹框:关窗时清掉防抖计时器、`persistBounds` 先查 `isDestroyed()`。
+- **右键「复制」在 Codex 这类程序里是灰的**(第十二次会话续,用户截图):Codex / Claude Code / vim 打开了鼠标模式,拖动选的是它们自己画的高亮,xterm 没有选区,菜单就把复制禁掉了 —— 而程序其实已经用 OSC 52 把文字复制过来了(`TerminalView.vue` 早就接了 OSC 52)。现在记住最近一次 OSC 52 的内容(2 分钟内有效),终端自己没选区时右键「复制」用它;程序占着鼠标又什么都没复制时,复制下面提示「按住 Shift 拖动来选择」(xterm.js 在 Windows 上 Shift 拖动强制本地选区)。注意:程序跑在 tmux 里时,tmux 默认不转发内层程序的 OSC 52(要 `set -g set-clipboard on`),那种情况只能 Shift 拖动。二次复核补了两条:① 程序那次复制只在它**还占着鼠标**时才算、并且一敲键盘就作废(`term.onKey`;不能用 onData —— 鼠标模式下右键本身就会经 onData 报给程序),否则旧的 OSC 52 文字会盖掉用户在别处复制的东西;② 右键菜单原来按固定 240px 估高度往回收,实际约 310px,靠近窗口底部右键时最后几项被切掉(用户截图里就是),现在渲染后量实际尺寸再收进窗口。
   - 动态键模式: `tab.*` / `group.*` / `sck.*` / `sck.*Hint`(缺失 hint 回退 `''`)。
   - 主题名(Nord/Dracula 等)为专有名词 **不翻译**,不建键。
 - 产品理念: 极简、键盘优先、密码/密钥不出主进程。

@@ -24,6 +24,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -57,8 +58,8 @@ fun JumpField(draft: HostDraft) {
     var picking by remember { mutableStateOf(false) }
     FormGroup(
         footnote = when {
-            blocked -> "它是「${usedBy.first().label}」的跳板机，不能再经过别的跳板机。"
-            gone -> "原来选的跳板机已经删除了。"
+            blocked -> stringResource(R.string.edit_jump_blocked, usedBy.first().label)
+            gone -> stringResource(R.string.edit_jump_gone)
             else -> null
         },
     ) {
@@ -70,13 +71,13 @@ fun JumpField(draft: HostDraft) {
                 .padding(horizontal = BoxPad),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("跳板机", color = if (blocked) p.textFaint else p.text, fontSize = 16.sp)
+            Text(stringResource(R.string.edit_jump_host), color = if (blocked) p.textFaint else p.text, fontSize = 16.sp)
             Spacer(Modifier.width(GapItem))
             Text(
                 when {
                     chosen != null -> chosen.label
-                    gone -> "已删除"
-                    else -> "不用"
+                    gone -> stringResource(R.string.edit_jump_deleted)
+                    else -> stringResource(R.string.edit_jump_none)
                 },
                 color = if (gone) p.warn else p.textDim,
                 fontSize = 16.sp,
@@ -118,20 +119,24 @@ private fun JumpPicker(options: List<Host>, selected: String, onPick: (String) -
                 .padding(vertical = 12.dp),
         ) {
             Text(
-                "跳板机",
+                stringResource(R.string.edit_jump_host),
                 color = p.text,
                 fontSize = 17.sp,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
             )
             Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
-                PickerRow("不用", "直接连接", selected.isEmpty()) { onPick("") }
+                PickerRow(
+                    stringResource(R.string.edit_jump_none),
+                    stringResource(R.string.edit_jump_direct),
+                    selected.isEmpty(),
+                ) { onPick("") }
                 options.forEach { host ->
                     PickerRow(host.label, host.subtitle, host.id == selected) { onPick(host.id) }
                 }
                 if (options.isEmpty()) {
                     Text(
-                        "还没有别的主机可以当跳板机。先把跳板机当作一台主机保存下来。",
+                        stringResource(R.string.edit_jump_empty),
                         color = p.textDim,
                         fontSize = 13.sp,
                         modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
@@ -166,7 +171,7 @@ private fun PickerRow(title: String, detail: String, checked: Boolean, onClick: 
         }
         if (checked) {
             Spacer(Modifier.width(GapItem))
-            Icon(XIcons.Check, contentDescription = "已选", tint = p.accent, modifier = Modifier.size(20.dp))
+            Icon(XIcons.Check, contentDescription = stringResource(R.string.edit_selected), tint = p.accent, modifier = Modifier.size(20.dp))
         }
     }
 }

@@ -33,6 +33,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -43,9 +45,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import uniffi.xssh_ffi.StyledRun
 
-/* ─────────────────────────────── 选终端字体 ───────────────────────────────
+/* ─────────────────────────────── 设置:语言 + 终端字体 ───────────────────────────────
+
+   原来这一页只有终端字体(入口是 Aa)。加了界面语言以后改叫「设置」:上面语言,下面字体。
+   手机 / 折叠屏整页推进来,平板居中浮层,两边内容同一份([SettingsContent])。
+
 
    一张卡片一款字体:名字 + 一段**用终端自己的画法画出来的**样例(同一套格子、同样的中英混排、
    同样的制表符),所以卡片里看到的就是连上之后看到的。点一下就换,立刻生效。
@@ -132,14 +140,14 @@ fun FontList(modifier: Modifier = Modifier, onPicked: (() -> Unit)? = null) {
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        font.label,
+                        font.displayName(),
                         color = p.text,
                         fontSize = 16.sp,
                         fontWeight = FontWeight.SemiBold,
                         modifier = Modifier.weight(1f),
                     )
                     if (selected) {
-                        Icon(XIcons.Check, contentDescription = "已选中", tint = p.accent, modifier = Modifier.size(20.dp))
+                        Icon(XIcons.Check, contentDescription = stringResource(R.string.set_selected), tint = p.accent, modifier = Modifier.size(20.dp))
                     }
                 }
                 Spacer(Modifier.height(10.dp))
@@ -149,31 +157,84 @@ fun FontList(modifier: Modifier = Modifier, onPicked: (() -> Unit)? = null) {
     }
 }
 
+/**
+ * 设置的内容:语言一组(跟随系统 / 简体中文 / 繁體中文 / English,当前的打勾),下面是终端字体。
+ * 语言的名字各用各自的文字写 —— 看不懂当前语言的人也要能找到自己那一行。
+ */
+@Composable
+fun SettingsContent(onFontPicked: (() -> Unit)? = null) {
+    val p = LocalXssh.current
+    val context = LocalContext.current
+    // 切换语言**不重建界面**(见 AndroidManifest 的 configChanges):系统把新配置送进来,Compose 原地换文字。
+    // 打勾的那一项点下去就先改,不等系统的配置回调 —— 否则勾会慢半拍才跳过去。
+    // 键上 locales:在系统设置里改了应用语言再回来,这里也跟着对上。
+    val locales = androidx.compose.ui.platform.LocalConfiguration.current.locales
+    var current by remember(locales) { androidx.compose.runtime.mutableStateOf(AppLanguages.current(context)) }
+    val options = listOf(
+        AppLanguage.System to stringResource(R.string.set_lang_system),
+        // 语言名不翻译:每种语言用它自己的文字。
+        AppLanguage.SimplifiedChinese to "简体中文",
+        AppLanguage.TraditionalChinese to "繁體中文",
+        AppLanguage.English to "English",
+    )
+    FormGroup(title = stringResource(R.string.set_language)) {
+        options.forEachIndexed { index, (language, label) ->
+            if (index > 0) FormDivider()
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 52.dp)
+                    .clickable {
+                        if (language != current) {
+                            current = language
+                            hostActivity(context)?.let { AppLanguages.apply(it, language) }
+                        }
+                    }
+                    .padding(horizontal = BoxPad),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(label, color = p.text, fontSize = 16.sp, modifier = Modifier.weight(1f))
+                if (language == current) {
+                    Icon(XIcons.Check, contentDescription = stringResource(R.string.set_selected), tint = p.accent, modifier = Modifier.size(20.dp))
+                }
+            }
+        }
+    }
+    Spacer(Modifier.height(24.dp))
+    Text(
+        stringResource(R.string.set_terminal_font),
+        color = p.textDim,
+        fontSize = 13.sp,
+        modifier = Modifier.padding(start = TitlePad, bottom = 7.dp),
+    )
+    FontList(onPicked = onFontPicked)
+}
+
 /** 手机 / 折叠屏:整页推进来(外壳和主机详情页同一个)。 */
 @Composable
-fun FontScreen(onBack: () -> Unit) {
+fun SettingsScreen(onBack: () -> Unit) {
     val p = LocalXssh.current
     ReadingPage(onBack) {
         Column(Modifier.widthIn(max = PageMaxWidth)) {
             // 大标题和主机页、编辑页同号字(34sp),三页推来推去看着是同一套。
             Text(
-                "终端字体",
+                stringResource(R.string.set_title),
                 color = p.text,
                 fontSize = 34.sp,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(start = TitlePad - TitleOptical, bottom = 18.dp),
             )
-            FontList()
+            SettingsContent()
         }
     }
 }
 
 /**
  * 平板:居中浮层(和新建 / 编辑主机同一种版式:标题居中、右上角「完成」、点外面关、Esc 关)。
- * 选一款就换,不用按「完成」—— 那颗只是关浮层。
+ * 选一款字体就换,不用按「完成」—— 那颗只是关浮层。
  */
 @Composable
-fun FontSheet(onDismiss: () -> Unit) {
+fun SettingsSheet(onDismiss: () -> Unit) {
     val p = LocalXssh.current
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
@@ -213,17 +274,17 @@ fun FontSheet(onDismiss: () -> Unit) {
                 // 标题栏和编辑浮层同一条:56dp 高、标题居中、下面一条细线。
                 Box(Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 8.dp)) {
                     Text(
-                        "终端字体",
+                        stringResource(R.string.set_title),
                         color = p.text,
                         fontSize = 17.sp,
                         fontWeight = FontWeight.SemiBold,
                         modifier = Modifier.align(Alignment.Center),
                     )
-                    ToolbarTextButton("完成", p.accent, Modifier.align(Alignment.CenterEnd), bold = true) { onDismiss() }
+                    ToolbarTextButton(stringResource(R.string.set_done), p.accent, Modifier.align(Alignment.CenterEnd), bold = true) { onDismiss() }
                 }
                 Box(Modifier.fillMaxWidth().height(0.5.dp).background(p.border))
                 Column(Modifier.verticalScroll(rememberScrollState()).padding(20.dp)) {
-                    FontList(onPicked = onDismiss)
+                    SettingsContent(onFontPicked = onDismiss)
                 }
             }
         }

@@ -1,6 +1,6 @@
 # X-SSH 移动端交接文档
 
-> 更新: 2026-09-27(第十二次会话:断线自动重连 + tmux 续接,见 M3.60;跳板机 + 命令片段,见 M3.61)。2026-09-26(第九次会话续:直板机按钮挪到底部,见 M3.57;第十、十一次会话:全面复核 —— 凭据丢失路径、密文状态可辨、安卓单测从零建起、平板真机复核,见 M3.58–M3.59)。
+> 更新: 2026-09-27(第十二次会话:断线自动重连 + tmux 续接,见 M3.60;跳板机 + 命令片段,见 M3.61;三种界面语言,见 M3.62)。2026-09-26(第九次会话续:直板机按钮挪到底部,见 M3.57;第十、十一次会话:全面复核 —— 凭据丢失路径、密文状态可辨、安卓单测从零建起、平板真机复核,见 M3.58–M3.59)。
 > 设备: Xiaomi 18 Fold(`2608BPX34C`,折叠屏,主测)、Xiaomi 17 Ultra(`25128PNA1C`,直板机)、
 > **Xiaomi Pad 9 Pro Max**(`M367FC`,平板,带键盘套/触控板/手写笔,见 M3.24)。
 > 最新提交以 `git log` 为准;本文 §0/§1/§6/§7 是现状,§2 起是按时间记的过程与原因(改代码前先读相关小节)。
@@ -48,6 +48,9 @@ App 已能**直连局域网**(`192.168.1.100`,早期 MIUI 联网拦截的问题�
   加锁、断线重连都覆盖到两跳。只支持一层。
 - **命令片段(M3.61)**:终端里 ⚡(折叠屏轨道 / 直板机底栏 / 平板工具栏)打开片段面板,点一下发出去;
   可设「发送后回车」「执行前确认」「只在这台主机显示」。
+
+- **三种界面语言(M3.62)**:简体中文 / 繁體中文(台湾用语)/ English,默认跟随系统;「设置」页(原来的 Aa)里切换,
+  **原地换文字、不重建界面**。桌面版同时补上了繁体和「跟随系统」。
 
 **还没有的核心能力**(桌面版有):端口转发、多标签、快照;iOS 轨未开工。
 SFTP 已做(上传/下载/重命名/删除,上传是"先写临时文件再改名",取消不会动目标)。
@@ -1911,6 +1914,48 @@ Linux 服务器没有这一下,旧输出直接留在屏上。
 - **Fold 外屏已真机看过**(`4f446e4`):键盘弹起时轨道是 📁 / [⌘ ⌨] / ✕,⚡ 和外观都收起,最上面一颗离状态栏还有余量;要是不收,⚡ 会顶到状态栏里。**17 Ultra 竖屏底栏还没看**(没接)。
 - **老问题(不是这次引入的)**:外屏键盘弹着、又在翻历史时,胶囊里多出「回到底部」,轨道会再高 56dp,最上面一颗大概会压到状态栏。没法在靶机上复现(输出太短翻不动),留着。
 
+### M3.62 三种界面语言 + 设置页(第十二次会话续)
+
+用户要简体、繁体、英文三种,能在应用里切,也要跟着系统走;两端一起做。入口用户选了「Aa 改成设置页」。
+
+**资源布局**:`res/values/`(英文,也是系统语言不是中英文时的兜底)、`values-zh/`(简体)、`values-b+zh+Hant/`(繁体)。
+系统是 zh-TW / zh-HK / zh-MO 时 Android 按可能的文字推断成 Hant,落到繁体;其余中文落到简体。
+`res/xml/locales_config.xml` + Manifest 的 `android:localeConfig`:系统「设置 → 应用 → 语言」里也能单独改,和应用内是同一个值。
+
+**切换**(`AppLanguage.kt`):Android 13 起用 `LocaleManager.applicationLocales`(系统存);更早的系统存 `xssh_ui` 的
+`appLanguage`,由 `MainActivity.attachBaseContext` 套上并 recreate(这几台机器都用不到)。
+**不闪**:Manifest 的 `configChanges` 加了 `locale|layoutDirection`,换语言时 Activity **不重建**,Compose 收到新配置原地重组。
+第一版没加,切换时整屏销毁重建,用户看到"整个界面闪跳了一下",当场要求修。修后在平板上录屏逐帧算整屏亮度:
+中→英、英→繁、繁→跟随系统,帧间最大变化 0.1 / 0.04(满分 255),没有黑 / 白帧;`logcat -b events` 里也没有 `wm_on_create` /
+`wm_on_destroy`。Fold 外屏也录了:中→英 364 帧最大 0.38,英→繁、繁→跟随系统最大 0.27,没有跳变、没有重建事件。设置页的勾点下去先本地改(不等配置回调),再按 `LocalConfiguration.locales` 对齐系统里改的值。
+常驻通知在 `SessionService.onConfigurationChanged` 里重发(界面不重建,它不会自己刷新);通知类别名每次 `ensureChannel` 都重建(同 id 只更新名字)。
+
+**不重建的代价**:存在状态里的「已经翻好的字」不会跟着换。二次复核时改了终端错误页:`error` 存成 `(Context) -> String`,显示时读一下 `LocalConfiguration` 再取 —— 平板上开着错误页去设置里换语言,那句话也跟着换。**平板真机验过**:建一台没存密码的临时主机(`127.0.0.1:1`)停在「这台主机还没有保存密码。」,侧边栏进设置切 English,那句变成 “This host has no saved password yet.”,按钮 Back / Enter password;点 Enter password 打开英文的 Edit host 浮层(密码格自动聚焦,小米输入法把屏幕标成安全窗口,截图是黑的 —— 用 uiautomator 读的)。测后按字节还原主机表(md5 `470b19c9…`)、恢复跟随系统。其余提示本来就存的是资源 id(`UiText` / `FileText`),菜单每次打开现取;只有切输入法时亮一秒的「输入法 / 英文」小标签不管。
+复核还查了:每处取字符串的参数个数和占位符一致(`scratchpad/i18n/argcheck.py`,0 处不符);没有带裸 `%` 的文案(`UiText` 无参也走格式化,裸 `%` 会崩);繁体资源和桌面繁体字典里没有混进简体字。
+
+**设置页**(`FontPicker.kt`,`SettingsScreen` / `SettingsSheet` / `SettingsContent`):上面「语言」四行(跟随系统 / 简体中文 / 繁體中文 / English,
+语言名用各自的文字写),下面终端字体。图标 `XIcons.Settings`(两条滑杆)。手机整页 `Screen.Fonts`(名字没改),平板浮层。
+
+**抽字符串**:6 个并行子任务各管几个文件,产出 JSON(`scratchpad/i18n/*.json`),由 `merge.py` 生成三份 `strings.xml`(318 条 + 14 组复数)。
+改文案时三种语言一起改 strings.xml(JSON 只是那次的中间产物)。要点:
+- 不在组合期的文字(点击回调、协程、菜单构建)用 `context.getString`;`HostDraft.error` 变成 `UiText(resId, args)`;`RemoteFiles` 的提示变成 `FileText`;
+  `Host.unreadableSecrets` 变成 `List<SecretField>`;`jumpFailureText` 变成返回结构的 `jumpFailure`;终端错误页的「就地修复」按钮不再靠比对中文文案(`FailureKind`)。
+- 仿字形字体显示成「X 风格 / X style / X 風格」,思源等宽 → Source Han Mono / 思源等寬(`TerminalFont.displayName()`)。
+- 终端里「── 连接已恢复 ──」按当前语言写(`reconnectedMarker(text)`,文字从 `AppLanguages.appContext` 取)。
+- 故意留着的中文:字体样例(演示中英混排)、语言名、`TerminalScreen` 里量「中」字宽度的那一行。
+- `scripts/lint-i18n-mobile.mjs` 改成检查三份资源键一致、占位符一致、代码里引用的键都存在、没有内联中文 UI 文字(现在 0)。
+- 英文里「Sign-in method」在外屏编辑页挤成两行,改成「Login」。
+
+**桌面版**:`src/renderer/src/lib/i18n.ts` 加 `zh-TW`(640 条,台湾用语),设置里语言四个按钮(跟随系统 / 简体中文 / 繁體中文 / English),
+`src/shared/lang.ts` 放系统语言识别(Hant / TW / HK / MO → 繁体,其余 zh → 简体,其余 → 英文)。**行为变化**:以前没选过语言时默认简体,
+现在跟随系统(英文 Windows 上会是英文)。主进程里几条原本就写死的中文报错(如「窗口尚未就绪」)没做。桌面版**还没打开应用看过**四个按钮排得下没有。
+
+**测试**:安卓 56 条单测(新增 `AppLanguageTest`);桌面 249 条 + typecheck + `npm run lint:i18n` 全过。
+`lintDebug` 失败是原来就有的(uniffi 生成代码的 NewApi),新增的 36 条 `LocalContextGetResourceValueCall` 都在回调里,界面不重建也拿得到当前语言。
+
+**真机**:Fold 外屏简体 / 英文 / 繁体看了设置、主机详情、编辑页;平板看了设置浮层和详情页、录屏验证不闪。测后都恢复「跟随系统」、主机数据没动
+(平板的 `xssh_hosts.xml` 在这之前被用户自己用过 —— 信任了主机密钥、重存了密码,md5 变成 `470b19c9…`,不是测试造成的,没去还原)。
+
 ## 5. 关键坑(踩过,别再踩)
 
 102. **横屏时 `input` 的坐标 ≠ uiautomator 的坐标**。平板锁定横屏(`user_rotation=1`)时
@@ -2152,6 +2197,10 @@ Linux 服务器没有这一下,旧输出直接留在屏上。
      让用户自己点。之后搜索框一点会弹「访问录音机」的权限框,按规矩点拒绝,不影响选文件。
 112. **连着输入会串格**:新建主机页点第二格时键盘弹起、页面上移,按旧坐标点到的是下一格(端口被敲成 12700)。
      自动化要**每点一格就 dump 一次**再点下一格。
+113. **应用内换语言会让 Activity 重建 → 整屏闪一下**(第十二次会话续):`LocaleManager` 换应用语言发的是 `locale` 配置变更,
+     Manifest 没声明就销毁重建。加 `configChanges="…|locale|layoutDirection"` 后原地重组;代价是缓存在状态里的已翻译文字
+     (比如错误页那句)要到下次刷新才换 —— 可以接受。验证闪不闪:`screenrecord` 录下来,用 `imageio-ffmpeg` 的 ffmpeg
+     抽成灰度小图逐帧算平均亮度(`scratchpad/frames_luma.py`),重建会有一帧跳几十。
 
 ## 6. 已知问题 / 待办
 

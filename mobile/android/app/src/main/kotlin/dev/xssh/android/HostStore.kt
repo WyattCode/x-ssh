@@ -63,7 +63,7 @@ data class Host(
     val lockedKeyData: String? = null,
     val lockedKeyPassphrase: String? = null,
     /**
-     * 磁盘上**有密文、这次却解不开**的凭据(没加锁的那种),按显示名:「密码」「私钥」「口令」。
+     * 磁盘上**有密文、这次却解不开**的凭据(没加锁的那种):密码 / 私钥 / 口令(见 [SecretField])。
      *
      * 重装、清了应用数据、密钥库被换掉之后,普通密钥已经不在,那几条密文永久解不开 ——
      * [password] 这些字段读出来是空串,和"本来就没存"一模一样。只看空串的话界面会说「未保存」,
@@ -71,7 +71,7 @@ data class Host(
      *
      * 只在加载时算,不落盘。加锁的密文不算(那是等着解锁,见 [lockedPassword])。
      */
-    val unreadableSecrets: List<String> = emptyList(),
+    val unreadableSecrets: List<SecretField> = emptyList(),
 ) {
     /**
      * 用私钥登录,但手里既没有导入的私钥、也没有私钥文件。
@@ -98,11 +98,11 @@ data class Host(
  * 密码原来只放内存 —— 结果是存过密码、连过一次,下次打开(进程被回收、重装、
  * 系统重启)又得重新输密码、再存、再连。
  */
-/** 记录里三条凭据的字段名,和 [SecretNames] 一一对应。 */
-private val SecretFields = listOf("password", "keyData", "keyPassphrase")
+/** 三条凭据。给用户看的名字在界面层按资源取(见 HostInfo.kt),这里不带文字。 */
+enum class SecretField { Password, PrivateKey, Passphrase }
 
-/** 三条凭据给用户看的名字。 */
-private val SecretNames = listOf("密码", "私钥", "口令")
+/** 记录里三条凭据的字段名,和 [SecretField] 的顺序一一对应。 */
+private val SecretFields = listOf("password", "keyData", "keyPassphrase")
 
 /**
  * 哪几条凭据"有密文、却解不开"。[sealed] 是磁盘上的原文,[plain] 是 [Secrets.open] 的结果,
@@ -112,8 +112,8 @@ private val SecretNames = listOf("密码", "私钥", "口令")
  * - 加锁的不算:`open` 本来就不读它,那是等着连接时解锁。
  * - 剩下的"原文不空、明文却空",就是密钥已经不在(或密文坏了)。
  */
-internal fun unreadableSecrets(sealed: List<String>, plain: List<String>): List<String> =
-    SecretNames.filterIndexed { i, _ ->
+internal fun unreadableSecrets(sealed: List<String>, plain: List<String>): List<SecretField> =
+    SecretField.entries.filterIndexed { i, _ ->
         sealed[i].isNotEmpty() && !Secrets.isLocked(sealed[i]) && plain[i].isEmpty()
     }
 

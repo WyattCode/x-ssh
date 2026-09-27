@@ -11,6 +11,7 @@ import android.graphics.drawable.ColorDrawable
 import android.graphics.Color
 import android.content.res.Configuration
 import android.os.Bundle
+import android.content.Context
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.activity.compose.setContent
@@ -47,20 +48,25 @@ class MainActivity : ComponentActivity() {
         data += KeyboardShortcutGroup(
             "X-SSH",
             listOf(
-                KeyboardShortcutInfo("新建主机", KeyEvent.KEYCODE_N, ctrlShift),
-                KeyboardShortcutInfo("搜索主机", KeyEvent.KEYCODE_F, ctrlShift),
-                KeyboardShortcutInfo("编辑主机", KeyEvent.KEYCODE_E, ctrlShift),
-                KeyboardShortcutInfo("显示 / 隐藏侧边栏", KeyEvent.KEYCODE_S, ctrlShift),
-                KeyboardShortcutInfo("下一个会话", KeyEvent.KEYCODE_TAB, KeyEvent.META_CTRL_ON),
-                KeyboardShortcutInfo("上一个会话", KeyEvent.KEYCODE_TAB, ctrlShift),
-                KeyboardShortcutInfo("断开当前会话", KeyEvent.KEYCODE_W, ctrlShift),
-                KeyboardShortcutInfo("切换终端 / 文件", KeyEvent.KEYCODE_O, ctrlShift),
-                KeyboardShortcutInfo("粘贴到终端", KeyEvent.KEYCODE_V, ctrlShift),
-                KeyboardShortcutInfo("终端里切换输入法 / 英文直通", KeyEvent.KEYCODE_SPACE, ctrlShift),
-                KeyboardShortcutInfo("放大字号", KeyEvent.KEYCODE_EQUALS, ctrlShift),
-                KeyboardShortcutInfo("缩小字号", KeyEvent.KEYCODE_MINUS, ctrlShift),
+                KeyboardShortcutInfo(getString(R.string.main_sc_new_host), KeyEvent.KEYCODE_N, ctrlShift),
+                KeyboardShortcutInfo(getString(R.string.main_sc_search), KeyEvent.KEYCODE_F, ctrlShift),
+                KeyboardShortcutInfo(getString(R.string.main_sc_edit_host), KeyEvent.KEYCODE_E, ctrlShift),
+                KeyboardShortcutInfo(getString(R.string.main_sc_sidebar), KeyEvent.KEYCODE_S, ctrlShift),
+                KeyboardShortcutInfo(getString(R.string.main_sc_next_session), KeyEvent.KEYCODE_TAB, KeyEvent.META_CTRL_ON),
+                KeyboardShortcutInfo(getString(R.string.main_sc_prev_session), KeyEvent.KEYCODE_TAB, ctrlShift),
+                KeyboardShortcutInfo(getString(R.string.main_sc_close_session), KeyEvent.KEYCODE_W, ctrlShift),
+                KeyboardShortcutInfo(getString(R.string.main_sc_toggle_files), KeyEvent.KEYCODE_O, ctrlShift),
+                KeyboardShortcutInfo(getString(R.string.main_sc_paste), KeyEvent.KEYCODE_V, ctrlShift),
+                KeyboardShortcutInfo(getString(R.string.main_sc_ime), KeyEvent.KEYCODE_SPACE, ctrlShift),
+                KeyboardShortcutInfo(getString(R.string.main_sc_zoom_in), KeyEvent.KEYCODE_EQUALS, ctrlShift),
+                KeyboardShortcutInfo(getString(R.string.main_sc_zoom_out), KeyEvent.KEYCODE_MINUS, ctrlShift),
             ),
         )
+    }
+
+    /** Android 12 及更早:应用内选的界面语言要自己套上(13 起系统按应用语言处理,见 [AppLanguages])。 */
+    override fun attachBaseContext(newBase: Context) {
+        super.attachBaseContext(AppLanguages.wrap(newBase))
     }
 
     override fun onStart() {
@@ -76,6 +82,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         XsshFonts.init(this)
+        AppLanguages.appContext = applicationContext
         // 调试录制只在可调试的包里可用(还要有 files/record 标记文件才真的录)。
         if (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0) {
             DebugRecorder.dir = filesDir
@@ -212,13 +219,22 @@ fun App(devTarget: DevTarget? = null) {
     // 分屏进出的某些路径都会重建)。重建之后 SSH 会话在 SessionRegistry 里还活着,
     // 丢的只是"我刚才在哪一屏" —— 表现就是正敲着命令突然被踢回主机列表。
     var termHostId by rememberSaveable { mutableStateOf<String?>(null) }
+    // 正开着设置页。在设置里换了语言,系统会重建整个界面 —— 不记着的话,一换语言就被踢回主机页。
+    var onSettings by rememberSaveable { mutableStateOf(false) }
     var screen by remember {
         // 在**第一次组合时**就算出来,不要等副作用 —— 否则会先渲染一帧主机页再跳走。
         val restored = termHostId
             ?.takeIf { SessionRegistry[it] != null }
             ?.let { id -> hosts.firstOrNull { it.id == id } }
-        mutableStateOf<Screen>(if (restored != null) Screen.Terminal(restored) else Screen.Home)
+        mutableStateOf<Screen>(
+            when {
+                restored != null -> Screen.Terminal(restored)
+                onSettings -> Screen.Fonts
+                else -> Screen.Home
+            },
+        )
     }
+    LaunchedEffect(screen) { onSettings = screen == Screen.Fonts }
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
@@ -464,7 +480,7 @@ private fun PhoneFlow(
             }
         }
 
-        Screen.Fonts -> FontScreen(onBack = { onScreen(Screen.Home) })
+        Screen.Fonts -> SettingsScreen(onBack = { onScreen(Screen.Home) })
 
         is Screen.Editor -> HostEditorScreen(
             initial = current.host,

@@ -118,6 +118,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.res.stringResource
 
 /**
  * 手指能稳稳点到的最小边长。Material 的无障碍下限是 48dp,本应用一律不低于它 ——
@@ -768,8 +769,23 @@ fun GlassGroup(content: @Composable () -> Unit) {
 @Composable
 fun ThemeGlassItem() {
     val theme = LocalThemeControl.current
-    GlassItem(theme.mode.icon, "外观:${theme.mode.label}") { theme.onChange(theme.mode.next()) }
+    GlassItem(theme.mode.icon, themeModeDescription(theme.mode)) { theme.onChange(theme.mode.next()) }
 }
+
+/** 外观按钮的读屏文字:「外观:浅色」。平板工具栏上的外观按钮也该用它。 */
+@Composable
+fun themeModeDescription(mode: ThemeMode): String =
+    stringResource(R.string.edit_appearance, themeModeName(mode))
+
+/** 外观模式的名字(当前语言)。 */
+@Composable
+fun themeModeName(mode: ThemeMode): String = stringResource(
+    when (mode) {
+        ThemeMode.Light -> R.string.edit_theme_light
+        ThemeMode.Dark -> R.string.edit_theme_dark
+        ThemeMode.System -> R.string.edit_theme_system
+    },
+)
 
 /**
  * 会来会去的按钮(「回到底部」、连上才有的「文件」)统一的出现 / 消失动效。

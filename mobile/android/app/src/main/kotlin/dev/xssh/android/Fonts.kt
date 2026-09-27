@@ -165,14 +165,20 @@ object XsshFonts {
  */
 enum class TerminalFont(val id: String, val label: String, val regular: Int, val bold: Int, val full: Boolean) {
     Iosevka("iosevka", "Iosevka", R.font.xssh_mono_regular, R.font.xssh_mono_bold, true),
-    JetBrains("jetbrains", "JetBrains Mono 风格", R.font.xssh_term_jetbrains_regular, R.font.xssh_term_jetbrains_bold, true),
-    Fira("fira", "Fira Mono 风格", R.font.xssh_term_fira_regular, R.font.xssh_term_fira_bold, true),
-    Menlo("menlo", "Menlo 风格", R.font.xssh_term_menlo_regular, R.font.xssh_term_menlo_bold, true),
-    Plex("plex", "IBM Plex Mono 风格", R.font.xssh_term_plex_regular, R.font.xssh_term_plex_bold, true),
+    JetBrains("jetbrains", "JetBrains Mono", R.font.xssh_term_jetbrains_regular, R.font.xssh_term_jetbrains_bold, true),
+    Fira("fira", "Fira Mono", R.font.xssh_term_fira_regular, R.font.xssh_term_fira_bold, true),
+    Menlo("menlo", "Menlo", R.font.xssh_term_menlo_regular, R.font.xssh_term_menlo_bold, true),
+    Plex("plex", "IBM Plex Mono", R.font.xssh_term_plex_regular, R.font.xssh_term_plex_bold, true),
     Ubuntu("ubuntu", "Ubuntu Mono", R.font.xssh_term_ubuntu_regular, R.font.xssh_term_ubuntu_bold, false),
     Inconsolata("inconsolata", "Inconsolata", R.font.xssh_term_inconsolata_regular, R.font.xssh_term_inconsolata_bold, false),
-    Noto("noto", "思源等宽", R.font.xssh_term_noto_regular, R.font.xssh_term_noto_bold, false),
+    Noto("noto", "Noto Sans Mono CJK", R.font.xssh_term_noto_regular, R.font.xssh_term_noto_bold, false),
     ;
+
+    /**
+     * 仿字形的那几款不是原版字体(见上面:原版是 0.6em 宽),名字后面要带「风格」,别让人以为装的是原版。
+     * [label] 只是原名,给人看的一律用 [displayName]。
+     */
+    val imitation: Boolean get() = this == JetBrains || this == Fira || this == Menlo || this == Plex
 
     val family: FontFamily by lazy {
         if (this == Iosevka) XsshFonts.mono else FontFamily(Font(regular, FontWeight.Normal), Font(bold, FontWeight.Bold))
@@ -218,4 +224,12 @@ object TerminalFontChoice {
         current = font
         prefs?.terminalFont = font.id
     }
+}
+
+/** 字体列表上显示的名字(当前界面语言):仿字形的带「风格」,思源等宽用各语言自己的叫法。 */
+@androidx.compose.runtime.Composable
+fun TerminalFont.displayName(): String = when {
+    this == TerminalFont.Noto -> androidx.compose.ui.res.stringResource(R.string.font_noto)
+    imitation -> androidx.compose.ui.res.stringResource(R.string.font_style, label)
+    else -> label
 }

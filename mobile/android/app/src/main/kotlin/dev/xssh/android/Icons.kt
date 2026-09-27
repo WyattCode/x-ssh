@@ -35,6 +35,16 @@ object XIcons {
         moveTo(12.5f, 16.5f); lineTo(18f, 16.5f)
     }
 
+    /** 设置:两条滑杆(语言、终端字体都在这一页)。 */
+    val Settings = icon("settings") {
+        moveTo(4f, 8f); lineTo(7.5f, 8f)
+        moveTo(11.5f, 8f); lineTo(20f, 8f)
+        moveTo(11.5f, 8f); arcTo(2f, 2f, 0f, true, true, 7.5f, 8f); arcTo(2f, 2f, 0f, true, true, 11.5f, 8f)
+        moveTo(4f, 16f); lineTo(12.5f, 16f)
+        moveTo(16.5f, 16f); lineTo(20f, 16f)
+        moveTo(16.5f, 16f); arcTo(2f, 2f, 0f, true, true, 12.5f, 16f); arcTo(2f, 2f, 0f, true, true, 16.5f, 16f)
+    }
+
     /** 命令片段:闪电(点一下就发出去的「快捷命令」)。 */
     val Bolt = icon("bolt") {
         moveTo(13.5f, 3f); lineTo(5.5f, 13.5f); lineTo(11.5f, 13.5f)

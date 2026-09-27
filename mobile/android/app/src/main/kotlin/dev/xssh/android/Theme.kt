@@ -15,6 +15,8 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.stringResource
+import androidx.annotation.StringRes
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.unit.TextUnit
@@ -145,11 +147,15 @@ val LightPalette = XsshPalette(
 val LocalXssh = staticCompositionLocalOf { DarkPalette }
 
 /** 外观模式。 */
-enum class ThemeMode(val label: String) {
-    Light("浅色"),
-    Dark("深色"),
-    System("跟随系统"),
+enum class ThemeMode(@StringRes val labelRes: Int) {
+    Light(R.string.host_theme_light),
+    Dark(R.string.host_theme_dark),
+    System(R.string.host_theme_system),
     ;
+
+    /** 给用户看的名字;只能在组合里读(非组合代码用 `context.getString(labelRes)`)。 */
+    val label: String
+        @Composable get() = stringResource(labelRes)
 
     /** 点一下切到下一个(不弹窗)。 */
     fun next(): ThemeMode = when (this) {

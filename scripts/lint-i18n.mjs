@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // i18n consistency linter.
 //
-// - 校验 lib/i18n.ts 中 zh/en 两个字典的键集合完全一致。
+// - 校验 lib/i18n.ts 中 zh/en/zhTW 三个字典的键集合完全一致(zhTW 运行时缺键会回退到 zh,
+//   但这里仍要求补全,避免繁体界面里混入简体)。
 // - 扫描源码,确保所有静态调用的 t('...') / tt('...') / $t('...')
 //   密钥在字典中真实存在(动态模板键 tab.* group.* sck.* 以及对应 Hint 除外)。
 //
@@ -37,6 +38,7 @@ function parse(body) {
 
 const zh = parse(bodyOf('zh'))
 const en = parse(bodyOf('en'))
+const zhTW = parse(bodyOf('zhTW'))
 
 let errors = 0
 const report = (msg) => {
@@ -46,10 +48,13 @@ const report = (msg) => {
 
 console.log(`zh keys: ${Object.keys(zh).length}`)
 console.log(`en keys: ${Object.keys(en).length}`)
+console.log(`zhTW keys: ${Object.keys(zhTW).length}`)
 
 // 1) key-set symmetry
 for (const k of Object.keys(zh)) if (!(k in en)) report(`only in zh: \`${k}\``)
 for (const k of Object.keys(en)) if (!(k in zh)) report(`only in en: \`${k}\``)
+for (const k of Object.keys(zh)) if (!(k in zhTW)) report(`missing in zhTW: \`${k}\``)
+for (const k of Object.keys(zhTW)) if (!(k in zh)) report(`only in zhTW: \`${k}\``)
 
 // 2) nested placeholders must match: t('a.b', { n }) vs value placeholders
 const ph = (v) => [...new Set([...(v.matchAll(/\{(\w+)\}/g))].map((x) => x[1]))].sort()
@@ -57,6 +62,10 @@ for (const k of Object.keys(zh)) {
   const zp = ph(zh[k]).join(',')
   const ep = ph(en[k]).join(',')
   if (zp !== ep) report(`placeholder mismatch for \`${k}\`: zh{${zp}} en{${ep}}`)
+  if (k in zhTW) {
+    const tp = ph(zhTW[k]).join(',')
+    if (zp !== tp) report(`placeholder mismatch for \`${k}\`: zh{${zp}} zhTW{${tp}}`)
+  }
 }
 
 // 3) verify static key references used in code exist
@@ -81,7 +90,7 @@ if (errors) {
   console.error(`\ni18n lint FAILED with ${errors} problem(s).`)
   process.exit(1)
 }
-console.log('\ni18n lint OK — zh/en symmetric, placeholders match, all static keys resolve.')
+console.log('\ni18n lint OK — zh/en/zhTW symmetric, placeholders match, all static keys resolve.')
 
 function walk(dir, out = []) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {

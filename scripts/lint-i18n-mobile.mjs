@@ -4,10 +4,11 @@
 // Mirrors scripts/lint-i18n.mjs (which covers the desktop renderer) for the
 // Android app. Two things are checked:
 //
-//  1. res/values/strings.xml and res/values-en/strings.xml declare the same key
-//     set with the same format placeholders — a missing translation falls back
-//     to Chinese silently at runtime, which is exactly the drift the desktop
-//     linter exists to catch.
+//  1. res/values (English, the fallback), res/values-zh (Simplified) and
+//     res/values-b+zh+Hant (Traditional) declare the same key set with the same
+//     format placeholders — a missing translation silently falls back to
+//     English at runtime, which is exactly the drift the desktop linter exists
+//     to catch.
 //  2. Every `R.string.<name>` referenced from Kotlin exists in the default
 //     resource file, so a rename can't leave a dangling reference.
 //
@@ -45,31 +46,35 @@ function readStrings(file) {
   return out
 }
 
-const zhFile = path.join(res, 'values', 'strings.xml')
-const enFile = path.join(res, 'values-en', 'strings.xml')
-const zh = readStrings(zhFile)
-const en = readStrings(enFile)
-
-if (!zh) {
-  console.error(`cannot read ${path.relative(root, zhFile)}`)
-  process.exit(1)
+// 三种语言:values = 英文(也是兜底),values-zh = 简体,values-b+zh+Hant = 繁体(台湾用语)。
+const locales = [
+  ['en', path.join(res, 'values', 'strings.xml')],
+  ['zh-Hans', path.join(res, 'values-zh', 'strings.xml')],
+  ['zh-Hant', path.join(res, 'values-b+zh+Hant', 'strings.xml')]
+]
+const tables = {}
+for (const [name, file] of locales) {
+  tables[name] = readStrings(file)
+  if (!tables[name]) {
+    console.error(`cannot read ${path.relative(root, file)}`)
+    process.exit(1)
+  }
+  console.log(`mobile ${name} strings: ${Object.keys(tables[name]).length}`)
 }
+const base = tables['en']
+const zh = base // R.string 引用对照默认资源(英文)
+const translatable = (k) => k !== 'app_name'
 
-console.log(`mobile zh strings: ${Object.keys(zh).length}`)
-console.log(`mobile en strings: ${en ? Object.keys(en).length : '(no values-en yet)'}`)
-
-if (en) {
-  for (const k of Object.keys(zh)) if (!(k in en)) report(`only in values: \`${k}\``)
-  for (const k of Object.keys(en)) if (!(k in zh)) report(`only in values-en: \`${k}\``)
-
-  // Placeholders must agree: a translated string missing %1$s renders a sentence
-  // with a hole in it (or throws, depending on the formatter).
-  const ph = (v) => [...new Set([...v.matchAll(/%(\d+\$)?[sd]/g)].map((x) => x[0]))].sort().join(',')
-  for (const k of Object.keys(zh)) {
-    if (!(k in en)) continue
-    const zp = ph(zh[k])
-    const ep = ph(en[k])
-    if (zp !== ep) report(`placeholder mismatch for \`${k}\`: zh[${zp}] en[${ep}]`)
+// Placeholders must agree: a translated string missing %1$s renders a sentence
+// with a hole in it (or throws, depending on the formatter).
+const ph = (v) => [...new Set([...v.matchAll(/%(\d+\$)?[sd]/g)].map((x) => x[0]))].sort().join(',')
+for (const [name] of locales.slice(1)) {
+  const t = tables[name]
+  for (const k of Object.keys(base)) if (translatable(k) && !(k in t)) report(`missing in ${name}: \`${k}\``)
+  for (const k of Object.keys(t)) if (!(k in base)) report(`only in ${name}: \`${k}\``)
+  for (const k of Object.keys(base)) {
+    if (!(k in t)) continue
+    if (ph(base[k]) !== ph(t[k])) report(`placeholder mismatch for \`${k}\`: en[${ph(base[k])}] ${name}[${ph(t[k])}]`)
   }
 }
 

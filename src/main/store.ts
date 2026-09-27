@@ -1,6 +1,7 @@
 import { app, safeStorage } from 'electron'
 import { join } from 'node:path'
-import { readFile, writeFile, mkdir } from 'node:fs/promises'
+import { mkdir } from 'node:fs/promises'
+import { parseJson, readDurable, writeDurable } from './durableFile'
 import type { Host } from '../shared/types'
 
 /**
@@ -26,34 +27,43 @@ export class HostStore {
   private secrets: Record<string, string> = {}
   private loaded = false
   private secretsLoadFailed = false
+  /**
+   * hosts.json exists but neither it nor its backup could be read. Starting from an
+   * empty list is unavoidable, but persisting that empty list would erase the file
+   * for good — every saved host gone. Same rule as secrets below.
+   */
+  private hostsLoadFailed = false
   private locked = false
 
   private async ensureLoaded(): Promise<void> {
     if (this.loaded) return
     await mkdir(this.dir, { recursive: true })
-    try {
-      this.hosts = JSON.parse(await readFile(this.hostsFile, 'utf8'))
-    } catch {
-      this.hosts = []
-    }
-    try {
-      const raw = await readFile(this.secretsFile)
-      if (safeStorage.isEncryptionAvailable()) {
-        this.secrets = JSON.parse(safeStorage.decryptString(raw))
-      }
-    } catch (e) {
-      this.secrets = {}
+    // Crash-safe reads (fall back to the .bak copy written before every save),
+    // see durableFile.ts. A half-written hosts.json used to parse as "no hosts".
+    const hosts = await readDurable(this.hostsFile, (buf) => {
+      const v = parseJson<unknown>(buf)
+      if (!Array.isArray(v)) throw new Error('not a host list')
+      return v as Host[]
+    })
+    this.hosts = hosts.status === 'ok' ? hosts.value : []
+    this.hostsLoadFailed = hosts.status === 'bad'
+    if (safeStorage.isEncryptionAvailable()) {
+      const secrets = await readDurable(this.secretsFile, (buf) =>
+        JSON.parse(safeStorage.decryptString(buf)) as Record<string, string>
+      )
+      this.secrets = secrets.status === 'ok' ? secrets.value : {}
       // The file exists but could not be decrypted — do NOT let a later
       // persist() overwrite it with an empty object and lose the passwords.
-      if ((e as NodeJS.ErrnoException).code !== 'ENOENT') {
-        this.secretsLoadFailed = true
-      }
+      this.secretsLoadFailed = secrets.status === 'bad'
     }
     this.loaded = true
   }
 
   private async persist(): Promise<void> {
-    await writeFile(this.hostsFile, JSON.stringify(this.hosts, null, 2), 'utf8')
+    if (!(this.hostsLoadFailed && this.hosts.length === 0)) {
+      await writeDurable(this.hostsFile, JSON.stringify(this.hosts, null, 2))
+      this.hostsLoadFailed = false
+    }
     if (!safeStorage.isEncryptionAvailable()) return
     // If a prior load couldn't decrypt secrets.bin (e.g. it was copied from
     // another machine — DPAPI is per-machine), don't clobber it with an EMPTY
@@ -62,7 +72,7 @@ export class HostStore {
     // must not stay permanently unable to save new passwords.
     if (this.secretsLoadFailed && Object.keys(this.secrets).length === 0) return
     const enc = safeStorage.encryptString(JSON.stringify(this.secrets))
-    await writeFile(this.secretsFile, enc)
+    await writeDurable(this.secretsFile, enc)
     this.secretsLoadFailed = false
   }
 

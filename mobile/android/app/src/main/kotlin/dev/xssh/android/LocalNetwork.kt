@@ -52,7 +52,7 @@ object LocalNetwork {
     /** 连接失败后补一句原因,区分「没权限」和「真连不上」。 */
     fun hintFor(context: Context, address: String, error: String): String =
         if (needsPermission(context, address)) {
-            "$error\n\n没有本地网络权限,请在系统设置里允许后重试。"
+            context.getString(R.string.term_local_network_hint, error)
         } else {
             error
         }

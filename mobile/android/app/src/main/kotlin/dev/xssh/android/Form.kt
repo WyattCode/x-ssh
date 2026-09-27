@@ -68,6 +68,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.res.stringResource
 
 /* ─────────────────────────── 移动端表单 ───────────────────────────
 
@@ -334,7 +335,9 @@ fun FormField(
                         Icon(
                             if (revealed) XIcons.EyeOff else XIcons.Eye,
                             // 读屏念这一句就够,别再给 clickable 配 onClickLabel(会念两遍)。
-                            contentDescription = if (revealed) "隐藏密码" else "显示密码",
+                            contentDescription = stringResource(
+                                if (revealed) R.string.edit_hide_password else R.string.edit_show_password,
+                            ),
                             tint = p.textDim,
                             modifier = Modifier.size(19.dp),
                         )

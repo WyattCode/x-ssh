@@ -62,6 +62,19 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import androidx.compose.foundation.layout.offset
+import androidx.annotation.StringRes
+import androidx.compose.ui.res.stringResource
+
+/**
+ * 一句要给用户看的话,存成资源 id + 参数:[HostDraft] 这类没有 Context 的代码也能写,
+ * 显示的地方再用 [text](组合里)或 [resolve](有 Context 时)换成当前语言的文字。
+ */
+data class UiText(@StringRes val id: Int, val args: List<Any> = emptyList())
+
+@Composable
+fun UiText.text(): String = stringResource(id, *args.toTypedArray())
+
+fun UiText.resolve(context: android.content.Context): String = context.getString(id, *args.toTypedArray())
 
 /**
  * 新建 / 编辑主机。
@@ -101,7 +114,7 @@ fun HostEditorScreen(
         // 解锁,都放到 IO 之外由 buildHostForSave 自己安排;这里只管收结果。
         val activity = hostActivity(context)
         if (activity == null) {
-            draft.error = "保存失败:找不到当前页面。"
+            draft.error = UiText(R.string.edit_err_no_page)
             return
         }
         scope.launch {
@@ -112,10 +125,10 @@ fun HostEditorScreen(
 
     val target: @Composable () -> Unit = {
         FormGroup {
-            FormField("名称", name, { name = it }, placeholder = "生产 Web")
+            FormField(stringResource(R.string.edit_name), name, { name = it }, placeholder = stringResource(R.string.edit_name_placeholder))
             FormDivider()
             FormField(
-                "地址",
+                stringResource(R.string.edit_address),
                 address,
                 { address = it },
                 placeholder = "192.168.1.10",
@@ -125,7 +138,7 @@ fun HostEditorScreen(
             )
             FormDivider()
             FormField(
-                "端口",
+                stringResource(R.string.edit_port),
                 port,
                 { port = it.filter(Char::isDigit).take(5) },
                 placeholder = "22",
@@ -135,7 +148,7 @@ fun HostEditorScreen(
             )
             FormDivider()
             // 用户名只会是英文:用 URI 类键盘,中文输入法会切到英文,不会把 root 组成拼音。
-            FormField("用户名", username, { username = it }, placeholder = "root", mono = true, keyboard = KeyboardType.Uri, asciiOnly = true)
+            FormField(stringResource(R.string.edit_username), username, { username = it }, placeholder = "root", mono = true, keyboard = KeyboardType.Uri, asciiOnly = true)
         }
         // 经哪台过去,和"连到哪台"是一件事,紧跟在地址下面。
         JumpField(draft)
@@ -156,7 +169,10 @@ fun HostEditorScreen(
             // 点两下才删,和主机页左滑、详情栏一致。
             var confirming by remember { mutableStateOf(false) }
             FormGroup {
-                FormAction(if (confirming) "确认删除这台主机" else "删除这台主机", danger = true) {
+                FormAction(
+                    stringResource(if (confirming) R.string.edit_delete_confirm else R.string.edit_delete),
+                    danger = true,
+                ) {
                     if (confirming) onDelete(initial) else confirming = true
                 }
             }
@@ -227,7 +243,7 @@ fun HostEditorScreen(
                 Modifier.padding(start = startInset + Gutter + TitlePad, end = railSide(), top = Gutter),
             ) {
                 Text(
-                    if (initial == null) "新建主机" else "编辑主机",
+                    stringResource(if (initial == null) R.string.edit_title_new else R.string.edit_title_edit),
                     Modifier.offset(x = -TitleOptical),
                     color = p.text,
                     fontSize = 34.sp,
@@ -236,7 +252,7 @@ fun HostEditorScreen(
                 // 标题下面只在出错时说话(比如地址没填),平时不放操作说明。
                 error?.let {
                     Spacer(Modifier.height(2.dp))
-                    Text(it, color = p.danger, fontSize = 12.5.sp)
+                    Text(it.text(), color = p.danger, fontSize = 12.5.sp)
                 }
             }
             Spacer(Modifier.height(GapItem + 4.dp))
@@ -294,10 +310,10 @@ fun HostEditorScreen(
             CompositionLocalProvider(LocalBackdrop provides backdrop) {
                 BottomBar(
                     Modifier.align(Alignment.BottomCenter),
-                    start = { GlassButton(XIcons.Back, "返回") { onBack() } },
+                    start = { GlassButton(XIcons.Back, stringResource(R.string.edit_back)) { onBack() } },
                     end = {
                         GlassGroup { ThemeGlassItem() }
-                        GlassButton(XIcons.Check, "保存") { save() }
+                        GlassButton(XIcons.Check, stringResource(R.string.edit_save)) { save() }
                     },
                 )
             }
@@ -307,9 +323,9 @@ fun HostEditorScreen(
                 EdgeRail(Modifier.align(Alignment.BottomEnd)) {
                     // 外观在最上面(每一页都有,位置一样);‹ ✓ 的落点一像素不动。
                     GlassGroup { ThemeGlassItem() }
-                    GlassButton(XIcons.Back, "返回") { onBack() }
+                    GlassButton(XIcons.Back, stringResource(R.string.edit_back)) { onBack() }
                     // 和 ‹ 同一种样式:无色玻璃、正文色图标。
-                    GlassButton(XIcons.Check, "保存") { save() }
+                    GlassButton(XIcons.Check, stringResource(R.string.edit_save)) { save() }
                 }
             }
         }
@@ -337,7 +353,7 @@ class HostDraft(private val initial: Host?) {
     var keyLocked by mutableStateOf(
         (initial?.keyPassphrase ?: "").isNotEmpty() || initial?.lockedKeyPassphrase != null,
     )
-    var error by mutableStateOf<String?>(null)
+    var error by mutableStateOf<UiText?>(null)
 
     var lockSecrets by mutableStateOf(initial?.lockSecrets ?: false)
     var tmux by mutableStateOf(initial?.tmux ?: false)
@@ -402,7 +418,7 @@ class HostDraft(private val initial: Host?) {
      * 导入一把私钥。返回要给用户看的一句话:null = 成功;带口令时返回提示并露出口令格
      * (私钥先收下,保存时再验口令)。在 IO 线程调用 —— 带口令的私钥解一次要几百毫秒。
      */
-    fun importKey(text: String, fileName: String): String? {
+    fun importKey(text: String, fileName: String): UiText? {
         val pem = text.trim()
         return try {
             val info = uniffi.xssh_ffi.inspectKey(pem, keyPassphrase.ifEmpty { null })
@@ -419,21 +435,22 @@ class HostDraft(private val initial: Host?) {
             keyPublicFingerprint = ""
             keyLocked = true
             auth = AuthKind.KEY
-            "这把私钥有口令"
+            UiText(R.string.edit_key_has_passphrase)
         } catch (e: Exception) {
-            "不是可用的私钥文件"
+            UiText(R.string.edit_key_invalid_file)
         }
     }
 
     /**
      * 在本机生成一把 ed25519 密钥并用上它。返回公钥一行(贴进服务器的 authorized_keys);失败返回 null。
      * 不加口令:私钥本身经密钥库加密存在应用里,口令只会让每次连接多一步。在 IO 线程调用。
+     * [label] 是存下来的私钥名(「本机生成 · ed25519」),调用方按当前语言给。
      */
-    fun generateKey(): String? = runCatching {
+    fun generateKey(label: String): String? = runCatching {
         val comment = "x-ssh@" + android.os.Build.MODEL.replace(' ', '-')
         val key = uniffi.xssh_ffi.generateKey(comment, null)
         keyData = key.pem
-        keyName = "本机生成 · ed25519"
+        keyName = label
         keyPublicFingerprint = key.info.fingerprint
         keyPassphrase = ""
         keyLocked = false
@@ -454,12 +471,12 @@ class HostDraft(private val initial: Host?) {
     fun build(): Host? {
         val newAddress = address.trim()
         if (newAddress.isEmpty()) {
-            error = "地址不能为空"
+            error = UiText(R.string.edit_err_address_empty)
             return null
         }
         if (auth == AuthKind.KEY) {
             if (!hasKey) {
-                error = "还没有导入私钥"
+                error = UiText(R.string.edit_err_no_key)
                 return null
             }
             // 带口令的私钥:保存前就验口令,填错当场说,而不是等到连接时才失败。
@@ -468,10 +485,12 @@ class HostDraft(private val initial: Host?) {
                     keyPublicFingerprint = uniffi.xssh_ffi.inspectKey(keyData, keyPassphrase.ifEmpty { null }).fingerprint
                 } catch (e: uniffi.xssh_ffi.FfiException.KeyEncrypted) {
                     keyLocked = true
-                    error = if (keyPassphrase.isEmpty()) "这把私钥有口令" else "私钥口令不对"
+                    error = UiText(
+                        if (keyPassphrase.isEmpty()) R.string.edit_key_has_passphrase else R.string.edit_err_wrong_passphrase,
+                    )
                     return null
                 } catch (e: Exception) {
-                    error = "私钥无法使用"
+                    error = UiText(R.string.edit_err_key_unusable)
                     return null
                 }
             }
@@ -550,7 +569,7 @@ private const val MaxKeyBytes = 64 * 1024
 suspend fun buildHostForSave(activity: android.app.Activity, draft: HostDraft): Host? {
     // 加锁开关没能生效时,把它拨回原状:开关留在"开"而磁盘上是"没锁",
     // 用户以为锁上了 —— 界面必须说同一件事。
-    fun fail(message: String) {
+    fun fail(message: UiText) {
         draft.error = message
         draft.lockSecrets = draft.originalLocked
     }
@@ -578,7 +597,7 @@ suspend fun buildHostForSave(activity: android.app.Activity, draft: HostDraft): 
     val hasSealed = listOf(host.lockedPassword, host.lockedKeyData, host.lockedKeyPassphrase)
         .any { it != null && Secrets.isLocked(it) }
     if (!wantsLock && hasSealed && !unlockForWrite(activity)) {
-        fail("没能关掉这道锁,请重试。")
+        fail(UiText(R.string.edit_err_lock_off_failed))
         return null
     }
     // 开关状态没变(一直锁着,只是改了点别的):密文由 HostStore.save 按 `lockSecrets`
@@ -609,7 +628,7 @@ suspend fun buildHostForSave(activity: android.app.Activity, draft: HostDraft): 
         }
     }
     if (sealed == null) {
-        fail(if (wantsLock) "没能打开这道锁,请重试。" else "没能关掉这道锁,请重试。")
+        fail(UiText(if (wantsLock) R.string.edit_err_lock_on_failed else R.string.edit_err_lock_off_failed))
         return null
     }
 
@@ -673,9 +692,9 @@ fun importKeyFrom(context: android.content.Context, uri: android.net.Uri, draft:
             }
             out.toByteArray()
         }
-    }.getOrNull() ?: return "读不了这个文件"
-    if (bytes.size > MaxKeyBytes) return "不是可用的私钥文件"
-    return draft.importKey(String(bytes, Charsets.UTF_8), name)
+    }.getOrNull() ?: return context.getString(R.string.edit_err_read_file)
+    if (bytes.size > MaxKeyBytes) return context.getString(R.string.edit_key_invalid_file)
+    return draft.importKey(String(bytes, Charsets.UTF_8), name)?.resolve(context)
 }
 
 /**
@@ -720,14 +739,20 @@ fun CredentialFields(
     // 这台设备有没有可用的门禁。没有(平板没设锁屏密码之类)就不显示这一项 ——
     // 显示了也打不开,只是个点了没反应的开关。
     val lockAvailable = remember { Secrets.lockAvailable(context) }
+    // 下面几句在协程里才用到,那里调不了 stringResource,先在组合里取好。
+    val generatedKeyName = stringResource(R.string.edit_key_generated_name)
+    val publicKeyCopied = stringResource(R.string.edit_public_key_copied)
+    val generateFailed = stringResource(R.string.edit_generate_failed)
+    val passwordLabel = stringResource(R.string.edit_password)
+    val privateKeyLabel = stringResource(R.string.edit_private_key)
     FormGroup {
         Row(
             Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(horizontal = BoxPad),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("登录方式", color = p.text, fontSize = 16.sp, modifier = Modifier.weight(1f))
+            Text(stringResource(R.string.edit_login_method), color = p.text, fontSize = 16.sp, modifier = Modifier.weight(1f))
             Segmented(
-                options = listOf("密码", "私钥"),
+                options = listOf(passwordLabel, privateKeyLabel),
                 selected = if (draft.auth == AuthKind.KEY) 1 else 0,
                 onSelect = { draft.auth = if (it == 1) AuthKind.KEY else AuthKind.PASSWORD },
             )
@@ -736,11 +761,13 @@ fun CredentialFields(
     if (draft.auth == AuthKind.PASSWORD) {
         FormGroup {
             FormField(
-                "密码",
+                passwordLabel,
                 draft.password,
                 { draft.password = it },
                 // 加锁的主机不解出来显示(解密要验指纹),但要让用户知道密码还在。
-                placeholder = if (draft.lockedPasswordKept) "已保存" else "输入密码",
+                placeholder = stringResource(
+                    if (draft.lockedPasswordKept) R.string.edit_password_saved else R.string.edit_password_placeholder,
+                ),
                 secret = true,
                 keyboard = KeyboardType.Password,
                 imeAction = ImeAction.Done,
@@ -754,13 +781,13 @@ fun CredentialFields(
             Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(horizontal = BoxPad),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("私钥", color = p.text, fontSize = 16.sp)
+            Text(privateKeyLabel, color = p.text, fontSize = 16.sp)
             Spacer(Modifier.width(GapItem))
             Text(
                 when {
                     draft.keyName.isNotEmpty() -> draft.keyName
-                    draft.hasKey -> "私钥文件"
-                    else -> "未导入"
+                    draft.hasKey -> stringResource(R.string.edit_key_file)
+                    else -> stringResource(R.string.edit_key_none)
                 },
                 color = if (draft.hasKey) p.textDim else p.warn,
                 fontSize = 16.sp,
@@ -776,7 +803,7 @@ fun CredentialFields(
                 Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(horizontal = BoxPad),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("指纹", color = p.text, fontSize = 16.sp)
+                Text(stringResource(R.string.edit_fingerprint), color = p.text, fontSize = 16.sp)
                 Spacer(Modifier.width(GapItem))
                 Text(
                     draft.keyPublicFingerprint.removePrefix("SHA256:"),
@@ -793,10 +820,10 @@ fun CredentialFields(
         if (draft.keyLocked) {
             FormDivider()
             FormField(
-                "口令",
+                stringResource(R.string.edit_passphrase),
                 draft.keyPassphrase,
                 { draft.keyPassphrase = it },
-                placeholder = "私钥口令",
+                placeholder = stringResource(R.string.edit_passphrase_placeholder),
                 secret = true,
                 keyboard = KeyboardType.Password,
                 imeAction = ImeAction.Done,
@@ -806,29 +833,31 @@ fun CredentialFields(
             )
         }
         FormDivider()
-        FormAction(if (draft.keyData.isEmpty()) "导入私钥…" else "更换私钥…") { onImport() }
+        FormAction(
+            stringResource(if (draft.keyData.isEmpty()) R.string.edit_import_key else R.string.edit_replace_key),
+        ) { onImport() }
         if (draft.keyData.isEmpty()) {
             // 手里没有私钥文件的人(平板上很常见):在这里生成一把,公钥直接进剪贴板,贴到服务器上就能用。
             FormDivider()
-            FormAction("生成新密钥") {
+            FormAction(stringResource(R.string.edit_generate_key)) {
                 scope.launch {
-                    val line = withContext(Dispatchers.IO) { draft.generateKey() }
+                    val line = withContext(Dispatchers.IO) { draft.generateKey(generatedKeyName) }
                     if (line != null) {
                         copyText(context, line)
-                        onMessage("公钥已复制")
+                        onMessage(publicKeyCopied)
                     } else {
-                        onMessage("生成失败")
+                        onMessage(generateFailed)
                     }
                 }
             }
         } else {
             FormDivider()
-            FormAction("复制公钥") {
+            FormAction(stringResource(R.string.edit_copy_public_key)) {
                 scope.launch {
                     val line = withContext(Dispatchers.IO) { draft.publicKey() }
                     if (line != null) {
                         copyText(context, line)
-                        onMessage("公钥已复制")
+                        onMessage(publicKeyCopied)
                     }
                 }
             }
@@ -843,7 +872,7 @@ fun CredentialFields(
                 Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(horizontal = BoxPad),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("用生物识别解锁", color = p.text, fontSize = 16.sp, modifier = Modifier.weight(1f))
+                Text(stringResource(R.string.edit_biometric_unlock), color = p.text, fontSize = 16.sp, modifier = Modifier.weight(1f))
                 XsshSwitch(draft.lockSecrets) { draft.lockSecrets = it }
             }
         }
@@ -854,7 +883,7 @@ fun CredentialFields(
             Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(horizontal = BoxPad),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("连接后进入 tmux", color = p.text, fontSize = 16.sp, modifier = Modifier.weight(1f))
+            Text(stringResource(R.string.edit_tmux), color = p.text, fontSize = 16.sp, modifier = Modifier.weight(1f))
             XsshSwitch(draft.tmux) { draft.tmux = it }
         }
     }

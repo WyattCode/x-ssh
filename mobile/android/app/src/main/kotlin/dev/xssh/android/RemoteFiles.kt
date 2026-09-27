@@ -14,6 +14,8 @@ import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.webkit.MimeTypeMap
+import androidx.annotation.PluralsRes
+import androidx.annotation.StringRes
 import java.io.File
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
@@ -53,11 +55,33 @@ data class Transfer(
     val count: Int,
 )
 
+/**
+ * 一句给人看的话:字符串资源 + 参数,到界面上再取成文字(这里没有 Context;取的时候也跟着当前界面语言)。
+ * 参数本身也可以是 [FileText]。[raw] 是原话(服务端 / 系统给的错误文本),不翻译。[count] 不为 null 时 [id] 是复数资源。
+ */
+class FileText private constructor(
+    val id: Int,
+    val count: Int?,
+    val args: List<Any>,
+    val raw: String?,
+) {
+    companion object {
+        fun of(@StringRes id: Int, vararg args: Any) = FileText(id, null, args.toList(), null)
+
+        fun plural(@PluralsRes id: Int, count: Int, vararg args: Any) = FileText(id, count, args.toList(), null)
+
+        fun raw(text: String) = FileText(0, null, emptyList(), text)
+    }
+}
+
+/** 带着一句给人看的话的失败:[reason] 取的就是它。 */
+class FileTextException(val text: FileText) : Exception()
+
 /** 面板底部的一句提示。[action] 是跟在后面的按钮(「打开」)。[id] 让同一句话再来一次也能重新显示。 */
 class Notice(
-    val text: String,
+    val text: FileText,
     val error: Boolean,
-    val action: Pair<String, () -> Unit>? = null,
+    val action: Pair<FileText, () -> Unit>? = null,
     val id: Long = SystemClock.uptimeMillis(),
 )
 
@@ -100,14 +124,14 @@ class RemoteFiles(session: Session, private val scope: CoroutineScope) {
     private val _notice = MutableStateFlow<Notice?>(null)
     val notice: StateFlow<Notice?> = _notice
 
-    fun notify(text: String, error: Boolean = false, action: Pair<String, () -> Unit>? = null) {
+    fun notify(text: FileText, error: Boolean = false, action: Pair<FileText, () -> Unit>? = null) {
         _notice.value = Notice(text, error, action)
     }
 
     /** 阻塞调用(在 IO 线程)。通道没开就先开。 */
     private fun <T> withSftp(block: (Sftp) -> T): T {
         val s = synchronized(lock) {
-            check(!closed) { "连接已断开" }
+            if (closed) throw FileTextException(FileText.of(R.string.files_disconnected))
             sftp ?: session.openSftp().also { sftp = it }
         }
         return block(s)
@@ -151,7 +175,7 @@ class RemoteFiles(session: Session, private val scope: CoroutineScope) {
     /** 还有传输在跑(一次只传一批):给提示并返回 true。 */
     fun busy(): Boolean {
         if (_transfer.value == null) return false
-        notify("还有传输没完成", error = true)
+        notify(FileText.of(R.string.files_transfer_busy), error = true)
         return true
     }
 
@@ -231,7 +255,7 @@ class RemoteFiles(session: Session, private val scope: CoroutineScope) {
                 size = entry.size.toLong(),
                 run = { listener ->
                     val uri = sink.create(rel, entry.name).also { target = it }
-                    val pfd = openForWrite(resolver, uri) ?: error("无法写入「${entry.name}」")
+                    val pfd = openForWrite(resolver, uri) ?: throw FileTextException(FileText.of(R.string.files_cannot_write, entry.name))
                     // use:通道没开成(还没交给 Rust)时描述符也要关;交出去之后 close 是空操作。
                     pfd.use { withSftp { it.downloadToFd(entry.path, pfd.detachFd(), listener) } }
                     sink.finish(uri)
@@ -251,10 +275,10 @@ class RemoteFiles(session: Session, private val scope: CoroutineScope) {
         val sink = MediaStoreSink(resolver)
         runBatch(
             upload = false,
-            label = entries.singleOrNull()?.name ?: "${entries.size} 项",
+            label = entries.singleOrNull()?.name ?: context.resources.getQuantityString(R.plurals.files_items, entries.size, entries.size),
             prepare = { s -> downloadSteps(s, entries, resolver, sink, created) },
         ) { sent, steps, failure, wasCancelled ->
-            reportDownload(context, sent, steps, failure, wasCancelled, created, "下载 / $DownloadFolder")
+            reportDownload(context, sent, steps, failure, wasCancelled, created, FileText.of(R.string.files_downloads_folder, DownloadFolder))
         }
         return true
     }
@@ -263,10 +287,10 @@ class RemoteFiles(session: Session, private val scope: CoroutineScope) {
     fun downloadTo(entries: List<RemoteEntry>, tree: Uri, context: Context) {
         val resolver = context.contentResolver
         val created = mutableListOf<Uri>()
-        val where = treeName(resolver, tree) ?: "所选文件夹"
+        val where = treeName(resolver, tree)?.let(FileText::raw) ?: FileText.of(R.string.files_selected_folder)
         runBatch(
             upload = false,
-            label = entries.singleOrNull()?.name ?: "${entries.size} 项",
+            label = entries.singleOrNull()?.name ?: context.resources.getQuantityString(R.plurals.files_items, entries.size, entries.size),
             prepare = { s -> downloadSteps(s, entries, resolver, TreeSink(resolver, tree), created) },
         ) { sent, steps, failure, wasCancelled ->
             reportDownload(context, sent, steps, failure, wasCancelled, created, where)
@@ -280,19 +304,24 @@ class RemoteFiles(session: Session, private val scope: CoroutineScope) {
         failure: Throwable?,
         wasCancelled: Boolean,
         created: List<Uri>,
-        where: String,
+        where: FileText,
     ) {
         when {
-            wasCancelled -> notify(if (sent > 0) "已取消(已下载 $sent 个)" else "已取消")
-            failure != null -> notify("下载失败:${failure.reason()}", error = true)
-            steps.isEmpty() -> notify("没有可下载的文件")
+            wasCancelled -> notify(
+                if (sent > 0) FileText.plural(R.plurals.files_cancelled_downloaded, sent, sent) else FileText.of(R.string.files_cancelled),
+            )
+            failure != null -> notify(FileText.of(R.string.files_download_failed, failure.reason()), error = true)
+            steps.isEmpty() -> notify(FileText.of(R.string.files_nothing_to_download))
             steps.size == 1 -> {
                 val uri = created.firstOrNull()
                 // 重名时系统会改成「xxx (1).conf」:提示里说实际存成的名字。
                 val name = uri?.let { displayName(context.contentResolver, it) } ?: steps[0].name
-                notify("已下载「$name」到 $where", action = uri?.let { "打开" to { view(context, it, name) } })
+                notify(
+                    FileText.of(R.string.files_downloaded_one, name, where),
+                    action = uri?.let { FileText.of(R.string.files_open) to { view(context, it, name) } },
+                )
             }
-            else -> notify("已下载 ${steps.size} 个文件到 $where")
+            else -> notify(FileText.plural(R.plurals.files_downloaded_many, steps.size, steps.size, where))
         }
     }
 
@@ -325,8 +354,8 @@ class RemoteFiles(session: Session, private val scope: CoroutineScope) {
             },
         ) { sent, _, failure, wasCancelled ->
             when {
-                wasCancelled -> notify("已取消")
-                failure != null -> notify("打开失败:${failure.reason()}", error = true)
+                wasCancelled -> notify(FileText.of(R.string.files_cancelled))
+                failure != null -> notify(FileText.of(R.string.files_open_failed, failure.reason()), error = true)
                 sent == 1 -> {
                     val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.files", file)
                     view(context, uri, entry.name)
@@ -342,19 +371,20 @@ class RemoteFiles(session: Session, private val scope: CoroutineScope) {
         try {
             context.startActivity(intent)
         } catch (_: ActivityNotFoundException) {
-            notify("没有能打开「$name」的应用", error = true)
+            notify(FileText.of(R.string.files_no_app, name), error = true)
         }
     }
 
     /**
      * 上传到远端目录 [dir](同名文件覆盖)。[dirs] 是要先建好的子目录(上传文件夹时,相对 [dir],浅的在前)。
      */
-    fun upload(dir: String, items: List<UploadItem>, resolver: ContentResolver, dirs: List<String> = emptyList()) {
+    fun upload(dir: String, items: List<UploadItem>, context: Context, dirs: List<String> = emptyList()) {
         if (items.isEmpty() && dirs.isEmpty()) return
+        val resolver = context.contentResolver
         val top = dirs.firstOrNull() ?: items.singleOrNull()?.name
         runBatch(
             upload = true,
-            label = top ?: "${items.size} 个文件",
+            label = top ?: context.resources.getQuantityString(R.plurals.files_n_files, items.size, items.size),
             prepare = { s ->
                 // 目录已经在了就接着用(合并);建不了又不是目录才算错。
                 dirs.forEach { rel ->
@@ -366,7 +396,7 @@ class RemoteFiles(session: Session, private val scope: CoroutineScope) {
                         name = item.name.substringAfterLast('/'),
                         size = item.size.coerceAtLeast(0),
                         run = { listener ->
-                            val pfd = resolver.openFileDescriptor(item.uri, "r") ?: error("读不到「${item.name}」")
+                            val pfd = resolver.openFileDescriptor(item.uri, "r") ?: throw FileTextException(FileText.of(R.string.files_cannot_read, item.name))
                             val size = pfd.statSize.takeIf { it >= 0 } ?: item.size.coerceAtLeast(0)
                             pfd.use { s.uploadFromFd(joinPath(dir, item.name), pfd.detachFd(), size.toULong(), listener) }
                         },
@@ -376,11 +406,13 @@ class RemoteFiles(session: Session, private val scope: CoroutineScope) {
         ) { sent, steps, failure, wasCancelled ->
             if (sent > 0 || dirs.isNotEmpty()) _changed.value++
             when {
-                wasCancelled -> notify(if (sent > 0) "已取消(已上传 $sent 个)" else "已取消")
-                failure != null -> notify("上传失败:${failure.reason()}", error = true)
-                dirs.isNotEmpty() -> notify("已上传「${dirs.first()}」(${steps.size} 个文件)")
-                steps.size == 1 -> notify("已上传「${steps[0].name}」")
-                else -> notify("已上传 ${steps.size} 个文件")
+                wasCancelled -> notify(
+                    if (sent > 0) FileText.plural(R.plurals.files_cancelled_uploaded, sent, sent) else FileText.of(R.string.files_cancelled),
+                )
+                failure != null -> notify(FileText.of(R.string.files_upload_failed, failure.reason()), error = true)
+                dirs.isNotEmpty() -> notify(FileText.plural(R.plurals.files_uploaded_folder, steps.size, dirs.first(), steps.size))
+                steps.size == 1 -> notify(FileText.of(R.string.files_uploaded_one, steps[0].name))
+                else -> notify(FileText.plural(R.plurals.files_uploaded_many, steps.size, steps.size))
             }
         }
     }
@@ -424,7 +456,7 @@ private class MediaStoreSink(private val resolver: ContentResolver) : Sink {
             )
             put(MediaStore.MediaColumns.IS_PENDING, 1)
         }
-        return resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: error("无法在下载目录里创建「$name」")
+        return resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: throw FileTextException(FileText.of(R.string.files_cannot_create_in_downloads, name))
     }
 
     override fun finish(uri: Uri) {
@@ -444,11 +476,11 @@ private class TreeSink(private val resolver: ContentResolver, tree: Uri) : Sink 
     private fun dir(rel: List<String>): Uri = dirs.getOrPut(rel) {
         val parent = dir(rel.dropLast(1))
         DocumentsContract.createDocument(resolver, parent, DocumentsContract.Document.MIME_TYPE_DIR, rel.last())
-            ?: error("无法创建文件夹「${rel.last()}」")
+            ?: throw FileTextException(FileText.of(R.string.files_cannot_create_folder, rel.last()))
     }
 
     override fun create(rel: List<String>, name: String): Uri =
-        DocumentsContract.createDocument(resolver, dir(rel), fileMime(name), name) ?: error("无法创建「$name」")
+        DocumentsContract.createDocument(resolver, dir(rel), fileMime(name), name) ?: throw FileTextException(FileText.of(R.string.files_cannot_create, name))
 
     override fun discard(uri: Uri) {
         DocumentsContract.deleteDocument(resolver, uri)
@@ -513,8 +545,9 @@ fun walkLocalTree(resolver: ContentResolver, tree: Uri): Pair<List<String>, List
 private fun openForWrite(resolver: ContentResolver, uri: Uri) =
     runCatching { resolver.openFileDescriptor(uri, "wt") }.getOrNull() ?: resolver.openFileDescriptor(uri, "w")
 
-/** 给人看的失败原因:核心的错误文本就是服务端 / 系统给的原话。 */
-fun Throwable.reason(): String = message?.ifBlank { null } ?: javaClass.simpleName
+/** 给人看的失败原因:核心的错误文本就是服务端 / 系统给的原话;我们自己的失败带着翻译好的那句。 */
+fun Throwable.reason(): FileText =
+    (this as? FileTextException)?.text ?: FileText.raw(message?.ifBlank { null } ?: javaClass.simpleName)
 
 private fun extension(name: String) = name.substringAfterLast('.', "").lowercase(Locale.ROOT)
 

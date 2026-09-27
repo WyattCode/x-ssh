@@ -79,8 +79,8 @@ private suspend fun authenticate(activity: Activity): Boolean =
         continuation.invokeOnCancellation { signal.cancel() }
 
         val prompt = BiometricPrompt.Builder(activity)
-            .setTitle("解锁已保存的凭据")
-            .setSubtitle("用生物识别或锁屏密码继续")
+            .setTitle(activity.getString(R.string.term_unlock_title))
+            .setSubtitle(activity.getString(R.string.term_unlock_subtitle))
             .setAllowedAuthenticators(
                 BiometricManager.Authenticators.BIOMETRIC_STRONG or
                     BiometricManager.Authenticators.DEVICE_CREDENTIAL,

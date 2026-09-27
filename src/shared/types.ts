@@ -300,7 +300,10 @@ export interface UiPrefs {
   zoom?: number
   sftpShowHidden?: boolean
   sftpWidth?: number
-  lang?: 'zh' | 'en'
+  /** Stored language preference ('zh' = Simplified); unset or 'system' follows the OS. See shared/lang.ts. */
+  lang?: 'zh' | 'zh-TW' | 'en' | 'system'
+  /** The OS's preferred locales (most preferred first), for "follow system". */
+  systemLocales?: string[]
 }
 
 /** Result of a `settings:set`. Main refuses keys outside its allowlist

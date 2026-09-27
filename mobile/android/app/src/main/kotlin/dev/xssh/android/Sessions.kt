@@ -207,7 +207,11 @@ class TerminalSession(
             }
             val transport = result.getOrNull()
             if (transport != null) {
-                withContext(Dispatchers.IO) { live.reattach(transport.first, transport.second) }
+                // 分隔行按当前界面语言写;会话层没有 Activity,用应用的 Context(Android 13 起跟着应用语言走)。
+                val marker = reconnectedMarker(
+                    AppLanguages.appContext?.getString(R.string.term_reconnected_marker) ?: "Reconnected",
+                )
+                withContext(Dispatchers.IO) { live.reattach(transport.first, transport.second, marker) }
                 files.rebind(live.session)
                 _frame.value = _frame.value.copy(reconnecting = 0)
                 Log.i(TAG, "reconnected ($label) on attempt $attempt")
@@ -384,7 +388,7 @@ object SessionRegistry {
     }
 
     /** 握手期间被「全部断开」打断。 */
-    class Cancelled : Exception("已全部断开")
+    class Cancelled : Exception("cancelled by disconnect all")
 
     /** 网络恢复的信号(见 [SessionService] 里的网络回调)。只留最新一次,没人等就丢掉。 */
     private val networkBack = MutableSharedFlow<Unit>(extraBufferCapacity = 1)

@@ -42,6 +42,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -168,7 +169,7 @@ fun SnippetSheet(
     }
 
     SheetFrame(
-        title = "命令片段",
+        title = stringResource(R.string.snip_title),
         tablet = tablet,
         onDismiss = onDismiss,
         trailing = {
@@ -179,13 +180,13 @@ fun SnippetSheet(
                     .clickable { editing = Snippet(hostId = null) },
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(XIcons.Plus, contentDescription = "新建片段", tint = p.accent, modifier = Modifier.size(22.dp))
+                Icon(XIcons.Plus, contentDescription = stringResource(R.string.snip_new), tint = p.accent, modifier = Modifier.size(22.dp))
             }
         },
     ) {
         if (shown.isEmpty()) {
             Text(
-                "还没有片段。点 ＋ 把常用命令存下来，以后点一下就发出去。",
+                stringResource(R.string.snip_empty),
                 color = p.textDim,
                 fontSize = 14.sp,
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
@@ -211,9 +212,9 @@ fun SnippetSheet(
                             modifier = Modifier.weight(1f, fill = false),
                         )
                         // 不直接执行的、要确认的,在名字后面标一下 —— 点之前就知道会发生什么。
-                        if (!s.run) SnippetTag("不回车", p.textDim)
-                        if (s.confirm) SnippetTag("先确认", p.warn)
-                        if (s.hostId != null) SnippetTag("仅本机", p.textDim)
+                        if (!s.run) SnippetTag(stringResource(R.string.snip_tag_no_enter), p.textDim)
+                        if (s.confirm) SnippetTag(stringResource(R.string.snip_tag_confirm), p.warn)
+                        if (s.hostId != null) SnippetTag(stringResource(R.string.snip_tag_this_host), p.textDim)
                     }
                     if (s.title.isNotBlank()) {
                         Text(
@@ -233,7 +234,7 @@ fun SnippetSheet(
                         .clickable { editing = s },
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(XIcons.Pencil, contentDescription = "编辑", tint = p.textDim, modifier = Modifier.size(18.dp))
+                    Icon(XIcons.Pencil, contentDescription = stringResource(R.string.snip_edit), tint = p.textDim, modifier = Modifier.size(18.dp))
                 }
             }
         }
@@ -262,9 +263,9 @@ fun SnippetSheet(
     }
     confirming?.let { s ->
         ConfirmDialog(
-            title = "执行「${s.label}」?",
+            title = stringResource(R.string.snip_run_title, s.label),
             message = s.text,
-            confirm = if (s.run) "执行" else "填入",
+            confirm = if (s.run) stringResource(R.string.snip_run) else stringResource(R.string.snip_fill),
             danger = true,
             onConfirm = {
                 confirming = null
@@ -327,17 +328,17 @@ private fun SnippetEditor(
     }
 
     SheetFrame(
-        title = if (isNew) "新建片段" else "编辑片段",
+        title = if (isNew) stringResource(R.string.snip_new) else stringResource(R.string.snip_edit_title),
         tablet = tablet,
         onDismiss = onDismiss,
-        leading = { ToolbarTextButton("取消", p.accent) { onDismiss() } },
-        trailing = { ToolbarTextButton("保存", if (valid) p.accent else p.textFaint, bold = true) { save() } },
+        leading = { ToolbarTextButton(stringResource(R.string.snip_cancel), p.accent) { onDismiss() } },
+        trailing = { ToolbarTextButton(stringResource(R.string.snip_save), if (valid) p.accent else p.textFaint, bold = true) { save() } },
     ) {
         Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             SnippetInput(
                 value = text,
                 onChange = { text = it },
-                label = "命令",
+                label = stringResource(R.string.snip_command),
                 placeholder = "nvidia-smi",
                 mono = true,
                 singleLine = false,
@@ -346,21 +347,21 @@ private fun SnippetEditor(
             SnippetInput(
                 value = title,
                 onChange = { title = it },
-                label = "名字(可不填)",
-                placeholder = "看 GPU",
+                label = stringResource(R.string.snip_name_label),
+                placeholder = stringResource(R.string.snip_name_placeholder),
                 mono = false,
                 singleLine = true,
             )
             FormGroup {
-                SnippetSwitch("发送后回车", run) { run = it }
+                SnippetSwitch(stringResource(R.string.snip_switch_enter), run) { run = it }
                 FormDivider()
-                SnippetSwitch("执行前确认", confirm) { confirm = it }
+                SnippetSwitch(stringResource(R.string.snip_switch_confirm), confirm) { confirm = it }
                 FormDivider()
-                SnippetSwitch("只在「$hostLabel」上显示", onlyHere) { onlyHere = it }
+                SnippetSwitch(stringResource(R.string.snip_switch_only_host, hostLabel), onlyHere) { onlyHere = it }
             }
             if (!isNew) {
                 FormGroup {
-                    FormAction(if (confirmingDelete) "确认删除这条片段" else "删除这条片段", danger = true) {
+                    FormAction(if (confirmingDelete) stringResource(R.string.snip_delete_confirm) else stringResource(R.string.snip_delete), danger = true) {
                         if (confirmingDelete) onDelete(initial) else confirmingDelete = true
                     }
                 }

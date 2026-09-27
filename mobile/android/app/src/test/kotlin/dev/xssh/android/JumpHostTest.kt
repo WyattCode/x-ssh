@@ -25,21 +25,21 @@ class JumpHostTest {
 
     @Test
     fun `tunnel failure names the jump host and the target it could not reach`() {
-        val text = jumpFailureText("jump host could not open a tunnel: Channel open failure", bastion, inner)
-        assertEquals("跳板机「堡垒机」连不到 10.0.0.5:2200。\nChannel open failure", text)
+        val failure = jumpFailure("jump host could not open a tunnel: Channel open failure", bastion, inner)
+        assertEquals(JumpFailure.Tunnel("堡垒机", "10.0.0.5:2200", "Channel open failure"), failure)
     }
 
     @Test
     fun `failures on the jump hop itself are attributed to it`() {
         assertEquals(
-            "跳板机「堡垒机」:authentication failed",
-            jumpFailureText("jump host: authentication failed", bastion, inner),
+            JumpFailure.Hop("堡垒机", "authentication failed"),
+            jumpFailure("jump host: authentication failed", bastion, inner),
         )
     }
 
     @Test
     fun `failures on the target are left alone`() {
-        assertNull(jumpFailureText("authentication failed", bastion, inner))
-        assertNull(jumpFailureText("connection timed out", bastion, inner))
+        assertNull(jumpFailure("authentication failed", bastion, inner))
+        assertNull(jumpFailure("connection timed out", bastion, inner))
     }
 }

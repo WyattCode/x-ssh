@@ -76,4 +76,5 @@ const val TMUX_COMMAND =
         "else exec \"\${SHELL:-/bin/sh}\" -l; fi'"
 
 /** 重连成功后写进终端的一行分隔:让人知道上面那些是断线前的输出。 */
-const val RECONNECTED_MARKER = "\r\n\u001b[2m── 连接已恢复 ──\u001b[0m\r\n"
+/** [text] 是当前界面语言的「连接已恢复」;这里只加暗色和两边的横线。 */
+fun reconnectedMarker(text: String): String = "\r\n\u001b[2m── $text ──\u001b[0m\r\n"

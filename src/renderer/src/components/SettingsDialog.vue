@@ -18,7 +18,7 @@ import type { SettingsTab } from '../stores/sessions'
 import type { KnownHostEntry } from '../../../shared/types'
 
 const store = useSessions()
-const { lang, setLang, t } = useI18n()
+const { langPref, setLang, t } = useI18n()
 const { toast } = useToast()
 const { confirm } = useConfirm()
 
@@ -660,8 +660,10 @@ async function resetMasterLock(): Promise<void> {
             <div class="section">
               <div class="label">{{ t('set.gen.lang') }}</div>
               <div class="seg">
-                <button :class="{ on: lang === 'zh' }" @click="setLang('zh')">{{ t('lang.zh') }}</button>
-                <button :class="{ on: lang === 'en' }" @click="setLang('en')">{{ t('lang.en') }}</button>
+                <button :class="{ on: langPref === 'system' }" @click="setLang('system')">{{ t('lang.system') }}</button>
+                <button :class="{ on: langPref === 'zh' }" lang="zh-CN" @click="setLang('zh')">{{ t('lang.zh') }}</button>
+                <button :class="{ on: langPref === 'zh-TW' }" lang="zh-TW" @click="setLang('zh-TW')">{{ t('lang.zhTW') }}</button>
+                <button :class="{ on: langPref === 'en' }" lang="en" @click="setLang('en')">{{ t('lang.en') }}</button>
               </div>
               <p class="desc">{{ t('set.gen.langDesc') }}</p>
             </div>

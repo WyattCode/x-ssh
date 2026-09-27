@@ -95,8 +95,11 @@ import androidx.compose.ui.input.pointer.isShiftPressed
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -135,15 +138,31 @@ private fun crumbs(path: String): List<Pair<String, String>> {
     return out
 }
 
-private val ThisYear = DateTimeFormatter.ofPattern("M月d日 HH:mm")
 private val OtherYear = DateTimeFormatter.ofPattern("yyyy-MM-dd")
 
-private fun formatTime(epochSeconds: Long): String {
+/** 今年的修改时间怎么写(「9月27日 14:05」/「Sep 27 14:05」):格式跟着界面语言,取自字符串资源。 */
+@Composable
+private fun rememberThisYear(): DateTimeFormatter {
+    val pattern = stringResource(R.string.files_time_this_year)
+    val locale = LocalConfiguration.current.locales[0]
+    return remember(pattern, locale) { DateTimeFormatter.ofPattern(pattern, locale) }
+}
+
+private fun formatTime(epochSeconds: Long, thisYear: DateTimeFormatter): String {
     if (epochSeconds <= 0) return ""
     val zone = ZoneId.systemDefault()
     val time = Instant.ofEpochSecond(epochSeconds).atZone(zone)
     val now = java.time.ZonedDateTime.now(zone)
-    return (if (time.year == now.year) ThisYear else OtherYear).format(time)
+    return (if (time.year == now.year) thisYear else OtherYear).format(time)
+}
+
+/** 把 [FileText] 取成当前语言的文字。 */
+@Composable
+private fun FileText.text(): String {
+    raw?.let { return it }
+    val resolved = args.map { if (it is FileText) it.text() else it }.toTypedArray()
+    val n = count
+    return if (n != null) pluralStringResource(id, n, *resolved) else stringResource(id, *resolved)
 }
 
 /* ─────────────────────────────── 界面 ─────────────────────────────── */
@@ -159,7 +178,7 @@ fun PaneSwitch(files: Boolean, onChange: (Boolean) -> Unit) {
             .background(p.bgElev2)
             .padding(2.dp),
     ) {
-        listOf(false to "终端", true to "文件").forEach { (value, label) ->
+        listOf(false to stringResource(R.string.files_terminal), true to stringResource(R.string.files_files)).forEach { (value, label) ->
             val on = value == files
             val interaction = remember { MutableInteractionSource() }
             val hovered by interaction.collectIsHoveredAsState()
@@ -249,7 +268,7 @@ fun FilesPane(
 
     var path by remember { mutableStateOf(files.cwd) }
     var entries by remember { mutableStateOf(files.cached) }
-    var failure by remember { mutableStateOf<String?>(null) }
+    var failure by remember { mutableStateOf<FileText?>(null) }
     var loading by remember { mutableStateOf(false) }
     // 选择:[marked] 是选中的集合,[cursor] 是键盘所在的那一项,[anchor] 是 Shift 连选的起点。
     var marked by remember { mutableStateOf(emptySet<String>()) }
@@ -390,9 +409,13 @@ fun FilesPane(
             val names = entries.orEmpty().map { it.name }.toSet()
             val clashes = items.count { it.name in names }
             if (clashes == 0) {
-                files.upload(dir, items, resolver)
+                files.upload(dir, items, context)
             } else {
-                val title = if (items.size == 1) "替换「${items[0].name}」?" else "替换 $clashes 个同名文件?"
+                val title = if (items.size == 1) {
+                    context.getString(R.string.files_replace_one, items[0].name)
+                } else {
+                    context.resources.getQuantityString(R.plurals.files_replace_many, clashes, clashes)
+                }
                 dialog = FilesDialog.Replace(title, dir, items, emptyList())
             }
         }
@@ -406,14 +429,14 @@ fun FilesPane(
         scope.launch {
             val (dirs, items) = runCatching { withContext(Dispatchers.IO) { walkLocalTree(resolver, tree) } }
                 .getOrElse { e ->
-                    files.notify("读不到这个文件夹:${e.reason()}", error = true)
+                    files.notify(FileText.of(R.string.files_cannot_read_folder, e.reason()), error = true)
                     return@launch
                 }
             val top = dirs.first()
             if (entries.orEmpty().any { it.name == top }) {
-                dialog = FilesDialog.Replace("「$top」已存在,合并并替换同名文件?", dir, items, dirs)
+                dialog = FilesDialog.Replace(context.getString(R.string.files_merge_folder, top), dir, items, dirs)
             } else {
-                files.upload(dir, items, resolver, dirs)
+                files.upload(dir, items, context, dirs)
             }
         }
     }
@@ -440,39 +463,45 @@ fun FilesPane(
         if (targets.isNotEmpty()) copyText(context, targets.joinToString("\n") { it.path })
     }
 
+    // 菜单项在菜单弹出时才建(不在组合里),文字用 context 取。
     fun menuFor(entry: RemoteEntry): List<MenuAction> = buildList {
         val targets = targetsFor(entry)
+        val res = context.resources
         if (targets.size > 1) {
-            add(MenuAction("下载 ${targets.size} 项", shortcut = "Ctrl+D") { download(targets) })
-            add(MenuAction("下载到…") { downloadTo(targets) })
-            add(MenuAction("复制路径", shortcut = "Ctrl+C") { copyPaths(targets) })
-            add(MenuAction("删除 ${targets.size} 项…", danger = true, shortcut = "Delete") { dialog = FilesDialog.Delete(targets) })
+            add(MenuAction(res.getQuantityString(R.plurals.files_download_n, targets.size, targets.size), shortcut = "Ctrl+D") { download(targets) })
+            add(MenuAction(res.getString(R.string.files_download_to)) { downloadTo(targets) })
+            add(MenuAction(res.getString(R.string.files_copy_path), shortcut = "Ctrl+C") { copyPaths(targets) })
+            add(
+                MenuAction(res.getQuantityString(R.plurals.files_delete_n_ellipsis, targets.size, targets.size), danger = true, shortcut = "Delete") {
+                    dialog = FilesDialog.Delete(targets)
+                },
+            )
             return@buildList
         }
-        add(MenuAction("打开", shortcut = "回车") { open(entry) })
-        add(MenuAction("下载", shortcut = "Ctrl+D") { download(targets) })
-        add(MenuAction("下载到…") { downloadTo(targets) })
-        add(MenuAction("复制路径", shortcut = "Ctrl+C") { copyPaths(targets) })
-        add(MenuAction("重命名…", shortcut = "F2") { dialog = FilesDialog.Rename(entry) })
-        add(MenuAction("多选") {
+        add(MenuAction(res.getString(R.string.files_open), shortcut = res.getString(R.string.files_key_enter)) { open(entry) })
+        add(MenuAction(res.getString(R.string.files_download), shortcut = "Ctrl+D") { download(targets) })
+        add(MenuAction(res.getString(R.string.files_download_to)) { downloadTo(targets) })
+        add(MenuAction(res.getString(R.string.files_copy_path), shortcut = "Ctrl+C") { copyPaths(targets) })
+        add(MenuAction(res.getString(R.string.files_rename_ellipsis), shortcut = "F2") { dialog = FilesDialog.Rename(entry) })
+        add(MenuAction(res.getString(R.string.files_select_multiple)) {
             selectMode = true
             only(entry.path)
         })
-        add(MenuAction("删除…", danger = true, shortcut = "Delete") { dialog = FilesDialog.Delete(targets) })
+        add(MenuAction(res.getString(R.string.files_delete_ellipsis), danger = true, shortcut = "Delete") { dialog = FilesDialog.Delete(targets) })
     }
     fun uploadMenu(): List<MenuAction> = listOf(
-        MenuAction("上传文件…", shortcut = "Ctrl+U") { pickFiles() },
-        MenuAction("上传文件夹…", shortcut = "Ctrl+Shift+U") { pickFolderToUpload() },
+        MenuAction(context.getString(R.string.files_upload_files), shortcut = "Ctrl+U") { pickFiles() },
+        MenuAction(context.getString(R.string.files_upload_folder), shortcut = "Ctrl+Shift+U") { pickFolderToUpload() },
     )
     fun backgroundMenu(): List<MenuAction> = buildList {
         addAll(uploadMenu())
-        add(MenuAction("新建文件夹…") { dialog = FilesDialog.NewFolder })
-        add(MenuAction("全选", shortcut = "Ctrl+A") {
+        add(MenuAction(context.getString(R.string.files_new_folder_ellipsis)) { dialog = FilesDialog.NewFolder })
+        add(MenuAction(context.getString(R.string.files_select_all), shortcut = "Ctrl+A") {
             marked = entries.orEmpty().mapTo(HashSet()) { it.path }
         })
-        add(MenuAction("刷新", shortcut = "Ctrl+R") { refresh() })
-        add(MenuAction("前往路径…", shortcut = "Ctrl+L") { dialog = FilesDialog.GoTo })
-        path?.let { add(MenuAction("复制当前路径") { copyText(context, it) }) }
+        add(MenuAction(context.getString(R.string.files_refresh), shortcut = "Ctrl+R") { refresh() })
+        add(MenuAction(context.getString(R.string.files_go_to_path_ellipsis), shortcut = "Ctrl+L") { dialog = FilesDialog.GoTo })
+        path?.let { add(MenuAction(context.getString(R.string.files_copy_current_path)) { copyText(context, it) }) }
     }
 
     var typed by remember { mutableStateOf("") }
@@ -720,11 +749,11 @@ fun FilesPane(
             Spacer(Modifier.width(8.dp))
             var uploadOpen by remember { mutableStateOf(false) }
             Box {
-                ToolbarIcon(XIcons.Upload, "上传") { uploadOpen = true }
+                ToolbarIcon(XIcons.Upload, stringResource(R.string.files_upload)) { uploadOpen = true }
                 ContextMenu(at = if (uploadOpen) DpOffset.Zero else null, onDismiss = { uploadOpen = false }, actions = ::uploadMenu)
             }
-            ToolbarIcon(XIcons.FolderPlus, "新建文件夹") { dialog = FilesDialog.NewFolder }
-            ToolbarIcon(XIcons.Refresh, "刷新  Ctrl+R") { refresh() }
+            ToolbarIcon(XIcons.FolderPlus, stringResource(R.string.files_new_folder)) { dialog = FilesDialog.NewFolder }
+            ToolbarIcon(XIcons.Refresh, stringResource(R.string.files_refresh) + "  Ctrl+R") { refresh() }
         }
         PathBar(path = path, onGo = { load(it) }, onUp = ::goUp, onEdit = { dialog = FilesDialog.GoTo })
         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().then(dropModifier)) {
@@ -755,9 +784,11 @@ fun FilesPane(
                 ColumnHeader(showTime)
                 val list = entries
                 when {
-                    failure != null && list == null -> CenterNote(failure!!) { XsshButton("重试") { retry() } }
+                    failure != null && list == null -> CenterNote(failure!!.text()) {
+                        XsshButton(stringResource(R.string.files_retry)) { retry() }
+                    }
                     list == null -> CenterNote(if (loading) "" else "…")
-                    list.isEmpty() -> CenterNote("空文件夹")
+                    list.isEmpty() -> CenterNote(stringResource(R.string.files_empty_folder))
                     else -> LazyColumn(Modifier.fillMaxSize().bounce(), state = listState) {
                         itemsIndexed(list, key = { _, it -> it.path }) { index, entry ->
                             FileRow(
@@ -785,9 +816,9 @@ fun FilesPane(
     when (val d = dialog) {
         null -> {}
         FilesDialog.GoTo -> NameDialog(
-            title = "前往路径",
+            title = stringResource(R.string.files_go_to_path),
             initial = path.orEmpty(),
-            confirm = "前往",
+            confirm = stringResource(R.string.files_go),
             isPath = true,
             onConfirm = { target ->
                 dialog = null
@@ -801,9 +832,9 @@ fun FilesPane(
             onDismiss = { dialog = null },
         )
         is FilesDialog.Rename -> NameDialog(
-            title = "重命名",
+            title = stringResource(R.string.files_rename),
             initial = d.entry.name,
-            confirm = "重命名",
+            confirm = stringResource(R.string.files_rename),
             onConfirm = { name ->
                 dialog = null
                 val dir = path ?: return@NameDialog
@@ -812,15 +843,15 @@ fun FilesPane(
                 scope.launch {
                     runCatching { files.rename(d.entry.path, to) }
                         .onSuccess { load(dir, select = to) }
-                        .onFailure { e -> files.notify("重命名失败:${e.reason()}", error = true) }
+                        .onFailure { e -> files.notify(FileText.of(R.string.files_rename_failed, e.reason()), error = true) }
                 }
             },
             onDismiss = { dialog = null },
         )
         FilesDialog.NewFolder -> NameDialog(
-            title = "新建文件夹",
+            title = stringResource(R.string.files_new_folder),
             initial = "",
-            confirm = "新建",
+            confirm = stringResource(R.string.files_create),
             onConfirm = { name ->
                 dialog = null
                 val dir = path ?: return@NameDialog
@@ -828,15 +859,16 @@ fun FilesPane(
                 scope.launch {
                     runCatching { files.mkdir(at) }
                         .onSuccess { load(dir, select = at) }
-                        .onFailure { e -> files.notify("新建失败:${e.reason()}", error = true) }
+                        .onFailure { e -> files.notify(FileText.of(R.string.files_create_failed, e.reason()), error = true) }
                 }
             },
             onDismiss = { dialog = null },
         )
         is FilesDialog.Delete -> ConfirmDialog(
-            title = d.entries.singleOrNull()?.let { "删除「${it.name}」?" } ?: "删除 ${d.entries.size} 项?",
-            message = if (d.entries.any { it.isDir && !it.isLink }) "文件夹里的内容会一起删除。" else null,
-            confirm = "删除",
+            title = d.entries.singleOrNull()?.let { stringResource(R.string.files_delete_one_title, it.name) }
+                ?: pluralStringResource(R.plurals.files_delete_n_title, d.entries.size, d.entries.size),
+            message = if (d.entries.any { it.isDir && !it.isLink }) stringResource(R.string.files_delete_folder_note) else null,
+            confirm = stringResource(R.string.files_delete),
             danger = true,
             onConfirm = {
                 dialog = null
@@ -849,7 +881,7 @@ fun FilesPane(
                     runCatching { files.remove(d.entries) }
                         .onSuccess { path?.let { load(it, select = next) } }
                         .onFailure { e ->
-                            files.notify("删除失败:${e.reason()}", error = true)
+                            files.notify(FileText.of(R.string.files_delete_failed, e.reason()), error = true)
                             refresh()
                         }
                 }
@@ -859,11 +891,11 @@ fun FilesPane(
         is FilesDialog.Replace -> ConfirmDialog(
             title = d.title,
             message = null,
-            confirm = "替换",
+            confirm = stringResource(R.string.files_replace),
             danger = true,
             onConfirm = {
                 dialog = null
-                files.upload(d.dir, d.items, resolver, d.dirs)
+                files.upload(d.dir, d.items, context, d.dirs)
             },
             onDismiss = { dialog = null },
         )
@@ -893,7 +925,7 @@ private class PhoneFileActions(
 private fun PhoneFiles(
     path: String?,
     entries: List<RemoteEntry>?,
-    failure: String?,
+    failure: FileText?,
     loading: Boolean,
     marked: Set<String>,
     cursor: String?,
@@ -923,14 +955,15 @@ private fun PhoneFiles(
     var barsHeight by remember { mutableIntStateOf(0) }
     val barsDp = with(density) { barsHeight.toDp() }
     val navDp = insets.asPaddingValues().calculateBottomPadding()
+    val thisYear = rememberThisYear()
 
     val railActions: @Composable () -> Unit = {
         // 上传是这一页的主操作,放在胶囊最下面(轨道最下面那个位置,和编辑页的 ✓ 同一个落点)。
         GlassGroup {
-            GlassItem(XIcons.FolderPlus, "新建文件夹") { onNewFolder() }
+            GlassItem(XIcons.FolderPlus, stringResource(R.string.files_new_folder)) { onNewFolder() }
             var uploadOpen by remember { mutableStateOf(false) }
             Box {
-                GlassItem(XIcons.Upload, "上传") { uploadOpen = true }
+                GlassItem(XIcons.Upload, stringResource(R.string.files_upload)) { uploadOpen = true }
                 ContextMenu(at = if (uploadOpen) DpOffset.Zero else null, onDismiss = { uploadOpen = false }, actions = uploadMenu)
             }
         }
@@ -998,9 +1031,9 @@ private fun PhoneFiles(
                 when {
                     failure != null && items == null -> item(key = "failure") {
                         Column(Modifier.fillMaxWidth().padding(start = rowStart, end = endPad, top = 24.dp)) {
-                            Text(failure, color = p.textDim, fontSize = 14.sp)
+                            Text(failure.text(), color = p.textDim, fontSize = 14.sp)
                             Spacer(Modifier.height(16.dp))
-                            XsshButton("重试") { onRetry() }
+                            XsshButton(stringResource(R.string.files_retry)) { onRetry() }
                         }
                     }
                     items == null -> item(key = "loading") {
@@ -1027,14 +1060,14 @@ private fun PhoneFiles(
                         }
                         if (items.isEmpty()) {
                             item(key = "empty") {
-                                Text("空文件夹", color = p.textDim, fontSize = 14.sp, modifier = Modifier.padding(start = rowStart, top = 24.dp))
+                                Text(stringResource(R.string.files_empty_folder), color = p.textDim, fontSize = 14.sp, modifier = Modifier.padding(start = rowStart, top = 24.dp))
                             }
                         }
                         items(items, key = { it.path }) { entry ->
                             PhoneFileRow(
                                 icon = if (entry.isDir) XIcons.Folder else XIcons.File,
                                 name = entry.name,
-                                meta = entryMeta(entry),
+                                meta = entryMeta(entry, thisYear),
                                 dim = false,
                                 chevron = entry.isDir,
                                 start = rowStart,
@@ -1106,7 +1139,7 @@ private fun PhoneFiles(
                     } else {
                         WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom
                     },
-                    start = { GlassButton(XIcons.Back, "返回") { onBack() } },
+                    start = { GlassButton(XIcons.Back, stringResource(R.string.files_back)) { onBack() } },
                     end = {
                         GlassGroup { ThemeGlassItem() }
                         railActions()
@@ -1123,7 +1156,7 @@ private fun PhoneFiles(
                 EdgeRail(Modifier.align(Alignment.BottomEnd).padding(bottom = barsDp)) {
                     // 外观在最上面(每一页都有,位置一样)。
                     GlassGroup { ThemeGlassItem() }
-                    GlassButton(XIcons.Back, "返回") { onBack() }
+                    GlassButton(XIcons.Back, stringResource(R.string.files_back)) { onBack() }
                     railActions()
                 }
             }
@@ -1143,8 +1176,8 @@ private fun PhoneFiles(
 }
 
 /** 列表第二行的小字:目录只写时间,文件写「大小 · 时间」。 */
-private fun entryMeta(entry: RemoteEntry): String {
-    val time = formatTime(entry.modified.toLong())
+private fun entryMeta(entry: RemoteEntry, thisYear: DateTimeFormatter): String {
+    val time = formatTime(entry.modified.toLong(), thisYear)
     return if (entry.isDir) time else listOf(formatSize(entry.size.toLong()), time).filter { it.isNotEmpty() }.joinToString(" · ")
 }
 
@@ -1180,7 +1213,7 @@ private fun FileDetailPane(
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Text("选择左边的文件", color = p.textDim, fontSize = 15.sp)
+            Text(stringResource(R.string.files_pick_on_left), color = p.textDim, fontSize = 15.sp)
         }
         return
     }
@@ -1207,17 +1240,23 @@ private fun FileDetailPane(
             )
             Spacer(Modifier.height(4.dp))
             Text(
-                if (entry.isDir) "文件夹" else formatSize(entry.size.toLong()),
+                if (entry.isDir) stringResource(R.string.files_folder) else formatSize(entry.size.toLong()),
                 color = p.textDim,
                 fontSize = 13.sp,
             )
             Spacer(Modifier.height(24.dp))
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                formatTime(entry.modified.toLong()).takeIf { it.isNotEmpty() }?.let { FileDetailRow("修改时间", it, mono = false) }
-                if (entry.permissions > 0u) {
-                    FileDetailRow("权限", "${permissionString(entry.permissions)}  ${entry.permissions.toString(8)}", mono = true)
+                formatTime(entry.modified.toLong(), rememberThisYear()).takeIf { it.isNotEmpty() }?.let {
+                    FileDetailRow(stringResource(R.string.files_modified), it, mono = false)
                 }
-                FileDetailRow("路径", entry.path, mono = true)
+                if (entry.permissions > 0u) {
+                    FileDetailRow(
+                        stringResource(R.string.files_permissions),
+                        "${permissionString(entry.permissions)}  ${entry.permissions.toString(8)}",
+                        mono = true,
+                    )
+                }
+                FileDetailRow(stringResource(R.string.files_path), entry.path, mono = true)
             }
         }
         Column(
@@ -1226,16 +1265,20 @@ private fun FileDetailPane(
                 .padding(start = Gutter * 2, end = endPad, top = 24.dp, bottom = bottomInset + Gutter),
             verticalArrangement = Arrangement.spacedBy(GapItem),
         ) {
-            XsshButton("打开", modifier = Modifier.fillMaxWidth()) { actions.open(entry) }
+            XsshButton(stringResource(R.string.files_open), modifier = Modifier.fillMaxWidth()) { actions.open(entry) }
             Row(horizontalArrangement = Arrangement.spacedBy(GapItem)) {
-                XsshButton("下载", kind = ButtonKind.Ghost, modifier = Modifier.weight(1f)) { actions.download(entry) }
-                XsshButton("下载到…", kind = ButtonKind.Ghost, modifier = Modifier.weight(1f)) { actions.downloadTo(entry) }
+                XsshButton(stringResource(R.string.files_download), kind = ButtonKind.Ghost, modifier = Modifier.weight(1f)) { actions.download(entry) }
+                XsshButton(stringResource(R.string.files_download_to), kind = ButtonKind.Ghost, modifier = Modifier.weight(1f)) {
+                    actions.downloadTo(entry)
+                }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(GapItem)) {
-                XsshButton("重命名", kind = ButtonKind.Ghost, modifier = Modifier.weight(1f)) { actions.rename(entry) }
-                XsshButton("删除", kind = ButtonKind.Danger, modifier = Modifier.weight(1f)) { actions.delete(entry) }
+                XsshButton(stringResource(R.string.files_rename), kind = ButtonKind.Ghost, modifier = Modifier.weight(1f)) { actions.rename(entry) }
+                XsshButton(stringResource(R.string.files_delete), kind = ButtonKind.Danger, modifier = Modifier.weight(1f)) { actions.delete(entry) }
             }
-            XsshButton("复制路径", kind = ButtonKind.Ghost, modifier = Modifier.fillMaxWidth()) { actions.copyPath(entry) }
+            XsshButton(stringResource(R.string.files_copy_path), kind = ButtonKind.Ghost, modifier = Modifier.fillMaxWidth()) {
+                actions.copyPath(entry)
+            }
         }
     }
 }
@@ -1316,7 +1359,7 @@ private fun PhoneFileRow(
                     )
                     if (link) {
                         Spacer(Modifier.width(6.dp))
-                        Icon(XIcons.Link, contentDescription = "链接", tint = p.textFaint, modifier = Modifier.size(14.dp))
+                        Icon(XIcons.Link, contentDescription = stringResource(R.string.files_link), tint = p.textFaint, modifier = Modifier.size(14.dp))
                     }
                 }
                 if (!meta.isNullOrEmpty()) {
@@ -1360,18 +1403,18 @@ private fun SelectionBar(
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Text(
-                "已选 $count 项",
+                pluralStringResource(R.plurals.files_selected_n, count, count),
                 color = p.text,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier.weight(1f),
             )
             if (count > 0) {
-                ToolbarTextButton("下载", p.accent) { onDownload() }
-                ToolbarTextButton("下载到…", p.accent) { onDownloadTo() }
-                ToolbarTextButton("删除", p.danger) { onDelete() }
+                ToolbarTextButton(stringResource(R.string.files_download), p.accent) { onDownload() }
+                ToolbarTextButton(stringResource(R.string.files_download_to), p.accent) { onDownloadTo() }
+                ToolbarTextButton(stringResource(R.string.files_delete), p.danger) { onDelete() }
             }
-            ToolbarTextButton("完成", p.text, bold = true) { onDone() }
+            ToolbarTextButton(stringResource(R.string.files_done), p.text, bold = true) { onDone() }
         }
     }
 }
@@ -1388,7 +1431,7 @@ private fun PathBar(path: String?, onGo: (String) -> Unit, onUp: () -> Unit, onE
             Modifier.fillMaxWidth().height(44.dp).padding(horizontal = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            ToolbarIcon(XIcons.ArrowUp, "上一级  Backspace", tint = if (path == null || path == "/") p.textFaint else null) { onUp() }
+            ToolbarIcon(XIcons.ArrowUp, stringResource(R.string.files_up) + "  Backspace", tint = if (path == null || path == "/") p.textFaint else null) { onUp() }
             Spacer(Modifier.width(6.dp))
             // 面包屑后面的空白处点一下 = 手动输入路径(Finder 的「前往文件夹」、资源管理器的地址栏)。
             Row(
@@ -1448,10 +1491,16 @@ private fun ColumnHeader(showTime: Boolean) {
             Modifier.fillMaxWidth().height(30.dp).padding(start = 52.dp, end = 24.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("名称", color = p.textFaint, fontSize = 12.sp, modifier = Modifier.weight(1f))
-            Text("大小", color = p.textFaint, fontSize = 12.sp, textAlign = TextAlign.End, modifier = Modifier.width(SizeColumn))
+            Text(stringResource(R.string.files_name), color = p.textFaint, fontSize = 12.sp, modifier = Modifier.weight(1f))
+            Text(
+                stringResource(R.string.files_size),
+                color = p.textFaint,
+                fontSize = 12.sp,
+                textAlign = TextAlign.End,
+                modifier = Modifier.width(SizeColumn),
+            )
             if (showTime) {
-                Text("修改时间", color = p.textFaint, fontSize = 12.sp, textAlign = TextAlign.End, modifier = Modifier.width(TimeColumn))
+                Text(stringResource(R.string.files_modified), color = p.textFaint, fontSize = 12.sp, textAlign = TextAlign.End, modifier = Modifier.width(TimeColumn))
             }
         }
         Box(Modifier.fillMaxWidth().height(0.5.dp).background(p.border))
@@ -1565,7 +1614,7 @@ private fun FileRow(
                 )
                 if (entry.isLink) {
                     Spacer(Modifier.width(6.dp))
-                    Icon(XIcons.Link, contentDescription = "链接", tint = p.textFaint, modifier = Modifier.size(14.dp))
+                    Icon(XIcons.Link, contentDescription = stringResource(R.string.files_link), tint = p.textFaint, modifier = Modifier.size(14.dp))
                 }
             }
             Text(
@@ -1578,7 +1627,7 @@ private fun FileRow(
             )
             if (showTime) {
                 Text(
-                    formatTime(entry.modified.toLong()),
+                    formatTime(entry.modified.toLong(), rememberThisYear()),
                     color = p.textDim,
                     fontSize = 13.sp,
                     textAlign = TextAlign.End,
@@ -1673,7 +1722,7 @@ private fun TransferBar(t: Transfer, inset: androidx.compose.ui.unit.Dp, onCance
                 }
             }
             Spacer(Modifier.width(8.dp))
-            ToolbarTextButton("取消", p.danger) { onCancel() }
+            ToolbarTextButton(stringResource(R.string.files_cancel), p.danger) { onCancel() }
         }
     }
 }
@@ -1701,7 +1750,7 @@ private fun NoticeBar(notice: Notice?, inset: androidx.compose.ui.unit.Dp) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                n.text,
+                n.text.text(),
                 color = if (n.error) p.danger else p.textDim,
                 fontSize = 13.sp,
                 maxLines = 2,
@@ -1709,7 +1758,7 @@ private fun NoticeBar(notice: Notice?, inset: androidx.compose.ui.unit.Dp) {
                 modifier = Modifier.weight(1f).padding(vertical = 10.dp),
             )
             n.action?.let { (label, run) ->
-                ToolbarTextButton(label, p.accent, bold = true) {
+                ToolbarTextButton(label.text(), p.accent, bold = true) {
                     shown = null
                     run()
                 }
@@ -1822,7 +1871,7 @@ private fun NameDialog(
             )
             Spacer(Modifier.height(20.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                XsshButton("取消", Modifier.weight(1f), kind = ButtonKind.Ghost) { onDismiss() }
+                XsshButton(stringResource(R.string.files_cancel), Modifier.weight(1f), kind = ButtonKind.Ghost) { onDismiss() }
                 XsshButton(confirm, Modifier.weight(1f)) { submit() }
             }
         }

@@ -91,6 +91,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -250,7 +251,8 @@ fun TabletApp(
     }
 
     var sheet by remember { mutableStateOf<SheetTarget?>(null) }
-    var fontSheet by remember { mutableStateOf(false) }
+    // 设置浮层(语言 + 终端字体)。在里面换语言会重建整个界面,用 rememberSaveable 才不会一换就关掉。
+    var fontSheet by rememberSaveable { mutableStateOf(false) }
     var deleting by remember { mutableStateOf<Host?>(null) }
     var query by rememberSaveable { mutableStateOf("") }
     val searchFocus = remember { FocusRequester() }
@@ -335,11 +337,16 @@ fun TabletApp(
     }
     fun menuFor(host: Host): List<MenuAction> = buildList {
         val live = running.containsKey(host.id)
-        add(MenuAction(if (live) "打开会话" else "连接", shortcut = "回车") { connect(host) })
-        add(MenuAction("编辑…", shortcut = "Ctrl+E") { sheet = SheetTarget.Edit(host) })
-        add(MenuAction("复制地址") { copyText(context, host.subtitle) })
-        if (live) add(MenuAction("断开", danger = true) { disconnect(host) })
-        add(MenuAction("删除…", danger = true, shortcut = "Delete") { deleting = host })
+        add(
+            MenuAction(
+                context.getString(if (live) R.string.tab_open_session else R.string.tab_connect),
+                shortcut = context.getString(R.string.tab_key_enter),
+            ) { connect(host) },
+        )
+        add(MenuAction(context.getString(R.string.tab_menu_edit), shortcut = "Ctrl+E") { sheet = SheetTarget.Edit(host) })
+        add(MenuAction(context.getString(R.string.tab_copy_address)) { copyText(context, host.subtitle) })
+        if (live) add(MenuAction(context.getString(R.string.tab_disconnect), danger = true) { disconnect(host) })
+        add(MenuAction(context.getString(R.string.tab_menu_delete), danger = true, shortcut = "Delete") { deleting = host })
     }
 
     val onKey: (KeyEvent) -> Boolean = handler@{ event ->
@@ -579,7 +586,7 @@ fun TabletApp(
 
     }
 
-    if (fontSheet) FontSheet(onDismiss = { fontSheet = false })
+    if (fontSheet) SettingsSheet(onDismiss = { fontSheet = false })
     sheet?.let { target ->
         val initial = (target as? SheetTarget.Edit)?.host
         HostSheet(
@@ -597,9 +604,9 @@ fun TabletApp(
     }
     deleting?.let { host ->
         ConfirmDialog(
-            title = "删除「${host.label}」?",
-            message = if (running.containsKey(host.id)) "它的会话会一起断开。" else null,
-            confirm = "删除",
+            title = stringResource(R.string.tab_delete_host_title, host.label),
+            message = if (running.containsKey(host.id)) stringResource(R.string.tab_delete_host_session_note) else null,
+            confirm = stringResource(R.string.tab_delete),
             danger = true,
             onConfirm = {
                 deleting = null
@@ -651,9 +658,9 @@ private fun Sidebar(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text("X-SSH", color = p.text, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-            ToolbarIcon(theme.mode.icon, "外观:${theme.mode.label}") { theme.onChange(theme.mode.next()) }
-            ToolbarIcon(XIcons.Font, "终端字体") { onFonts() }
-            ToolbarIcon(XIcons.Plus, "新建主机  Ctrl+N") { onNew() }
+            ToolbarIcon(theme.mode.icon, stringResource(R.string.tab_appearance, theme.mode.label)) { theme.onChange(theme.mode.next()) }
+            ToolbarIcon(XIcons.Settings, stringResource(R.string.set_title)) { onFonts() }
+            ToolbarIcon(XIcons.Plus, stringResource(R.string.tab_new_host) + "  Ctrl+N") { onNew() }
         }
         if (total > 0) {
             SidebarSearch(
@@ -667,7 +674,7 @@ private fun Sidebar(
         }
         LazyColumn(Modifier.weight(1f).fillMaxWidth().bounce()) {
             if (sessions.isNotEmpty()) {
-                item(key = "h:sessions") { SectionHeader("会话") }
+                item(key = "h:sessions") { SectionHeader(stringResource(R.string.tab_sessions)) }
                 items(sessions, key = { "s:" + it.id }) { host ->
                     SidebarRow(
                         host = host,
@@ -682,7 +689,7 @@ private fun Sidebar(
                 }
             }
             if (total > 0) {
-                item(key = "h:hosts") { SectionHeader(if (query.isBlank()) "主机" else "搜索结果") }
+                item(key = "h:hosts") { SectionHeader(stringResource(if (query.isBlank()) R.string.tab_hosts else R.string.tab_search_results)) }
             }
             items(hosts, key = { "h:" + it.id }) { host ->
                 SidebarRow(
@@ -698,7 +705,7 @@ private fun Sidebar(
             if (total > 0 && hosts.isEmpty()) {
                 item(key = "empty") {
                     Text(
-                        "没有匹配的主机",
+                        stringResource(R.string.tab_no_matching_hosts),
                         color = p.textDim,
                         fontSize = 14.sp,
                         modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
@@ -743,7 +750,7 @@ private fun SidebarSearch(
         Icon(XIcons.Search, contentDescription = null, tint = p.textDim, modifier = Modifier.size(18.dp))
         Spacer(Modifier.width(8.dp))
         Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
-            if (query.isEmpty()) Text("搜索  Ctrl+F", color = p.textFaint, fontSize = 15.sp)
+            if (query.isEmpty()) Text(stringResource(R.string.tab_search) + "  Ctrl+F", color = p.textFaint, fontSize = 15.sp)
             var field by remember { mutableStateOf(TextFieldValue(query)) }
             val shown = syncedField(field, query)
             BasicTextField(
@@ -765,13 +772,14 @@ private fun SidebarSearch(
             )
         }
         if (query.isNotEmpty()) {
+            val clearLabel = stringResource(R.string.tab_clear_search)
             Box(
                 Modifier
                     .size(24.dp)
                     .clip(RoundedCornerShape(12.dp))
                     .clickable { onQuery("") }
                     .pointerHoverIcon(PointerIcon.Hand)
-                    .semantics { contentDescription = "清除搜索" },
+                    .semantics { contentDescription = clearLabel },
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(XIcons.Close, contentDescription = null, tint = p.textDim, modifier = Modifier.size(14.dp))
@@ -877,7 +885,7 @@ private fun SidebarRow(
                     )
                     if (showChips && host.keyFingerprint.isBlank()) {
                         Spacer(Modifier.width(6.dp))
-                        Chip("待确认", p.warn)
+                        Chip(stringResource(R.string.tab_chip_unverified), p.warn)
                     }
                 }
                 Spacer(Modifier.height(3.dp))
@@ -893,6 +901,7 @@ private fun SidebarRow(
             if (onClose != null && hovered) {
                 val closeInteraction = remember { MutableInteractionSource() }
                 val closeHovered by closeInteraction.collectIsHoveredAsState()
+                val closeLabel = stringResource(R.string.tab_disconnect_host, host.label)
                 Box(
                     Modifier
                         .size(28.dp)
@@ -901,7 +910,7 @@ private fun SidebarRow(
                         .hoverable(closeInteraction)
                         .pointerHoverIcon(PointerIcon.Hand)
                         .clickable(interactionSource = closeInteraction, indication = null, role = Role.Button) { onClose() }
-                        .semantics { contentDescription = "断开 ${host.label}" },
+                        .semantics { contentDescription = closeLabel },
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(XIcons.Close, contentDescription = null, tint = p.textDim, modifier = Modifier.size(15.dp))
@@ -989,12 +998,12 @@ fun TabletToolbar(
         ) {
             ToolbarIcon(
                 XIcons.Sidebar,
-                if (sidebarVisible) "隐藏侧边栏  Ctrl+Shift+S" else "显示侧边栏  Ctrl+Shift+S",
+                stringResource(if (sidebarVisible) R.string.tab_hide_sidebar else R.string.tab_show_sidebar) + "  Ctrl+Shift+S",
             ) { onToggleSidebar() }
             // 外观按钮平时在侧边栏标题行;侧边栏收起来时挪到这里 —— 任何时候都能换深浅色。
             val theme = LocalThemeControl.current
             GlassRevealRow(!sidebarVisible) {
-                ToolbarIcon(theme.mode.icon, "外观:${theme.mode.label}") { theme.onChange(theme.mode.next()) }
+                ToolbarIcon(theme.mode.icon, stringResource(R.string.tab_appearance, theme.mode.label)) { theme.onChange(theme.mode.next()) }
             }
             Spacer(Modifier.width(6.dp))
             if (dot != null) {
@@ -1158,8 +1167,8 @@ private fun TabletHostDetail(
     val p = LocalXssh.current
     Column(Modifier.fillMaxSize()) {
         TabletToolbar(sidebarVisible, onToggleSidebar) {
-            ToolbarIcon(XIcons.Pencil, "编辑主机  Ctrl+E") { onEdit() }
-            ToolbarIcon(XIcons.Trash, "删除主机  Delete", tint = p.danger) { onDelete() }
+            ToolbarIcon(XIcons.Pencil, stringResource(R.string.tab_edit_host) + "  Ctrl+E") { onEdit() }
+            ToolbarIcon(XIcons.Trash, stringResource(R.string.tab_delete_host) + "  Delete", tint = p.danger) { onDelete() }
         }
         Column(
             Modifier
@@ -1202,9 +1211,12 @@ private fun TabletHostDetail(
                 Spacer(Modifier.height(24.dp))
                 // 按钮按内容宽,不拉满(小米:按钮加最大宽度限制,避免横向过度拉伸)。
                 Row(horizontalArrangement = Arrangement.spacedBy(GapItem)) {
-                    XsshButton(if (running) "打开会话" else "连接", Modifier.widthIn(min = 150.dp)) { onConnect() }
+                    XsshButton(
+                        stringResource(if (running) R.string.tab_open_session else R.string.tab_connect),
+                        Modifier.widthIn(min = 150.dp),
+                    ) { onConnect() }
                     if (running) {
-                        XsshButton("断开", Modifier.widthIn(min = 110.dp), kind = ButtonKind.Danger) { onDisconnect() }
+                        XsshButton(stringResource(R.string.tab_disconnect),Modifier.widthIn(min = 110.dp), kind = ButtonKind.Danger) { onDisconnect() }
                     }
                 }
                 Spacer(Modifier.height(32.dp))
@@ -1228,9 +1240,9 @@ private fun TabletWelcome(sidebarVisible: Boolean, onToggleSidebar: () -> Unit, 
                     Icon(XIcons.Terminal, contentDescription = null, tint = p.textDim, modifier = Modifier.size(38.dp))
                 }
                 Spacer(Modifier.height(18.dp))
-                Text("还没有主机", color = p.text, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+                Text(stringResource(R.string.tab_no_hosts_yet), color = p.text, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(20.dp))
-                XsshButton("新建主机", Modifier.widthIn(min = 160.dp)) { onNew() }
+                XsshButton(stringResource(R.string.tab_new_host),Modifier.widthIn(min = 160.dp)) { onNew() }
             }
         }
     }
@@ -1307,7 +1319,7 @@ private fun HostSheet(
                         if (uri != null) {
                             importKeyFrom(context, uri, draft)
                         } else {
-                            draft.importKey(item.coerceToText(context).toString(), "拖入的私钥")
+                            draft.importKey(item.coerceToText(context).toString(), context.getString(R.string.tab_dropped_key_name))?.resolve(context)
                         }
                     }
                 }
@@ -1319,7 +1331,7 @@ private fun HostSheet(
     fun save() {
         val activity = hostActivity(context)
         if (activity == null) {
-            draft.error = "保存失败:找不到当前页面。"
+            draft.error = UiText(R.string.tab_save_failed_no_page)
             return
         }
         scope.launch {
@@ -1394,15 +1406,15 @@ private fun HostSheet(
                     .onPreviewKeyEvent(onKey),
             ) {
                 Box(Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 8.dp)) {
-                    ToolbarTextButton("取消", p.accent, Modifier.align(Alignment.CenterStart)) { cancel() }
+                    ToolbarTextButton(stringResource(R.string.tab_cancel), p.accent, Modifier.align(Alignment.CenterStart)) { cancel() }
                     Text(
-                        if (draft.isNew) "新建主机" else "编辑主机",
+                        stringResource(if (draft.isNew) R.string.tab_new_host else R.string.tab_edit_host),
                         color = p.text,
                         fontSize = 17.sp,
                         fontWeight = FontWeight.SemiBold,
                         modifier = Modifier.align(Alignment.Center),
                     )
-                    ToolbarTextButton("保存", p.accent, Modifier.align(Alignment.CenterEnd), bold = true) { save() }
+                    ToolbarTextButton(stringResource(R.string.tab_save),p.accent, Modifier.align(Alignment.CenterEnd), bold = true) { save() }
                 }
                 Box(Modifier.fillMaxWidth().height(0.5.dp).background(p.border))
                 Column(
@@ -1412,20 +1424,20 @@ private fun HostSheet(
                     verticalArrangement = Arrangement.spacedBy(20.dp),
                 ) {
                     draft.error?.let {
-                        Text(it, color = p.danger, fontSize = 14.sp, modifier = Modifier.padding(start = BoxPad))
+                        Text(it.text(), color = p.danger, fontSize = 14.sp, modifier = Modifier.padding(start = BoxPad))
                     }
                     FormGroup {
                         FormField(
-                            "名称",
+                            stringResource(R.string.tab_field_name),
                             draft.name,
                             { draft.name = it },
-                            placeholder = "生产 Web",
+                            placeholder = stringResource(R.string.tab_field_name_placeholder),
                             onComposing = { composing = it; ime.onTextChanged() },
                             focusRequester = first,
                         )
                         FormDivider()
                         FormField(
-                            "地址",
+                            stringResource(R.string.tab_field_address),
                             draft.address,
                             { draft.address = it },
                             placeholder = "192.168.1.10",
@@ -1436,7 +1448,7 @@ private fun HostSheet(
                         )
                         FormDivider()
                         FormField(
-                            "端口",
+                            stringResource(R.string.tab_field_port),
                             draft.port,
                             { draft.port = it.filter(Char::isDigit).take(5) },
                             placeholder = "22",
@@ -1447,7 +1459,7 @@ private fun HostSheet(
                         )
                         FormDivider()
                         FormField(
-                            "用户名",
+                            stringResource(R.string.tab_field_username),
                             draft.username,
                             { draft.username = it },
                             placeholder = "root",
@@ -1470,7 +1482,7 @@ private fun HostSheet(
                     )
                     if (initial != null) {
                         FormGroup {
-                            FormAction("删除这台主机", danger = true) { onDelete(initial) }
+                            FormAction(stringResource(R.string.tab_delete_this_host),danger = true) { onDelete(initial) }
                         }
                     }
                 }
@@ -1486,9 +1498,9 @@ private fun HostSheet(
 
     if (confirmDiscard) {
         ConfirmDialog(
-            title = "放弃未保存的修改?",
+            title = stringResource(R.string.tab_discard_changes_title),
             message = null,
-            confirm = "放弃",
+            confirm = stringResource(R.string.tab_discard),
             danger = true,
             onConfirm = {
                 confirmDiscard = false
@@ -1541,7 +1553,7 @@ fun ConfirmDialog(
             }
             Spacer(Modifier.height(20.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                XsshButton("取消", Modifier.weight(1f), kind = ButtonKind.Ghost) { onDismiss() }
+                XsshButton(stringResource(R.string.tab_cancel), Modifier.weight(1f), kind = ButtonKind.Ghost) { onDismiss() }
                 XsshButton(
                     confirm,
                     Modifier.weight(1f),

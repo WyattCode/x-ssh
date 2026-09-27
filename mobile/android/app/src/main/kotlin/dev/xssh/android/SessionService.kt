@@ -65,6 +65,14 @@ class SessionService : Service() {
         }
     }
 
+    /** 换了界面语言:常驻通知和通知类别名跟着换(界面不重建,通知不会自己刷新)。 */
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        ensureChannel(this)
+        val count = SessionRegistry.sessions.value.size
+        if (count > 0) notificationManager().notify(NOTIFICATION_ID, buildNotification(count))
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_DISCONNECT_ALL) {
             SessionRegistry.closeAll()
@@ -95,10 +103,16 @@ class SessionService : Service() {
             PendingIntent.FLAG_IMMUTABLE,
         )
         return Notification.Builder(this, CHANNEL_ID)
-            .setContentTitle(if (count > 1) "$count 个 SSH 会话连接中" else "SSH 会话连接中")
+            .setContentTitle(
+                if (count > 1) {
+                    resources.getQuantityString(R.plurals.term_notify_title_many, count, count)
+                } else {
+                    getString(R.string.term_notify_title_one)
+                },
+            )
             .setSmallIcon(R.drawable.ic_stat_session)
             .setContentIntent(open)
-            .addAction(Notification.Action.Builder(null, "全部断开", disconnect).build())
+            .addAction(Notification.Action.Builder(null, getString(R.string.term_notify_disconnect_all), disconnect).build())
             .setOngoing(true)
             .build()
     }
@@ -110,10 +124,11 @@ class SessionService : Service() {
 
         private fun ensureChannel(context: Context) {
             val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            if (manager.getNotificationChannel(CHANNEL_ID) != null) return
+            // 已经有了也再建一次:同一个 id 重复创建只会更新名字和说明(重要程度不动),
+            // 换了界面语言之后,系统设置里的通知类别名跟着变。
             manager.createNotificationChannel(
-                NotificationChannel(CHANNEL_ID, "会话保持", NotificationManager.IMPORTANCE_LOW).apply {
-                    description = "显示后台仍在连接的 SSH 会话"
+                NotificationChannel(CHANNEL_ID, context.getString(R.string.term_channel_name), NotificationManager.IMPORTANCE_LOW).apply {
+                    description = context.getString(R.string.term_channel_desc)
                     setShowBadge(false)
                 },
             )

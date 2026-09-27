@@ -44,6 +44,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -101,35 +102,37 @@ fun HostKeyGate(
         tint = if (changed) p.danger else p.accent,
         tile = if (changed) p.danger.copy(alpha = 0.12f) else p.accentSoft,
         title = when {
-            jumpFor != null && changed -> "跳板机密钥已改变"
-            jumpFor != null -> "确认跳板机身份"
-            changed -> "主机密钥已改变"
-            else -> "确认主机身份"
+            jumpFor != null && changed -> stringResource(R.string.host_gate_jump_key_changed)
+            jumpFor != null -> stringResource(R.string.host_gate_verify_jump)
+            changed -> stringResource(R.string.host_gate_key_changed)
+            else -> stringResource(R.string.host_gate_verify_host)
         },
         note = when {
-            changed -> "和上次记录的不一致。可能是服务器重装过，也可能是连接被人截获。"
+            changed -> stringResource(R.string.host_gate_changed_note)
             // 用户点的是另一台,这里冒出一个不同的名字会一愣:说一句它是谁的跳板机。
-            jumpFor != null -> "连接「${jumpFor.label}」要先经过它。"
+            jumpFor != null -> stringResource(R.string.host_gate_jump_note, jumpFor.label)
             else -> null
         },
         noteColor = if (changed) p.danger else p.textDim,
         onEnter = if (changed) null else onTrust,
         body = {
             if (changed) {
-                FingerprintCard("上次记录", host.keyFingerprint, p.textDim)
+                FingerprintCard(stringResource(R.string.host_gate_last_recorded), host.keyFingerprint, p.textDim)
                 Spacer(Modifier.height(GapItem))
-                FingerprintCard("这次收到", fingerprint, p.danger)
+                FingerprintCard(stringResource(R.string.host_gate_received_now), fingerprint, p.danger)
             } else {
-                FingerprintCard("服务器指纹", fingerprint, p.text)
+                FingerprintCard(stringResource(R.string.host_gate_server_fingerprint), fingerprint, p.text)
             }
         },
         actions = { stacked ->
             GateButtons(
                 stacked = stacked,
-                primary = if (changed) "仍然信任新密钥" else "信任并连接",
+                primary = stringResource(
+                    if (changed) R.string.host_gate_trust_new_key else R.string.host_gate_trust_and_connect,
+                ),
                 primaryKind = if (changed) ButtonKind.Danger else ButtonKind.Primary,
                 onPrimary = onTrust,
-                secondary = "取消",
+                secondary = stringResource(R.string.host_cancel),
                 onSecondary = onExit,
             )
         },
@@ -157,20 +160,27 @@ fun ConnectGate(
             tile = p.bgElev2,
             // 标题写状态,不写主机名:三种状态(确认身份 / 正在连接 / 连接失败)的行数、落点
             // 完全一样,连不上时只换图标、标题字和卡片内容,整页不会跳一行。
-            title = "正在连接",
+            title = stringResource(R.string.host_gate_connecting),
             onEnter = null,
             body = { StatusCard(waited) },
             actions = { stacked ->
-                GateButtons(stacked, primary = null, onPrimary = {}, secondary = "取消", onSecondary = onExit)
+                GateButtons(
+                    stacked,
+                    primary = null,
+                    onPrimary = {},
+                    secondary = stringResource(R.string.host_cancel),
+                    onSecondary = onExit,
+                )
             },
         )
     } else {
-        val primary = fix ?: retry?.let { "重试" to it }
+        val retryLabel = stringResource(R.string.host_gate_retry)
+        val primary = fix ?: retry?.let { retryLabel to it }
         GateContent(
             icon = XIcons.Alert,
             tint = p.danger,
             tile = p.danger.copy(alpha = 0.12f),
-            title = "连接失败",
+            title = stringResource(R.string.host_gate_failed),
             onEnter = primary?.second,
             body = { MessageCard(failure) },
             actions = { stacked ->
@@ -179,9 +189,9 @@ fun ConnectGate(
                     primary = primary?.first,
                     onPrimary = { primary?.second?.invoke() },
                     // 有「填写密码」这类修复时,重试退到第二颗(填完再连就是重试)。
-                    secondary = "返回",
+                    secondary = stringResource(R.string.host_back),
                     onSecondary = onExit,
-                    tertiary = if (fix != null && retry != null) "重试" to retry else null,
+                    tertiary = if (fix != null && retry != null) retryLabel to retry else null,
                 )
             },
         )
@@ -335,7 +345,7 @@ private fun GatePage(host: Host, content: GateContent, tablet: Boolean, onExit: 
             CompositionLocalProvider(LocalBackdrop provides backdrop) {
                 BottomBar(
                     Modifier.align(Alignment.BottomCenter),
-                    start = { GlassButton(XIcons.Back, "返回") { onExit() } },
+                    start = { GlassButton(XIcons.Back, stringResource(R.string.host_back)) { onExit() } },
                     end = { GlassGroup { ThemeGlassItem() } },
                 )
             }
@@ -343,7 +353,7 @@ private fun GatePage(host: Host, content: GateContent, tablet: Boolean, onExit: 
             CompositionLocalProvider(LocalBackdrop provides backdrop) {
                 EdgeRail(Modifier.align(Alignment.BottomEnd)) {
                     GlassGroup { ThemeGlassItem() }
-                    GlassButton(XIcons.Back, "返回") { onExit() }
+                    GlassButton(XIcons.Back, stringResource(R.string.host_back)) { onExit() }
                 }
             }
         }
@@ -410,7 +420,7 @@ private fun FingerprintCard(label: String, value: String, color: Color) {
             fontSize = 12.5.sp,
         )
         Spacer(Modifier.height(10.dp))
-        if (rows.isEmpty()) Text("(无)", color = color, fontSize = 17.sp, fontFamily = XsshFonts.monoUi)
+        if (rows.isEmpty()) Text(stringResource(R.string.host_gate_none), color = color, fontSize = 17.sp, fontFamily = XsshFonts.monoUi)
         rows.forEach { row ->
             Text(
                 row,
@@ -446,12 +456,12 @@ private fun StatusCard(waited: Int) {
     ) {
         CircularProgressIndicator(Modifier.size(18.dp), color = p.accent, strokeWidth = 2.dp, trackColor = p.bgElev2)
         Spacer(Modifier.width(12.dp))
-        Text("正在建立连接", color = p.text, fontSize = 15.sp)
+        Text(stringResource(R.string.host_gate_establishing), color = p.text, fontSize = 15.sp)
         // 等久了才报秒数:前两秒一闪而过,数字只会显得慌。取值靠右,和详情页的「标签—取值」一个规矩。
         if (waited >= 3) {
             Spacer(Modifier.weight(1f))
             Spacer(Modifier.width(12.dp))
-            Text("已等待 $waited 秒", color = p.textDim, fontSize = 13.sp, maxLines = 1)
+            Text(stringResource(R.string.host_gate_waited, waited), color = p.textDim, fontSize = 13.sp, maxLines = 1)
         }
     }
 }

@@ -249,10 +249,10 @@ object Secrets {
     private fun plainKey(): SecretKey = loadOrNull(PLAIN_ALIAS) as? SecretKey ?: generate(PLAIN_ALIAS, null)
 
     private fun loadSecret(alias: String): SecretKey =
-        loadOrNull(alias) as? SecretKey ?: throw IllegalStateException("密钥库里没有 $alias")
+        loadOrNull(alias) as? SecretKey ?: throw IllegalStateException("no $alias in the keystore")
 
     private fun loadPrivate(alias: String): java.security.PrivateKey =
-        loadOrNull(alias) as? java.security.PrivateKey ?: throw IllegalStateException("密钥库里没有 $alias")
+        loadOrNull(alias) as? java.security.PrivateKey ?: throw IllegalStateException("no $alias in the keystore")
 
     /**
      * 取公钥。**要把它从密钥库里"摘出来"再用**:直接拿密钥库给的那个公钥对象去加密,
@@ -263,7 +263,7 @@ object Secrets {
     private fun publicKey(alias: String): java.security.PublicKey {
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         val fromStore = store.getCertificate(alias)?.publicKey
-            ?: throw IllegalStateException("密钥库里没有 $alias 的公钥")
+            ?: throw IllegalStateException("no public key for $alias in the keystore")
         val factory = java.security.KeyFactory.getInstance(fromStore.algorithm)
         return factory.generatePublic(java.security.spec.X509EncodedKeySpec(fromStore.encoded))
     }
@@ -279,7 +279,7 @@ object Secrets {
      */
     private fun generateRsa(alias: String) {
         if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.R) {
-            throw IllegalStateException("要求认证的密钥需要 Android 11 及以上")
+            throw IllegalStateException("auth-bound keys need Android 11 or later")
         }
         val generator = java.security.KeyPairGenerator.getInstance(
             KeyProperties.KEY_ALGORITHM_RSA,
@@ -314,7 +314,7 @@ object Secrets {
             // 而主机记录里却写着"已加锁" —— 用户以为锁上了,实际谁拿到文件都能解。
             // 宁可直接失败(开关在那些系统上本来就不显示,见 [lockAvailable])。
             if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.R) {
-                throw IllegalStateException("要求认证的密钥需要 Android 11 及以上")
+                throw IllegalStateException("auth-bound keys need Android 11 or later")
             }
             requireAuth(builder, auth)
         }

@@ -18,6 +18,8 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.animation.core.tween
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.material3.Icon
@@ -366,10 +368,10 @@ fun HomeScreen(
         val viewActions: @Composable () -> Unit = {
             GlassGroup {
                 ThemeGlassItem()
-                GlassItem(XIcons.Font, "终端字体") { onFonts() }
+                GlassItem(XIcons.Settings, stringResource(R.string.set_title)) { onFonts() }
                 // 一台主机都没有时不摆搜索 —— 没东西可搜。
                 if (hosts.isNotEmpty()) {
-                    GlassItem(XIcons.Search, "搜索主机") {
+                    GlassItem(XIcons.Search, stringResource(R.string.host_search_hosts)) {
                         searching = !searching
                         if (!searching) query = ""
                     }
@@ -377,7 +379,7 @@ fun HomeScreen(
             }
         }
         // 主操作:无色玻璃、正文色图标(参考图里"+"就是这样)。
-        val newHost: @Composable () -> Unit = { GlassButton(XIcons.Plus, "新建主机") { onNew() } }
+        val newHost: @Composable () -> Unit = { GlassButton(XIcons.Plus, stringResource(R.string.host_new_host)) { onNew() } }
 
         if (bottomBar) {
             // 直板机:底栏。左边外观 / 字体 / 搜索,右边 ＋ —— 安卓底部操作栏的排法(动作在左、主按钮在右)。
@@ -522,7 +524,11 @@ private fun HostListPane(
                             .fillMaxWidth()
                             .padding(start = TitlePad, top = Gutter, bottom = 2.dp),
                         "X-SSH",
-                        if (total == 0) "还没有主机" else "$total 台主机",
+                        if (total == 0) {
+                            stringResource(R.string.host_none_yet)
+                        } else {
+                            pluralStringResource(R.plurals.host_count, total, total)
+                        },
                     )
                     // 搜索平时不占地方,点轨道上的放大镜才展开出来。
                     AnimatedVisibility(searching, enter = Motion.revealIn, exit = Motion.revealOut) {
@@ -591,6 +597,7 @@ private fun SearchField(modifier: Modifier, query: String, onQuery: (String) -> 
     val p = LocalXssh.current
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+    val closeLabel = stringResource(R.string.host_close_search)
     Row(
         modifier
             .fillMaxWidth()
@@ -604,7 +611,7 @@ private fun SearchField(modifier: Modifier, query: String, onQuery: (String) -> 
         Spacer(Modifier.width(8.dp))
         Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
             if (query.isEmpty()) {
-                Text("搜索名称 / 地址 / 用户", color = p.textFaint, fontSize = 16.sp)
+                Text(stringResource(R.string.host_search_placeholder), color = p.textFaint, fontSize = 16.sp)
             }
             BasicTextField(
                 value = query,
@@ -619,7 +626,7 @@ private fun SearchField(modifier: Modifier, query: String, onQuery: (String) -> 
             Modifier
                 .size(TouchMin)
                 .clickable(onClick = onClose)
-                .semantics { contentDescription = "关闭搜索" },
+                .semantics { contentDescription = closeLabel },
             contentAlignment = Alignment.Center,
         ) {
             Icon(XIcons.Close, null, tint = p.textDim, modifier = Modifier.size(17.dp))
@@ -654,7 +661,7 @@ private fun FirstRun(modifier: Modifier) {
             fontWeight = FontWeight.SemiBold,
         )
         Spacer(Modifier.height(10.dp))
-        Text("还没有主机", color = p.textDim, fontSize = 15.sp)
+        Text(stringResource(R.string.host_none_yet), color = p.textDim, fontSize = 15.sp)
     }
     }
 }
@@ -667,7 +674,7 @@ private fun NoMatches(modifier: Modifier) {
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text("没有匹配的主机", color = p.textDim, fontSize = 16.sp)
+        Text(stringResource(R.string.host_no_matches), color = p.textDim, fontSize = 16.sp)
     }
 }
 
@@ -720,12 +727,12 @@ private fun HostCard(
                     )
                     Spacer(Modifier.width(8.dp))
                     if (running) {
-                        Chip("运行中", p.ok)
+                        Chip(stringResource(R.string.host_running), p.ok)
                         Spacer(Modifier.width(6.dp))
                     }
                     // 只标需要注意的状态;"密码登录""已信任"这类常态不贴标签。
                     if (host.keyFingerprint.isBlank()) {
-                        Chip("密钥待确认", p.warn)
+                        Chip(stringResource(R.string.host_key_pending), p.warn)
                     }
                 }
                 Spacer(Modifier.height(if (large) 4.dp else 3.dp))
@@ -739,6 +746,7 @@ private fun HostCard(
                 )
             }
             if (onInfo != null) {
+                val infoLabel = stringResource(R.string.host_info)
                 // ⓘ(iOS 无线局域网列表的做法):点卡片 = 连接,点 ⓘ = 看这台主机的信息。
                 // 热区 44dp 伸进卡片的右内边距,图标本身和卡片右缘留出正常的内边距。
                 Box(
@@ -748,7 +756,7 @@ private fun HostCard(
                         .size(TouchMin)
                         .clip(CircleShape)
                         .clickable { onInfo(host) }
-                        .semantics { contentDescription = "主机信息" },
+                        .semantics { contentDescription = infoLabel },
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(XIcons.Info, null, tint = p.textDim, modifier = Modifier.size(22.dp))
@@ -811,6 +819,8 @@ private fun SwipeActions(
     }
 
     val progress = (-offset.value / reveal).coerceIn(0f, 1f)
+    val editLabel = stringResource(R.string.host_edit)
+    val deleteLabel = stringResource(R.string.host_delete)
     Box(
         modifier
             .fillMaxWidth()
@@ -818,8 +828,8 @@ private fun SwipeActions(
             .semantics {
                 // 读屏用户做不了滑动手势,给同样的两个操作。
                 customActions = listOf(
-                    CustomAccessibilityAction("编辑") { onEdit(); true },
-                    CustomAccessibilityAction("删除") { onDelete(); true },
+                    CustomAccessibilityAction(editLabel) { onEdit(); true },
+                    CustomAccessibilityAction(deleteLabel) { onDelete(); true },
                 )
             },
     ) {
@@ -838,14 +848,14 @@ private fun SwipeActions(
         ) {
             Spacer(Modifier.width(ActionGap))
             if (confirming) {
-                SwipeTile("确认删除", p.bg, p.danger, Modifier.width(ActionTile * 2 + ActionGap)) {
+                SwipeTile(stringResource(R.string.host_confirm_delete), p.bg, p.danger, Modifier.width(ActionTile * 2 + ActionGap)) {
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                     onDelete()
                 }
             } else {
-                SwipeTile("编辑", p.accent, p.accentSoft, Modifier.width(ActionTile)) { onEdit() }
+                SwipeTile(editLabel, p.accent, p.accentSoft, Modifier.width(ActionTile)) { onEdit() }
                 Spacer(Modifier.width(ActionGap))
-                SwipeTile("删除", p.danger, p.danger.copy(alpha = 0.16f), Modifier.width(ActionTile)) {
+                SwipeTile(deleteLabel, p.danger, p.danger.copy(alpha = 0.16f), Modifier.width(ActionTile)) {
                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     confirming = true
                 }
@@ -935,7 +945,7 @@ private fun HostDetailPane(
         ) {
             // 空态只说话,不放按钮 —— 新建已经在右边缘轨道上,这里再来一个就是重复,
             // 而且一个方按钮浮在空白里正是之前那种割裂感的来源。
-            Text("选择左边的主机", color = p.textDim, fontSize = 15.sp)
+            Text(stringResource(R.string.host_select_on_left), color = p.textDim, fontSize = 15.sp)
         }
         return
     }

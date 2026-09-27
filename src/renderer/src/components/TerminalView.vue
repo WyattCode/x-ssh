@@ -90,6 +90,11 @@ async function copySelection(): Promise<void> {
   const sel = term?.getSelection()
   if (sel) window.api.clipboard.writeText(sel)
 }
+/** Right-click Copy: the terminal's own selection, else what the program last copied (see [lastAppCopy]). */
+async function copyFromMenu(): Promise<void> {
+  if (term?.hasSelection()) return copySelection()
+  if (menu.appCopy) window.api.clipboard.writeText(menu.appCopy)
+}
 async function pasteClipboard(): Promise<void> {
   const text = window.api.clipboard.readText()
   if (!text || !term) return
@@ -125,7 +130,19 @@ function clearTerm(): void {
 }
 
 // ---- Right-click context menu ----
-const menu = reactive({ open: false, x: 0, y: 0, hasSel: false })
+const menu = reactive({ open: false, x: 0, y: 0, hasSel: false, appCopy: null as string | null, mouseApp: false })
+
+/**
+ * The last text a program copied through OSC 52 (Codex / Claude Code / vim …).
+ * Those programs take over the mouse: a drag selects inside *their* UI, the
+ * terminal itself has no selection, and the right-click Copy used to be greyed
+ * out even though the text is highlighted on screen. Copy now uses this text
+ * when the terminal has no selection of its own (only while it's recent).
+ */
+let lastAppCopy: { text: string; at: number } | null = null
+const APP_COPY_TTL_MS = 2 * 60 * 1000
+/** The context menu element — measured after it opens so it can be kept inside the window. */
+const menuEl = ref<HTMLElement | null>(null)
 
 // ---- Auto-scroll follow ----
 // While the user hasn't scrolled up, new output keeps the view pinned to the
@@ -165,11 +182,26 @@ async function toggleLog(): Promise<void> {
 function openMenu(e: MouseEvent): void {
   e.preventDefault()
   menu.hasSel = !!term?.hasSelection()
-  const mw = 172
-  const mh = 240
-  menu.x = Math.min(e.clientX, window.innerWidth - mw - 8)
-  menu.y = Math.min(e.clientY, window.innerHeight - mh - 8)
+  // A program owns the mouse (Codex, vim, tmux mouse mode…): a plain drag goes to
+  // it, Shift+drag makes a terminal selection. Say so when Copy has nothing to copy.
+  menu.mouseApp = !!term && term.modes.mouseTrackingMode !== 'none'
+  // The program's own copy only counts while it still owns the mouse (its
+  // highlight is what the user sees) and it's recent. Otherwise an old OSC 52
+  // text could overwrite whatever the user copied elsewhere since.
+  const recent = lastAppCopy && Date.now() - lastAppCopy.at < APP_COPY_TTL_MS ? lastAppCopy.text : null
+  menu.appCopy = menu.hasSel || !menu.mouseApp ? null : recent
+  menu.x = e.clientX
+  menu.y = e.clientY
   menu.open = true
+  // Keep the whole menu inside the window. It used to be clamped with a fixed
+  // 240px guess while the real menu is ~310px, so near the bottom its last items
+  // were cut off. Measure it once it's rendered.
+  void nextTick(() => {
+    const r = menuEl.value?.getBoundingClientRect()
+    if (!r) return
+    menu.x = Math.max(8, Math.min(menu.x, window.innerWidth - r.width - 8))
+    menu.y = Math.max(8, Math.min(menu.y, window.innerHeight - r.height - 8))
+  })
 }
 /** Right-click pastes when that option is on; otherwise shows the menu. */
 function onContextMenu(e: MouseEvent): void {
@@ -284,7 +316,9 @@ onMounted(() => {
     if (!payload || payload === '?' || payload.length > 2_000_000) return true
     try {
       const bytes = Uint8Array.from(atob(payload), (ch) => ch.charCodeAt(0))
-      window.api.clipboard.writeText(new TextDecoder().decode(bytes))
+      const text = new TextDecoder().decode(bytes)
+      window.api.clipboard.writeText(text)
+      lastAppCopy = { text, at: Date.now() }
     } catch {
       return false
     }
@@ -445,6 +479,9 @@ onMounted(() => {
       })
     }
   }
+  term.onKey(() => {
+    lastAppCopy = null
+  })
   term.onData((data) => {
     let out = data
     if (ta) {
@@ -589,10 +626,11 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-if="menu.open" class="ctx-overlay" @mousedown="menu.open = false" @contextmenu.prevent="menu.open = false">
-      <div class="ctx" :style="{ left: menu.x + 'px', top: menu.y + 'px' }" @mousedown.stop>
-        <button :disabled="!menu.hasSel" @click="runMenu(copySelection)">
+      <div ref="menuEl" class="ctx" :style="{ left: menu.x + 'px', top: menu.y + 'px' }" @mousedown.stop>
+        <button :disabled="!menu.hasSel && !menu.appCopy" @click="runMenu(copyFromMenu)">
           <span>{{ t('term.copy') }}</span><span class="k">Ctrl+C</span>
         </button>
+        <div v-if="!menu.hasSel && !menu.appCopy && menu.mouseApp" class="hint">{{ t('term.shiftSelectHint') }}</div>
         <button @click="runMenu(pasteClipboard)">
           <span>{{ t('term.paste') }}</span><span class="k">Ctrl+V</span>
         </button>
@@ -713,6 +751,11 @@ onBeforeUnmount(() => {
 }
 .ctx .k.on {
   color: var(--accent);
+}
+.ctx .hint {
+  padding: 0 10px 6px;
+  font-size: 11.5px;
+  color: var(--text-faint);
 }
 .ctx .sep {
   height: 1px;

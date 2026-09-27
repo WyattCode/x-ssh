@@ -9,6 +9,7 @@ import { IPC, PREFS_ARG } from '../shared/ipc'
 import type { ConnectParams, Host, HostForward, ForwardMode, JumpConfig, LocalEntry, Snippet, UiPrefs, UploadOverwrite } from '../shared/types'
 import { readLaunchTarget, targetFromUrl, PROTOCOL, compareVersions } from '../shared/launchTarget'
 import { isRendererSettableKey } from '../shared/settingsKeys'
+import { resolveLang, type LangPref, type UiLang } from '../shared/lang'
 import { resolveDir, resolveInside } from '../shared/localPaths'
 import { SshManager } from './ssh'
 import { HostStore } from './store'
@@ -57,24 +58,39 @@ if (process.platform === 'win32') app.setAppUserModelId('com.x-ssh.app')
 let mainWindow: BrowserWindow | null = null
 /** Cached copy of the `minimizeToTray` setting, kept in sync by the setter. */
 let minimizeToTray = false
+/** The OS's preferred locales, most preferred first, for the "follow system" language. */
+function systemLocales(): string[] {
+  let preferred: string[] = []
+  try {
+    preferred = app.getPreferredSystemLanguages()
+  } catch {
+    // Older platforms may not report a list; getLocale() below still works.
+  }
+  return [...preferred, app.getLocale()].filter(Boolean)
+}
+const TRAY_LABELS: Record<UiLang, { show: string; hide: string; palette: string; quit: string }> = {
+  zh: { show: '显示 X-SSH', hide: '隐藏', palette: '打开命令栏', quit: '退出' },
+  'zh-TW': { show: '顯示 X-SSH', hide: '隱藏', palette: '開啟命令面板', quit: '結束' },
+  en: { show: 'Show X-SSH', hide: 'Hide', palette: 'Open command palette', quit: 'Quit' }
+}
 async function buildTrayMenu(win: BrowserWindow): Promise<Electron.Menu> {
-  const lang = await settings.get<'zh' | 'en'>('lang')
-  const en = lang === 'en'
+  const lang = resolveLang(await settings.get<LangPref>('lang'), systemLocales())
+  const L = TRAY_LABELS[lang]
   return Menu.buildFromTemplate([
     {
-      label: en ? 'Show X-SSH' : '显示 X-SSH',
+      label: L.show,
       click: () => {
         win.show()
         win.focus()
       }
     },
     {
-      label: en ? 'Hide' : '隐藏',
+      label: L.hide,
       click: () => win.hide()
     },
     { type: 'separator' },
     {
-      label: en ? 'Open command palette' : '打开命令栏',
+      label: L.palette,
       click: () => {
         if (win.isMinimized()) win.restore()
         win.show()
@@ -84,7 +100,7 @@ async function buildTrayMenu(win: BrowserWindow): Promise<Electron.Menu> {
     },
     { type: 'separator' },
     {
-      label: en ? 'Quit' : '退出',
+      label: L.quit,
       click: () => {
         quitting = true
         app.quit()
@@ -652,9 +668,9 @@ async function readUiPrefs(): Promise<UiPrefs> {
     settings.get<number>('zoom'),
     settings.get<boolean>('sftpShowHidden'),
     settings.get<number>('sftpWidth'),
-    settings.get<'zh' | 'en'>('lang')
+    settings.get<UiPrefs['lang']>('lang')
   ])
-  return { theme, fontSize, zoom, sftpShowHidden, sftpWidth, lang }
+  return { theme, fontSize, zoom, sftpShowHidden, sftpWidth, lang, systemLocales: systemLocales() }
 }
 
 function createWindow(saved?: SavedBounds, prefs: UiPrefs = {}): void {
@@ -709,6 +725,9 @@ function createWindow(saved?: SavedBounds, prefs: UiPrefs = {}): void {
   // deliberately not saved: the window always opens centered.
   let saveTimer: NodeJS.Timeout | null = null
   const persistBounds = (): void => {
+    // 退出时会等设置写完(见 will-quit)才真正结束进程 —— 这段时间里窗口已经销毁,
+    // 迟到的缩放防抖回调再读 bounds 会抛「Object has been destroyed」,主进程弹错误框。
+    if (win.isDestroyed()) return
     const b = win.getNormalBounds()
     // On a fractional-scale display the OS hands back a slightly larger rect
     // than we asked for (measured +3w/+2h at 175%). Storing that verbatim grew
@@ -724,7 +743,12 @@ function createWindow(saved?: SavedBounds, prefs: UiPrefs = {}): void {
     saveTimer = setTimeout(persistBounds, 400)
   }
   win.on('resize', schedulePersist)
-  win.on('close', persistBounds)
+  win.on('close', () => {
+    // 关窗时立刻存一次,别让还没到点的防抖回调在窗口销毁后再跑。
+    if (saveTimer) clearTimeout(saveTimer)
+    saveTimer = null
+    persistBounds()
+  })
 
   win.on('ready-to-show', () => win.show())
 
@@ -1966,8 +1990,22 @@ app.whenReady().then(async () => {
   })
 })
 
+// 退出前等设置写完。关窗时会存 windowBounds(不 await),紧接着 app 退出 —— 进程在写
+// settings.json 的半路被结束,文件只剩半截,下次启动所有设置都读不出来(外部编辑器、片段……
+// 「过一阵就丢」就是这么来的)。这里拦一下,最多等 3 秒再真正退出。
+// 拦在 will-quit:它在所有窗口都关掉之后才来,关窗时排进去的那次写已经在队列里了
+// (托盘「退出」也是先关窗再到这里)。
 app.on('before-quit', () => {
   quitting = true
+})
+
+let settingsFlushed = false
+app.on('will-quit', (e) => {
+  if (settingsFlushed) return
+  e.preventDefault()
+  settingsFlushed = true
+  const timeout = new Promise<void>((r) => setTimeout(r, 3000))
+  void Promise.race([settings.flush(), timeout]).finally(() => app.quit())
 })
 
 app.on('window-all-closed', () => {
