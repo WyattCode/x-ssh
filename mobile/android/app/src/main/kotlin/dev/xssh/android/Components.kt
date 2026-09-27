@@ -870,11 +870,12 @@ fun BottomBar(
                 .then(if (insets) Modifier.windowInsetsPadding(stableSafeDrawing().only(sides)) else Modifier)
                 .padding(start = Gutter, end = Gutter, bottom = Gutter),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(GapItem),
         ) {
-            start()
+            // 两组各自排间隔,中间一块弹性空白。原来整行 spacedBy:左边没东西时(终端页)
+            // 空白两侧也各算一个 12dp,白白吃掉宽度,400dp 的直板机上最右一颗被挤扁。
+            Row(horizontalArrangement = Arrangement.spacedBy(GapItem), verticalAlignment = Alignment.CenterVertically) { start() }
             Spacer(Modifier.weight(1f))
-            end()
+            Row(horizontalArrangement = Arrangement.spacedBy(GapItem), verticalAlignment = Alignment.CenterVertically) { end() }
         }
     }
 }

@@ -321,8 +321,9 @@ fun TerminalScreen(
                             "跳板机「${readyJump.label}」的私钥口令不对。"
                         }
 
+                    // 看**解锁后**的口令:加锁主机的 host.keyPassphrase 永远是空的,填错了口令也会被说成"有口令"。
                     failure is FfiException.KeyEncrypted ->
-                        error = if (host.keyPassphrase.isEmpty()) "这把私钥有口令。" else "私钥口令不对。"
+                        error = if (ready.keyPassphrase.isEmpty()) "这把私钥有口令。" else "私钥口令不对。"
 
                     else -> {
                         val message = failure.message?.ifBlank { null } ?: failure.toString()
@@ -885,7 +886,10 @@ private fun TerminalView(
         // 正在打字的人也不会同时想换深浅色;收起键盘它自己长回来。
         @OptIn(ExperimentalLayoutApi::class)
         val imeUp = WindowInsets.isImeVisible
-        GlassReveal(!imeUp) { GlassGroup { ThemeGlassItem() } }
+        // 直板机竖屏(17 Ultra 400dp 宽)底栏一行放不下 7 颗 56dp 的按钮:外观让位 —— 终端页最用不上它,
+        // 别的页都有。放得下(横屏、宽一点的手机)照常显示。算法:7 颗 + 3 个间隔 + 两边边距 = 460dp。
+        val barCrowded = LocalChrome.current == Chrome.BottomBar && LocalConfiguration.current.screenWidthDp < 460
+        GlassReveal(!imeUp && !barCrowded) { GlassGroup { ThemeGlassItem() } }
         // 文件(SFTP):单独一颗,在输入那枚胶囊上面 —— 它是"换一页",不是输入。
         // 断开之后它会消失,所以长出来 / 收回去都带动效(见 GlassReveal)。
         GlassReveal(onFiles != null && !dead) { GlassButton(XIcons.Folder, "文件") { onFiles?.invoke() } }
@@ -899,8 +903,9 @@ private fun TerminalView(
                     live.scrollToBottom()
                 }
             }
-            // 命令片段也是"输入":点一下把存好的命令发出去。断开之后没东西可发,收起来。
-            GlassReveal(!dead) {
+            // 命令片段也是"输入":点一下把存好的命令发出去。断开 / 重连中没东西可发,收起来。
+            // 键盘弹着时也收起(同外观):外屏键盘占掉一半高度,轨道不能再多一颗;正在打字的人要的是键盘。
+            GlassReveal(!dead && reconnecting == 0 && !imeUp) {
                 GlassItem(XIcons.Bolt, "命令片段") { snippetsOpen = true }
             }
             GlassItem(
@@ -957,7 +962,7 @@ private fun TerminalView(
                 GlassRevealRow(scrolled) {
                     ToolbarIcon(XIcons.ArrowDown, "回到底部") { live.scrollToBottom() }
                 }
-                GlassRevealRow(!dead) {
+                GlassRevealRow(!dead && reconnecting == 0) {
                     ToolbarIcon(XIcons.Bolt, "命令片段") { snippetsOpen = true }
                 }
                 ToolbarIcon(
@@ -1016,6 +1021,9 @@ private fun TerminalView(
             tablet = tablet != null,
             onSend = { s ->
                 snippetsOpen = false
+                // 粘滞的 Ctrl / Alt 是给"下一个按键"的,片段不吃它们 —— 但也别让它们留到片段之后的那一下。
+                ctrl = false
+                alt = false
                 clearSelection()
                 live.sendRaw(snippetPayload(s.text, s.run).toByteArray())
                 restoreFocus()
