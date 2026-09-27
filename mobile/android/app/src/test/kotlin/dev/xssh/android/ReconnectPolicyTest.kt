@@ -32,12 +32,26 @@ class ReconnectPolicyTest {
         // 自动重连绝不能替用户接受一把新的主机密钥。
         assertTrue(ReconnectPolicy.isPermanent(FfiException.HostKeyChanged("SHA256:x")))
         assertTrue(ReconnectPolicy.isPermanent(FfiException.HostKeyUnknown("SHA256:x")))
+        // 跳板机的密钥同理。
+        assertTrue(ReconnectPolicy.isPermanent(FfiException.JumpHostKeyChanged("SHA256:x")))
+        assertTrue(ReconnectPolicy.isPermanent(FfiException.JumpHostKeyUnknown("SHA256:x")))
     }
 
     @Test
     fun `wrong credentials stop the retries`() {
         assertTrue(ReconnectPolicy.isPermanent(FfiException.Message("authentication failed")))
         assertTrue(ReconnectPolicy.isPermanent(FfiException.KeyEncrypted("passphrase required")))
+        // 跳板机那一跳认证失败(核心报的文本带 `jump host: ` 前缀)也一样停。
+        assertTrue(ReconnectPolicy.isPermanent(FfiException.Message("jump host: authentication failed")))
+    }
+
+    @Test
+    fun `a tunnel the jump host could not open is worth another try`() {
+        // 目标机器还在重启、跳板机暂时连不过去:过一会儿多半就好了。
+        assertFalse(
+            ReconnectPolicy.isPermanent(FfiException.Message("jump host could not open a tunnel: Channel open failure")),
+        )
+        assertFalse(ReconnectPolicy.isPermanent(FfiException.Message("jump host: connection timed out")))
     }
 
     @Test

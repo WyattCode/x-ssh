@@ -112,6 +112,12 @@ pub struct Target {
     pub auth: Auth,
     /// 已信任的服务端主机密钥指纹(SHA256)。None = 还没信任过任何密钥。
     pub known_key: Option<String>,
+    /// 跳板机(ProxyJump):先登录这台,再让它开一条隧道(`direct-tcpip`)到本目标,
+    /// 目标的 SSH 握手整个走在隧道里 —— 跳板机只转发加密后的字节,看不到里面的内容。
+    ///
+    /// 只支持一层:跳板机自己的 `jump` 不看(和桌面版的 `jumpHostId` 一致)。
+    /// 两台主机的密钥各验各的,不认识 / 变了都会停下来,见 [`SshError::Jump`]。
+    pub jump: Option<Box<Target>>,
 }
 
 /// 服务端主机密钥的校验结论。
@@ -168,6 +174,14 @@ pub enum SshError {
     HostKeyUnknown { fingerprint: String },
     /// 主机密钥与已信任的不一致,连接已拒绝。
     HostKeyChanged { expected: String, actual: String },
+    /// 跳板机这一跳失败了(连不上、认证失败、主机密钥不认识 / 变了……),里面是原因。
+    ///
+    /// 单独包一层:同样是「主机密钥不认识」,是跳板机的还是目标的,界面要存到不同的主机上;
+    /// 同样是「认证失败」,用户要去改的也是不同主机的密码。
+    Jump(Box<SshError>),
+    /// 跳板机登录成功了,但它不肯 / 没能开隧道到目标(目标地址不对、跳板机连不过去、
+    /// 服务器关了 `AllowTcpForwarding`)。带跳板机给的原因。
+    Tunnel(String),
     Russh(russh::Error),
 }
 
@@ -188,6 +202,9 @@ impl fmt::Display for SshError {
             Self::HostKeyChanged { expected, actual } => {
                 write!(f, "host key changed: expected {expected}, got {actual}")
             }
+            // 这两句的开头是给宿主认的(Android 按前缀换成中文),别改措辞。
+            Self::Jump(inner) => write!(f, "jump host: {inner}"),
+            Self::Tunnel(reason) => write!(f, "jump host could not open a tunnel: {reason}"),
             Self::Russh(err) => write!(f, "ssh: {err}"),
         }
     }
@@ -318,17 +335,91 @@ fn server_key_fingerprint(key: &PublicKeyOrCertificate) -> String {
     key.public_key().fingerprint(HashAlg::Sha256).to_string()
 }
 
+/// 一跳握手时记下的东西:服务端给了哪个指纹、我们判成了什么。
+///
+/// 握手被我们自己(`check_server_key` 返回 false)拒掉时,russh 只报一个笼统的错;
+/// 靠这份记录翻译成带指纹的具体原因,界面才能让用户比对、确认。
+#[derive(Default)]
+struct Probe {
+    server_key: Arc<Mutex<Option<String>>>,
+    verdict: Arc<Mutex<Option<HostKeyVerdict>>>,
+}
+
+impl Probe {
+    fn handler(
+        &self,
+        tx: mpsc::UnboundedSender<ServerMsg>,
+        known_key: Option<String>,
+        shell_channel: Arc<Mutex<Option<ChannelId>>>,
+    ) -> Handler {
+        Handler {
+            tx,
+            server_key: self.server_key.clone(),
+            known_key,
+            verdict: self.verdict.clone(),
+            shell_channel,
+        }
+    }
+
+    /// 握手走到了服务端亮出主机密钥那一步没有。
+    fn saw_key(&self) -> bool {
+        self.server_key.lock().map(|slot| slot.is_some()).unwrap_or(false)
+    }
+
+    fn fingerprint(&self) -> String {
+        self.server_key.lock().ok().and_then(|slot| slot.clone()).unwrap_or_default()
+    }
+
+    /// 握手失败的原因:是我们因为主机密钥拒掉的,就换成带指纹的错误;否则原样。
+    fn explain(&self, err: SshError, known_key: Option<&str>) -> SshError {
+        match self.verdict.lock().ok().and_then(|slot| slot.clone()) {
+            Some(HostKeyVerdict::Unknown) => SshError::HostKeyUnknown { fingerprint: self.fingerprint() },
+            Some(HostKeyVerdict::Changed) => SshError::HostKeyChanged {
+                expected: known_key.unwrap_or_default().to_string(),
+                actual: self.fingerprint(),
+            },
+            _ => err,
+        }
+    }
+}
+
+/// 用 [target] 里的凭据认证一条刚握完手的连接(跳板机和目标共用)。
+async fn authenticate(handle: &mut Handle<Handler>, target: &Target) -> Result<(), SshError> {
+    let success = match &target.auth {
+        Auth::Password(password) => {
+            handle.authenticate_password(target.username.clone(), password.as_str()).await?.success()
+        }
+        Auth::KeyFile { .. } | Auth::KeyData { .. } => {
+            let key = match &target.auth {
+                Auth::KeyFile { path, passphrase } => {
+                    load_secret_key(path, passphrase.as_deref()).map_err(|err| SshError::Key(err.to_string()))?
+                }
+                Auth::KeyData { pem, passphrase } => parse_private_key(pem, passphrase.as_deref())?,
+                Auth::Password(_) => unreachable!(),
+            };
+            let hash = handle.best_supported_rsa_hash().await?.flatten();
+            handle
+                .authenticate_publickey(target.username.clone(), PrivateKeyWithHashAlg::new(Arc::new(key), hash))
+                .await?
+                .success()
+        }
+    };
+    if success { Ok(()) } else { Err(SshError::AuthFailed) }
+}
+
 /// 一条已认证的 SSH 连接。
 pub struct Ssh {
     runtime: Arc<tokio::runtime::Runtime>,
     handle: Handle<Handler>,
+    /// 经跳板机连的话,跳板机那条连接。隧道长在它上面,它一断目标就断 —— 必须和目标活得一样久。
+    jump: Option<Handle<Handler>>,
     events: Option<mpsc::UnboundedReceiver<ServerMsg>>,
     server_key: String,
     shell_channel: Arc<Mutex<Option<ChannelId>>>,
 }
 
 impl Ssh {
-    /// 连接并完成认证(阻塞直到握手与认证结束)。
+    /// 连接并完成认证(阻塞直到握手与认证结束)。设了 [`Target::jump`] 就先连跳板机、再经它的隧道连目标。
     pub fn connect(target: &Target) -> Result<Self, SshError> {
         let runtime = Arc::new(
             tokio::runtime::Builder::new_multi_thread()
@@ -339,8 +430,6 @@ impl Ssh {
         );
 
         let (tx, rx) = mpsc::unbounded_channel();
-        let server_key = Arc::new(Mutex::new(None));
-        let verdict = Arc::new(Mutex::new(None));
 
         let config = Arc::new(client::Config {
             inactivity_timeout: None,
@@ -352,72 +441,76 @@ impl Ssh {
         });
 
         let shell_channel = Arc::new(Mutex::new(None));
-        let handler = Handler {
-            tx,
-            server_key: server_key.clone(),
-            known_key: target.known_key.clone(),
-            verdict: verdict.clone(),
-            shell_channel: shell_channel.clone(),
-        };
-        let handle = runtime.block_on(async {
-            tokio::time::timeout(CONNECT_TIMEOUT, async {
-                let mut handle =
-                    client::connect(config, (target.host.as_str(), target.port), handler).await?;
+        let probe = Probe::default();
+        let jump_probe = Probe::default();
 
-                let success = match &target.auth {
-                    Auth::Password(password) => {
-                        handle
-                            .authenticate_password(target.username.clone(), password.as_str())
-                            .await?
-                            .success()
-                    }
-                    Auth::KeyFile { .. } | Auth::KeyData { .. } => {
-                        let key = match &target.auth {
-                            Auth::KeyFile { path, passphrase } => load_secret_key(path, passphrase.as_deref())
-                                .map_err(|err| SshError::Key(err.to_string()))?,
-                            Auth::KeyData { pem, passphrase } => parse_private_key(pem, passphrase.as_deref())?,
-                            Auth::Password(_) => unreachable!(),
-                        };
-                        let hash = handle.best_supported_rsa_hash().await?.flatten();
-                        handle
-                            .authenticate_publickey(
-                                target.username.clone(),
-                                PrivateKeyWithHashAlg::new(Arc::new(key), hash),
-                            )
-                            .await?
-                            .success()
+        let connected = runtime.block_on(async {
+            // 第一跳:跳板机。它的 Handler 和目标**共用一个消息队列** —— 跳板机断了,隧道随之断,
+            // 终端要立刻收到 `Disconnected` 好去重连,而不是等目标那头的心跳慢慢超时。
+            // 它不登记终端通道,所以隧道里的字节不会被当成终端输出(那些字节走隧道自己的流)。
+            let jump = match target.jump.as_deref() {
+                None => None,
+                Some(hop) => {
+                    let handler = jump_probe.handler(tx.clone(), hop.known_key.clone(), Arc::new(Mutex::new(None)));
+                    let reached = tokio::time::timeout(CONNECT_TIMEOUT, async {
+                        let mut handle = client::connect(config.clone(), (hop.host.as_str(), hop.port), handler).await?;
+                        authenticate(&mut handle, hop).await?;
+                        Ok::<_, SshError>(handle)
+                    })
+                    .await
+                    .unwrap_or(Err(SshError::Timeout));
+                    let handle = reached
+                        .map_err(|err| SshError::Jump(Box::new(jump_probe.explain(err, hop.known_key.as_deref()))))?;
+                    Some(handle)
+                }
+            };
+
+            let handler = probe.handler(tx, target.known_key.clone(), shell_channel.clone());
+            let reached = tokio::time::timeout(CONNECT_TIMEOUT, async {
+                let mut handle = match &jump {
+                    None => client::connect(config, (target.host.as_str(), target.port), handler).await?,
+                    Some(jump) => {
+                        // 发起方地址填什么都行(服务器只拿来记日志),OpenSSH 的 ProxyJump 也是这么填的。
+                        let channel = jump
+                            .channel_open_direct_tcpip(target.host.clone(), u32::from(target.port), "127.0.0.1", 0)
+                            .await
+                            .map_err(|err| SshError::Tunnel(err.to_string()))?;
+                        client::connect_stream(config, channel.into_stream(), handler).await?
                     }
                 };
-
-                if !success {
-                    return Err(SshError::AuthFailed);
-                }
-            Ok::<Handle<Handler>, SshError>(handle)
+                authenticate(&mut handle, target).await?;
+                Ok::<_, SshError>(handle)
             })
             .await
-            .map_err(|_| SshError::Timeout)?
-        });
+            .unwrap_or(Err(SshError::Timeout))
+            .map_err(|err| match err {
+                // 经跳板机时,目标还没亮出主机密钥连接就断了:隧道那头根本没有 SSH 服务
+                // (端口不对、目标没开机)。有的服务器(Windows 的 OpenSSH)会先答应开隧道、
+                // 连不过去再关掉,报出来的只是一句「对方断开」—— 要说清楚是隧道没通。
+                SshError::Russh(_) | SshError::Io(_) if jump.is_some() && !probe.saw_key() => {
+                    SshError::Tunnel(format!("closed before the server answered ({err})"))
+                }
+                err => probe.explain(err, target.known_key.as_deref()),
+            });
 
-        let fingerprint = server_key.lock().ok().and_then(|slot| slot.clone()).unwrap_or_default();
-        // 握手被我们自己拒掉时,russh 只会报一个笼统的错;换成带指纹的具体原因。
-        let handle = match handle {
-            Ok(handle) => handle,
-            Err(err) => {
-                let verdict = verdict.lock().ok().and_then(|slot| slot.clone());
-                return Err(match verdict {
-                    Some(HostKeyVerdict::Unknown) => {
-                        SshError::HostKeyUnknown { fingerprint }
+            match reached {
+                Ok(handle) => Ok((handle, jump)),
+                Err(err) => {
+                    // 跳板机连上了、目标没连上:跳板机那条别漏在外面。
+                    if let Some(jump) = jump {
+                        let _ = tokio::time::timeout(
+                            Duration::from_secs(3),
+                            jump.disconnect(russh::Disconnect::ByApplication, "", "en"),
+                        )
+                        .await;
                     }
-                    Some(HostKeyVerdict::Changed) => SshError::HostKeyChanged {
-                        expected: target.known_key.clone().unwrap_or_default(),
-                        actual: fingerprint,
-                    },
-                    _ => err,
-                });
+                    Err(err)
+                }
             }
-        };
+        });
+        let (handle, jump) = connected?;
 
-        Ok(Self { runtime, handle, events: Some(rx), server_key: fingerprint, shell_channel })
+        Ok(Self { runtime, handle, jump, events: Some(rx), server_key: probe.fingerprint(), shell_channel })
     }
 
     /// 在这条连接上再开一个 SFTP 通道(不影响终端)。服务器没开 sftp 子系统时报错。
@@ -508,12 +601,20 @@ impl Ssh {
         // 死连接上断开可能等不到回音;最多等 3 秒,别把调用方(会话收尾)卡住。
         // 计时器必须在 async 块**里面**构造:写成 block_on 的参数的话,它在进入运行时
         // 之前就被求值,tokio 找不到当前运行时直接 panic("no reactor running")。
-        let _ = self.runtime.block_on(async {
-            tokio::time::timeout(
+        self.runtime.block_on(async {
+            let _ = tokio::time::timeout(
                 Duration::from_secs(3),
                 self.handle.disconnect(russh::Disconnect::ByApplication, "", "en"),
             )
-            .await
+            .await;
+            // 目标先断、跳板机后断:反过来的话目标的断开消息走不出去(隧道已经没了)。
+            if let Some(jump) = &self.jump {
+                let _ = tokio::time::timeout(
+                    Duration::from_secs(3),
+                    jump.disconnect(russh::Disconnect::ByApplication, "", "en"),
+                )
+                .await;
+            }
         });
     }
 }

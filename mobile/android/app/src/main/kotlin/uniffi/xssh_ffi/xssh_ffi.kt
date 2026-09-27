@@ -3793,6 +3793,12 @@ data class HostConfig (
      * 抛出 HostKeyUnknown,异常文本就是服务端这次的指纹,由界面让用户确认。
      */
     var `knownKey`: kotlin.String?
+    , 
+    /**
+     * 经这台跳板机连(ProxyJump)。它自己的主机密钥 / 认证出了问题,报的是 `JumpHostKey*`
+     * 或带 `jump host: ` 前缀的错误,宿主据此知道该改哪台主机。
+     */
+    var `jump`: JumpHost? = null 
     
 ){
     
@@ -3814,6 +3820,7 @@ public object FfiConverterTypeHostConfig: FfiConverterRustBuffer<HostConfig> {
             FfiConverterString.read(buf),
             FfiConverterTypeAuthMethod.read(buf),
             FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalTypeJumpHost.read(buf),
         )
     }
 
@@ -3822,7 +3829,8 @@ public object FfiConverterTypeHostConfig: FfiConverterRustBuffer<HostConfig> {
             FfiConverterUShort.allocationSize(value.`port`) +
             FfiConverterString.allocationSize(value.`username`) +
             FfiConverterTypeAuthMethod.allocationSize(value.`auth`) +
-            FfiConverterOptionalString.allocationSize(value.`knownKey`)
+            FfiConverterOptionalString.allocationSize(value.`knownKey`) +
+            FfiConverterOptionalTypeJumpHost.allocationSize(value.`jump`)
     )
 
     override fun write(value: HostConfig, buf: ByteBuffer) {
@@ -3831,6 +3839,7 @@ public object FfiConverterTypeHostConfig: FfiConverterRustBuffer<HostConfig> {
             FfiConverterString.write(value.`username`, buf)
             FfiConverterTypeAuthMethod.write(value.`auth`, buf)
             FfiConverterOptionalString.write(value.`knownKey`, buf)
+            FfiConverterOptionalTypeJumpHost.write(value.`jump`, buf)
     }
 }
 
@@ -3892,6 +3901,65 @@ public object FfiConverterTypeInputModes: FfiConverterRustBuffer<InputModes> {
             FfiConverterBoolean.write(value.`mouseReport`, buf)
             FfiConverterBoolean.write(value.`sgrMouse`, buf)
             FfiConverterBoolean.write(value.`alternateScroll`, buf)
+    }
+}
+
+
+
+/**
+ * 跳板机:和 [`HostConfig`] 一样的连接信息,只是它自己不能再经过跳板机(只支持一层)。
+ */
+data class JumpHost (
+    var `host`: kotlin.String
+    , 
+    var `port`: kotlin.UShort
+    , 
+    var `username`: kotlin.String
+    , 
+    var `auth`: AuthMethod
+    , 
+    /**
+     * 跳板机的已信任指纹,规则同 [`HostConfig::known_key`]。
+     */
+    var `knownKey`: kotlin.String?
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeJumpHost: FfiConverterRustBuffer<JumpHost> {
+    override fun read(buf: ByteBuffer): JumpHost {
+        return JumpHost(
+            FfiConverterString.read(buf),
+            FfiConverterUShort.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterTypeAuthMethod.read(buf),
+            FfiConverterOptionalString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: JumpHost) = (
+            FfiConverterString.allocationSize(value.`host`) +
+            FfiConverterUShort.allocationSize(value.`port`) +
+            FfiConverterString.allocationSize(value.`username`) +
+            FfiConverterTypeAuthMethod.allocationSize(value.`auth`) +
+            FfiConverterOptionalString.allocationSize(value.`knownKey`)
+    )
+
+    override fun write(value: JumpHost, buf: ByteBuffer) {
+            FfiConverterString.write(value.`host`, buf)
+            FfiConverterUShort.write(value.`port`, buf)
+            FfiConverterString.write(value.`username`, buf)
+            FfiConverterTypeAuthMethod.write(value.`auth`, buf)
+            FfiConverterOptionalString.write(value.`knownKey`, buf)
     }
 }
 
@@ -4321,6 +4389,13 @@ sealed class FfiException(message: String): kotlin.Exception(message) {
         class HostKeyChanged(message: String) : FfiException(message)
         
     /**
+     * 同上两条,但说的是**跳板机**的密钥 —— 宿主要把指纹存到跳板机那台主机上,不是目标。
+     */
+        class JumpHostKeyUnknown(message: String) : FfiException(message)
+        
+        class JumpHostKeyChanged(message: String) : FfiException(message)
+        
+    /**
      * 私钥带口令,没给或给错了(导入 / 连接时界面据此提示填口令)。
      */
         class KeyEncrypted(message: String) : FfiException(message)
@@ -4346,8 +4421,10 @@ public object FfiConverterTypeFfiError : FfiConverterRustBuffer<FfiException> {
             1 -> FfiException.Message(FfiConverterString.read(buf))
             2 -> FfiException.HostKeyUnknown(FfiConverterString.read(buf))
             3 -> FfiException.HostKeyChanged(FfiConverterString.read(buf))
-            4 -> FfiException.KeyEncrypted(FfiConverterString.read(buf))
-            5 -> FfiException.Cancelled(FfiConverterString.read(buf))
+            4 -> FfiException.JumpHostKeyUnknown(FfiConverterString.read(buf))
+            5 -> FfiException.JumpHostKeyChanged(FfiConverterString.read(buf))
+            6 -> FfiException.KeyEncrypted(FfiConverterString.read(buf))
+            7 -> FfiException.Cancelled(FfiConverterString.read(buf))
             else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
         }
         
@@ -4371,12 +4448,20 @@ public object FfiConverterTypeFfiError : FfiConverterRustBuffer<FfiException> {
                 buf.putInt(3)
                 Unit
             }
-            is FfiException.KeyEncrypted -> {
+            is FfiException.JumpHostKeyUnknown -> {
                 buf.putInt(4)
                 Unit
             }
-            is FfiException.Cancelled -> {
+            is FfiException.JumpHostKeyChanged -> {
                 buf.putInt(5)
+                Unit
+            }
+            is FfiException.KeyEncrypted -> {
+                buf.putInt(6)
+                Unit
+            }
+            is FfiException.Cancelled -> {
+                buf.putInt(7)
                 Unit
             }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
@@ -4722,6 +4807,38 @@ public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?>
         } else {
             buf.put(1)
             FfiConverterString.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalTypeJumpHost: FfiConverterRustBuffer<JumpHost?> {
+    override fun read(buf: ByteBuffer): JumpHost? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeJumpHost.read(buf)
+    }
+
+    override fun allocationSize(value: JumpHost?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeJumpHost.allocationSize(value)
+        }
+    }
+
+    override fun write(value: JumpHost?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeJumpHost.write(value, buf)
         }
     }
 }

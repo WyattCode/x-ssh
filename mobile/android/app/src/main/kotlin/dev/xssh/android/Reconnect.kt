@@ -31,6 +31,8 @@ object ReconnectPolicy {
     fun isPermanent(error: Throwable): Boolean = when (error) {
         is FfiException.HostKeyUnknown,
         is FfiException.HostKeyChanged,
+        is FfiException.JumpHostKeyUnknown,
+        is FfiException.JumpHostKeyChanged,
         is FfiException.KeyEncrypted,
         -> true
         is FfiException.Message -> error.message.orEmpty().contains("authentication failed", ignoreCase = true)

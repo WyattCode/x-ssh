@@ -90,6 +90,8 @@ fun HostKeyGate(
     fingerprint: String,
     changed: Boolean,
     tablet: Boolean,
+    /** 不为空时:[host] 是经它去连的跳板机,这一页确认的是跳板机的密钥。 */
+    jumpFor: Host? = null,
     onTrust: () -> Unit,
     onExit: () -> Unit,
 ) {
@@ -98,9 +100,19 @@ fun HostKeyGate(
         icon = if (changed) XIcons.Alert else XIcons.Shield,
         tint = if (changed) p.danger else p.accent,
         tile = if (changed) p.danger.copy(alpha = 0.12f) else p.accentSoft,
-        title = if (changed) "主机密钥已改变" else "确认主机身份",
-        note = if (changed) "和上次记录的不一致。可能是服务器重装过，也可能是连接被人截获。" else null,
-        noteColor = p.danger,
+        title = when {
+            jumpFor != null && changed -> "跳板机密钥已改变"
+            jumpFor != null -> "确认跳板机身份"
+            changed -> "主机密钥已改变"
+            else -> "确认主机身份"
+        },
+        note = when {
+            changed -> "和上次记录的不一致。可能是服务器重装过，也可能是连接被人截获。"
+            // 用户点的是另一台,这里冒出一个不同的名字会一愣:说一句它是谁的跳板机。
+            jumpFor != null -> "连接「${jumpFor.label}」要先经过它。"
+            else -> null
+        },
+        noteColor = if (changed) p.danger else p.textDim,
         onEnter = if (changed) null else onTrust,
         body = {
             if (changed) {

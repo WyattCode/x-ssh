@@ -37,6 +37,7 @@ fn main() -> anyhow::Result<()> {
         auth,
         // 调试工具:不校验主机密钥(首次握手会被拒,重试时带上打印出来的指纹)。
         known_key: cli.known_key.clone(),
+        jump: None,
     };
     let mut ssh = Ssh::connect(&target)?;
     eprintln!("[devssh] connected; server key {}", ssh.server_key());

@@ -22,6 +22,21 @@ pub struct HostConfig {
     /// 已信任的主机密钥指纹(SHA256)。为空表示还没信任过 —— 连接会被拒绝并
     /// 抛出 HostKeyUnknown,异常文本就是服务端这次的指纹,由界面让用户确认。
     pub known_key: Option<String>,
+    /// 经这台跳板机连(ProxyJump)。它自己的主机密钥 / 认证出了问题,报的是 `JumpHostKey*`
+    /// 或带 `jump host: ` 前缀的错误,宿主据此知道该改哪台主机。
+    #[uniffi(default = None)]
+    pub jump: Option<JumpHost>,
+}
+
+/// 跳板机:和 [`HostConfig`] 一样的连接信息,只是它自己不能再经过跳板机(只支持一层)。
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct JumpHost {
+    pub host: String,
+    pub port: u16,
+    pub username: String,
+    pub auth: AuthMethod,
+    /// 跳板机的已信任指纹,规则同 [`HostConfig::known_key`]。
+    pub known_key: Option<String>,
 }
 
 /// 认证方式。
@@ -125,6 +140,9 @@ pub enum FfiError {
     HostKeyUnknown { fingerprint: String },
     /// 主机密钥与已信任的不一致,连接已拒绝。
     HostKeyChanged { actual: String },
+    /// 同上两条,但说的是**跳板机**的密钥 —— 宿主要把指纹存到跳板机那台主机上,不是目标。
+    JumpHostKeyUnknown { fingerprint: String },
+    JumpHostKeyChanged { actual: String },
     /// 私钥带口令,没给或给错了(导入 / 连接时界面据此提示填口令)。
     KeyEncrypted { detail: String },
     /// 传输被用户取消(不是错误,界面不用提示)。
@@ -135,8 +153,10 @@ impl std::fmt::Display for FfiError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Message { message } => write!(f, "{message}"),
-            Self::HostKeyUnknown { fingerprint } => write!(f, "{fingerprint}"),
-            Self::HostKeyChanged { actual } => write!(f, "{actual}"),
+            Self::HostKeyUnknown { fingerprint } | Self::JumpHostKeyUnknown { fingerprint } => {
+                write!(f, "{fingerprint}")
+            }
+            Self::HostKeyChanged { actual } | Self::JumpHostKeyChanged { actual } => write!(f, "{actual}"),
             Self::KeyEncrypted { detail } | Self::Cancelled { detail } => write!(f, "{detail}"),
         }
     }
@@ -145,6 +165,15 @@ impl std::fmt::Display for FfiError {
 impl From<ssh::SshError> for FfiError {
     fn from(err: ssh::SshError) -> Self {
         match err {
+            // 跳板机那一跳:主机密钥换成专门的变体(指纹要存到跳板机上);口令问题保留变体、
+            // 文本带前缀;其余一律是带前缀的消息。
+            ssh::SshError::Jump(inner) => match *inner {
+                ssh::SshError::HostKeyUnknown { fingerprint } => Self::JumpHostKeyUnknown { fingerprint },
+                ssh::SshError::HostKeyChanged { actual, .. } => Self::JumpHostKeyChanged { actual },
+                ssh::SshError::KeyEncrypted => Self::KeyEncrypted { detail: format!("jump host: {inner}") },
+                ssh::SshError::Cancelled => Self::Cancelled { detail: inner.to_string() },
+                other => Self::Message { message: ssh::SshError::Jump(Box::new(other)).to_string() },
+            },
             ssh::SshError::HostKeyUnknown { fingerprint } => Self::HostKeyUnknown { fingerprint },
             ssh::SshError::HostKeyChanged { actual, .. } => Self::HostKeyChanged { actual },
             ssh::SshError::KeyEncrypted => Self::KeyEncrypted { detail: err.to_string() },
@@ -312,19 +341,24 @@ impl Session {
     /// 连接并认证(阻塞至完成;请在工作线程调用)。
     #[uniffi::constructor]
     pub fn connect(config: HostConfig) -> Result<Arc<Self>, FfiError> {
-        let auth = match config.auth {
-            AuthMethod::Password { password } => ssh::Auth::Password(password),
-            AuthMethod::KeyFile { path, passphrase } => {
-                ssh::Auth::KeyFile { path: path.into(), passphrase }
-            }
-            AuthMethod::KeyData { pem, passphrase } => ssh::Auth::KeyData { pem, passphrase },
-        };
+        let auth = auth_of(config.auth);
+        let jump = config.jump.map(|hop| {
+            Box::new(ssh::Target {
+                host: hop.host,
+                port: hop.port,
+                username: hop.username,
+                auth: auth_of(hop.auth),
+                known_key: hop.known_key,
+                jump: None,
+            })
+        });
         let target = ssh::Target {
             host: config.host,
             port: config.port,
             username: config.username,
             auth,
             known_key: config.known_key,
+            jump,
         };
         let ssh = Ssh::connect(&target)?;
         Ok(Arc::new(Self { inner: Mutex::new(ssh) }))
@@ -364,6 +398,14 @@ impl Session {
     /// 断开连接。
     pub fn disconnect(&self) {
         self.lock().disconnect();
+    }
+}
+
+fn auth_of(auth: AuthMethod) -> ssh::Auth {
+    match auth {
+        AuthMethod::Password { password } => ssh::Auth::Password(password),
+        AuthMethod::KeyFile { path, passphrase } => ssh::Auth::KeyFile { path: path.into(), passphrase },
+        AuthMethod::KeyData { pem, passphrase } => ssh::Auth::KeyData { pem, passphrase },
     }
 }
 

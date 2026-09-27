@@ -7,6 +7,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import uniffi.xssh_ffi.AuthMethod
 import uniffi.xssh_ffi.HostConfig
+import uniffi.xssh_ffi.JumpHost
 import uniffi.xssh_ffi.ScreenRow
 import uniffi.xssh_ffi.ServerEvent
 import uniffi.xssh_ffi.Session
@@ -326,10 +327,21 @@ class LiveTerminal(
     }
 }
 
-/** 建立连接并打开 shell(在 IO 线程调用)。 */
-fun connectHost(host: Host, cols: Int = 80, rows: Int = 24): LiveTerminal {
-    val (session, shell) = openTransport(host, cols, rows)
+/** 建立连接并打开 shell(在 IO 线程调用)。[jump] 是已解锁的跳板机,null = 直连。 */
+fun connectHost(host: Host, jump: Host?, cols: Int = 80, rows: Int = 24): LiveTerminal {
+    val (session, shell) = openTransport(host, jump, cols, rows)
     return LiveTerminal(session, shell, Term(cols.toUInt(), rows.toUInt()), cols, rows)
+}
+
+/** 一台主机的登录方式,交给核心。凭据必须已经解锁([unlockCredentials])。 */
+private fun authOf(host: Host): AuthMethod = when (host.auth) {
+    AuthKind.PASSWORD -> AuthMethod.Password(host.password)
+    // 导入的私钥:解密后的文本只在内存里交给核心;老数据 / 调试用的私钥文件路径照旧。
+    AuthKind.KEY -> if (host.keyData.isNotEmpty()) {
+        AuthMethod.KeyData(host.keyData, host.keyPassphrase.ifEmpty { null })
+    } else {
+        AuthMethod.KeyFile(host.keyPath, host.keyPassphrase.ifEmpty { null })
+    }
 }
 
 /**
@@ -339,26 +351,22 @@ fun connectHost(host: Host, cols: Int = 80, rows: Int = 24): LiveTerminal {
  * 而不是先开 shell 再把命令敲进去 —— 后者要等提示符出来,中间还会被 `.bashrc` 的输出搅乱。
  * exec 本身失败(服务器不给 exec、Windows 的 OpenSSH 没有 sh)就退回普通 shell。
  */
-fun openTransport(host: Host, cols: Int, rows: Int): Pair<Session, Shell> {
-    val auth = when (host.auth) {
-        AuthKind.PASSWORD -> AuthMethod.Password(host.password)
-        // 导入的私钥:解密后的文本只在内存里交给核心;老数据 / 调试用的私钥文件路径照旧。
-        AuthKind.KEY -> if (host.keyData.isNotEmpty()) {
-            AuthMethod.KeyData(host.keyData, host.keyPassphrase.ifEmpty { null })
-        } else {
-            AuthMethod.KeyFile(host.keyPath, host.keyPassphrase.ifEmpty { null })
-        }
-    }
+fun openTransport(host: Host, jump: Host?, cols: Int, rows: Int): Pair<Session, Shell> {
     val config = HostConfig(
         host.address,
         host.port.toUShort(),
         host.username,
-        auth,
+        authOf(host),
         knownKey = host.keyFingerprint.ifBlank { null },
+        // 跳板机的密钥单独验、单独存(见 FfiException.JumpHostKey*)。
+        jump = jump?.let {
+            JumpHost(it.address, it.port.toUShort(), it.username, authOf(it), it.keyFingerprint.ifBlank { null })
+        },
     )
     val started = System.currentTimeMillis()
     fun elapsed() = System.currentTimeMillis() - started
-    Log.i(TAG, "connect ${host.address}:${host.port} auth=${host.auth}")
+    val via = jump?.let { " via ${it.address}:${it.port}" }.orEmpty()
+    Log.i(TAG, "connect ${host.address}:${host.port}$via auth=${host.auth}")
     val session = try {
         Session.connect(config)
     } catch (e: Throwable) {

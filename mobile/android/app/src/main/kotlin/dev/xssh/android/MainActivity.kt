@@ -17,6 +17,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -191,6 +192,12 @@ private fun Screen.depth(): Int = when (this) {
 }
 
 /**
+ * 全部已保存的主机。跳板机按 id 引用另一台主机(见 [Host.jumpHostId]),
+ * 编辑页选它、详情页显示它、终端连接时解锁它,都要从这里现查 —— 不必把列表一层层往下传。
+ */
+val LocalHosts = compositionLocalOf<List<Host>> { emptyList() }
+
+/**
  * 应用壳:主机 → 终端 / 编辑器。布局形态由 [LocalAdaptive] 决定,各界面自己适配。
  */
 @Composable
@@ -241,6 +248,7 @@ fun App(devTarget: DevTarget? = null) {
     // 平板:窗口够宽(≥ 600dp)就是平板那一整套交互;小窗、窄分屏缩到手机宽度时退回手机的页面,
     // 按钮按直板机的底栏摆。两套共用上面这些状态,窗口来回缩放时正在看的东西不丢。
     val chrome = LocalChrome.current
+    CompositionLocalProvider(LocalHosts provides hosts) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
         if (chrome == Chrome.Tablet && maxWidth >= 600.dp) {
             TabletApp(
@@ -298,6 +306,7 @@ fun App(devTarget: DevTarget? = null) {
                 )
             }
         }
+    }
     }
 }
 
@@ -488,6 +497,10 @@ private fun PhoneFlow(
                     persist(hosts.map { if (it.id == trusted.id) it.copy(keyFingerprint = fingerprint) else it })
                 }
                 onScreen(current.copy(host = trusted))
+            },
+            // 跳板机的指纹存到跳板机那台上;主机表一变,终端屏拿到新的跳板机实例,随之重连。
+            onTrustJumpKey = { jump, fingerprint ->
+                persist(hosts.map { if (it.id == jump.id) it.copy(keyFingerprint = fingerprint) else it })
             },
             onFiles = { onScreen(Screen.Files(current)) },
             onEditHost = {

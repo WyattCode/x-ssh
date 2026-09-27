@@ -137,6 +137,8 @@ fun HostEditorScreen(
             // 用户名只会是英文:用 URI 类键盘,中文输入法会切到英文,不会把 root 组成拼音。
             FormField("用户名", username, { username = it }, placeholder = "root", mono = true, keyboard = KeyboardType.Uri, asciiOnly = true)
         }
+        // 经哪台过去,和"连到哪台"是一件事,紧跟在地址下面。
+        JumpField(draft)
     }
 
     val credentials: @Composable () -> Unit = {
@@ -339,6 +341,11 @@ class HostDraft(private val initial: Host?) {
 
     var lockSecrets by mutableStateOf(initial?.lockSecrets ?: false)
     var tmux by mutableStateOf(initial?.tmux ?: false)
+    /** 跳板机(另一台主机的 id,空 = 直连)。 */
+    var jumpHostId by mutableStateOf(initial?.jumpHostId ?: "")
+
+    /** 正在编辑的这台的 id;新建时为 null(选跳板机时要把自己排除掉)。 */
+    val id: String? get() = initial?.id
 
     /** 进来时这台主机是不是已经加了锁 —— 和 [lockSecrets] 一比就知道要不要重新加密。 */
     val originalLocked: Boolean = initial?.lockSecrets ?: false
@@ -378,7 +385,8 @@ class HostDraft(private val initial: Host?) {
             // 只拨了这个开关也是改过:漏掉它的话,平板浮层点外面就把这次改动静默丢了,
             // 连「放弃未保存的修改?」都不问。tmux 那个开关同理。
             lockSecrets != originalLocked ||
-            tmux != (initial?.tmux ?: false)
+            tmux != (initial?.tmux ?: false) ||
+            jumpHostId != (initial?.jumpHostId ?: "")
 
     /**
      * 这台主机磁盘上有一条加锁的密码密文。
@@ -472,7 +480,9 @@ class HostDraft(private val initial: Host?) {
         val newPort = (port.toIntOrNull() ?: 22).coerceIn(1, 65535)
         // 已信任的指纹绑在「地址:端口」上:改了目标就是另一台机器,旧指纹不能跟着走;
         // 没改就必须留下,否则编辑一下备注就把信任关系抹了。
-        val sameEndpoint = initial != null && initial.address == newAddress && initial.port == newPort
+        // 跳板机也算在「目标」里:`127.0.0.1:22` 经不同的跳板机是不同的机器。
+        val sameEndpoint = initial != null && initial.address == newAddress && initial.port == newPort &&
+            initial.jumpHostId == jumpHostId
         val key = auth == AuthKind.KEY
         val kept = carriedSecrets(key = key, keyLocked = keyLocked)
         return Host(
@@ -492,6 +502,7 @@ class HostDraft(private val initial: Host?) {
             keyPublicFingerprint = if (key) keyPublicFingerprint else "",
             lockSecrets = lockSecrets,
             tmux = tmux,
+            jumpHostId = jumpHostId,
             // 没解锁就保存时,明文是空的 —— 把磁盘上那几条原样带过去,别覆盖成空。
             // (用户只是改个名字,不该顺手把密码弄丢。取舍规则见 carriedSecrets,抽出去是为了能测。)
             lockedPassword = kept.lockedPassword,

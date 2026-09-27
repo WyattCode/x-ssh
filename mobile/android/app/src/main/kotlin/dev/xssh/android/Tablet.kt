@@ -521,6 +521,7 @@ fun TabletApp(
                                         host = host,
                                         onExit = onCloseTerminal,
                                         onTrustKey = { onTrustKey(host, it) },
+                                        onTrustJumpKey = { jump, fingerprint -> onTrustKey(jump, fingerprint) },
                                         tablet = TabletTerminalChrome(
                                             sidebarVisible = sidebarVisible,
                                             onToggleSidebar = ::toggleSidebar,
@@ -1456,6 +1457,7 @@ private fun HostSheet(
                             asciiOnly = true,
                         )
                     }
+                    JumpField(draft)
                     CredentialFields(
                         draft = draft,
                         keyMessage = keyMessage,

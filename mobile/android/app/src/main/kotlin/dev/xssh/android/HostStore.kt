@@ -45,6 +45,15 @@ data class Host(
      */
     val tmux: Boolean = false,
     /**
+     * 跳板机:另一台已保存主机的 id(空 = 直连)。先登录那台,再让它开隧道连到这台 ——
+     * 公司内网、云上私有子网里的机器常常只能这样进。只支持一层:跳板机自己设的跳板机不看
+     * (编辑页也不让这样选)。字段名和桌面版的 `jumpHostId` 一致。
+     *
+     * 那台主机被删了的话这里留着原 id,连接时明确报「跳板机已删除」,
+     * **不会**悄悄改成直连 —— 直连一个内网地址只会超时,还会让人以为是网络问题。
+     */
+    val jumpHostId: String = "",
+    /**
      * 还没解锁时,磁盘上那几条**读不出来**的密文原样带着。
      *
      * 没有它们的话,「解锁之前保存一次主机」(改个端口、换个名字)就会把密码
@@ -136,6 +145,7 @@ class HostStore(context: Context) {
                     keyName = item.optString("keyName"),
                     keyPublicFingerprint = item.optString("keyPublicFingerprint"),
                     tmux = item.optBoolean("tmux", false),
+                    jumpHostId = item.optString("jumpHostId"),
                     // **这一条不能漏**:漏了每次加载都是 false —— 编辑页的开关显示成"关"
                     // (磁盘上明明锁着),而且保存时 `writeSecret` 会按"没加锁"用普通密钥
                     // 重新加密,用户没碰过开关,锁就被悄悄去掉了。
@@ -188,6 +198,7 @@ class HostStore(context: Context) {
             item.put("keyName", host.keyName)
             item.put("keyPublicFingerprint", host.keyPublicFingerprint)
             item.put("tmux", host.tmux)
+            item.put("jumpHostId", host.jumpHostId)
             array.put(item)
         }
         prefs.edit().putString(KEY_LIST, array.toString()).apply()

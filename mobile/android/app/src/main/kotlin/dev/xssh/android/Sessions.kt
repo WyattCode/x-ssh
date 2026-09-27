@@ -85,6 +85,7 @@ data class TerminalFrame(
  */
 class TerminalSession(
     host: Host,
+    jump: Host?,
     private val live: LiveTerminal,
     scope: CoroutineScope,
 ) {
@@ -98,9 +99,14 @@ class TerminalSession(
      * 加了生物识别锁的主机,连接那一刻验过一次指纹;之后的自动重连是**同一次连接的延续**,
      * 不再弹框 —— 否则切到后台时根本没人能按,而这正是最需要自动重连的时候。
      * 会话结束(用户断开、对端正常退出、重连放弃)就清掉,不在内存里多留。
+     *
+     * 经跳板机连的,跳板机的凭据一起留着([jumpCredentials]):重连要把两跳都重走一遍。
      */
     @Volatile
     private var credentials: Host? = host
+
+    @Volatile
+    private var jumpCredentials: Host? = jump
 
     /** 同一条连接上的文件(SFTP),第一次打开文件面板时才开通道。 */
     val files = RemoteFiles(live.session, scope)
@@ -128,6 +134,7 @@ class TerminalSession(
             if (!pumped.alive) {
                 Log.i(TAG, "peer closed ($label)")
                 credentials = null
+                jumpCredentials = null
                 _frame.value = _frame.value.copy(alive = false)
                 withContext(NonCancellable + Dispatchers.IO) {
                     files.close()
@@ -190,12 +197,13 @@ class TerminalSession(
      */
     private suspend fun reconnect(): Boolean {
         val host = credentials ?: return false
+        val jump = jumpCredentials
         Log.i(TAG, "link dropped ($label), reconnecting")
         for (attempt in 1..ReconnectPolicy.MAX_ATTEMPTS) {
             _frame.value = _frame.value.copy(reconnecting = attempt)
             SessionRegistry.awaitRetry(ReconnectPolicy.delayMillis(attempt))
             val result = withContext(Dispatchers.IO) {
-                runCatching { openTransport(host, live.cols, live.rows) }
+                runCatching { openTransport(host, jump, live.cols, live.rows) }
             }
             val transport = result.getOrNull()
             if (transport != null) {
@@ -287,6 +295,7 @@ class TerminalSession(
 
     internal fun shutdown() {
         credentials = null
+        jumpCredentials = null
         job.cancel()
         outbox.close()
         writer.cancel()
@@ -333,14 +342,15 @@ object SessionRegistry {
      * 连接并登记(阻塞,在 IO 线程调用)。已经有会话就直接复用。
      *
      * 握手期间用户点了「全部断开」的话,抛 [Cancelled] —— 界面按普通的连接失败处理。
+     * [jump] 是已解锁的跳板机(null = 直连)。
      */
-    fun open(host: Host, cols: Int, rows: Int): TerminalSession {
+    fun open(host: Host, jump: Host?, cols: Int, rows: Int): TerminalSession {
         val generation = synchronized(lock) {
             _sessions.value[host.id]?.let { return it }
             closedGeneration
         }
         // 真正的连接不能放在锁里 —— 它要好几秒,会把 close / 通知栏的全部断开一起堵死。
-        val live = connectHost(host, cols, rows)
+        val live = connectHost(host, jump, cols, rows)
         synchronized(lock) {
             if (closedGeneration != generation) {
                 // 这几秒里用户喊了「全部断开」。刚握完手的这条也算在内,不能让它活下来。
@@ -352,7 +362,7 @@ object SessionRegistry {
                 live.closeAsync()
                 return existing
             }
-            val session = TerminalSession(host, live, scope)
+            val session = TerminalSession(host, jump, live, scope)
             _sessions.value = _sessions.value + (host.id to session)
             return session
         }

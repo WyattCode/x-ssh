@@ -154,14 +154,16 @@ import uniffi.xssh_ffi.SelectKind
  */
 private val SENTINELS = arrayOf("\u200b", "\u200c")
 
-/** 等用户裁决的主机密钥:[fingerprint] 是服务端这次给出的指纹。 */
-private data class PendingKey(val fingerprint: String, val changed: Boolean)
+/** 等用户裁决的主机密钥:[fingerprint] 是服务端这次给出的指纹;[jump] = 说的是跳板机的密钥。 */
+private data class PendingKey(val fingerprint: String, val changed: Boolean, val jump: Boolean = false)
 
 @Composable
 fun TerminalScreen(
     host: Host,
     onExit: () -> Unit,
     onTrustKey: (String) -> Unit = {},
+    /** 信任跳板机的密钥:指纹要存到跳板机那台主机上(第一个参数),不是这台。 */
+    onTrustJumpKey: (Host, String) -> Unit = { _, _ -> },
     /** 放在平板右栏里时不为空:工具栏换成平板那套,不再画手机的轨道 / 底栏按钮。 */
     tablet: TabletTerminalChrome? = null,
     /** 手机 / 折叠屏:打开这条连接的文件页(平板走 [tablet] 里的开关)。 */
@@ -170,11 +172,23 @@ fun TerminalScreen(
     onEditHost: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
+    // 跳板机从主机表里现查:信任了它的密钥、改了它的密码,这里拿到的就是新的那份,随之重连。
+    val jumpHost = host.jumpHostId.takeIf { it.isNotEmpty() }
+        ?.let { id -> LocalHosts.current.firstOrNull { it.id == id } }
+    // 设了跳板机、那台却已经删了。**不能**退回直连:内网地址直连只会超时,让人以为是网络问题。
+    val jumpGone = host.jumpHostId.isNotEmpty() && jumpHost == null
     // 已经连着就直接接管,不重连、也不再问一次主机密钥。
-    var live by remember(host) { mutableStateOf(SessionRegistry[host.id]) }
-    var error by remember(host) { mutableStateOf<String?>(null) }
-    var pendingKey by remember(host) { mutableStateOf<PendingKey?>(null) }
-    var attempt by remember(host) { mutableStateOf(0) }
+    var live by remember(host, jumpHost) { mutableStateOf(SessionRegistry[host.id]) }
+    var error by remember(host, jumpHost) { mutableStateOf<String?>(null) }
+    var pendingKey by remember(host, jumpHost) { mutableStateOf<PendingKey?>(null) }
+    var attempt by remember(host, jumpHost) { mutableStateOf(0) }
+    // 这一屏里已经解锁过的凭据(本机, 跳板机)。确认完主机密钥重连时直接用,不再弹指纹:
+    // 系统的解锁窗口只有 10 秒,读完指纹再点「信任」早过了 —— 原来第一次连一台加锁主机要按两三次。
+    // 键里去掉了指纹(信任之后只有它变),其余任何一项变了(编辑浮层里改了密码)就作废重新解锁。
+    // 离开这一屏就没了;连上之后也清掉(会话自己留着一份用于重连)。
+    var unlocked by remember(host.copy(keyFingerprint = ""), jumpHost?.copy(keyFingerprint = "")) {
+        mutableStateOf<Pair<Host, Host?>?>(null)
+    }
     // 局域网权限只问一次:拒绝了也照常尝试连接,失败提示里会说明原因。
     var askedLocalNetwork by remember { mutableStateOf(PermissionAsked.localNetwork) }
     val askLocalNetwork = rememberLauncherForActivityResult(
@@ -190,15 +204,35 @@ fun TerminalScreen(
         ActivityResultContracts.RequestPermission(),
     ) { attempt++ }
 
-    LaunchedEffect(host, attempt) {
+    LaunchedEffect(host, jumpHost, attempt) {
         if (live != null) return@LaunchedEffect
         error = null
         pendingKey = null
+        if (jumpGone) {
+            error = JumpGoneText
+            return@LaunchedEffect
+        }
         // 开了「用生物识别解锁」的主机,列表里读到的密码是空的(没解锁就读不出来)。
         // 先解锁再判断"有没有存" —— 顺序反了会把"还没解锁"报成"没有保存密码"。
-        val ready = unlockCredentials(context, host)
+        val cached = unlocked
+        val ready = if (cached != null) host.withSecretsOf(cached.first) else unlockCredentials(context, host)
         if (ready == null) {
             error = "没能解锁已保存的凭据。"
+            return@LaunchedEffect
+        }
+        // 跳板机的凭据同样要解锁。两台都加了锁时一般只弹一次:第一次验过之后解锁窗口还开着。
+        val readyJump = jumpHost?.let { jump ->
+            cached?.second?.let { jump.withSecretsOf(it) } ?: unlockCredentials(context, jump) ?: run {
+                error = "没能解锁跳板机「${jump.label}」的凭据。"
+                return@LaunchedEffect
+            }
+        }
+        if (readyJump != null && readyJump.auth == AuthKind.PASSWORD && readyJump.password.isEmpty()) {
+            error = "跳板机「${readyJump.label}」还没有保存密码。"
+            return@LaunchedEffect
+        }
+        if (readyJump != null && readyJump.keyMissing) {
+            error = "跳板机「${readyJump.label}」还没有导入私钥。"
             return@LaunchedEffect
         }
         // 密码认证却没有存密码(旧版本只放内存、或者新建时没填):拿空密码去连,
@@ -212,6 +246,7 @@ fun TerminalScreen(
             error = "这台主机还没有导入私钥。"
             return@LaunchedEffect
         }
+        unlocked = ready to readyJump
         val notifyPermission = SessionService.NOTIFICATION_PERMISSION
         if (!askedNotify && notifyPermission != null &&
             context.checkSelfPermission(notifyPermission) != PackageManager.PERMISSION_GRANTED
@@ -221,7 +256,9 @@ fun TerminalScreen(
             askNotify.launch(notifyPermission)
             return@LaunchedEffect
         }
-        if (!askedLocalNetwork && LocalNetwork.needsPermission(context, host.address)) {
+        // 手机直接连的是跳板机:局域网权限看它的地址(目标可能是跳板机后面的内网地址,和手机无关)。
+        val direct = readyJump?.address ?: host.address
+        if (!askedLocalNetwork && LocalNetwork.needsPermission(context, direct)) {
             askedLocalNetwork = true
             PermissionAsked.localNetwork = true
             askLocalNetwork.launch(LocalNetwork.PERMISSION)
@@ -234,7 +271,7 @@ fun TerminalScreen(
         // onSuccess 就不跑了 —— 会话已经登记在册,却没有任何东西托着进程,
         // 系统一冻结连接就悄悄没了,而主机页还写着「运行中」。
         val result = withContext(Dispatchers.IO) {
-            runCatching { SessionRegistry.open(ready, 80, 24) }
+            runCatching { SessionRegistry.open(ready, readyJump, 80, 24) }
                 .onSuccess {
                     // **服务起不来不算连接失败。** 它和登记要在同一个不可取消的步骤里
                     // (上面那段注释),但异常必须分开接:Android 12 起,应用退到后台时
@@ -248,7 +285,10 @@ fun TerminalScreen(
                 }
         }
         result
-            .onSuccess { live = it }
+            .onSuccess {
+                live = it
+                unlocked = null
+            }
             .onFailure { failure ->
                 // 主机密钥两种异常的 message 就是服务端指纹本身(见 FfiError 注释)。
                 val fingerprint = failure.message.orEmpty().trim()
@@ -256,7 +296,9 @@ fun TerminalScreen(
                     // 指纹为空就没得信任 —— 真让用户点下去只会存个空值、再弹一次同样的框。
                     fingerprint.isEmpty() &&
                         (failure is FfiException.HostKeyUnknown ||
-                            failure is FfiException.HostKeyChanged) ->
+                            failure is FfiException.HostKeyChanged ||
+                            failure is FfiException.JumpHostKeyUnknown ||
+                            failure is FfiException.JumpHostKeyChanged) ->
                         error = "服务端密钥校验未通过,但没拿到指纹(${failure.javaClass.simpleName})。"
 
                     failure is FfiException.HostKeyUnknown ->
@@ -265,14 +307,28 @@ fun TerminalScreen(
                     failure is FfiException.HostKeyChanged ->
                         pendingKey = PendingKey(fingerprint, changed = true)
 
+                    // 跳板机的密钥:确认页换成跳板机那台,信任后指纹存到它身上。
+                    failure is FfiException.JumpHostKeyUnknown ->
+                        pendingKey = PendingKey(fingerprint, changed = false, jump = true)
+
+                    failure is FfiException.JumpHostKeyChanged ->
+                        pendingKey = PendingKey(fingerprint, changed = true, jump = true)
+
+                    failure is FfiException.KeyEncrypted && readyJump != null && isJumpFailure(failure.message) ->
+                        error = if (readyJump.keyPassphrase.isEmpty()) {
+                            "跳板机「${readyJump.label}」的私钥有口令。"
+                        } else {
+                            "跳板机「${readyJump.label}」的私钥口令不对。"
+                        }
+
                     failure is FfiException.KeyEncrypted ->
                         error = if (host.keyPassphrase.isEmpty()) "这把私钥有口令。" else "私钥口令不对。"
 
-                    else -> error = LocalNetwork.hintFor(
-                        context,
-                        host.address,
-                        failure.message?.ifBlank { null } ?: failure.toString(),
-                    )
+                    else -> {
+                        val message = failure.message?.ifBlank { null } ?: failure.toString()
+                        error = readyJump?.let { jumpFailureText(message, it, host) }
+                            ?: LocalNetwork.hintFor(context, direct, message)
+                    }
                 }
             }
     }
@@ -294,13 +350,22 @@ fun TerminalScreen(
     }
     when {
         pending != null -> frame {
+            // 跳板机的密钥:页面上说的是跳板机那台(它的名字、地址、上次记录的指纹)。
+            val keyHost = if (pending.jump) jumpHost ?: host else host
             HostKeyGate(
-                host = host,
+                host = keyHost,
                 fingerprint = pending.fingerprint,
                 changed = pending.changed,
                 tablet = tablet != null,
+                jumpFor = if (pending.jump) host else null,
                 // 信任后由上层把指纹写回主机并换一个新的 Host 实例,本屏随之重连。
-                onTrust = { onTrustKey(pending.fingerprint) },
+                onTrust = {
+                    if (pending.jump && jumpHost != null) {
+                        onTrustJumpKey(jumpHost, pending.fingerprint)
+                    } else {
+                        onTrustKey(pending.fingerprint)
+                    }
+                },
                 onExit = onExit,
             )
         }
@@ -314,17 +379,23 @@ fun TerminalScreen(
             val noPassword = host.auth == AuthKind.PASSWORD && !storedPassword
             val keyProblem = failure.startsWith("这把私钥有口令") ||
                 failure.startsWith("私钥口令不对")
+            // 跳板机没存凭据:重试只会得到同一句话(去跳板机那台的编辑页补上)。
+            val jumpNoCredentials = jumpHost != null && (
+                (jumpHost.auth == AuthKind.PASSWORD && jumpHost.password.isEmpty() && jumpHost.lockedPassword == null) ||
+                    jumpHost.keyMissing
+                )
             ConnectGate(
                 host = host,
                 failure = failure,
                 waited = 0,
                 tablet = tablet != null,
                 // 没存密码 / 没导入私钥时,重试只会得到同一句话,不给这个按钮。
-                retry = if (noPassword || host.keyMissing) null else ({ attempt++ }),
+                retry = if (noPassword || host.keyMissing || jumpGone || jumpNoCredentials) null else ({ attempt++ }),
                 onExit = onExit,
                 // 能就地修的直接给按钮,打开编辑页(平板是浮层)—— 不用先退回去再找编辑入口。
                 fix = (tablet?.onEdit ?: onEditHost)?.let { edit ->
                     when {
+                        jumpGone -> "重新选跳板机" to edit
                         noPassword -> "填写密码" to edit
                         host.keyMissing -> "导入私钥" to edit
                         keyProblem -> "填写口令" to edit
@@ -477,6 +548,8 @@ private fun TerminalView(
     var showKeys by remember { mutableStateOf(false) }
     var alt by remember { mutableStateOf(false) }
     var grid by remember { mutableStateOf(0 to 0) }
+    // 命令片段面板(轨道 / 底栏 / 平板工具栏上的 ⚡)。
+    var snippetsOpen by remember { mutableStateOf(false) }
 
     // 捏合调完字号要记住;等手停下来再写盘,别把每一帧都落到 SharedPreferences。
     LaunchedEffect(fontSize) {
@@ -581,6 +654,7 @@ private fun TerminalView(
         add(MenuAction("缩小字号", shortcut = "Ctrl+Shift+-") {
             fontSize = (fontSize - 1f).coerceIn(UiPrefs.FONT_MIN, UiPrefs.FONT_MAX)
         })
+        add(MenuAction("命令片段…") { snippetsOpen = true })
         tablet?.let { add(MenuAction("编辑主机…", shortcut = "Ctrl+Shift+E") { it.onEdit() }) }
     }
     var canvasMenuAt by remember { mutableStateOf<DpOffset?>(null) }
@@ -825,6 +899,10 @@ private fun TerminalView(
                     live.scrollToBottom()
                 }
             }
+            // 命令片段也是"输入":点一下把存好的命令发出去。断开之后没东西可发,收起来。
+            GlassReveal(!dead) {
+                GlassItem(XIcons.Bolt, "命令片段") { snippetsOpen = true }
+            }
             GlassItem(
                 XIcons.Command,
                 if (showKeys) "收起快捷键" else "显示快捷键",
@@ -879,6 +957,9 @@ private fun TerminalView(
                 GlassRevealRow(scrolled) {
                     ToolbarIcon(XIcons.ArrowDown, "回到底部") { live.scrollToBottom() }
                 }
+                GlassRevealRow(!dead) {
+                    ToolbarIcon(XIcons.Bolt, "命令片段") { snippetsOpen = true }
+                }
                 ToolbarIcon(
                     XIcons.Command,
                     if (showKeys) "收起快捷键栏" else "显示快捷键栏",
@@ -927,6 +1008,23 @@ private fun TerminalView(
             // 也和折叠屏同一个样子。试过把名字放到底下按钮左边,用户否掉了。
             HostLine(host = host, dead = dead, reconnecting = reconnecting)
         }
+    }
+
+    if (snippetsOpen) {
+        SnippetSheet(
+            host = host,
+            tablet = tablet != null,
+            onSend = { s ->
+                snippetsOpen = false
+                clearSelection()
+                live.sendRaw(snippetPayload(s.text, s.run).toByteArray())
+                restoreFocus()
+            },
+            onDismiss = {
+                snippetsOpen = false
+                restoreFocus()
+            },
+        )
     }
 
     val tabletop = adaptive.tabletop
@@ -1006,6 +1104,31 @@ private fun TerminalView(
                 EdgeRail(Modifier.align(Alignment.BottomEnd), content = actions)
             }
         }
+    }
+}
+
+/** 用 [other] 里已经解锁的三条凭据,其余(尤其是刚信任的指纹)取自己的。 */
+private fun Host.withSecretsOf(other: Host): Host =
+    copy(password = other.password, keyData = other.keyData, keyPassphrase = other.keyPassphrase)
+
+/** 设的跳板机已经被删掉了。 */
+private const val JumpGoneText = "这台主机的跳板机已经删除了。"
+
+/** 核心报的错是不是跳板机那一跳的(见 Rust `SshError::Jump` / `Tunnel` 的 Display)。 */
+private fun isJumpFailure(message: String?): Boolean = message.orEmpty().startsWith("jump host")
+
+/**
+ * 跳板机那一跳的错误换成人话:说清是**哪一台**出的事,用户才知道去改哪台主机。
+ * 不是跳板机的错就返回 null,由调用方照常处理。
+ */
+internal fun jumpFailureText(message: String, jump: Host, target: Host): String? {
+    val tunnel = "jump host could not open a tunnel: "
+    val hop = "jump host: "
+    return when {
+        message.startsWith(tunnel) ->
+            "跳板机「${jump.label}」连不到 ${target.address}:${target.port}。\n" + message.removePrefix(tunnel)
+        message.startsWith(hop) -> "跳板机「${jump.label}」:" + message.removePrefix(hop)
+        else -> null
     }
 }
 

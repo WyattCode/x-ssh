@@ -64,6 +64,11 @@ fun HostInfoGroups(host: Host) {
         FormDivider()
         InfoRow("用户名", host.username.ifBlank { "未设置" }, mono = host.username.isNotBlank())
         FormDivider()
+        if (host.jumpHostId.isNotEmpty()) {
+            val jump = LocalHosts.current.firstOrNull { it.id == host.jumpHostId }
+            InfoRow("跳板机", jump?.label ?: "已删除", valueColor = if (jump == null) p.warn else null)
+            FormDivider()
+        }
         // 判"到底存没存"要看磁盘上那条密文:加了锁而这次没解锁时,明文本来就是空的,
         // 有密文、但这次读不出来(重装过、密钥库被清):那不是"没存过",是**出事了**。
         // 一律说「未保存」的话,用户会以为自己从没存过密码。解不开这件事是加载时记下的

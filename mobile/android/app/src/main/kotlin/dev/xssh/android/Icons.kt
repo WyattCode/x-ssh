@@ -35,6 +35,12 @@ object XIcons {
         moveTo(12.5f, 16.5f); lineTo(18f, 16.5f)
     }
 
+    /** 命令片段:闪电(点一下就发出去的「快捷命令」)。 */
+    val Bolt = icon("bolt") {
+        moveTo(13.5f, 3f); lineTo(5.5f, 13.5f); lineTo(11.5f, 13.5f)
+        lineTo(10.5f, 21f); lineTo(18.5f, 10.5f); lineTo(12.5f, 10.5f); close()
+    }
+
     /** 快捷键面板:⌘(和 Mac 键盘上的 command 同一个符号)。 */
     val Command = icon("command") {
         moveTo(9f, 9f); lineTo(15f, 9f); lineTo(15f, 15f); lineTo(9f, 15f); close()

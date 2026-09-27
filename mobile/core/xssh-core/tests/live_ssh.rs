@@ -26,6 +26,7 @@ fn target(known_key: Option<String>) -> Option<Target> {
         username: user,
         auth: Auth::KeyFile { path: key.into(), passphrase: None },
         known_key,
+        jump: None,
     })
 }
 
@@ -255,4 +256,79 @@ fn cancelled_upload_leaves_the_target_alone() {
     sftp.remove(&path, false).expect("清理");
     sftp.close();
     ssh.disconnect();
+}
+
+/// 经跳板机连:先登跳板机、再经它的隧道连目标。两台的主机密钥各验各的。
+///
+/// 目标端口用 `XSSH_TEST_JUMP_TARGET_PORT`(同一台机器上另起一个 sshd 就行 —— 手机那边只转发了
+/// 跳板机的端口,目标只有经隧道才到得了)。没设就拿跳板机自己当目标。
+#[test]
+#[ignore = "需要真实 sshd,见文件头"]
+fn jump_host_tunnels_to_the_target() {
+    let Some(hop) = target(None) else {
+        eprintln!("未设置 XSSH_TEST_* 环境变量,跳过");
+        return;
+    };
+    let target_port: u16 = std::env::var("XSSH_TEST_JUMP_TARGET_PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(hop.port);
+    let via = |jump_key: Option<String>, target_key: Option<String>, port: u16| {
+        let mut jump = hop.clone();
+        jump.known_key = jump_key;
+        let mut t = hop.clone();
+        t.host = "127.0.0.1".into();
+        t.port = port;
+        t.known_key = target_key;
+        t.jump = Some(Box::new(jump));
+        t
+    };
+
+    // 跳板机的密钥还没信任:报的是**跳板机**的「不认识」,不是目标的。
+    let jump_fp = match Ssh::connect(&via(None, None, target_port)) {
+        Err(SshError::Jump(inner)) => match *inner {
+            SshError::HostKeyUnknown { fingerprint } => fingerprint,
+            other => panic!("应要求确认跳板机的密钥,实际: {other}"),
+        },
+        Err(other) => panic!("应要求确认跳板机的密钥,实际: {other}"),
+        Ok(_) => panic!("跳板机没有已信任指纹却连上了"),
+    };
+    // 跳板机信任了、目标还没有:这回是目标的「不认识」(不带 Jump 包装)。
+    let target_fp = match Ssh::connect(&via(Some(jump_fp.clone()), None, target_port)) {
+        Err(SshError::HostKeyUnknown { fingerprint }) => fingerprint,
+        Err(other) => panic!("应要求确认目标的密钥,实际: {other}"),
+        Ok(_) => panic!("目标没有已信任指纹却连上了"),
+    };
+    // 跳板机的密钥"变了":拒绝,并且说的是跳板机。
+    match Ssh::connect(&via(Some("SHA256:not-this-one".into()), Some(target_fp.clone()), target_port)) {
+        Err(SshError::Jump(inner)) => assert!(matches!(*inner, SshError::HostKeyChanged { .. }), "{inner}"),
+        other => panic!("跳板机密钥不符应被拒绝: {:?}", other.err()),
+    }
+    // 跳板机到不了的端口:隧道开不起来。
+    match Ssh::connect(&via(Some(jump_fp.clone()), Some(target_fp.clone()), 1)) {
+        Err(SshError::Tunnel(reason)) => eprintln!("隧道失败(预期): {reason}"),
+        other => panic!("目标端口不通应报隧道失败: {:?}", other.err()),
+    }
+
+    // 都信任了:连上、开 shell、敲命令、收回显。
+    let mut ssh = Ssh::connect(&via(Some(jump_fp), Some(target_fp), target_port)).expect("经跳板机连接");
+    let mut shell = ssh.open_shell(80, 24, "xterm-256color").expect("开 shell");
+    shell.write(b"echo via-jump-ok\r").expect("写数据");
+    let mut seen = Vec::new();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline {
+        while let Some(msg) = shell.poll_msg() {
+            if let ServerMsg::Data { data, .. } = msg {
+                seen.extend_from_slice(&data);
+            }
+        }
+        if String::from_utf8_lossy(&seen).contains("via-jump-ok") {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(String::from_utf8_lossy(&seen).contains("via-jump-ok"), "经隧道没收到回显");
+    let started = Instant::now();
+    ssh.disconnect();
+    assert!(started.elapsed() < Duration::from_secs(7), "断开被卡住了");
 }
