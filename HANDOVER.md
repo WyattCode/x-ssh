@@ -12,7 +12,7 @@
 - 必须用 `npm.cmd`(直接 `npm` 会因执行策略失败)。
 - 校验: `npm.cmd run typecheck`、`npm.cmd run build`
 - **单元测试**: `npm.cmd run test`(Vitest 2,与 Vite 5 兼容;共 **267** 用例,全部落在纯逻辑层:`src/shared/*`、`src/renderer/src/lib/*`、`composables/*`)。**没有任何组件测试**,界面交互只能人工验。)
-- **i18n 键对称校验**: `npm.cmd run lint:i18n`(现在串跑两个脚本:桌面端 `scripts/lint-i18n.mjs` + 移动端 `scripts/lint-i18n-mobile.mjs`;桌面端 638/638 全对称)。
+- **i18n 键对称校验**: `npm.cmd run lint:i18n`(现在串跑两个脚本:桌面端 `scripts/lint-i18n.mjs` + 移动端 `scripts/lint-i18n-mobile.mjs`;桌面端 zh / zh-TW / en 640/640/640 全对称,移动端三份资源对称且代码里 0 条内联中文)。
 - 打包: `npm.cmd run dist` → `release\X-SSH Setup 0.2.1.exe`(NSIS)+ `release\win-unpacked\X-SSH.exe` + `.blockmap`。
 - 无代码签名,SmartScreen 可能提示(正常)。
 - **CI**: `.github/workflows/ci.yml`,两个作业 —— `test-build`(`windows-latest`:typecheck → lint:i18n → unit test → build;NOTE: 仅 build,不跑 electron-builder,因无代码签名配置)、`rust-core`(`cargo test --workspace` + `cargo clippy -- -D warnings`;移动端核心不需要设备,所以进了 CI)。
@@ -45,9 +45,24 @@
 - **主进程里没有非空断言了**。需要 SSH 管理器的地方用 `requireSshManager()`(只有晚于窗口创建的 handler 才可以用);能在窗口创建前被调用到的(如 `sessionLog`、fire-and-forget 的 `send`)必须自己判空。
 
 ## 下一步(如果继续)
+- **待亲眼看的**(第十二次会话末只过了 typecheck / 单测):设置 → 常规 → 语言那一排四个按钮排不排得下;
+  Codex 里右键「复制」和菜单靠底部时收进窗口;繁体界面整体过一遍。
+- `CHANGELOG.md` 还没写这一轮(三种语言、设置 / 主机列表防丢失、右键复制);要发版时补上并改版本号。
 - 按用户截图式 UI 反馈继续修复。
 - 如版本号增加,改 `package.json` + 更新 `CHANGELOG.md` 后 `npm.cmd run dist` 重打包。
 - 大规模改动前先跑 `npm.cmd run typecheck && npm.cmd run build` 与 `npm.cmd run lint:i18n` 保证通过。
+
+# 会话记录:第十二次会话后半(2026-09-27 晚,提交 `f6fef73`)
+
+- **繁体中文 + 跟随系统**:`i18n.ts` 加 `zh-TW` 字典(台湾用语,640 条),设置里语言四个按钮,`src/shared/lang.ts` 做系统语言识别,
+  托盘菜单也按同一套规则。没存过语言时**从默认简体改成了跟随系统**(英文 Windows 上会显示英文)。
+- **设置 / 主机列表防丢失**:见上面「架构要点」里「设置文件不能丢」那两条(`durableFile.ts`、`will-quit` 等写完)。
+- **右键复制**:见「架构要点」里「右键「复制」在 Codex 这类程序里是灰的」。
+- 部署:`D:\Apps\X-SSH` 已是这版(robocopy 后 `app.asar` / `X-SSH.exe` 哈希与 `release\win-unpacked` 一致)。
+  桌面快捷方式那个 `%USERPROFILE%\Desktop\X-SSH` 目录现在不存在,只部署了 `D:\Apps\X-SSH`。
+- 测试 267 条(新增 `settings.test.ts` 8、`store.test.ts` 3、`durableFile.test.ts` 7、`lang.test.ts` 20);
+  `store.test.ts` 与 settings 的"半截文件"用例拿旧实现跑全失败(阴性对照)。
+- 移动端这一轮见 `mobile/HANDOVER.md` M3.60–M3.62。
 
 # 会话记录:第十二次会话复核(2026-09-27)
 
