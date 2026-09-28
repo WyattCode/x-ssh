@@ -119,7 +119,9 @@ fun HostInfoGroups(host: Host) {
         }
         if (host.auth == AuthKind.KEY && host.keyPublicFingerprint.isNotEmpty()) {
             FormDivider()
-            InfoRow(stringResource(R.string.host_key_fingerprint), host.keyPublicFingerprint.removePrefix("SHA256:"), mono = true)
+            // 和下面的主机密钥一样分组显示:这一行的用处就是让人逐段核对"是不是我导入的那把",
+            // 挤成一行被省略号截掉就核不了了(InfoRow 固定 maxLines = 1)。
+            FingerprintRow(stringResource(R.string.host_key_fingerprint), host.keyPublicFingerprint)
         }
     }
     Spacer(Modifier.height(24.dp))
@@ -165,6 +167,36 @@ private fun unreadableText(broken: List<SecretField>): String {
         1 -> stringResource(R.string.host_unreadable_1, names[0])
         2 -> stringResource(R.string.host_unreadable_2, names[0], names[1])
         else -> stringResource(R.string.host_unreadable_3, names[0], names[1], names[2])
+    }
+}
+
+/**
+ * 带标签的指纹行。取值用 [fingerprintRows] 分组换行,不截断 ——
+ * 指纹的用处是逐段核对,被省略号截掉就等于没有。
+ */
+@Composable
+fun FingerprintRow(label: String, value: String) {
+    val p = LocalXssh.current
+    val (algorithm, rows) = fingerprintRows(value)
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = BoxPad, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, color = p.text, fontSize = 15.sp)
+        Spacer(Modifier.width(GapItem))
+        Column(Modifier.weight(1f), horizontalAlignment = Alignment.End) {
+            if (algorithm.isNotEmpty()) {
+                Text(algorithm, color = p.textDim, fontSize = 13.sp)
+                Spacer(Modifier.height(4.dp))
+            }
+            SelectionContainer {
+                Column(horizontalAlignment = Alignment.End) {
+                    rows.forEach {
+                        Text(it, color = p.textDim, fontSize = 13.sp, fontFamily = XsshFonts.monoUi)
+                    }
+                }
+            }
+        }
     }
 }
 

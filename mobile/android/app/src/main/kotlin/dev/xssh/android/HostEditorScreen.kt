@@ -799,23 +799,8 @@ fun CredentialFields(
         }
         if (draft.keyPublicFingerprint.isNotEmpty()) {
             FormDivider()
-            Row(
-                Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(horizontal = BoxPad),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(stringResource(R.string.edit_fingerprint), color = p.text, fontSize = 16.sp)
-                Spacer(Modifier.width(GapItem))
-                Text(
-                    draft.keyPublicFingerprint.removePrefix("SHA256:"),
-                    color = p.textDim,
-                    fontSize = 13.sp,
-                    fontFamily = XsshFonts.monoUi,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    textAlign = TextAlign.End,
-                    modifier = Modifier.weight(1f),
-                )
-            }
+            // 分组显示,别挤成一行截断(见 FingerprintRow)。
+            FingerprintRow(stringResource(R.string.edit_fingerprint), draft.keyPublicFingerprint)
         }
         if (draft.keyLocked) {
             FormDivider()
