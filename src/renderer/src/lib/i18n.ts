@@ -35,7 +35,6 @@ const zh: Dict = {
   'status.unknownTip': '主机密钥尚未记录(首次连接)',
 
   // app / welcome
-  'app.tagline': '更安静地抵达你的服务器',
   'app.newConn': '新建连接',
   'app.ungrouped': '未分组',
   'app.hintBefore': '输入 ',
@@ -709,7 +708,6 @@ const en: Dict = {
   'status.trustedTip': 'Host key is trusted',
   'status.unknownTip': 'Host key not recorded yet (first connect)',
 
-  'app.tagline': 'Reach your servers more quietly',
   'app.newConn': 'New connection',
   'app.ungrouped': 'Ungrouped',
   'app.hintBefore': 'Type ',
@@ -1376,7 +1374,6 @@ const zhTW: Dict = {
   'status.unknownTip': '主機金鑰尚未記錄(首次連線)',
 
   // app / welcome
-  'app.tagline': '更安靜地抵達你的伺服器',
   'app.newConn': '新增連線',
   'app.ungrouped': '未分組',
   'app.hintBefore': '輸入 ',

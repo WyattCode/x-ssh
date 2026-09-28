@@ -108,9 +108,27 @@ async function buildTrayMenu(win: BrowserWindow): Promise<Electron.Menu> {
     }
   ])
 }
+// Tray icon at the size each platform actually shows. Windows: the .ico, so the shell
+// picks the frame rendered for the current DPI (Electron's own recommendation) instead
+// of shrinking the 1024px PNG. macOS / Linux: 16pt (menu bar) / 24px (indicators) with
+// an @2x representation — handing them the raw 1024px image shows it oversized or
+// coarsely scaled.
+function trayImage(): Electron.NativeImage {
+  const dir = join(__dirname, '../../build')
+  if (process.platform === 'win32') return nativeImage.createFromPath(join(dir, 'icon.ico'))
+  const big = nativeImage.createFromPath(join(dir, 'icon.png'))
+  if (big.isEmpty()) return big
+  const pt = process.platform === 'darwin' ? 16 : 24
+  const img = nativeImage.createEmpty()
+  for (const scaleFactor of [1, 2]) {
+    const px = pt * scaleFactor
+    img.addRepresentation({ scaleFactor, buffer: big.resize({ width: px, height: px, quality: 'best' }).toPNG() })
+  }
+  return img
+}
 async function setupTray(win: BrowserWindow): Promise<void> {
   if (tray) return
-  let image = nativeImage.createFromPath(join(__dirname, '../../build/icon.png'))
+  let image = trayImage()
   if (image.isEmpty()) image = nativeImage.createFromDataURL(DRAG_ICON.toDataURL())
   tray = new Tray(image)
   tray.setToolTip('X-SSH')

@@ -1,28 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-  前景层:终端提示符 >_ ,与桌面版 build/icon.svg 同一个标识。
-
-  尺寸怎么定的(别再按"原图多大就多大"来放):
-  自适应图标的画布是 108dp,但**只有中间 72dp 是可见的**,外圈 18dp 一圈会被启动器的
-  遮罩裁掉。桌面版里符号占整块图标的 53.2%,如果在这里也按 53.2% 的画布宽度放,
-  换算到可见区域就是 53.2% x 108/72 = 79.8% —— 撑满整个图标、四周没有空隙。
-  所以要按可见区域算:符号宽 = 0.532 x 72/108 x 1024 = 363 单位(相当于原图缩放 0.666)。
-  这样看上去才和桌面版一样,四周留得出气。
--->
+<!-- 由 build/icon-src/make_icons.py 生成,别手改(改那个脚本再跑一遍)。前景:两根银条,只占中间 72dp 可见区的约 2/3。 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="1024"
     android:viewportHeight="1024">
-    <path
-        android:pathData="M363.2,420.1L500.3,512L363.2,603.9"
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="65.3"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round" />
-    <path
-        android:pathData="M558.3,603.2L663.5,603.2"
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="59.9"
-        android:strokeLineCap="round" />
+    <path android:pathData="M610.23,329.26 A41.96,41.96 0 0,1 639.68,317.19 L694.60,317.19 A41.96,41.96 0 0,1 724.05,389.04 L413.77,694.74 A41.96,41.96 0 0,1 384.32,706.81 L329.40,706.81 A41.96,41.96 0 0,1 299.95,634.96Z">
+        <aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="709.73" android:startY="317.19" android:endX="314.27" android:endY="706.81"><item android:offset="0.000" android:color="#FF878D94"/><item android:offset="0.080" android:color="#FF6F757C"/><item android:offset="0.165" android:color="#FF565C63"/><item android:offset="0.249" android:color="#FF3F444B"/><item android:offset="0.333" android:color="#FF2E3338"/><item android:offset="0.500" android:color="#FF262A2F"/><item android:offset="0.670" android:color="#FF2C3138"/><item android:offset="0.754" android:color="#FF4E555E"/><item android:offset="0.838" android:color="#FF7B828B"/><item android:offset="0.922" android:color="#FF9FA4AD"/><item android:offset="1.000" android:color="#FFB3B8BF"/></gradient></aapt:attr>
+    </path>
+    <path android:pathData="M610.23,329.26 A41.96,41.96 0 0,1 639.68,317.19 L694.60,317.19 A41.96,41.96 0 0,1 724.05,389.04 L413.77,694.74 A41.96,41.96 0 0,1 384.32,706.81 L329.40,706.81 A41.96,41.96 0 0,1 299.95,634.96Z">
+        <aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="469.03" android:startY="468.38" android:endX="554.97" android:endY="555.62"><item android:offset="0.000" android:color="#2E000000"/><item android:offset="0.500" android:color="#00000000"/><item android:offset="0.500" android:color="#00FFFFFF"/><item android:offset="1.000" android:color="#29FFFFFF"/></gradient></aapt:attr>
+    </path>
+    <path android:pathData="M299.95,389.04 A41.96,41.96 0 0,1 329.40,317.19 L384.32,317.19 A41.96,41.96 0 0,1 413.77,329.26 L724.05,634.96 A41.96,41.96 0 0,1 694.60,706.81 L639.68,706.81 A41.96,41.96 0 0,1 610.23,694.74Z">
+        <aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="314.27" android:startY="317.19" android:endX="709.73" android:endY="706.81"><item android:offset="0.000" android:color="#FFE4E7EB"/><item android:offset="0.089" android:color="#FFD6D9DF"/><item android:offset="0.172" android:color="#FFBEC3CB"/><item android:offset="0.256" android:color="#FFA5ABB3"/><item android:offset="0.339" android:color="#FF8A929A"/><item android:offset="0.423" android:color="#FF848C95"/><item android:offset="0.506" android:color="#FF858D96"/><item android:offset="0.590" android:color="#FF8B939C"/><item android:offset="0.673" android:color="#FF979DA6"/><item android:offset="0.757" android:color="#FFA4AAB3"/><item android:offset="0.840" android:color="#FFADB3BB"/><item android:offset="0.924" android:color="#FFB6BBC5"/><item android:offset="1.000" android:color="#FFBFC4CC"/></gradient></aapt:attr>
+    </path>
+    <path android:pathData="M299.95,389.04 A41.96,41.96 0 0,1 329.40,317.19 L384.32,317.19 A41.96,41.96 0 0,1 413.77,329.26 L724.05,634.96 A41.96,41.96 0 0,1 694.60,706.81 L639.68,706.81 A41.96,41.96 0 0,1 610.23,694.74Z">
+        <aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="554.97" android:startY="468.38" android:endX="469.03" android:endY="555.62"><item android:offset="0.000" android:color="#59FFFFFF"/><item android:offset="0.250" android:color="#16FFFFFF"/><item android:offset="0.500" android:color="#00FFFFFF"/><item android:offset="0.750" android:color="#16FFFFFF"/><item android:offset="1.000" android:color="#59FFFFFF"/></gradient></aapt:attr>
+    </path>
 </vector>

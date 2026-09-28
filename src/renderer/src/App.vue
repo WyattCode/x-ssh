@@ -37,7 +37,9 @@ import {
   chordMatches,
   type RebindableAction
 } from './lib/shortcuts'
-import logoUrl from './assets/logo.png'
+// 新标识「X SSH」:白天 / 夜间两张,按界面主题显示其中一张(见 .lockup 样式)。
+import logoLight from './assets/logo-light.png'
+import logoDark from './assets/logo-dark.png'
 import type { Host } from '../../shared/types'
 
 // Neither of these can be on screen at startup — a restored tab comes back
@@ -369,9 +371,10 @@ onBeforeUnmount(() => {
       <!-- Empty state -->
       <div v-if="!store.tabs.length" class="welcome">
         <div class="hero">
-          <img class="logo" :src="logoUrl" alt="X-SSH" />
-          <h1>X-SSH</h1>
-          <p class="tagline">{{ t('app.tagline') }}</p>
+          <h1 class="brand">
+            <img class="lockup lockup-light" :src="logoLight" alt="X-SSH" draggable="false" />
+            <img class="lockup lockup-dark" :src="logoDark" alt="X-SSH" draggable="false" />
+          </h1>
         </div>
 
         <div class="dock">
@@ -522,20 +525,27 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 4px;
 }
-.logo {
-  width: 84px;
-  height: 84px;
-  margin-bottom: 8px;
+.brand {
+  margin: 0;
+  line-height: 0;
+}
+.lockup {
+  height: 48px;
+  width: auto;
   -webkit-user-drag: none;
+  user-select: none;
 }
-.welcome h1 {
-  font-size: 24px;
-  font-weight: 600;
-  letter-spacing: -0.02em;
+/* 渲染层总会在 <html> 上打 data-theme(见 styles/global.css):浅色主题用白天版,其余用夜间版。
+   别写成 :global(:root[...]) .lockup-light —— Vue 会把后半截丢掉,编出 :root[...]{display:none},
+   浅色主题下整个页面就没了。scoped 本来就只给最后一段加属性,祖先选择器直接写即可。 */
+.lockup-light {
+  display: none;
 }
-.tagline {
-  color: var(--text-dim);
-  font-size: 13.5px;
+:root[data-theme='light'] .lockup-light {
+  display: inline;
+}
+:root[data-theme='light'] .lockup-dark {
+  display: none;
 }
 .dock {
   width: min(360px, 84vw);

@@ -5,6 +5,12 @@
 
 ## [Unreleased]
 
+### Changed
+- **全新标识**: 两根交叉的银色条组成的「X」, 白天 / 夜间两套配色; 欢迎页换成「X SSH」字标, 随界面深浅色切换。
+- **macOS 图标按 macOS 26 / 27 的 Liquid Glass 规范重做**: 提供 Icon Composer 分层图标(`build/icon.icon`, 不带圆角的方形矢量图层, 默认 / 深色两种外观, 高光阴影由系统生成)。
+- Windows / Linux 图标、托盘和窗口图标换成新标识(夜间配色的圆角方块); Windows 图标含各缩放比例的专用尺寸, 小尺寸单独优化过, 托盘按系统 DPI 取清晰的那一帧。
+- 打包工具 electron-builder 升级到 26(26.2 起支持 Icon Composer 图标); 移除旧的图标生成脚本及其依赖 `sharp`、`png-to-ico`, 所有图标改由 `build/icon-src/make_icons.py` 从同一套几何生成。
+
 ## [0.3.0] - 2026-09-28
 
 这一版包含 0.2.0 之后的全部改动(0.2.1 只是内部打包号, 没有单独发布)。

@@ -13,7 +13,17 @@
 - 校验: `npm.cmd run typecheck`、`npm.cmd run build`
 - **单元测试**: `npm.cmd run test`(Vitest 2,与 Vite 5 兼容;共 **267** 用例,全部落在纯逻辑层:`src/shared/*`、`src/renderer/src/lib/*`、`composables/*`)。**没有任何组件测试**,界面交互只能人工验。)
 - **i18n 键对称校验**: `npm.cmd run lint:i18n`(现在串跑两个脚本:桌面端 `scripts/lint-i18n.mjs` + 移动端 `scripts/lint-i18n-mobile.mjs`;桌面端 zh / zh-TW / en 640/640/640 全对称,移动端三份资源对称且代码里 0 条内联中文)。
-- 打包: `npm.cmd run dist` → `release\X-SSH Setup 0.3.0.exe`(NSIS)+ `release\win-unpacked\X-SSH.exe` + `.blockmap`。
+- 打包: `npm.cmd run dist` → `release\X-SSH Setup 0.3.0.exe`(NSIS)+ `release\win-unpacked\X-SSH.exe` + `.blockmap`。electron-builder 已是 **26.x**。
+- **图标**:全部由 `python build/icon-src/make_icons.py` 生成(Pillow + numpy),别手改产物。几何是从 `build/icon-src/reference/` 里用户给的三张参考图拟合的
+  (两根镜像的平行四边形条、水平切口、倾角约 45.4°、圆角 63/1024,形状 IoU 0.97)。产物:`build/icon.icon`(macOS 26/27 Icon Composer 文档:
+  四个 SVG 图层,白天 / 夜间两套条靠 `hidden-specializations` 切换,背景 `fill-specializations`;按 HIG 图层是**不带圆角的方形**、不自己画阴影高光)、
+  `build/icon.png/.ico/-512/-256/.svg`(Windows / Linux / 托盘:夜间配色圆角方块;ICO 含 16~256 共 15 帧,覆盖 Windows 各缩放比例,每帧单独渲染、不是缩小来的;
+  **小尺寸优化**:夜间配色「/」条中段和底几乎一样黑,16~24px 时会整段消失,所以 <64px 的图把它最暗处往 `SMALL_FLOOR` 抬,16px 抬满、64px 起不动)、
+  `src/renderer/src/assets/logo-light|dark.png`(欢迎页字标,出图 192px 高 = 显示 48px × 4 倍,够 300% 系统缩放 × 应用 1.2 倍缩放;用户嫌 X 太大、离字太远,拆开重排:用户定的比例是 X 和字母**一样高**、上下对齐、间距 0.22 倍字高(参照 MCode 的字标,量过:标高 = 字高、间距 0.22、竖笔 0.23 倍字高),SSH 直接用用户给的设计稿 `build/icon-src/reference/ssh-{dark,light}.png`(之前自己腐蚀变细把字形弄坏了,用户否掉;**别再改笔画**),X 直接用应用图标原图 `reference/icon-{dark,light}.webp`(用户要求和应用图标统一;横幅已不再用),只抠底、缩放到字高;抠底门槛按每张图的底噪单独给,且只按一个方向算不透明度(深底只看比底亮的),否则白天版浅色条端会被抠掉、黑底会泛雾,欢迎页显示高 48px;原来的欢迎语用户不要,已删)、安卓 `drawable(-night)/ic_launcher_*`、`ic_stat_session`。`icon.json` 用 dfabulich 的非官方 schema 校验过(含阴性对照),
+  托盘图标按平台给:Windows 用 `icon.ico`(系统按 DPI 取对应帧,Electron 官方推荐),macOS / Linux 从 1024 图缩成 16pt / 24px 各带 @2x —— 以前直接给 1024 的 PNG。
+  **Vue 坑**:scoped 样式里别写 `:global(:root[data-theme='light']) .lockup-light`,Vue 3.5 会把后半截丢掉、编出 `:root[...]{display:none}`,浅色主题整个窗口空白(本批差点带出去,复核时在编译后的 CSS 里发现);祖先选择器直接写就行。
+  复核手法:SVG 用无头 Electron 光栅化后和 numpy 位图逐像素比(内部 ≤6 级、差异全在边缘抗锯齿);欢迎页用无头 Electron + 桩 preload 两种主题都截过图;安卓 `assembleDebug` 通过、APK 里白天 / 夜间两套都在,X 离中心最远 29.5dp(安全圆 33dp)。
+  但**没有在 Icon Composer 里打开过、也没在 Mac 上打过包**(这台是 Windows):macOS 包必须在装了 Xcode 26 的 Mac 上打,electron-builder 会调 actool 编 Assets.car。
 - 无代码签名,SmartScreen 可能提示(正常)。
 - **CI**: `.github/workflows/ci.yml`,两个作业 —— `test-build`(`windows-latest`:typecheck → lint:i18n → unit test → build;NOTE: 仅 build,不跑 electron-builder,因无代码签名配置)、`rust-core`(`cargo test --workspace` + `cargo clippy -- -D warnings`;移动端核心不需要设备,所以进了 CI)。
 
