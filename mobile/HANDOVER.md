@@ -1,6 +1,6 @@
 # X-SSH 移动端交接文档
 
-> 更新: 2026-09-27 晚(第十二次会话:断线自动重连 + tmux 续接 M3.60;跳板机 + 命令片段 M3.61;三种界面语言 M3.62;桌面版设置 / 主机列表防丢失、右键复制,见根目录 HANDOVER.md。最新提交 `f6fef73`)。2026-09-26(第九次会话续:直板机按钮挪到底部,见 M3.57;第十、十一次会话:全面复核 —— 凭据丢失路径、密文状态可辨、安卓单测从零建起、平板真机复核,见 M3.58–M3.59)。
+> 更新: 2026-09-28(第十四次会话:本机 **MuMu 模拟器**上复核 M3.63;UI 细节走查,修掉私钥指纹被截断的缺陷 M3.64 —— **这两处代码改动尚未提交**)。2026-09-27 晚(第十二次会话:断线自动重连 + tmux 续接 M3.60;跳板机 + 命令片段 M3.61;三种界面语言 M3.62;桌面版设置 / 主机列表防丢失、右键复制,见根目录 HANDOVER.md。最新提交 `f6fef73`)。2026-09-26(第九次会话续:直板机按钮挪到底部,见 M3.57;第十、十一次会话:全面复核 —— 凭据丢失路径、密文状态可辨、安卓单测从零建起、平板真机复核,见 M3.58–M3.59)。
 > 设备: Xiaomi 18 Fold(`2608BPX34C`,折叠屏,主测)、Xiaomi 17 Ultra(`25128PNA1C`,直板机)、
 > **Xiaomi Pad 9 Pro Max**(`M367FC`,平板,带键盘套/触控板/手写笔,见 M3.24)。
 > 最新提交以 `git log` 为准;本文 §0/§1/§6/§7 是现状,§2 起是按时间记的过程与原因(改代码前先读相关小节)。
@@ -75,9 +75,13 @@ SFTP 已做(上传/下载/重命名/删除,上传是"先写临时文件再改名
    - **17 Ultra 竖屏终端底栏**(`4f446e4` 的修复:外观让位、底栏两组分开排间隔,最挤 392dp)—— 17 Ultra 上还是 `02cc89a`,要先装最新版。
    - 首次连加锁主机时确认密钥后不再重复弹指纹(同一屏复用已解锁凭据,M3.61 复核)。
    - 外屏键盘弹着又在翻历史时,胶囊里多一颗「回到底部」,轨道最上面一颗可能压到状态栏(老问题,靶机输出太短复现不了)。
-   - 桌面版设置里语言四个按钮(跟随系统 / 简体 / 繁體 / English)排不排得下,没打开应用看过。
+   - **桌面版**(Electron)设置里语言四个按钮排不排得下,没打开应用看过。
+     ⚠️ 别和 M3.63 那条混淆 —— 那里验的是**移动端**设置页的四个语言按钮,桌面版这一条**仍然没验**。
    - 桌面版右键复制(Codex 里)和菜单量高度收进窗口,没在真实界面试过。
 7. 发布前:HyperOS 省电白名单引导、通知权限被拒的兜底、TOFU 策略与桌面版统一、密码 zeroize。
+8. **第十四次会话有两处改动还没提交**(工作区里):`mobile/HANDOVER.md` 自己,以及 M3.64 的指纹修复
+   (`HostInfo.kt` 新增 `FingerprintRow`、`HostEditorScreen.kt` 改用它)。**接手的先 `git status` 看一眼**,
+   别当成别人没干完的活。
 
 > **第九次会话的教训(M3.56、坑 100–101)**:验证要选**别人干扰不了**的判据。小米输入法给密码框
 > 挂 `FLAG_SECURE` 会把整屏截图弄黑,锁屏也会 —— 两次都让我以为"保护住了"。读 `dumpsys window` 的
@@ -91,24 +95,31 @@ SFTP 已做(上传/下载/重命名/删除,上传是"先写临时文件再改名
 
 用户的真服务器 `192.168.1.100`(主机名 DGX Node 0)**只点界面、不在里面敲命令**。要测输入就用本地靶机:
 
-第七次会话在这台 PC 上重建了靶机(和之前那台不是同一台机器):只认 `authorized_keys` 里的 `id_xssh_dev`,
-主机密钥指纹 **`SHA256:NuZD6Jv36NCi0gSSVW45YYnCVk1ez6l+51m6aMFueQs`**(第十二次会话用 `ssh-keygen -lf ssh_host_ed25519_key.pub`
-核对过;之前写的 `c/Oi3y0…` 已过时)。**注意 `sshd_config` 里现在是 `Port 22` + `ListenAddress 0.0.0.0`**,
-所以启动时一律用 `-o` 覆盖成只绑回环(见下)。测跳板机时再起一个 `-o Port=2223` 的实例当目标,手机只 `adb reverse` 2222。
+靶机在第十三/十四次会话之间被清理过(Temp 目录只剩一个 `authorized_keys`,`sshd.exe`、配置、主机密钥、私钥全没了)。
+**第十四次会话用系统自带的 OpenSSH 重建了它**,配置固定为只绑回环:
+
+- 私钥 `id_xssh_dev`(ed25519,注释 `xssh-dev`),公钥已写进同目录 `authorized_keys`
+- 主机密钥指纹 **`SHA256:wfEX/1iYTjMAN4Y2GwgMt412wqzxHFgkV2UBmdTRbXA`**(旧记的 `NuZD6Jv3…`、`c/Oi3y0…` 都已作废)
+- `sshd_config` 里直接写死 `Port 2222` + `ListenAddress 127.0.0.1`,**启动时不必再用 `-o` 覆盖**
+- `PerSourcePenalties` 只能删掉:系统自带的是 OpenSSH 9.x,不认识这个 9.8+ 的选项,写了会 "Bad configuration option"
+
+```powershell
+# 1) PC 上起 sshd(配置里已绑回环;路径必须绝对,否则 "sshd_config: No such file")
+Start-Process -FilePath 'C:\Windows\System32\OpenSSH\sshd.exe' `
+  -ArgumentList '-D','-e','-f','C:\Users\user\AppData\Local\Temp\opencode\xssh-sshd\sshd_config' `
+  -RedirectStandardError 'C:\Users\user\AppData\Local\Temp\opencode\xssh-sshd\sshd-run.log' -WindowStyle Hidden
+# 2) 手机/模拟器回环 → PC
+adb reverse tcp:2222 tcp:2222
+# 3) 私钥:界面上「导入私钥…」可以直接选文件(第十四次会话验过,见 M3.63)。
+#    要走命令,就推到模拟器可见目录再在应用里选,或推进私有目录:
+adb push id_xssh_dev /sdcard/Download/id_xssh_dev   # 然后在表单里「导入私钥…」选它
+```
+测跳板机时再起一个 `-o Port=2223` 的实例当目标,手机只 `adb reverse` 2222。
 默认 shell 是 cmd(Windows),没有 vim/less —— 应用光标模式只有单测覆盖(`input_modes_follow_the_program`)。
 
-```bash
-# 1) PC 上起便携 sshd(配置文件必须给绝对路径,否则 "sshd_config: No such file")
-cd /c/Users/user/AppData/Local/Temp/opencode/xssh-sshd && ./OpenSSH-Win64/sshd.exe -D -e \
-  -f 'C:\Users\user\AppData\Local\Temp\opencode\xssh-sshd\sshd_config' \
-  -o Port=2222 -o ListenAddress=127.0.0.1 -o PerSourcePenalties=no
-# 2) 手机回环 → PC
-adb reverse tcp:2222 tcp:2222
-# 3) 私钥推进 App 私有目录(私钥主机只能这样造,界面上没有入口)
-adb push id_xssh_dev /data/local/tmp/k && adb shell "run-as dev.xssh.android sh -c 'cat /data/local/tmp/k > files/xssh_dev_key'"
-```
 测试主机可以直接写 `shared_prefs/xssh_hosts.xml`(JSON 列表,字段见 `HostStore.kt`)。
 **用户设备上已有真实主机(含加密密码)时,先原样备份该文件,测完字节级还原。** 测完关 sshd、`adb reverse --remove-all`。
+**注意 `input text` 的空格要写成 `%s`**,否则从空格处整段截断(见坑 106)。
 
 ### 1.1 验证手法(第六次会话沉淀)
 
@@ -202,7 +213,8 @@ adb push id_xssh_dev /data/local/tmp/k && adb shell "run-as dev.xssh.android sh 
 | JDK | `C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot` |
 | Android SDK | `D:\Android\sdk`(platform-tools / platforms;android-37.0 / build-tools;37.0.0 / ndk;28.2.13676358) |
 | Gradle | `D:\Android\gradle-9.7.1`(不用 wrapper) |
-| 本地 SSH 靶机 | 便携 OpenSSH,配置 `%LOCALAPPDATA%\Temp\opencode\xssh-sshd\`(0.0.0.0:22,私钥 `id_xssh_dev`,防火墙规则 "OpenSSH dev 22") |
+| 本地 SSH 靶机 | 系统自带 OpenSSH,配置 `%LOCALAPPDATA%\Temp\opencode\xssh-sshd\`(**127.0.0.1:2222**,私钥 `id_xssh_dev`,第十四次会话重建) |
+| MuMu 模拟器 | `D:\Apps\MuMuPlayer`(MuMuManager 6.7.0;实例 0 = Android 15/API 35,伪装 vivo V2362A,1440×2560@360dpi,adb `127.0.0.1:16384`) |
 | 用户服务器 | `192.168.1.100`(DGX Node 0,用户 user;**密码不写进仓库**;只点界面不敲命令) |
 | 网络 | PC 与手机同一局域网 `192.168.10.x`(手机曾为 `.150`) |
 | MSVC | VS 2022 Build Tools + C++ 工作负载(**cargo-ndk / 桌面版 xssh-ffi 编译要 `link.exe`**,没有就 `linker link.exe not found`) |
@@ -1964,6 +1976,98 @@ Linux 服务器没有这一下,旧输出直接留在屏上。
 **真机**:Fold 外屏简体 / 英文 / 繁体看了设置、主机详情、编辑页;平板看了设置浮层和详情页、录屏验证不闪。测后都恢复「跟随系统」、主机数据没动
 (平板的 `xssh_hosts.xml` 在这之前被用户自己用过 —— 信任了主机密钥、重存了密码,md5 变成 `470b19c9…`,不是测试造成的,没去还原)。
 
+### M3.63 在 MuMu 模拟器上复核(第十四次会话)
+
+用户提醒本机有安卓虚拟机。**找的过程本身值得记**:我一开始按官方 SDK 找 `emulator.exe`,没找到就下了
+"本机没有安卓虚拟机"的结论 —— 实际是 **MuMu 模拟器 6.7.0**(`D:\Apps\MuMuPlayer`),它用 VBox、自带 adb,
+不在 SDK 目录里。而且当时**只起了主程序、安卓系统没启动**,所以 16384 端口不监听、adb 啥也看不到。
+用户坚持"就是本机,再找找",才发现。**教训:找东西别只按自己熟悉的名字找,`Get-Process` 搜一遍进程名最快。**
+
+**怎么把它弄起来**(MuMuManager 的命令行接口,`nx_main\MuMuManager.exe`):
+
+```powershell
+$mm = "D:\Apps\MuMuPlayer\nx_main\MuMuManager.exe"
+& $mm info -v all                       # is_android_started / adb_port 都在这
+& $mm control -v 0 launch               # 只起"主程序"不算数,必须 launch 实例
+& "D:\Android\sdk\platform-tools\adb.exe" connect 127.0.0.1:16384
+```
+
+**虚拟机的定位**:它**不能替代真机复核**。密钥库是另一套实现,生物识别(指纹/人脸)、HyperOS 省电与联网拦截、
+折叠屏形态、手写笔、触控板全都验不了。它的价值在于"第二现场":装 APK 快、改分辨率快、能看 logcat。
+**真机才作数的结论仍要在平板上过一遍。**
+
+**这轮验到的**
+
+| 判据 | 结果 |
+|---|---|
+| 最新代码编译的 APK 能装能起(无崩溃) | ✅ 库哈希核对过(`--strip-unneeded` 后与 APK 内一致) |
+| 设置页四个语言按钮排得下(不挤不截断) | ✅ 「跟随系统 / 简体中文 / 繁體中文 / English」各占一行 |
+| 语言切换**不重建 Activity** | ✅ 日志取证:点「繁體中文」的前后 4 秒里,`MainActivity` 只有 `viewroot_draw_event`(重绘),没有 `wm_on_create` / `wm_on_destroy` / `wm_pause` / `wm_stop`;同一份日志里真正重建的时刻(`wm_finish_activity` → `wm_on_create_called`)是**会记的**,所以这是有效对照。切换后「設定 / 語言 / 終端機字型」都变了 |
+| 繁体切换本身 | ✅ 承上,正是这一次切换;预约定的用户那次也正常 |
+| 主题深浅切换 | ⚠️ 只看到背景由深变浅(还是我误点「外观」造成的);浅色下的可读性没细看 |
+| **直板机底栏**(<600dp 时) | ✅ 411dp 竖屏:按钮全在底部、左「‹ / 外观」右「✓」,两组分开、不重叠 |
+| 终端页底栏 | ✅ 左「文件夹」中「⚡ / ⌘ / 键盘」右红叉「断开」 |
+| 首次连接的主机身份确认(TOFU) | ✅ 指纹与靶机 `ssh-keygen -lf` 的输出一致 |
+| **真连一次 + 终端输入** | ✅ 靶机 sshd 日志 `Accepted publickey ... SHA256:pWK1wuqB…`,命令回显正确 |
+| 「导入私钥…」入口 | ✅ **界面上就能导入私钥**(以前以为只能推文件,已更正 §1.0) |
+
+**怎么造出窄屏**:MuMu 改窗口大小**不影响 Android 侧的活动配置**(`sw640dp` 一直不动)。
+要用 `wm size` + `wm density` 一起改,才会重新算:`1080x2400 @420dpi` → `sw411dp w411dp nrml port`。
+测完 `wm size reset` / `wm density reset` 还原。
+
+**顺手记两条容易看错的地方**:
+- 终端字体第一项是 **`Iosevka`**(大写 I)。等宽字体里 I/l 长得一样,我这一轮照着截图抄成了小写 L 开头的 `losevka`,
+  抓 `uiautomator` 的文本才看清。
+- 繁体界面里「终端字体」译作 **「終端機字型」**;设置页标题是「設定」。
+
+**关于点不中控件**:这一轮又踩了一次。`uiautomator dump` 的 `bounds` 给的是**可点区域的框**,不是文字的框 ——
+要拿整行的 `[x1,y1,x2,y2]` 取中心,别拿 `TextView` 的窄框。这轮点「繁體中文」用文字框算出的 y 落在**两行之间**,
+连点两次都没中,换成整行中心 `(720,829)` 一次就中。**还有:点的必须是当时那一刻抓的 XML**,
+我拿过期的 XML 分析过一次,白折腾。
+
+**没验到的(虚拟机验不了,留给真机)**:生物识别解锁、HyperOS 联网拦截、折叠屏三形态、手写笔、触控板。
+
+### M3.64 UI 细节走查(第十四次会话续)
+
+在 MuMu 上把主要界面逐个走了一遍,专找"看着别扭"的地方。**净结果:一个真缺陷,两处误判。**
+
+**真缺陷:私钥指纹被省略号截断**
+
+详情页和编辑页的「私钥指纹」显示成 `pWK1wuqBoN/MDt/LldSv…`,而**同一页的「主机密钥」是完整的**。
+根因:`InfoRow` 写死 `maxLines = 1` + `Ellipsis`;主机密钥另走 `fingerprintRows()` 分组显示,
+**私钥指纹漏用了**。`fingerprintRows` 的注释本来就写着"确认页和详情栏共用这一套"。
+
+这不是好看不好看的问题:**指纹的用处就是逐段核对"是不是我导入的那把",截断了就核不了**。
+对齐方式参考 `Components.kt:493` 那段注释(自由折行会停在 `/` `+` 后面,最容易看串行)。
+
+修法:新增 `FingerprintRow`(`HostInfo.kt`),详情页与编辑页改用它。现在两处都是
+算法名一行 + 11 字一组、两组一行的摘要。模拟器上两处都截图验过。
+
+**两处误判(记下来,免得下次又怀疑)**
+
+- **侧边栏里同一台主机出现两次**:不是重复渲染。`Tablet.kt` 侧边栏本就是「会话 + 主机」两组,
+  设计上靠 `detailId`(连着时为 null)让高亮只落在会话那一行。放大看过:会话行有整行底色,主机行没有。
+  图标底色两行都是绿的,因为 `running` 看的是"这台主机有没有活会话"——同一台机器,两处都绿是事实,不是错。
+- **文件面板「名称」表头与内容不对齐**:量了像素。表头「名称」起于 x=786,文件名起于约 796,
+  **差 10px** —— 那是字号不同(表头 12sp、内容 14.5sp)的视觉重心差,`ColumnHeader` 的 `start = 52.dp`
+  与 `FileRow` 里 `8 + 12 + 20 + 12 = 52dp` **本来就一致**。之前是被缩放后的裁剪图骗了。
+
+**一条操作经验:`input tap` 会点偏,用零长度 swipe**
+
+「命令片段」和「显示快捷键栏」是两个**只有图标、没有文字**的按钮,可点区各 99px 且紧挨
+(`[1985,59,2084,167]` 和 `[2084,59,2183,167]`)。用 `input tap 2134 113` 想点右边那个,
+**连点两次都落在左边的「命令片段」上**。换成文档 §1.1 记的那招就稳了:
+
+```powershell
+adb shell input swipe 2134 113 2134 113 80   # 80ms 的零长度 swipe
+```
+
+这条原本是给 MIUI 记的,说明**模拟器上同样适用**。
+
+**走查覆盖到、没发现问题的**:主机列表与空态、详情页(全部字段)、编辑页(滚到底)、
+终端页(连接、提示符、折行、底栏)、快捷键栏(9 列 × 2 行,列完全对齐)、文件面板(面包屑、三列表头、
+目录大小显示 `—`、时间右对齐)、语言与主题。
+
 ## 5. 关键坑(踩过,别再踩)
 
 102. **横屏时 `input` 的坐标 ≠ uiautomator 的坐标**。平板锁定横屏(`user_rotation=1`)时
@@ -1975,6 +2079,9 @@ Linux 服务器没有这一下,旧输出直接留在屏上。
      另一个更省事的路子:**键盘注入是可靠的**(`input keyevent TAB` 让焦点移动、
      `keycombination KEYCODE_CTRL_LEFT KEYCODE_S` 保存、`KEYCODE_CTRL_LEFT KEYCODE_E` 打开编辑),
      点击打不进去时先试键盘。
+     **补充(第十四次,MuMu 模拟器上)**:那里的 `uiautomator dump` 给的是**应用窗口自己的坐标系**,
+     横屏(显示 2560 宽)和竖屏(`wm size` 1440x2560)下**抓到的 bounds 一模一样**,所以模拟器上两边本来就同空间。
+     它和坑 102 描述的平板情形**不是一回事**,别把结论套过去 —— 判断依据看 `dumpsys window displays` 的 `cur=` 与 `mDisplayRotation`。
 103. **`screencap` 全黑未必是 SECURE 也未必是休眠**。遇到过:屏幕 `mScreenState=ON`、亮度 72、
      没有 SECURE、`isKeyguardShowing=false`,但截图纯黑 —— 原因是**主题刚切成深色,那一帧正好是重建过渡**。
      判据:看 PNG 的**文件大小**(纯黑 36KB vs 正常 185KB),等两秒重截一次。
@@ -1990,6 +2097,11 @@ Linux 服务器没有这一下,旧输出直接留在屏上。
      **用函数式替换**(`s.replace(anchor, () => text)`),并且改完查 `## 0` 这类唯一标记的出现次数。
 
 
+106. **`adb shell input text` 的空格要写成 `%s`**。写 `input text "echo hello"` 只会送过去 `echo`,
+     空格之后整段被吃掉 —— 表现成"应用把命令截断了",很容易误判成终端或编码的缺陷。
+     (第十四次会话就这样误报过一次,自查后确认是注入方式的问题。)
+     中文和特殊字符也别直接用 `input text`,走剪贴板或应用自带的输入面板更可靠。
+
 1. **DSR 应答**:终端事件不回写 → 远端程序挂起(ConPTY 必现;vim 同理)。已修 + 单测。
 2. **cargo-ndk 4.x**: API level 是 `-P`;`-p` 已被 cargo 占用(会报 `unknown package: 26`)。
 3. **AGP 9 内置 Kotlin**:必须删掉 `org.jetbrains.kotlin.android` 插件;Compose 插件保留。
@@ -1997,7 +2109,9 @@ Linux 服务器没有这一下,旧输出直接留在屏上。
 5. **改 Rust 后必须重建 `.so`**(`cargo ndk ...`)再打 APK,否则 APK 里还是旧库(今天因此浪费过一轮排查)。
 6. **adb 进程会占住输出管道**导致工具误杀:所有 adb 调用重定向到文件,或结束加 `adb kill-server`。
 7. **锁屏/息屏时 screencap 全黑**;多显示器必须 `-d`。
-8. Windows OpenSSH 靶机需 `ListenAddress 0.0.0.0` + 入站防火墙规则才对外可达。
+8. Windows OpenSSH 靶机要对外可达才需 `ListenAddress 0.0.0.0` + 入站防火墙规则;
+   用 `adb reverse` 时**只绑回环即可**,不必动防火墙(第十四次会话的做法)。
+   **系统自带的 OpenSSH 是 9.x,不认 `PerSourcePenalties`**(9.8+ 才有),写进配置会直接起不来。
 9. ConPTY 写端被 drop 会连带终止子进程(devpty 已用 `keep_input_open` 规避)。
 10. **MIUI 联网控制页**:搜索模式会隐藏页签;清空搜索后列表可能短暂为空(等一下或退出搜索再进);
     X-SSH 名字红色 = 受限;`uiautomator dump` 看不到搜索结果的业务行,只能用截图判读。
@@ -2253,7 +2367,7 @@ Linux 服务器没有这一下,旧输出直接留在屏上。
 - 主机列表必须有卡片框;快捷键默认收起、按键不拉伸;动效统一用 `Motion.kt` 的曲线。
 - 每次改完都要真机复核(外屏 / 内屏竖 / 内屏横,必要时直板机),并在深浅两种主题下看。
 
-## 7. 设备现状(2026-09-27 晚更新,第十二次会话结束)
+## 7. 设备现状(2026-09-28 更新,第十四次会话结束)
 
 **18 Fold**(`SERIAL0000000002`):装的是 `f6fef73` 的代码(三种语言、切换不闪)。主机只有用户的 `DGX Node 0`
 (`203.0.113.10:2222`,密码加锁),`xssh_hosts.xml` md5 `524ced4c…` 整个会话测前测后一致;多了 `xssh_snippets.xml`(空列表)。
@@ -2267,8 +2381,17 @@ Linux 服务器没有这一下,旧输出直接留在屏上。
 **17 Ultra**(`4ba14696`):还是 `02cc89a`(09-26 底栏版),缺 M3.58 之后的所有改动(凭据修复、重连、跳板机、片段、三种语言、底栏防挤爆)。
 下次接上**先装最新版**,再看竖屏终端底栏(§1 第 6.1 条)。
 
-**PC**:测试 sshd 已停;`D:\Apps\X-SSH` 是 `f6fef73` 的桌面版(用户在用)。桌面版的 `%APPDATA%\x-ssh\settings.json`
+**PC**:测试 sshd 已停;**靶机已重建**(见 §1.0,新指纹 `SHA256:wfEX/1iY…`),密钥文件留在原处,下次直接按 §1.0 起。
+`D:\Apps\X-SSH` 是 `f6fef73` 的桌面版(用户在用)。桌面版的 `%APPDATA%\x-ssh\settings.json`
 在修复前被清空过一次(只剩外部编辑器等 7 项,用户重新设过),修复后会多出 `.bak` 文件,出事时还会有 `.corrupt`。
+
+**MuMu 模拟器**(本机,第十四次会话发现并启用):`D:\Apps\MuMuPlayer`,实例 0 = Android 15。
+**装的是"最新代码 + M3.64 指纹修复"的 debug APK**(比 `f6fef73` 新,因为带上了一处未提交的改动)——
+语言、主题、窄屏底栏、真连接、终端输入、指纹显示都在上面验过,见 M3.63 / M3.64。
+**注意它是"主程序"和"安卓实例"分开的**:只看到 `MuMu*` 进程不等于安卓起来了,`is_android_started` 才是准的。
+**模拟器里留着一台测试主机 `Local Target`**(`127.0.0.1:2222`,私钥 `id_xssh_dev`)——靶机不起时连不上,属正常。
+测试后 `wm size/density` 覆盖、旋转、`adb reverse` 都**已还原**;模拟器窗口本身留着(用户原来就开着)。
+**这个模拟器不能替代真机**:密钥库是另一套实现,生物识别 / HyperOS 省电与联网拦截 / 折叠屏形态 / 手写笔 / 触控板全验不了。
 
 ### 7.0.1 上一次记录(第十二次会话中段,M3.61 时)
 
