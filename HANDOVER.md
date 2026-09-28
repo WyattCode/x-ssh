@@ -6,14 +6,14 @@
 - 极简、键盘优先的 SSH 客户端。Electron + Vue 3 (Vite) + TypeScript。
 - 平台: Windows (`win32`)。目录: `D:\Documents\Claude Code\X-SSH`。
 - **git 仓库**(`main` 分支),远程: `https://github.com/WyattCode/x-ssh`(私有)。
-- 版本: `package.json` 当前为 **0.2.1**;有 `CHANGELOG.md`(Keep a Changelog + 语义化)。
+- 版本: `package.json` 当前为 **0.3.0**;有 `CHANGELOG.md`(Keep a Changelog + 语义化)。
 
 ## 常用命令(Windows/PowerShell)
 - 必须用 `npm.cmd`(直接 `npm` 会因执行策略失败)。
 - 校验: `npm.cmd run typecheck`、`npm.cmd run build`
 - **单元测试**: `npm.cmd run test`(Vitest 2,与 Vite 5 兼容;共 **267** 用例,全部落在纯逻辑层:`src/shared/*`、`src/renderer/src/lib/*`、`composables/*`)。**没有任何组件测试**,界面交互只能人工验。)
 - **i18n 键对称校验**: `npm.cmd run lint:i18n`(现在串跑两个脚本:桌面端 `scripts/lint-i18n.mjs` + 移动端 `scripts/lint-i18n-mobile.mjs`;桌面端 zh / zh-TW / en 640/640/640 全对称,移动端三份资源对称且代码里 0 条内联中文)。
-- 打包: `npm.cmd run dist` → `release\X-SSH Setup 0.2.1.exe`(NSIS)+ `release\win-unpacked\X-SSH.exe` + `.blockmap`。
+- 打包: `npm.cmd run dist` → `release\X-SSH Setup 0.3.0.exe`(NSIS)+ `release\win-unpacked\X-SSH.exe` + `.blockmap`。
 - 无代码签名,SmartScreen 可能提示(正常)。
 - **CI**: `.github/workflows/ci.yml`,两个作业 —— `test-build`(`windows-latest`:typecheck → lint:i18n → unit test → build;NOTE: 仅 build,不跑 electron-builder,因无代码签名配置)、`rust-core`(`cargo test --workspace` + `cargo clippy -- -D warnings`;移动端核心不需要设备,所以进了 CI)。
 
