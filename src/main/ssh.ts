@@ -14,6 +14,7 @@ import type {
   ConnectResult,
   HostForward,
   ForwardMode,
+  ForwardErrorCode,
   JumpConfig,
   ProxyConfig,
   SessionEvent,
@@ -419,24 +420,37 @@ export class SshManager {
   private connectProxy(
     proxy: ProxyConfig,
     targetHost: string,
-    targetPort: number
+    targetPort: number,
+    /** Handed the socket at once, so a caller can close it mid-handshake. */
+    track?: (sock: Socket) => void
   ): Promise<Socket> {
     return new Promise((res, rej) => {
       const sock = createConnection({ host: proxy.host, port: proxy.port })
+      track?.(sock)
       let settled = false
+      // A proxy that accepts the connection but never answers the handshake
+      // must not hang the connect forever.
+      const handshakeTimer = setTimeout(() => fail('代理握手超时'), 15_000)
       const fail = (msg: string): void => {
         if (settled) return
         settled = true
+        clearTimeout(handshakeTimer)
         sock.destroy()
         rej(new Error(msg))
       }
       sock.on('error', (e) => fail(friendlyError(e.message)))
       sock.on('connect', () => {
+        const ok = (): void => {
+          if (settled) return
+          settled = true
+          clearTimeout(handshakeTimer)
+          res(sock)
+        }
         if (proxy.type === 'socks5') this.socks5Handshake(sock, proxy, targetHost, targetPort)
-          .then(() => { if (!settled) { settled = true; res(sock) } })
+          .then(ok)
           .catch((e) => fail((e as Error).message))
         else this.httpConnectHandshake(sock, proxy, targetHost, targetPort)
-          .then(() => { if (!settled) { settled = true; res(sock) } })
+          .then(ok)
           .catch((e) => fail((e as Error).message))
       })
     })
@@ -617,14 +631,14 @@ export class SshManager {
   /** Adds a port forward to a live session at runtime. Returns ok/error.
    *  Unlike connect-time forwards, the bind is awaited so a port already in use
    *  (EADDRINUSE) is reported instead of silently appearing to have succeeded. */
-  async addForward(sessionId: string, rule: HostForward): Promise<{ ok: boolean; error?: string }> {
+  async addForward(sessionId: string, rule: HostForward): Promise<{ ok: boolean; error?: string; code?: ForwardErrorCode }> {
     const session = this.sessions.get(sessionId)
-    if (!session) return { ok: false, error: '会话不存在' }
-    if (!rule.localPort) return { ok: false, error: '缺少本地端口' }
+    if (!session) return { ok: false, code: 'no-session', error: 'session not found' }
+    if (!rule.localPort) return { ok: false, code: 'bad-port', error: 'missing local port' }
     const mode = rule.mode ?? 'local'
-    if (mode !== 'dynamic' && !rule.remotePort) return { ok: false, error: '缺少远端端口' }
+    if (mode !== 'dynamic' && !rule.remotePort) return { ok: false, code: 'bad-port', error: 'missing remote port' }
     const key = `${mode}:${rule.localPort}`
-    if (session.runtimeRules?.has(key)) return { ok: false, error: '该端口已处于转发状态' }
+    if (session.runtimeRules?.has(key)) return { ok: false, code: 'already', error: 'already forwarding' }
     const servers = this.openRule(session, rule)
     if (servers.length) {
       // A failed bind surfaces as an async 'error' after listen(); wait for all
@@ -632,7 +646,7 @@ export class SshManager {
       const bound = await Promise.all(servers.map((s) => this.waitForListen(s)))
       if (bound.some((b) => !b)) {
         servers.forEach((s) => s.close())
-        return { ok: false, error: `本地端口 ${rule.localPort} 已被占用` }
+        return { ok: false, code: 'in-use', error: `local port ${rule.localPort} in use` }
       }
       session.forwardServers = (session.forwardServers ?? []).concat(servers)
     }
@@ -660,9 +674,9 @@ export class SshManager {
 
   /** Removes a port forward from a live session. Handles both runtime-added and
    *  host-configured rules by matching the local listener port. */
-  removeForward(sessionId: string, rule: { mode?: ForwardMode; localPort: number }): { ok: boolean; error?: string } {
+  removeForward(sessionId: string, rule: { mode?: ForwardMode; localPort: number }): { ok: boolean; error?: string; code?: ForwardErrorCode } {
     const session = this.sessions.get(sessionId)
-    if (!session) return { ok: false, error: '会话不存在' }
+    if (!session) return { ok: false, code: 'no-session', error: 'session not found' }
     const mode = rule.mode ?? 'local'
     const key = `${mode}:${rule.localPort}`
     // Close any local/dynamic listener bound to this port (static or runtime).
@@ -845,6 +859,7 @@ export class SshManager {
       )
     } catch (err) {
       jumpClient?.end()
+      ;(config.sock as Duplex | Socket | undefined)?.destroy()
       this.sessions.delete(id)
       return { ok: false, error: friendlyError((err as Error).message) }
     }
@@ -2492,6 +2507,91 @@ export class SshManager {
         )
         stream.on('error', (e: Error) => settle(e))
       })
+    })
+  }
+
+  /** Background, read-only: logs in without a terminal, runs one command on an
+   *  exec channel, returns its stdout and disconnects. Nothing is emitted to the
+   *  renderer and no session is registered. Only for a server whose host key is
+   *  already on record — an unknown key is never trusted here (that decision
+   *  belongs to the user, on a real connect), a changed one aborts. */
+  async quietExec(params: ConnectParams, cmd: string, timeoutMs = 20_000): Promise<string> {
+    const port = params.port || 22
+    await this.knownHosts.load()
+    if (!this.knownHosts.get(params.host, port)) throw new Error('host key not on record')
+    // The hop too: connectJump would otherwise trust an unknown jump host on
+    // first use and hand it the saved credential, with nobody watching.
+    if (params.jump && !this.knownHosts.get(params.jump.host, params.jump.port || 22)) {
+      throw new Error('jump host key not on record')
+    }
+    const config = SshManager.baseConfig(params.host, port, params.username, undefined, 12_000)
+    config.hostVerifier = (hashedKey: string, cb: (valid: boolean) => void): void => {
+      cb(this.knownHosts.get(params.host, port) === hashedKey)
+    }
+    const client = new Client()
+    let jumpClient: Client | null = null
+    let sock: Duplex | Socket | undefined
+    return new Promise<string>((resolve, reject) => {
+      let done = false
+      // One exit for every path — timeout, errors, a throw from connect() —
+      // and it always releases the hop, the proxy socket and the client.
+      const finish = (err: Error | null, out = ''): void => {
+        if (done) return
+        done = true
+        clearTimeout(timer)
+        client.removeAllListeners('close')
+        try {
+          client.end()
+        } catch {
+          /* never connected */
+        }
+        sock?.destroy()
+        jumpClient?.end()
+        if (err) reject(err)
+        else resolve(out)
+      }
+      // Covers the whole thing, including a proxy or hop that never answers.
+      const timer = setTimeout(() => finish(new Error('timeout')), timeoutMs)
+      const run = async (): Promise<void> => {
+        if (params.jump) {
+          const hop = await this.connectJump(params.jump, params.host, port)
+          jumpClient = hop.client
+          sock = hop.sock
+        } else if (params.proxy) {
+          sock = await this.connectProxy(params.proxy, params.host, port, (s) => (sock = s))
+        }
+        if (done) {
+          // Timed out while the hop / proxy was still coming up.
+          sock?.destroy()
+          jumpClient?.end()
+          return
+        }
+        if (sock) {
+          sock.on('error', () => undefined)
+          config.sock = sock
+        }
+        Object.assign(config, await this.authConfig(params.auth, params.keyPath, params.passphrase, params.password))
+        if (done) return finish(new Error('timeout'))
+        client.on('error', (e) => finish(e))
+        client.on('close', () => finish(new Error('closed')))
+        client.on('ready', () => {
+          client.exec(cmd, (err, stream) => {
+            if (err) return finish(err)
+            let out = ''
+            stream.on('data', (d: Buffer) => {
+              out += d.toString()
+              if (out.length > 64_000) finish(null, out)
+            })
+            stream.stderr.on('data', () => undefined)
+            stream.on('close', () => finish(null, out))
+            stream.on('error', (e: Error) => finish(e))
+          })
+        })
+        // ssh2 throws synchronously for an unreadable key (encrypted, no
+        // passphrase saved) — that lands in the catch below like any error.
+        client.connect(config)
+      }
+      run().catch((e: Error) => finish(e))
     })
   }
 

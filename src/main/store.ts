@@ -2,7 +2,7 @@ import { app, safeStorage } from 'electron'
 import { join } from 'node:path'
 import { mkdir } from 'node:fs/promises'
 import { parseJson, readDurable, writeDurable } from './durableFile'
-import type { Host } from '../shared/types'
+import type { Host, HostOs } from '../shared/types'
 
 /**
  * Drop the fields that describe the *current session* rather than the saved
@@ -145,6 +145,19 @@ export class HostStore {
     await this.ensureLoaded()
     if (this.locked) return undefined
     return this.secrets[this.ppKey(id)]
+  }
+
+  /** Records the OS detected on connect. Returns whether anything changed, so
+   *  the caller only tells the renderer to reload when it has to. */
+  async setOs(id: string, os: HostOs, at?: { host: string; port?: number }): Promise<boolean> {
+    await this.ensureLoaded()
+    const host = this.hosts.find((h) => h.id === id)
+    if (!host || (host.os?.id === os.id && host.os?.pretty === os.pretty)) return false
+    // Read from an address the host no longer has (edited meanwhile): not its OS.
+    if (at && (host.host !== at.host || (host.port || 22) !== (at.port || 22))) return false
+    host.os = os
+    await this.persist()
+    return true
   }
 
   async touch(id: string): Promise<void> {

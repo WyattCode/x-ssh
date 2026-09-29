@@ -6,6 +6,7 @@ import type {
   Host,
   HostForward,
   ForwardMode,
+  ForwardErrorCode,
   KnownHostEntry,
   ManagedKey,
   SessionEvent,
@@ -15,7 +16,9 @@ import type {
   UiPrefs,
   LocalEntry,
   UploadOverwrite,
-  SettingsWriteResult
+  SettingsWriteResult,
+  ThemePref,
+  Reachability
 } from '../shared/types'
 
 /** Startup preferences main passed as a launch argument — no IPC, no storage. */
@@ -45,6 +48,13 @@ const api = {
   prefs: initialPrefs(),
   hosts: {
     list: (): Promise<Host[]> => ipcRenderer.invoke(IPC.hostsList),
+    /** Online / offline for the given saved hosts (all when omitted). */
+    probe: (ids?: string[]): Promise<Record<string, Reachability>> => ipcRenderer.invoke(IPC.hostsProbe, ids),
+    onChanged: (cb: () => void): (() => void) => {
+      const h = (): void => cb()
+      ipcRenderer.on(IPC.hostsChanged, h)
+      return () => ipcRenderer.removeListener(IPC.hostsChanged, h)
+    },
     save: (host: Host, password?: string, passphrase?: string): Promise<Host[]> =>
       ipcRenderer.invoke(IPC.hostsSave, host, password, passphrase),
     delete: (id: string): Promise<Host[]> => ipcRenderer.invoke(IPC.hostsDelete, id),
@@ -151,12 +161,12 @@ const api = {
       ipcRenderer.invoke(IPC.sshTmuxList, sessionId),
     tmuxAttach: (sessionId: string, name: string): Promise<{ ok: boolean }> =>
       ipcRenderer.invoke(IPC.sshTmuxAttach, sessionId, name),
-    forwardAdd: (sessionId: string, rule: HostForward): Promise<{ ok: boolean; error?: string }> =>
+    forwardAdd: (sessionId: string, rule: HostForward): Promise<{ ok: boolean; error?: string; code?: ForwardErrorCode }> =>
       ipcRenderer.invoke(IPC.sshForwardAdd, sessionId, rule),
     forwardRemove: (
       sessionId: string,
       rule: { mode?: ForwardMode; localPort: number }
-    ): Promise<{ ok: boolean; error?: string }> =>
+    ): Promise<{ ok: boolean; error?: string; code?: ForwardErrorCode }> =>
       ipcRenderer.invoke(IPC.sshForwardRemove, sessionId, rule)
   },
   sftp: {
@@ -273,6 +283,12 @@ const api = {
     /** Resolves `{ ok: false }` when main refuses the key — see SettingsWriteResult. */
     set: (key: string, value: unknown): Promise<SettingsWriteResult> =>
       ipcRenderer.invoke(IPC.settingsSet, key, value)
+  },
+  theme: {
+    /** Saves the appearance choice and pins the native theme (title bar) to it.
+     *  Resolves whether the window is now dark — for 'system', the OS's real
+     *  setting, so the renderer can switch without a wrong-color frame first. */
+    set: (pref: ThemePref): Promise<{ dark: boolean }> => ipcRenderer.invoke(IPC.themeSet, pref)
   },
   /** Opens a terminal link in the default browser (http/https only). */
   openExternal: (url: string): Promise<boolean> =>

@@ -19,7 +19,6 @@ export const RENDERER_SETTABLE_KEYS = new Set([
   'terminalCursor',
   'terminalFontFamily',
   'terminalTheme',
-  'theme',
   'zoom',
   // Connection behaviour
   'autoReconnect',
@@ -54,10 +53,16 @@ export const RENDERER_SETTABLE_KEYS = new Set([
   'transferQueue',
   'transferRateKbps',
   'verifyChecksums',
+  'autoDetectOs',
   // Files / editor
   'externalEditor',
   'fileOpeners',
   // Misc UI
+  'hostsSort',
+  'hostsView',
+  'sidebarCollapsed',
+  'sidebarWidth',
+  'termSidebarHidden',
   'confirmClose',
   'globalShowHideAccel',
   'minimizeToTray',
@@ -71,7 +76,12 @@ export const RENDERER_SETTABLE_KEYS = new Set([
 export const MAIN_ONLY_KEYS = new Set([
   'connectionLog',
   'masterLock',
+  // Background OS detection's back-off list (main/index.ts detectMissingOs).
+  'osDetectFailed',
   'sessionHistory',
+  // Written by main's theme:set, which validates the value and pins the
+  // native theme to it in the same step.
+  'theme',
   'windowBounds',
 ])
 

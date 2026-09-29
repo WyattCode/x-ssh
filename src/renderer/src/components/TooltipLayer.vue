@@ -17,6 +17,27 @@ let originalTitle: string | null = null
 let showTimer: number | null = null
 const SHOW_DELAY = 600
 
+// While an element is hovered its `title` is held here, not on the element.
+// If Vue re-renders the binding meanwhile (a toggle whose label changes on
+// click), it writes the new text back onto the element: take that as the new
+// title — update the tip, keep suppressing the native one. Without this,
+// release() restored the text captured on entry, and since Vue believes the
+// attribute already holds the new value it never corrects it: the stale label
+// stuck until the next change (the theme button kept saying "switch to light").
+let titleWatch: MutationObserver | null = null
+function watchTitle(el: HTMLElement): void {
+  titleWatch = new MutationObserver(() => {
+    const next = el.getAttribute('title')
+    if (next === null) return // our own removal
+    originalTitle = next
+    el.removeAttribute('title')
+    state.text = next
+    if (!next) state.visible = false
+    else if (state.visible) void place(el)
+  })
+  titleWatch.observe(el, { attributes: true, attributeFilter: ['title'] })
+}
+
 function clearShowTimer(): void {
   if (showTimer !== null) {
     clearTimeout(showTimer)
@@ -27,6 +48,10 @@ function clearShowTimer(): void {
 /** Restores the previous element's title and clears tooltip state. */
 function release(): void {
   clearShowTimer()
+  // Before restoring: disconnect() also drops queued records, so putting the
+  // title back below can't be mistaken for a re-render.
+  titleWatch?.disconnect()
+  titleWatch = null
   if (hovered && originalTitle !== null && hovered.isConnected) {
     hovered.setAttribute('title', originalTitle)
   }
@@ -62,12 +87,13 @@ function onOver(e: MouseEvent): void {
   hovered = el
   originalTitle = el.getAttribute('title')
   el.removeAttribute('title')
+  watchTitle(el)
   state.text = text
   state.visible = false
   clearShowTimer()
   showTimer = window.setTimeout(() => {
     showTimer = null
-    if (!hovered) return
+    if (!hovered || !state.text) return
     state.visible = true
     void place(hovered)
   }, SHOW_DELAY)
@@ -78,15 +104,22 @@ function onOut(e: MouseEvent): void {
   release()
 }
 
+// A key press or scroll dismisses the tip, as native tooltips do. It also
+// covers the hovered element disappearing under the pointer (a shortcut
+// switching pages hides it) — no mouseout ever arrives for that.
 onMounted(() => {
   document.addEventListener('mouseover', onOver, true)
   document.addEventListener('mouseout', onOut, true)
   window.addEventListener('resize', release)
+  window.addEventListener('keydown', release, true)
+  window.addEventListener('wheel', release, { capture: true, passive: true })
 })
 onBeforeUnmount(() => {
   document.removeEventListener('mouseover', onOver, true)
   document.removeEventListener('mouseout', onOut, true)
   window.removeEventListener('resize', release)
+  window.removeEventListener('keydown', release, true)
+  window.removeEventListener('wheel', release, { capture: true } as EventListenerOptions)
 })
 </script>
 

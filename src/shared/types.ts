@@ -7,6 +7,8 @@ export type AuthMethod = 'password' | 'key' | 'agent'
 
 /** How a port-forward rule is established. */
 export type ForwardMode = 'local' | 'remote' | 'dynamic'
+/** Why starting / stopping a live port forward failed (translated in the renderer). */
+export type ForwardErrorCode = 'no-session' | 'bad-port' | 'already' | 'in-use'
 
 /**
  * How an upload treats remote files that already exist at the destination.
@@ -72,11 +74,27 @@ export interface Host {
   terminalTheme?: string
   /** Per-host terminal font-family override (unset = use the global font). */
   terminalFontFamily?: string
+  /** Free-form labels ("生产", "GPU"…) shown on the host card and matched by search. */
+  tags?: string[]
+  /** Detected on the last successful connect (see shared/hostOs.ts); drives the card icon. */
+  os?: HostOs
   /** Runtime-only flag (not persisted): whether an encrypted password exists. */
   hasSavedPassword?: boolean
   /** Runtime-only flag: whether an encrypted key passphrase exists. */
   hasSavedPassphrase?: boolean
 }
+
+/** A host's operating system as detected over SSH. */
+export interface HostOs {
+  /** Normalized key the UI has an icon for: 'ubuntu', 'centos', 'dgx', 'macos', 'linux'… */
+  id: string
+  /** os-release PRETTY_NAME, e.g. "Ubuntu 26.04 LTS". */
+  pretty?: string
+}
+
+/** Result of the background online probe for one saved host. 'unknown' = not
+ *  probed directly (reached through a jump host / proxy, or an odd address). */
+export type Reachability = 'online' | 'offline' | 'unknown'
 
 /** A user-managed SSH key pair stored in the app's key library dir. */
 export interface ManagedKey {
@@ -294,8 +312,12 @@ export interface ConnectResult {
  * is deliberately unused: its backing store is locked to one process, so a
  * second instance sharing the profile stalls ~6s on its first access.
  */
+/** Appearance choice: 'system' follows the OS light/dark setting live. */
+export type ThemePref = 'system' | 'light' | 'dark'
+
 export interface UiPrefs {
-  theme?: 'light' | 'dark'
+  /** Unset (never chosen) behaves as 'system'. */
+  theme?: ThemePref
   fontSize?: number
   zoom?: number
   sftpShowHidden?: boolean

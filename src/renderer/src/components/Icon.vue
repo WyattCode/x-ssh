@@ -7,6 +7,20 @@ withDefaults(defineProps<{ name: string; size?: number }>(), { size: 16 })
 
 const P: Record<string, string> = {
   plus: 'M12 5v14 M5 12h14',
+  minus: 'M5 12h14',
+  list: 'M9 6h12 M9 12h12 M9 18h12 M4 6h.01 M4 12h.01 M4 18h.01',
+  // Port forwarding: traffic going out one way, back the other.
+  forward: 'M4 8h14 M14 4l4 4-4 4 M20 16H6 M10 12l-4 4 4 4',
+  monitor: 'M4.5 4h15A1.5 1.5 0 0 1 21 5.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 14.5v-9A1.5 1.5 0 0 1 4.5 4z M8.5 20h7 M12 16v4',
+  // 专注模式: the window, its sidebar fading out (dashed), only the prompt left.
+  focus: 'M6 4h12a3.5 3.5 0 0 1 3.5 3.5v9a3.5 3.5 0 0 1-3.5 3.5H6a3.5 3.5 0 0 1-3.5-3.5v-9A3.5 3.5 0 0 1 6 4z M8 5.8v1 M8 9.5v1 M8 13.2v1 M8 16.9v1 M11 9l3 3-3 3 M15.5 15h3',
+  image: 'M5 4h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z M8.5 10.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z M20 15l-5-5L5 20',
+  'file-text': 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M8 13h8 M8 17h5',
+  database: 'M12 3c4.4 0 8 1.3 8 3s-3.6 3-8 3-8-1.3-8-3 3.6-3 8-3z M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6 M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3',
+  'arrow-left': 'M19 12H5 M11 18l-6-6 6-6',
+  sidebar: 'M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z M9 3v18',
+  layers: 'M12 3 2 8l10 5 10-5z M2 16l10 5 10-5 M2 12l10 5 10-5',
+  tag: 'M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z|M7.5 7.5h.01',
   close: 'M18 6 6 18 M6 6l12 12',
   keyboard:
     'M20 5H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2z M6 9h.01 M10 9h.01 M14 9h.01 M18 9h.01 M6 13h.01 M18 13h.01 M9.5 13h5',
@@ -50,6 +64,8 @@ const P: Record<string, string> = {
   book: 'M4 19.5A2.5 2.5 0 0 1 6.5 17H20 M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z',
   zap: 'M13 2 3 14h9l-1 8 10-12h-9l1-8z',
   check: 'M20 6 9 17l-5-5',
+  // 跟随系统:和安卓 XIcons.Auto 同一个图形 —— 圆圈,左半边实心(一半亮一半暗)。
+  auto: 'M20.2 12A8.2 8.2 0 1 1 3.8 12 8.2 8.2 0 1 1 20.2 12|F M12 3.8A8.2 8.2 0 0 0 12 20.2Z',
   'check-all': 'M18 7a7 7 0 1 0 1.5 8 M14.5 12 11 15.5 8 12.5 M22 6l-8.2 8.2',
   info: 'M12 8h.01 M11 12h1v4h1',
   copy: 'M9 9h10v12H9z M6 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v2',
@@ -79,6 +95,10 @@ const P: Record<string, string> = {
     stroke-linejoin="round"
     aria-hidden="true"
   >
-    <path v-for="(d, i) in (P[name] || '').split('|')" :key="i" :d="d" />
+    <!-- A segment starting with "F " is a solid fill instead of a stroke. -->
+    <template v-for="(d, i) in (P[name] || '').split('|')" :key="i">
+      <path v-if="d.startsWith('F ')" :d="d.slice(2)" fill="currentColor" stroke="none" />
+      <path v-else :d="d" />
+    </template>
   </svg>
 </template>

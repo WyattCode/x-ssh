@@ -14,11 +14,13 @@ import { PRESETS } from '../lib/terminalThemes'
 import { useI18n } from '../lib/i18n'
 import { useToast } from '../composables/toast'
 import { useConfirm } from '../composables/confirm'
+import { useTheme } from '../composables/theme'
 import type { SettingsTab } from '../stores/sessions'
 import type { KnownHostEntry } from '../../../shared/types'
 
 const store = useSessions()
 const { langPref, setLang, t } = useI18n()
+const { pref: themePref, setPref: setThemePref } = useTheme()
 const { toast } = useToast()
 const { confirm } = useConfirm()
 
@@ -88,7 +90,9 @@ function startRecord(id: RebindableAction): void {
   recording.value = id
 }
 function recordChord(e: KeyboardEvent, id: RebindableAction): void {
+  // The chord being recorded must not also run (Ctrl+1 jumping to tab 1).
   e.preventDefault()
+  e.stopPropagation()
   if (e.key === 'Escape') {
     recording.value = null
     return
@@ -138,13 +142,13 @@ watch(
     if (o) nextTick(() => dialogEl.value?.focus())
   }
 )
-// Load the connection audit log each time the security tab is shown.
+// Load the connection audit log each time the security tab is shown —
+// including opening 设置 straight onto it.
 watch(
-  () => store.settingsTab,
-  (tab) => {
-    if (tab === 'security') void loadConnLog()
-  },
-  { immediate: false }
+  () => store.settingsOpen && store.settingsTab === 'security',
+  (show) => {
+    if (show) void loadConnLog()
+  }
 )
 
 async function pickEditor(): Promise<void> {
@@ -275,6 +279,10 @@ function onConcurrency(e: Event): void {
   const n = Math.max(1, Math.min(32, parseInt((e.target as HTMLInputElement).value, 10) || 4))
   store.transferConcurrency = n
   void store.saveSetting('transferConcurrency', n)
+}
+function toggleAutoDetectOs(): void {
+  store.autoDetectOs = !store.autoDetectOs
+  void store.saveSetting('autoDetectOs', store.autoDetectOs)
 }
 function toggleVerifyChecksums(): void {
   store.verifyChecksums = !store.verifyChecksums
@@ -633,564 +641,614 @@ async function resetMasterLock(): Promise<void> {
 </script>
 
 <template>
-  <div v-if="store.settingsOpen" class="overlay" @mousedown.self="store.toggleSettings(false)">
-    <div ref="dialogEl" class="dialog" tabindex="-1" @keydown.esc="store.toggleSettings(false)">
-      <div class="head">
-        <span>{{ t('set.title') }}</span>
-        <button class="x" :title="t('set.closeTip')" @click="store.toggleSettings(false)"><Icon name="close" /></button>
-      </div>
+  <!-- 设置: a sidebar page in the 连接 page's language — title, pill tabs, then
+       grouped cards of rows (name + one line on the left, the control on the right). -->
+  <div v-if="store.settingsOpen" class="settings">
+    <div class="page-col">
+      <header class="page-head">
+        <h1>{{ t('set.title') }}</h1>
+      </header>
+      <nav class="stabs">
+        <button
+          v-for="tabItem in TABS"
+          :key="tabItem.id"
+          :class="{ on: store.settingsTab === tabItem.id }"
+          @click="store.settingsTab = tabItem.id"
+        >
+          <Icon :name="tabItem.icon" :size="14" />{{ t('tab.' + tabItem.id) }}
+        </button>
+      </nav>
 
-      <div class="body">
-        <nav class="nav">
-          <button
-            v-for="tabItem in TABS"
-            :key="tabItem.id"
-            class="nav-item"
-            :class="{ on: store.settingsTab === tabItem.id }"
-            @click="store.settingsTab = tabItem.id"
-          >
-            <Icon :name="tabItem.icon" :size="15" />
-            <span>{{ t('tab.' + tabItem.id) }}</span>
-          </button>
-        </nav>
-
-        <div class="pane">
-          <!-- 通用 -->
+      <div ref="dialogEl" class="content" tabindex="-1">
+        <div class="inner">
+          <!-- ================= 通用 ================= -->
           <template v-if="store.settingsTab === 'general'">
-            <div class="section">
-              <div class="label">{{ t('set.gen.lang') }}</div>
-              <div class="seg">
-                <button :class="{ on: langPref === 'system' }" @click="setLang('system')">{{ t('lang.system') }}</button>
-                <button :class="{ on: langPref === 'zh' }" lang="zh-CN" @click="setLang('zh')">{{ t('lang.zh') }}</button>
-                <button :class="{ on: langPref === 'zh-TW' }" lang="zh-TW" @click="setLang('zh-TW')">{{ t('lang.zhTW') }}</button>
-                <button :class="{ on: langPref === 'en' }" lang="en" @click="setLang('en')">{{ t('lang.en') }}</button>
+            <section class="group">
+              <h3>{{ t('set.grp.appearance') }}</h3>
+              <div class="card">
+                <div class="row">
+                  <div class="r-text">
+                    <span class="r-title">{{ t('set.gen.lang') }}</span>
+                    <span class="r-desc">{{ t('set.gen.langDesc') }}</span>
+                  </div>
+                  <div class="seg">
+                    <button :class="{ on: langPref === 'system' }" @click="setLang('system')">{{ t('lang.system') }}</button>
+                    <button :class="{ on: langPref === 'zh' }" lang="zh-CN" @click="setLang('zh')">{{ t('lang.zh') }}</button>
+                    <button :class="{ on: langPref === 'zh-TW' }" lang="zh-TW" @click="setLang('zh-TW')">{{ t('lang.zhTW') }}</button>
+                    <button :class="{ on: langPref === 'en' }" lang="en" @click="setLang('en')">{{ t('lang.en') }}</button>
+                  </div>
+                </div>
+                <div class="row">
+                  <div class="r-text"><span class="r-title">{{ t('theme.label') }}</span></div>
+                  <div class="seg">
+                    <button :class="{ on: themePref === 'system' }" @click="setThemePref('system')">{{ t('theme.system') }}</button>
+                    <button :class="{ on: themePref === 'light' }" @click="setThemePref('light')">{{ t('theme.light') }}</button>
+                    <button :class="{ on: themePref === 'dark' }" @click="setThemePref('dark')">{{ t('theme.dark') }}</button>
+                  </div>
+                </div>
+                <div class="row">
+                  <div class="r-text">
+                    <span class="r-title">{{ t('set.gen.sidebar') }}</span>
+                    <span class="r-desc">{{ t('set.gen.sidebarDesc') }}</span>
+                  </div>
+                  <button class="btn sm" @click="store.resetSidebar()">{{ t('set.gen.sidebarReset') }}</button>
+                </div>
               </div>
-              <p class="desc">{{ t('set.gen.langDesc') }}</p>
-            </div>
-            <div class="section">
-              <div class="label">{{ t('set.gen.editor') }}</div>
-              <p class="desc">{{ t('set.gen.editorDesc') }}</p>
-              <div class="editor-row">
-                <span class="path" :class="{ dim: !store.externalEditor }">
-                  {{ store.externalEditor || t('set.gen.systemDefault') }}
-                </span>
-                <button class="ghost" @click="pickEditor">{{ t('set.gen.pickEditor') }}</button>
-                <button v-if="store.externalEditor" class="ghost" @click="clearEditor">{{ t('set.gen.restoreDefault') }}</button>
+            </section>
+
+            <section class="group">
+              <h3>{{ t('set.grp.files') }}</h3>
+              <div class="card">
+                <div class="row">
+                  <div class="r-text">
+                    <span class="r-title">{{ t('set.gen.editor') }}</span>
+                    <span class="r-desc">{{ t('set.gen.editorDesc') }}</span>
+                  </div>
+                  <span class="value" :class="{ dim: !store.externalEditor }" :title="store.externalEditor || ''">
+                    {{ store.externalEditor || t('set.gen.systemDefault') }}
+                  </span>
+                  <button class="btn sm" @click="pickEditor">{{ t('set.gen.pickEditor') }}</button>
+                  <button v-if="store.externalEditor" class="btn sm" @click="clearEditor">{{ t('set.gen.restoreDefault') }}</button>
+                </div>
+                <div class="row">
+                  <div class="r-text">
+                    <span class="r-title">{{ t('set.gen.openers') }}</span>
+                    <span class="r-desc">{{ t('set.gen.openersDesc') }}</span>
+                  </div>
+                </div>
+                <div v-for="(prog, ext) in store.fileOpeners" :key="ext" class="row list">
+                  <span class="chip mono">.{{ ext }}</span>
+                  <span class="mono grow ellipsis" :title="prog">{{ prog }}</span>
+                  <button class="btn sm" @click="setOpenerProgram(ext)">{{ t('set.gen.openerSet') }}</button>
+                  <button class="icon-x" :title="t('set.gen.delete')" @click="removeOpener(ext)"><Icon name="trash" :size="14" /></button>
+                </div>
+                <div class="row form-row">
+                  <input v-model="openerForm.ext" class="box mono ext-in" :placeholder="t('set.gen.openerExt')" spellcheck="false" />
+                  <input v-model="openerForm.program" class="box mono grow" :placeholder="t('set.gen.openerProg')" spellcheck="false" />
+                  <button class="btn sm" @click="upsertOpener">{{ t('set.gen.openerAdd') }}</button>
+                </div>
               </div>
-            </div>
-            <div class="section">
-              <div class="label">{{ t('set.gen.openers') }}</div>
-              <p class="desc">{{ t('set.gen.openersDesc') }}</p>
-              <div class="opener-form">
-                <input v-model="openerForm.ext" class="opener-ext" :placeholder="t('set.gen.openerExt')" spellcheck="false" />
-                <input v-model="openerForm.program" class="opener-prog" :placeholder="t('set.gen.openerProg')" spellcheck="false" />
-                <button class="ghost" @click="upsertOpener">{{ t('set.gen.openerAdd') }}</button>
-              </div>
-              <div v-for="(prog, ext) in store.fileOpeners" :key="ext" class="opener-row">
-                <span class="opener-ext-tag">.{{ ext }}</span>
-                <span class="opener-prog-tag" :title="prog">{{ prog }}</span>
-                <button class="ghost" @click="setOpenerProgram(ext)">{{ t('set.gen.openerSet') }}</button>
-                <button class="ghost" @click="removeOpener(ext)">{{ t('set.gen.delete') }}</button>
-              </div>
-            </div>
-            <div class="section">
-              <div class="label">{{ t('set.gen.startup') }}</div>
-              <label class="toggle-row" @click="toggleRestore">
-                <span>
-                  <span class="fname">{{ t('set.gen.restoreTabs') }}</span>
-                  <span class="sub">{{ t('set.gen.restoreTabsDesc') }}</span>
-                </span>
-                <span class="switch" :class="{ on: store.restoreTabs }"><i /></span>
-              </label>
-              <label class="toggle-row" @click="toggleRestoreConnect">
-                <span>
-                  <span class="fname">{{ t('set.gen.restoreConnect') }}</span>
-                  <span class="sub">{{ t('set.gen.restoreConnectDesc') }}</span>
-                </span>
-                <span class="switch" :class="{ on: store.restoreConnect }"><i /></span>
-              </label>
-              <label class="toggle-row" @click="toggleRestoreCwd">
-                <span>
-                  <span class="fname">{{ t('set.gen.restoreCwd') }}</span>
-                  <span class="sub">{{ t('set.gen.restoreCwdDesc') }}</span>
-                </span>
-                <span class="switch" :class="{ on: store.restoreCwd }"><i /></span>
-              </label>
-              <label class="toggle-row" @click="toggleMinimizeToTray">
-                <span>
-                  <span class="fname">{{ t('set.gen.minimizeToTray') }}</span>
-                  <span class="sub">{{ t('set.gen.minimizeToTrayDesc') }}</span>
-                </span>
-                <span class="switch" :class="{ on: store.minimizeToTray }"><i /></span>
-              </label>
-              <label class="toggle-row" @click="toggleConnectionMultiplex">
-                <span>
-                  <span class="fname">{{ t('set.gen.connectionMultiplex') }}</span>
-                  <span class="sub">{{ t('set.gen.connectionMultiplexDesc') }}</span>
-                </span>
-                <span class="switch" :class="{ on: store.connectionMultiplex }"><i /></span>
-              </label>
-              <label class="toggle-row" @click="toggleTmuxOnConnect">
-                <span>
-                  <span class="fname">{{ t('set.gen.tmuxOnConnect') }}</span>
-                  <span class="sub">{{ t('set.gen.tmuxOnConnectDesc') }}</span>
-                </span>
-                <span class="switch" :class="{ on: store.tmuxOnConnect }"><i /></span>
-              </label>
-              <label v-if="store.tmuxOnConnect" class="toggle-row">
-                <span>
-                  <span class="fname">{{ t('set.gen.tmuxSessionName') }}</span>
+            </section>
+
+            <section class="group">
+              <h3>{{ t('set.gen.startup') }}</h3>
+              <div class="card">
+                <label class="row toggle" @click="toggleRestore">
+                  <div class="r-text">
+                    <span class="r-title">{{ t('set.gen.restoreTabs') }}</span>
+                    <span class="r-desc">{{ t('set.gen.restoreTabsDesc') }}</span>
+                  </div>
+                  <span class="switch" :class="{ on: store.restoreTabs }"><i /></span>
+                </label>
+                <label class="row toggle" @click="toggleRestoreConnect">
+                  <div class="r-text">
+                    <span class="r-title">{{ t('set.gen.restoreConnect') }}</span>
+                    <span class="r-desc">{{ t('set.gen.restoreConnectDesc') }}</span>
+                  </div>
+                  <span class="switch" :class="{ on: store.restoreConnect }"><i /></span>
+                </label>
+                <label class="row toggle" @click="toggleRestoreCwd">
+                  <div class="r-text">
+                    <span class="r-title">{{ t('set.gen.restoreCwd') }}</span>
+                    <span class="r-desc">{{ t('set.gen.restoreCwdDesc') }}</span>
+                  </div>
+                  <span class="switch" :class="{ on: store.restoreCwd }"><i /></span>
+                </label>
+                <label class="row toggle" @click="toggleMinimizeToTray">
+                  <div class="r-text">
+                    <span class="r-title">{{ t('set.gen.minimizeToTray') }}</span>
+                    <span class="r-desc">{{ t('set.gen.minimizeToTrayDesc') }}</span>
+                  </div>
+                  <span class="switch" :class="{ on: store.minimizeToTray }"><i /></span>
+                </label>
+                <label class="row toggle" @click="toggleConnectionMultiplex">
+                  <div class="r-text">
+                    <span class="r-title">{{ t('set.gen.connectionMultiplex') }}</span>
+                    <span class="r-desc">{{ t('set.gen.connectionMultiplexDesc') }}</span>
+                  </div>
+                  <span class="switch" :class="{ on: store.connectionMultiplex }"><i /></span>
+                </label>
+                <label class="row toggle" @click="toggleTmuxOnConnect">
+                  <div class="r-text">
+                    <span class="r-title">{{ t('set.gen.tmuxOnConnect') }}</span>
+                    <span class="r-desc">{{ t('set.gen.tmuxOnConnectDesc') }}</span>
+                  </div>
+                  <span class="switch" :class="{ on: store.tmuxOnConnect }"><i /></span>
+                </label>
+                <div v-if="store.tmuxOnConnect" class="row">
+                  <div class="r-text"><span class="r-title">{{ t('set.gen.tmuxSessionName') }}</span></div>
                   <input
-                    class="text"
+                    class="box text-in"
                     :value="store.tmuxSessionName"
                     :placeholder="t('set.gen.tmuxSessionNamePh')"
                     spellcheck="false"
                     @change="onTmuxSessionName"
                     @keyup.enter="onTmuxSessionName"
                   />
-                </span>
-              </label>
-              <label class="toggle-row">
-                <span>
-                  <span class="fname">{{ t('set.gen.globalShowHide') }}</span>
+                </div>
+                <div class="row">
+                  <div class="r-text">
+                    <span class="r-title">{{ t('set.gen.globalShowHide') }}</span>
+                    <span v-if="globalHotkey.error" class="r-desc err">{{ globalHotkey.error }}</span>
+                    <span v-else class="r-desc">{{ t('set.gen.globalShowHideDesc') }}</span>
+                  </div>
                   <input
-                    class="text"
+                    class="box text-in mono"
                     :value="store.globalShowHide"
                     :placeholder="t('set.gen.globalShowHidePh')"
                     spellcheck="false"
                     @change="onGlobalShowHide"
                     @keyup.enter="onGlobalShowHide"
                   />
-                  <span v-if="globalHotkey.error" class="sub err">{{ globalHotkey.error }}</span>
-                  <span v-else class="sub">{{ t('set.gen.globalShowHideDesc') }}</span>
-                </span>
-              </label>
-            </div>
-            <div class="section">
-              <div class="label">{{ t('set.gen.snippets') }}</div>
-              <p class="desc">{{ t('set.gen.snippetsDesc') }}</p>
-              <div v-for="s in store.snippets" :key="s.id" class="snip-row">
-                <span class="snip-title">{{ s.title }}<template v-if="s.group"> · {{ s.group }}</template></span>
-                <span class="snip-text">{{ oneLine(s.text) }}</span>
-                <span v-if="s.hostId" class="snip-host">{{ hostLabel(s.hostId) }}</span>
-                <button class="ghost" @click="editSnippet(s)">{{ t('set.gen.edit') }}</button>
-                <button class="ghost" @click="deleteSnippet(s.id)">{{ t('set.gen.delete') }}</button>
-              </div>
-              <div v-if="snippetForm.open" class="snip-form">
-                <input
-                  v-model="snippetForm.title"
-                  class="snip-in"
-                  :placeholder="t('set.gen.snipName')"
-                  spellcheck="false"
-                />
-                <textarea
-                  v-model="snippetForm.text"
-                  class="snip-in snip-ta"
-                  :placeholder="t('set.gen.snipPlaceholder')"
-                  spellcheck="false"
-                />
-                <input
-                  v-model="snippetForm.group"
-                  class="snip-in"
-                  :placeholder="t('set.gen.snipGroup')"
-                  spellcheck="false"
-                />
-                <label class="field host-scope">
-                  <span class="snip-lbl">{{ t('set.gen.snipHostScope') }}</span>
-                  <select v-model="snippetForm.hostId" class="snip-in select">
-                    <option value="">{{ t('set.gen.snipHostAll') }}</option>
-                    <option v-for="h in store.hosts" :key="h.id" :value="h.id">{{ h.label }}</option>
-                  </select>
-                </label>
-                <label class="field">
-                  <span class="snip-lbl">{{ t('set.gen.snipDefaultVars') }}</span>
-                  <textarea
-                    v-model="snippetForm.defaultVars"
-                    class="snip-in snip-ta snip-vars"
-                    :placeholder="t('set.gen.snipDefaultVarsPh')"
-                    spellcheck="false"
-                  />
-                </label>
-                <label class="field check">
-                  <input v-model="snippetForm.confirm" type="checkbox" />
-                  <span class="check-label">{{ t('set.gen.snipConfirm') }}</span>
-                </label>
-                <div class="snip-actions">
-                  <button class="ghost" @click="snippetForm.open = false">{{ t('set.gen.cancel') }}</button>
-                  <button class="primary" :disabled="!snippetForm.title.trim() || !snippetForm.text.trim()" @click="saveSnippet">{{ t('set.gen.save') }}</button>
                 </div>
               </div>
-              <button v-else class="ghost" @click="startNewSnippet">{{ t('set.gen.newSnippet') }}</button>
-            </div>
-            <div class="section">
-              <div class="label">{{ t('set.gen.update') }}</div>
-              <p class="desc">{{ t('set.gen.updateDesc') }}</p>
-              <div class="editor-row">
-                <span class="path" :class="{ dim: !updateState.latest }">
-                  <template v-if="updateState.fresh">{{ t('set.gen.upToDate', { v: updateState.latest }) }}</template>
-                  <template v-else-if="updateState.latest">{{ t('set.gen.updateAvail', { v: updateState.latest }) }}</template>
-                  <template v-else>{{ t('set.gen.updateUnknown') }}</template>
-                </span>
-                <button class="ghost" :disabled="updateState.checking" @click="checkForUpdates">
-                  {{ updateState.checking ? t('set.gen.updateChecking') : t('set.gen.updateCheck') }}
-                </button>
-                <button v-if="updateState.url" class="ghost" @click="openUpdatePage">{{ t('set.gen.updateOpen') }}</button>
-              </div>
-              <p v-if="updateState.error" class="desc err">{{ updateState.error }}</p>
-              <p v-if="updateState.notes && !updateState.fresh" class="desc update-notes">{{ updateState.notes }}</p>
-            </div>
-          </template>
+            </section>
 
-          <!-- 终端 -->
-          <template v-else-if="store.settingsTab === 'terminal'">
-            <div class="section">
-              <div class="label">{{ t('set.term.appearance') }}</div>
-              <div class="field">
-                <span class="fname">{{ t('set.term.font') }}</span>
-                <div class="select-wrap">
-                  <select class="select-in" :value="store.terminalFontFamily" @change="onFont">
-                    <option value="">{{ t('set.term.systemDefault') }}</option>
-                    <option v-for="f in fontList" :key="f" :value="f">{{ f }}</option>
-                  </select>
-                  <Icon name="chevron-down" :size="15" class="select-caret" />
+            <section class="group">
+              <h3>{{ t('set.gen.snippets') }}</h3>
+              <p class="g-desc">{{ t('set.gen.snippetsDesc') }}</p>
+              <div class="card">
+                <div v-for="s in store.snippets" :key="s.id" class="row list">
+                  <div class="r-text">
+                    <span class="r-title">{{ s.title }}<span v-if="s.group" class="faint"> · {{ s.group }}</span></span>
+                    <span class="r-desc mono ellipsis">{{ oneLine(s.text) }}</span>
+                  </div>
+                  <span v-if="s.hostId" class="chip">{{ hostLabel(s.hostId) }}</span>
+                  <button class="btn sm" @click="editSnippet(s)">{{ t('set.gen.edit') }}</button>
+                  <button class="icon-x" :title="t('set.gen.delete')" @click="deleteSnippet(s.id)"><Icon name="trash" :size="14" /></button>
                 </div>
+                <div v-if="snippetForm.open" class="sub">
+                  <input v-model="snippetForm.title" class="box" :placeholder="t('set.gen.snipName')" spellcheck="false" />
+                  <textarea v-model="snippetForm.text" class="box mono ta" :placeholder="t('set.gen.snipPlaceholder')" spellcheck="false" />
+                  <div class="sub-grid">
+                    <input v-model="snippetForm.group" class="box grow" :placeholder="t('set.gen.snipGroup')" spellcheck="false" />
+                    <div class="select-box grow">
+                      <select v-model="snippetForm.hostId" :aria-label="t('set.gen.snipHostScope')">
+                        <option value="">{{ t('set.gen.snipHostAll') }}</option>
+                        <option v-for="h in store.hosts" :key="h.id" :value="h.id">{{ h.label }}</option>
+                      </select>
+                      <Icon name="chevron-down" :size="14" class="caret" />
+                    </div>
+                  </div>
+                  <span class="sub-label">{{ t('set.gen.snipDefaultVars') }}</span>
+                  <textarea v-model="snippetForm.defaultVars" class="box mono ta short" :placeholder="t('set.gen.snipDefaultVarsPh')" spellcheck="false" />
+                  <div class="sub-foot">
+                    <label class="check">
+                      <input v-model="snippetForm.confirm" type="checkbox" class="switch-input" />
+                      <span>{{ t('set.gen.snipConfirm') }}</span>
+                    </label>
+                    <span class="spacer" />
+                    <button class="btn sm" @click="snippetForm.open = false">{{ t('set.gen.cancel') }}</button>
+                    <button class="btn sm btn-primary" :disabled="!snippetForm.title.trim() || !snippetForm.text.trim()" @click="saveSnippet">{{ t('set.gen.save') }}</button>
+                  </div>
+                </div>
+                <button v-else class="row add-row" @click="startNewSnippet"><Icon name="plus" :size="14" />{{ t('set.gen.newSnippet') }}</button>
               </div>
-              <div class="field">
-                <span class="fname">{{ t('set.term.cursor') }}</span>
-                <div class="seg">
-                  <button
-                    v-for="o in cursorOptions"
-                    :key="o.v"
-                    :class="{ on: store.terminalCursor === o.v }"
-                    @click="setCursor(o.v)"
-                  >
-                    {{ o.label }}
+            </section>
+
+            <section class="group">
+              <h3>{{ t('set.gen.update') }}</h3>
+              <p class="g-desc">{{ t('set.gen.updateDesc') }}</p>
+              <div class="card">
+                <div class="row">
+                  <div class="r-text">
+                    <span class="r-title" :class="{ faint: !updateState.latest }">
+                      <template v-if="updateState.fresh">{{ t('set.gen.upToDate', { v: updateState.latest }) }}</template>
+                      <template v-else-if="updateState.latest">{{ t('set.gen.updateAvail', { v: updateState.latest }) }}</template>
+                      <template v-else>{{ t('set.gen.updateUnknown') }}</template>
+                    </span>
+                    <span v-if="updateState.error" class="r-desc err">{{ updateState.error }}</span>
+                  </div>
+                  <button class="btn sm" :disabled="updateState.checking" @click="checkForUpdates">
+                    {{ updateState.checking ? t('set.gen.updateChecking') : t('set.gen.updateCheck') }}
                   </button>
+                  <button v-if="updateState.url" class="btn sm btn-tinted" @click="openUpdatePage">{{ t('set.gen.updateOpen') }}</button>
                 </div>
+                <div v-if="updateState.notes && !updateState.fresh" class="row notes">{{ updateState.notes }}</div>
               </div>
-              <div class="field">
-                <span class="fname">{{ t('set.term.theme') }}</span>
-                <div class="select-wrap">
-                  <select class="select-in" :value="store.terminalTheme" @change="onTheme">
-                    <option value="">{{ t('set.term.themeSystem') }}</option>
-                    <option v-for="p in PRESETS" :key="p.id" :value="p.id">{{ p.label }}</option>
-                  </select>
-                  <Icon name="chevron-down" :size="15" class="select-caret" />
-                </div>
-              </div>
-              <div class="field">
-                <span class="fname">{{ t('set.term.accent') }}</span>
-                <div class="accent-row">
-                  <input type="color" class="accent-input" :value="store.accentColor || '#6ea8fe'" @input="onAccent" />
-                  <button v-if="store.accentColor" class="ghost" @click="clearAccent">{{ t('set.term.accentReset') }}</button>
-                </div>
-              </div>
-              <p class="desc">{{ t('set.term.fontHint', { keys: `${modKey}+= / ${modKey}+-` }) }}</p>
-            </div>
-            <div class="section">
-              <div class="label">{{ t('set.term.safety') }}</div>
-              <label class="toggle-row" @click="toggleConfirmPaste">
-                <span>
-                  <span class="fname">{{ t('set.term.confirmPaste') }}</span>
-                  <span class="sub">{{ t('set.term.confirmPasteDesc') }}</span>
-                </span>
-                <span class="switch" :class="{ on: store.confirmPaste }"><i /></span>
-              </label>
-              <label class="toggle-row" @click="toggleSanitizePaste">
-                <span>
-                  <span class="fname">{{ t('set.term.sanitizePaste') }}</span>
-                  <span class="sub">{{ t('set.term.sanitizePasteDesc') }}</span>
-                </span>
-                <span class="switch" :class="{ on: store.sanitizePaste }"><i /></span>
-              </label>
-              <label class="toggle-row" @click="toggleCopyOnSelect">
-                <span>
-                  <span class="fname">{{ t('set.term.copyOnSelect') }}</span>
-                  <span class="sub">{{ t('set.term.copyOnSelectDesc') }}</span>
-                </span>
-                <span class="switch" :class="{ on: store.copyOnSelect }"><i /></span>
-              </label>
-              <label class="toggle-row" @click="toggleMiddleClickPaste">
-                <span>
-                  <span class="fname">{{ t('set.term.middleClickPaste') }}</span>
-                  <span class="sub">{{ t('set.term.middleClickPasteDesc') }}</span>
-                </span>
-                <span class="switch" :class="{ on: store.middleClickPaste }"><i /></span>
-              </label>
-              <label class="toggle-row" @click="toggleRightClickPaste">
-                <span>
-                  <span class="fname">{{ t('set.term.rightClickPaste') }}</span>
-                  <span class="sub">{{ t('set.term.rightClickPasteDesc') }}</span>
-                </span>
-                <span class="switch" :class="{ on: store.rightClickPaste }"><i /></span>
-              </label>
-            </div>
-            <div class="section">
-              <div class="label">{{ t('set.term.integration') }}</div>
-              <label class="toggle-row" @click="toggleShell">
-                <span>
-                  <span class="fname">{{ t('set.term.cwdSync') }}</span>
-                  <span class="sub">{{ t('set.term.cwdSyncDesc') }}</span>
-                </span>
-                <span class="switch" :class="{ on: store.shellIntegration }"><i /></span>
-              </label>
-            </div>
+            </section>
           </template>
 
-          <!-- 连接 -->
+          <!-- ================= 终端 ================= -->
+          <template v-else-if="store.settingsTab === 'terminal'">
+            <section class="group">
+              <h3>{{ t('set.term.appearance') }}</h3>
+              <div class="card">
+                <div class="row">
+                  <div class="r-text"><span class="r-title">{{ t('set.term.font') }}</span></div>
+                  <div class="select-box">
+                    <select :value="store.terminalFontFamily" @change="onFont">
+                      <option value="">{{ t('set.term.systemDefault') }}</option>
+                      <option v-for="f in fontList" :key="f" :value="f">{{ f }}</option>
+                    </select>
+                    <Icon name="chevron-down" :size="14" class="caret" />
+                  </div>
+                </div>
+                <div class="row">
+                  <div class="r-text"><span class="r-title">{{ t('set.term.cursor') }}</span></div>
+                  <div class="seg">
+                    <button v-for="o in cursorOptions" :key="o.v" :class="{ on: store.terminalCursor === o.v }" @click="setCursor(o.v)">
+                      {{ o.label }}
+                    </button>
+                  </div>
+                </div>
+                <div class="row">
+                  <div class="r-text"><span class="r-title">{{ t('set.term.theme') }}</span></div>
+                  <div class="select-box">
+                    <select :value="store.terminalTheme" @change="onTheme">
+                      <option value="">{{ t('set.term.themeSystem') }}</option>
+                      <option v-for="p in PRESETS" :key="p.id" :value="p.id">{{ p.label }}</option>
+                    </select>
+                    <Icon name="chevron-down" :size="14" class="caret" />
+                  </div>
+                </div>
+                <div class="row">
+                  <div class="r-text"><span class="r-title">{{ t('set.term.accent') }}</span></div>
+                  <button v-if="store.accentColor" class="btn sm" @click="clearAccent">{{ t('set.term.accentReset') }}</button>
+                  <input type="color" class="color-in" :value="store.accentColor || '#6ea8fe'" @input="onAccent" />
+                </div>
+              </div>
+              <p class="foot-note">{{ t('set.term.fontHint', { keys: `${modKey}+= / ${modKey}+-` }) }}</p>
+            </section>
+
+            <section class="group">
+              <h3>{{ t('set.term.safety') }}</h3>
+              <div class="card">
+                <label class="row toggle" @click="toggleConfirmPaste">
+                  <div class="r-text">
+                    <span class="r-title">{{ t('set.term.confirmPaste') }}</span>
+                    <span class="r-desc">{{ t('set.term.confirmPasteDesc') }}</span>
+                  </div>
+                  <span class="switch" :class="{ on: store.confirmPaste }"><i /></span>
+                </label>
+                <label class="row toggle" @click="toggleSanitizePaste">
+                  <div class="r-text">
+                    <span class="r-title">{{ t('set.term.sanitizePaste') }}</span>
+                    <span class="r-desc">{{ t('set.term.sanitizePasteDesc') }}</span>
+                  </div>
+                  <span class="switch" :class="{ on: store.sanitizePaste }"><i /></span>
+                </label>
+                <label class="row toggle" @click="toggleCopyOnSelect">
+                  <div class="r-text">
+                    <span class="r-title">{{ t('set.term.copyOnSelect') }}</span>
+                    <span class="r-desc">{{ t('set.term.copyOnSelectDesc') }}</span>
+                  </div>
+                  <span class="switch" :class="{ on: store.copyOnSelect }"><i /></span>
+                </label>
+                <label class="row toggle" @click="toggleMiddleClickPaste">
+                  <div class="r-text">
+                    <span class="r-title">{{ t('set.term.middleClickPaste') }}</span>
+                    <span class="r-desc">{{ t('set.term.middleClickPasteDesc') }}</span>
+                  </div>
+                  <span class="switch" :class="{ on: store.middleClickPaste }"><i /></span>
+                </label>
+                <label class="row toggle" @click="toggleRightClickPaste">
+                  <div class="r-text">
+                    <span class="r-title">{{ t('set.term.rightClickPaste') }}</span>
+                    <span class="r-desc">{{ t('set.term.rightClickPasteDesc') }}</span>
+                  </div>
+                  <span class="switch" :class="{ on: store.rightClickPaste }"><i /></span>
+                </label>
+              </div>
+            </section>
+
+            <section class="group">
+              <h3>{{ t('set.term.integration') }}</h3>
+              <div class="card">
+                <label class="row toggle" @click="toggleShell">
+                  <div class="r-text">
+                    <span class="r-title">{{ t('set.term.cwdSync') }}</span>
+                    <span class="r-desc">{{ t('set.term.cwdSyncDesc') }}</span>
+                  </div>
+                  <span class="switch" :class="{ on: store.shellIntegration }"><i /></span>
+                </label>
+              </div>
+            </section>
+          </template>
+
+          <!-- ================= 连接 ================= -->
           <template v-else-if="store.settingsTab === 'connection'">
-            <div class="section">
-              <div class="label">{{ t('set.conn.keepalive') }}</div>
-              <div class="field">
-                <span class="fname">{{ t('set.conn.interval') }}</span>
-                <input
-                  class="num-in"
-                  type="number"
-                  min="0"
-                  max="600"
-                  :value="store.keepaliveSec"
-                  @input="onKeepalive"
-                />
-                <span class="unit">{{ t('set.conn.seconds') }}</span>
+            <section class="group">
+              <h3>{{ t('set.conn.keepalive') }}</h3>
+              <div class="card">
+                <div class="row">
+                  <div class="r-text">
+                    <span class="r-title">{{ t('set.conn.interval') }}</span>
+                    <span class="r-desc">{{ t('set.conn.keepaliveDesc') }}</span>
+                  </div>
+                  <span class="num">
+                    <input class="box mono" type="number" min="0" max="600" :value="store.keepaliveSec" @input="onKeepalive" />
+                    <span class="unit">{{ t('set.conn.seconds') }}</span>
+                  </span>
+                </div>
+                <label class="row toggle" @click="toggleAutoDetectOs">
+                  <div class="r-text">
+                    <span class="r-title">{{ t('set.conn.autoDetectOs') }}</span>
+                    <span class="r-desc">{{ t('set.conn.autoDetectOsDesc') }}</span>
+                  </div>
+                  <span class="switch" :class="{ on: store.autoDetectOs }"><i /></span>
+                </label>
               </div>
-              <p class="desc">{{ t('set.conn.keepaliveDesc') }}</p>
-            </div>
-            <div class="section">
-              <div class="label">{{ t('set.conn.timeout') }}</div>
-              <div class="field">
-                <span class="fname">{{ t('set.conn.timeoutVal') }}</span>
-                <input
-                  class="num-in"
-                  type="number"
-                  min="1"
-                  max="300"
-                  :value="store.connectTimeoutSec"
-                  @input="onTimeout"
-                />
-                <span class="unit">{{ t('set.conn.seconds') }}</span>
+            </section>
+
+            <section class="group">
+              <h3>{{ t('set.conn.timeout') }}</h3>
+              <div class="card">
+                <div class="row">
+                  <div class="r-text">
+                    <span class="r-title">{{ t('set.conn.timeoutVal') }}</span>
+                    <span class="r-desc">{{ t('set.conn.timeoutDesc') }}</span>
+                  </div>
+                  <span class="num">
+                    <input class="box mono" type="number" min="1" max="300" :value="store.connectTimeoutSec" @input="onTimeout" />
+                    <span class="unit">{{ t('set.conn.seconds') }}</span>
+                  </span>
+                </div>
+                <div class="row">
+                  <div class="r-text">
+                    <span class="r-title">{{ t('set.conn.retriesVal') }}</span>
+                    <span class="r-desc">{{ t('set.conn.retriesDesc') }}</span>
+                  </div>
+                  <span class="num">
+                    <input class="box mono" type="number" min="0" max="30" :value="store.connectRetries" @input="onRetries" />
+                    <span class="unit">{{ t('set.conn.times') }}</span>
+                  </span>
+                </div>
               </div>
-              <p class="desc">{{ t('set.conn.timeoutDesc') }}</p>
-              <div class="field">
-                <span class="fname">{{ t('set.conn.retriesVal') }}</span>
-                <input
-                  class="num-in"
-                  type="number"
-                  min="0"
-                  max="30"
-                  :value="store.connectRetries"
-                  @input="onRetries"
-                />
-                <span class="unit">{{ t('set.conn.times') }}</span>
+            </section>
+
+            <section class="group">
+              <h3>{{ t('set.conn.xfer') }}</h3>
+              <div class="card">
+                <div class="row">
+                  <div class="r-text"><span class="r-title">{{ t('set.conn.xferConc') }}</span></div>
+                  <span class="num">
+                    <input class="box mono" type="number" min="1" max="32" :value="store.transferConcurrency" @input="onConcurrency" />
+                    <span class="unit">{{ t('set.conn.files') }}</span>
+                  </span>
+                </div>
+                <div class="row">
+                  <div class="r-text">
+                    <span class="r-title">{{ t('set.conn.xferRate') }}</span>
+                    <span class="r-desc">{{ t('set.conn.xferRateDesc') }}</span>
+                  </div>
+                  <span class="num">
+                    <input class="box mono" type="number" min="0" max="131072" :value="store.transferRateKbps" @input="onRate" />
+                    <span class="unit">{{ t('set.conn.kbps') }}</span>
+                  </span>
+                </div>
+                <label class="row toggle" @click="toggleVerifyChecksums">
+                  <div class="r-text">
+                    <span class="r-title">{{ t('set.conn.verifyChecksums') }}</span>
+                    <span class="r-desc">{{ t('set.conn.verifyChecksumsDesc') }}</span>
+                  </div>
+                  <span class="switch" :class="{ on: store.verifyChecksums }"><i /></span>
+                </label>
               </div>
-              <p class="desc">{{ t('set.conn.retriesDesc') }}</p>
-            </div>
-            <div class="section">
-              <div class="label">{{ t('set.conn.xfer') }}</div>
-              <div class="field">
-                <span class="fname">{{ t('set.conn.xferConc') }}</span>
-                <input
-                  class="num-in"
-                  type="number"
-                  min="1"
-                  max="32"
-                  :value="store.transferConcurrency"
-                  @input="onConcurrency"
-                />
-                <span class="unit">{{ t('set.conn.files') }}</span>
+            </section>
+
+            <section class="group">
+              <h3>{{ t('set.conn.drop') }}</h3>
+              <div class="card">
+                <label class="row toggle" @click="toggleAutoReconnect">
+                  <div class="r-text">
+                    <span class="r-title">{{ t('set.conn.autoReconnect') }}</span>
+                    <span class="r-desc">{{ t('set.conn.autoReconnectDesc') }}</span>
+                  </div>
+                  <span class="switch" :class="{ on: store.autoReconnect }"><i /></span>
+                </label>
+                <label class="row toggle" @click="toggleNotifications">
+                  <div class="r-text">
+                    <span class="r-title">{{ t('set.conn.notify') }}</span>
+                    <span class="r-desc">{{ t('set.conn.notifyDesc') }}</span>
+                  </div>
+                  <span class="switch" :class="{ on: store.notifications }"><i /></span>
+                </label>
+                <label class="row toggle" @click="toggleNotifySound">
+                  <div class="r-text">
+                    <span class="r-title">{{ t('set.conn.notifySound') }}</span>
+                    <span class="r-desc">{{ t('set.conn.notifySoundDesc') }}</span>
+                  </div>
+                  <span class="switch" :class="{ on: store.notifySound }"><i /></span>
+                </label>
+                <label class="row toggle" @click="toggleConfirmClose">
+                  <div class="r-text">
+                    <span class="r-title">{{ t('set.conn.confirmClose') }}</span>
+                    <span class="r-desc">{{ t('set.conn.confirmCloseDesc') }}</span>
+                  </div>
+                  <span class="switch" :class="{ on: store.confirmClose }"><i /></span>
+                </label>
               </div>
-              <div class="field">
-                <span class="fname">{{ t('set.conn.xferRate') }}</span>
-                <input
-                  class="num-in"
-                  type="number"
-                  min="0"
-                  max="131072"
-                  :value="store.transferRateKbps"
-                  @input="onRate"
-                />
-                <span class="unit">{{ t('set.conn.kbps') }}</span>
-              </div>
-              <p class="desc">{{ t('set.conn.xferRateDesc') }}</p>
-              <label class="toggle-row" @click="toggleVerifyChecksums">
-                <span>
-                  <span class="fname">{{ t('set.conn.verifyChecksums') }}</span>
-                  <span class="sub">{{ t('set.conn.verifyChecksumsDesc') }}</span>
-                </span>
-                <span class="switch" :class="{ on: store.verifyChecksums }"><i /></span>
-              </label>
-            </div>
-            <div class="section">
-              <div class="label">{{ t('set.conn.drop') }}</div>
-              <label class="toggle-row" @click="toggleAutoReconnect">
-                <span>
-                  <span class="fname">{{ t('set.conn.autoReconnect') }}</span>
-                  <span class="sub">{{ t('set.conn.autoReconnectDesc') }}</span>
-                </span>
-                <span class="switch" :class="{ on: store.autoReconnect }"><i /></span>
-              </label>
-              <label class="toggle-row" @click="toggleNotifications">
-                <span>
-                  <span class="fname">{{ t('set.conn.notify') }}</span>
-                  <span class="sub">{{ t('set.conn.notifyDesc') }}</span>
-                </span>
-                <span class="switch" :class="{ on: store.notifications }"><i /></span>
-              </label>
-              <label class="toggle-row" @click="toggleNotifySound">
-                <span>
-                  <span class="fname">{{ t('set.conn.notifySound') }}</span>
-                  <span class="sub">{{ t('set.conn.notifySoundDesc') }}</span>
-                </span>
-                <span class="switch" :class="{ on: store.notifySound }"><i /></span>
-              </label>
-              <label class="toggle-row" @click="toggleConfirmClose">
-                <span>
-                  <span class="fname">{{ t('set.conn.confirmClose') }}</span>
-                  <span class="sub">{{ t('set.conn.confirmCloseDesc') }}</span>
-                </span>
-                <span class="switch" :class="{ on: store.confirmClose }"><i /></span>
-              </label>
-            </div>
+            </section>
           </template>
 
-          <!-- 安全 -->
+          <!-- ================= 安全 ================= -->
           <template v-else-if="store.settingsTab === 'security'">
-            <div class="section">
-              <div class="label">{{ t('set.sec.known') }}</div>
-              <p class="desc">{{ t('set.sec.knownDesc') }}</p>
-              <div v-for="k in store.knownHosts" :key="`${k.host}:${k.port}`" class="kh-row">
-                <span class="kh-host">{{ k.host }}:{{ k.port }}</span>
-                <span class="kh-fp">{{ k.fingerprint }}</span>
-                <span v-if="keyAge(k.firstSeen)" class="kh-age" :class="{ stale: keyStale(k.firstSeen) }" :title="keyStale(k.firstSeen) ? t('set.sec.keyStaleTip') : t('set.sec.keyAge')">{{ keyAge(k.firstSeen) }}</span>
-                <button class="ghost" @click="forgetKnownHost(k)">{{ t('set.sec.delete') }}</button>
-              </div>
-              <div v-if="!store.knownHosts.length" class="desc">{{ t('set.sec.empty') }}</div>
-            </div>
-            <div class="section">
-              <div class="label">{{ t('set.sec.connLog') }}</div>
-              <p class="desc">{{ t('set.sec.connLogDesc') }}</p>
-              <div v-for="(l, i) in connLog" :key="i" class="cl-row">
-                <span class="cl-time">{{ connTime(l.at) }}</span>
-                <span class="cl-event" :class="l.event">{{ eventLabel(l.event) }}</span>
-                <span class="cl-host">{{ l.username }}@{{ l.host }}:{{ l.port }}</span>
-                <span v-if="l.detail" class="cl-detail">{{ l.detail }}<template v-if="l.bytes != null"> · {{ fmtBytes(l.bytes) }}</template></span>
-              </div>
-              <div v-if="!connLog.length" class="desc">{{ t('set.sec.connLogEmpty') }}</div>
-              <button v-if="connLog.length" class="ghost" @click="clearConnLog">{{ t('set.sec.connLogClear') }}</button>
-            </div>
-            <div class="section">
-              <div class="label">{{ t('set.sec.sshConfig') }}</div>
-              <p class="desc">{{ t('set.sec.sshConfigDesc') }}</p>
-              <div class="btn-row">
-                <button class="ghost" @click="importSshConfig">{{ t('set.sec.import') }}</button>
-                <button class="ghost" @click="exportSshConfig">{{ t('set.sec.export') }}</button>
-              </div>
-            </div>
-            <div class="section">
-              <div class="label">{{ t('set.sec.backup') }}</div>
-              <p class="desc">{{ t('set.sec.backupDesc') }}</p>
-              <div class="btn-row">
-                <button class="ghost" @click="exportHostsJson">{{ t('set.sec.export') }}</button>
-                <button class="ghost" @click="importHostsJson">{{ t('set.sec.restore') }}</button>
-              </div>
-              <p class="desc">{{ t('set.sec.fullBackupDesc') }}</p>
-              <div class="btn-row">
-                <button class="ghost" @click="exportAllData">{{ t('set.sec.exportAll') }}</button>
-                <button class="ghost" @click="importAllData">{{ t('set.sec.importAll') }}</button>
-              </div>
-            </div>
-            <div class="section">
-              <div class="label">{{ t('lock.title') }}</div>
-              <p class="desc">{{ t('lock.desc') }}</p>
-              <div class="lock-opts">
+            <section class="group">
+              <h3>{{ t('lock.title') }}</h3>
+              <p class="g-desc">{{ t('lock.desc') }}</p>
+              <div class="card">
                 <template v-if="store.lockEnabled">
-                  <label class="backup-row">
-                    <span class="backup-label">{{ t('lock.current') }}</span>
-                    <input v-model="currentPass" type="password" class="lock-in" :placeholder="t('lock.placeholder')" />
+                  <label class="row">
+                    <div class="r-text"><span class="r-title">{{ t('lock.current') }}</span></div>
+                    <input v-model="currentPass" type="password" class="box text-in" :placeholder="t('lock.placeholder')" />
                   </label>
-                  <div v-if="store.lockLocked" class="btn-row">
-                    <button class="ghost" @click="unlockNow">{{ t('lock.unlock') }}</button>
-                  </div>
-                  <div class="btn-row">
-                    <button class="ghost" :disabled="lockBusy" @click="disableMasterLock">{{ t('lock.disable') }}</button>
-                    <button class="ghost" @click="lockApp">{{ t('lock.lockNow') }}</button>
-                    <button class="ghost danger" @click="resetMasterLock">{{ t('lock.reset') }}</button>
-                  </div>
-                </template>
-                <template v-else>
-                  <label class="backup-row">
-                    <span class="backup-label">{{ t('lock.new') }}</span>
-                    <input v-model="lockNewPass" type="password" class="lock-in" :placeholder="t('lock.placeholder')" />
-                  </label>
-                  <div class="btn-row">
-                    <button class="ghost" :disabled="lockBusy" @click="saveMasterLock">{{ t('lock.save') }}</button>
+                  <div class="row actions-row">
+                    <button v-if="store.lockLocked" class="btn sm btn-primary" @click="unlockNow">{{ t('lock.unlock') }}</button>
+                    <button class="btn sm" @click="lockApp">{{ t('lock.lockNow') }}</button>
+                    <button class="btn sm" :disabled="lockBusy" @click="disableMasterLock">{{ t('lock.disable') }}</button>
+                    <span class="spacer" />
+                    <button class="btn sm btn-danger" @click="resetMasterLock">{{ t('lock.reset') }}</button>
                   </div>
                 </template>
-                <p class="desc">{{ t('lock.setHint') }}</p>
+                <label v-else class="row">
+                  <div class="r-text"><span class="r-title">{{ t('lock.new') }}</span></div>
+                  <input v-model="lockNewPass" type="password" class="box text-in" :placeholder="t('lock.placeholder')" />
+                  <button class="btn sm btn-primary" :disabled="lockBusy" @click="saveMasterLock">{{ t('lock.save') }}</button>
+                </label>
               </div>
-            </div>
-            <div class="section">
-              <div class="label">{{ t('set.sec.autoBackup') }}</div>
-              <label class="toggle-row" @click="toggleAutoBackup">
-                <span>
-                  <span class="fname">{{ t('set.sec.autoBackup') }}</span>
-                  <span class="sub">{{ t('set.sec.autoBackupDesc') }}</span>
-                </span>
-                <span class="switch" :class="{ on: store.autoBackup }"><i /></span>
-              </label>
-              <div v-if="store.autoBackup" class="backup-opts">
-                <div class="backup-row">
-                  <span class="backup-label">{{ t('set.sec.backupDir') }}</span>
-                  <span class="backup-val">{{ store.autoBackupDir || t('set.sec.backupDirNone') }}</span>
-                  <button class="ghost" @click="pickBackupDir">{{ t('host.browse') }}</button>
+              <p class="foot-note">{{ t('lock.setHint') }}</p>
+            </section>
+
+            <section class="group">
+              <h3>{{ t('set.sec.backup') }}</h3>
+              <div class="card">
+                <div class="row">
+                  <div class="r-text">
+                    <span class="r-title">{{ t('set.sec.hostsJson') }}</span>
+                    <span class="r-desc">{{ t('set.sec.backupDesc') }}</span>
+                  </div>
+                  <button class="btn sm" @click="exportHostsJson">{{ t('set.sec.export') }}</button>
+                  <button class="btn sm" @click="importHostsJson">{{ t('set.sec.restore') }}</button>
                 </div>
-                <div class="backup-row">
-                  <span class="backup-label">{{ t('set.sec.backupEvery') }}</span>
-                  <label class="hour-input">
-                    <input :value="store.autoBackupEveryHours" type="number" min="1" max="720" @change="onBackupHours" />
-                    <span class="unit">{{ t('set.sec.hours') }}</span>
-                  </label>
+                <div class="row">
+                  <div class="r-text">
+                    <span class="r-title">{{ t('set.sec.fullBackup') }}</span>
+                    <span class="r-desc">{{ t('set.sec.fullBackupDesc') }}</span>
+                  </div>
+                  <button class="btn sm" @click="exportAllData">{{ t('set.sec.exportAll') }}</button>
+                  <button class="btn sm" @click="importAllData">{{ t('set.sec.importAll') }}</button>
                 </div>
-                <button class="ghost" :disabled="backupBusy" @click="backupNow">{{ t('set.sec.backupNow') }}</button>
+                <label class="row toggle" @click="toggleAutoBackup">
+                  <div class="r-text">
+                    <span class="r-title">{{ t('set.sec.autoBackup') }}</span>
+                    <span class="r-desc">{{ t('set.sec.autoBackupDesc') }}</span>
+                  </div>
+                  <span class="switch" :class="{ on: store.autoBackup }"><i /></span>
+                </label>
+                <template v-if="store.autoBackup">
+                  <div class="row">
+                    <div class="r-text"><span class="r-title">{{ t('set.sec.backupDir') }}</span></div>
+                    <span class="value" :class="{ dim: !store.autoBackupDir }" :title="store.autoBackupDir || ''">{{ store.autoBackupDir || t('set.sec.backupDirNone') }}</span>
+                    <button class="btn sm" @click="pickBackupDir">{{ t('host.browse') }}</button>
+                  </div>
+                  <div class="row">
+                    <div class="r-text"><span class="r-title">{{ t('set.sec.backupEvery') }}</span></div>
+                    <span class="num">
+                      <input :value="store.autoBackupEveryHours" class="box mono" type="number" min="1" max="720" @change="onBackupHours" />
+                      <span class="unit">{{ t('set.sec.hours') }}</span>
+                    </span>
+                    <button class="btn sm" :disabled="backupBusy" @click="backupNow">{{ t('set.sec.backupNow') }}</button>
+                  </div>
+                </template>
               </div>
-            </div>
+            </section>
+
+            <section class="group">
+              <h3>{{ t('set.sec.sshConfig') }}</h3>
+              <div class="card">
+                <div class="row">
+                  <div class="r-text">
+                    <span class="r-title">~/.ssh/config</span>
+                    <span class="r-desc">{{ t('set.sec.sshConfigDesc') }}</span>
+                  </div>
+                  <button class="btn sm" @click="importSshConfig">{{ t('set.sec.importShort') }}</button>
+                  <button class="btn sm" @click="exportSshConfig">{{ t('set.sec.exportShort') }}</button>
+                </div>
+              </div>
+            </section>
+
+            <section class="group">
+              <h3>{{ t('set.sec.known') }}</h3>
+              <p class="g-desc">{{ t('set.sec.knownDesc') }}</p>
+              <div class="card">
+                <div v-for="k in store.knownHosts" :key="`${k.host}:${k.port}`" class="row list">
+                  <div class="r-text">
+                    <span class="r-title mono">{{ k.host }}:{{ k.port }}</span>
+                    <span class="r-desc mono ellipsis">{{ k.fingerprint }}</span>
+                  </div>
+                  <span
+                    v-if="keyAge(k.firstSeen)"
+                    class="chip"
+                    :class="{ warn: keyStale(k.firstSeen) }"
+                    :title="keyStale(k.firstSeen) ? t('set.sec.keyStaleTip') : t('set.sec.keyAge')"
+                  >{{ keyAge(k.firstSeen) }}</span>
+                  <button class="icon-x" :title="t('set.sec.delete')" @click="forgetKnownHost(k)"><Icon name="trash" :size="14" /></button>
+                </div>
+                <div v-if="!store.knownHosts.length" class="row empty">{{ t('set.sec.empty') }}</div>
+              </div>
+            </section>
+
+            <section class="group">
+              <h3>{{ t('set.sec.connLog') }}</h3>
+              <p class="g-desc">{{ t('set.sec.connLogDesc') }}</p>
+              <div class="card">
+                <div v-for="(l, i) in connLog" :key="i" class="row log">
+                  <span class="log-time">{{ connTime(l.at) }}</span>
+                  <span class="log-event" :class="l.event">{{ eventLabel(l.event) }}</span>
+                  <span class="mono grow ellipsis">{{ l.username }}@{{ l.host }}:{{ l.port }}</span>
+                  <span v-if="l.detail" class="mono faint ellipsis log-detail">{{ l.detail }}<template v-if="l.bytes != null"> · {{ fmtBytes(l.bytes) }}</template></span>
+                </div>
+                <div v-if="!connLog.length" class="row empty">{{ t('set.sec.connLogEmpty') }}</div>
+                <div v-else class="row actions-row">
+                  <span class="spacer" />
+                  <button class="btn sm btn-danger" @click="clearConnLog">{{ t('set.sec.connLogClear') }}</button>
+                </div>
+              </div>
+            </section>
           </template>
 
-          <!-- 快捷键 -->
+          <!-- ================= 快捷键 ================= -->
           <template v-else>
-            <div class="section">
-              <div class="label">{{ t('set.sc.custom') }}</div>
-              <p class="desc">{{ t('set.sc.customDesc') }}</p>
-              <div v-for="id in REBINDABLE_ACTIONS" :key="id" class="sc-row rebind">
-                <div class="sc-keys">
-                  <template v-for="(part, pi) in parts(bindingOf(id))" :key="pi">
-                    <span v-if="part.sep" class="sc-sep">{{ part.sep }}</span>
-                    <span v-for="(k, ki) in part.chord || []" :key="ki" class="kbd">{{ k }}</span>
+            <section class="group">
+              <h3>{{ t('set.sc.custom') }}</h3>
+              <p class="g-desc">{{ t('set.sc.customDesc') }}</p>
+              <div class="card">
+                <div v-for="id in REBINDABLE_ACTIONS" :key="id" class="row sc">
+                  <div class="r-text"><span class="r-title">{{ t('sck.' + DESC_KEY[id]) }}</span></div>
+                  <template v-if="recording !== id">
+                    <span class="keys">
+                      <template v-for="(part, pi) in parts(bindingOf(id))" :key="pi">
+                        <span v-if="part.sep" class="sep">{{ part.sep }}</span>
+                        <span v-for="(k, ki) in part.chord || []" :key="ki" class="kbd">{{ k }}</span>
+                      </template>
+                    </span>
+                    <button v-if="store.keybindings[id]" class="btn sm" @click="resetBinding(id)">{{ t('set.sc.reset') }}</button>
+                    <button class="btn sm" @click="startRecord(id)">{{ t('set.sc.rebind') }}</button>
                   </template>
-                </div>
-                <div class="sc-desc">{{ t('sck.' + DESC_KEY[id]) }}</div>
-                <div v-if="recording !== id" class="sc-actions">
-                  <button class="ghost" @click="startRecord(id)">{{ t('set.sc.rebind') }}</button>
-                  <button v-if="store.keybindings[id]" class="ghost" @click="resetBinding(id)">{{ t('set.sc.reset') }}</button>
-                </div>
-                <div v-else class="sc-actions">
-                  <span class="kbd rec">{{ t('set.sc.recording') }}</span>
-                  <button class="ghost" @click="recording = null">{{ t('set.sc.cancel') }}</button>
+                  <template v-else>
+                    <span class="kbd rec">{{ t('set.sc.recording') }}</span>
+                    <button class="btn sm" @click="recording = null">{{ t('set.sc.cancel') }}</button>
+                  </template>
                 </div>
               </div>
-              <div v-if="recording" class="rec-capture" @keydown.prevent="recordChord($event, recording)" tabindex="-1" ref="recCaptureEl"></div>
-            </div>
-            <section v-for="g in groups" :key="g.id" class="sc-group">
-              <div class="label">{{ t('group.' + g.id) }}</div>
-              <div v-for="item in g.items" :key="item.keys" class="sc-row">
-                <div class="sc-keys">
-                  <template v-for="(part, pi) in parts(item.keys)" :key="pi">
-                    <span v-if="part.sep" class="sc-sep">{{ part.sep }}</span>
-                    <span v-for="(k, ki) in part.chord || []" :key="ki" class="kbd">{{ k }}</span>
-                  </template>
-                </div>
-                <div class="sc-desc">
-                  {{ t('sck.' + item.key) }}
-                  <span v-if="hintOf(item.key)" class="sub">{{ withMod(hintOf(item.key)) }}</span>
+              <div v-if="recording" ref="recCaptureEl" class="rec-capture" tabindex="-1" @keydown="recordChord($event, recording)" @mousedown="recording = null"></div>
+            </section>
+
+            <section v-for="g in groups" :key="g.id" class="group">
+              <h3>{{ t('group.' + g.id) }}</h3>
+              <div class="card">
+                <div v-for="item in g.items" :key="item.keys" class="row sc">
+                  <div class="r-text">
+                    <span class="r-title">{{ t('sck.' + item.key) }}</span>
+                    <span v-if="hintOf(item.key)" class="r-desc">{{ withMod(hintOf(item.key)) }}</span>
+                  </div>
+                  <span class="keys">
+                    <template v-for="(part, pi) in parts(item.keys)" :key="pi">
+                      <span v-if="part.sep" class="sep">{{ part.sep }}</span>
+                      <span v-for="(k, ki) in part.chord || []" :key="ki" class="kbd">{{ k }}</span>
+                    </template>
+                  </span>
                 </div>
               </div>
             </section>
@@ -1202,736 +1260,537 @@ async function resetMasterLock(): Promise<void> {
 </template>
 
 <style scoped>
-.overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.4);
-  backdrop-filter: blur(2px);
+/* Same page frame as 连接 / 端口转发 / SFTP; content as grouped cards of rows. */
+.settings {
   display: flex;
   justify-content: center;
-  animation: fade-in 0.12s ease;
-  align-items: center;
-  padding: 24px;
-  z-index: 110;
+  height: 100%;
+  padding: 24px 36px 0;
+  background: var(--bg);
 }
-.dialog {
+.page-col {
   display: flex;
   flex-direction: column;
-  width: min(760px, 94vw);
-  height: min(560px, 82vh);
-  background-color: color-mix(in srgb, var(--bg-elev) 92%, transparent);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow), 0 0 0 1px rgba(255, 255, 255, 0.04) inset;
-  outline: none;
-  animation: pop-in 0.16s cubic-bezier(0.2, 0.8, 0.3, 1);
+  gap: 16px;
+  width: 100%;
+  max-width: 1320px;
+  min-height: 0;
 }
-.section + .section, .sc-group + .sc-group {
-  margin-top: 18px;
-  padding-top: 18px;
-  border-top: 1px solid var(--border);
-}
-.head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+
+/* Tabs: the 连接 page's pill tabs. */
+.stabs {
   flex: none;
-  padding: 14px 16px;
-  font-size: 15px;
-  font-weight: 600;
-  border-bottom: 1px solid var(--border);
-}
-.x {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  border-radius: 5px;
-  color: var(--text-dim);
-}
-.x:hover {
-  background: var(--bg-elev-2);
-  color: var(--text);
-}
-.section {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
-.label {
-  font-size: 12px;
-  color: var(--text-dim);
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-}
-.desc {
-  font-size: 12px;
-  color: var(--text-faint);
-  line-height: 1.5;
-}
-.desc.err {
-  color: var(--danger);
-}
-.update-notes {
-  margin-top: 8px;
-  max-height: 120px;
-  overflow-y: auto;
-  white-space: pre-wrap;
-  font-family: var(--font-mono);
-  font-size: 11px;
-}
-.editor-row {
+.stabs button {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-top: 6px;
-}
-.opener-form {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 6px;
-}
-.opener-ext {
-  width: 90px;
-  height: 32px;
-  padding: 0 10px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color: var(--text);
-  font-size: 12.5px;
-  outline: none;
-}
-.opener-prog {
-  flex: 1;
-  height: 32px;
-  padding: 0 10px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color: var(--text);
-  font-size: 12.5px;
-  outline: none;
-}
-.opener-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 6px;
-}
-.opener-ext-tag {
-  flex: none;
-  width: 60px;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--accent);
-}
-.opener-prog-tag {
-  flex: 1;
-  min-width: 0;
-  height: 30px;
-  display: flex;
-  align-items: center;
-  padding: 0 10px;
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  color: var(--text-dim);
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.accent-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.accent-input {
-  width: 40px;
-  height: 34px;
-  padding: 3px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-}
-.accent-input::-webkit-color-swatch-wrapper {
-  padding: 0;
-}
-.accent-input::-webkit-color-swatch {
-  border: none;
-  border-radius: 4px;
-}
-.accent-input:hover {
-  border-color: var(--border-strong);
-}
-.accent-input:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}.path {
-  flex: 1;
-  min-width: 0;
-  height: 32px;
-  display: flex;
-  align-items: center;
-  padding: 0 11px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  color: var(--text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.path.dim {
-  color: var(--text-faint);
-}
-.ghost {
-  flex: none;
+  gap: 7px;
   height: 32px;
   padding: 0 14px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--r-pill);
   font-size: 13px;
   color: var(--text-dim);
-  border: 1px solid var(--border);
+  white-space: nowrap;
+  transition: background 0.16s var(--ease), color 0.16s var(--ease);
 }
-.ghost:hover {
-  background: var(--bg-elev-2);
+.stabs button:hover {
+  background: var(--hover);
   color: var(--text);
 }
-.btn-row {
-  display: flex;
-  gap: 8px;
+.stabs button.on {
+  color: var(--text);
+  background: var(--selected);
 }
-.lock-opts {
+.stabs button.on :deep(svg) {
+  color: var(--accent);
+}
+
+.content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  outline: none;
+  /* Room for the scrollbar without shifting the column. */
+  margin-right: -12px;
+  padding-right: 12px;
+}
+/* Full width of the page column, like 连接 / SFTP / 端口转发: the cards'
+   right edge lines up with the title row's on every page. */
+.inner {
+  container-type: inline-size;
+  padding: 4px 0 48px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  margin-top: 10px;
+  gap: 24px;
 }
-.lock-in {
-  flex: 1;
-  height: 32px;
-  min-width: 0;
-  padding: 0 10px;
+
+/* ---- Groups & rows ---- */
+.group h3 {
+  margin: 0 0 8px 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-faint);
+}
+.g-desc,
+.foot-note {
+  margin: -2px 4px 10px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-faint);
+}
+.foot-note {
+  margin: 8px 4px 0;
+}
+.card {
   background: var(--bg-elev);
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color: var(--text);
-  font-size: 12.5px;
-  outline: none;
+  border-radius: var(--r-card);
+  overflow: hidden;
 }
-.lock-in:focus {
-  border-color: var(--accent);
-}
-.ghost.danger {
-  color: var(--danger);
-}
-.ghost.danger:hover {
-  background: color-mix(in srgb, var(--danger) 12%, transparent);
-  border-color: var(--danger);
-}
-.backup-opts {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-top: 10px;
-}
-.backup-row {
+.row {
   display: flex;
   align-items: center;
   gap: 10px;
-}
-.backup-label {
-  font-size: 12px;
-  color: var(--text-dim);
-  flex: none;
-  width: 80px;
-}
-.backup-val {
-  flex: 1;
-  font-size: 12px;
-  font-family: var(--font-mono);
+  width: 100%;
+  min-height: 52px;
+  padding: 10px 16px;
+  text-align: left;
+  font-size: 13px;
   color: var(--text);
+}
+.row + .row,
+.row + .sub,
+.sub + .row {
+  border-top: 1px solid var(--border);
+}
+.r-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-right: 12px;
+}
+.r-title {
+  font-size: 13.5px;
+  color: var(--text);
+}
+.r-desc {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-faint);
+}
+.r-desc.solo {
+  font-size: 12.5px;
+  color: var(--text-dim);
+}
+.err {
+  color: var(--danger) !important;
+}
+.faint {
+  color: var(--text-faint);
+}
+.mono {
+  font-family: var(--font-mono);
+}
+.grow {
+  flex: 1;
+  min-width: 0;
+}
+.ellipsis {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.hour-input {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.hour-input input {
-  width: 64px;
-  height: 30px;
-  padding: 0 8px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color: var(--text);
-  font-size: 12.5px;
-  outline: none;
-}
-.hour-input .unit {
-  font-size: 12px;
-  color: var(--text-dim);
-}
-.field {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 8px;
-}
-.fname {
-  font-size: 13px;
-  color: var(--text);
-}
-.select-wrap {
-  position: relative;
+.spacer {
   flex: 1;
-  min-width: 0;
 }
-.select-in {
-  width: 100%;
-  height: 32px;
-  padding: 0 32px 0 11px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color: var(--text);
-  font-size: 12.5px;
-  outline: none;
-  appearance: none;
-  -webkit-appearance: none;
+.row.toggle {
   cursor: pointer;
+  transition: background 0.16s var(--ease);
 }
-.select-in:focus {
-  border-color: var(--accent);
+.row.toggle:hover {
+  background: var(--hover);
 }
-.select-caret {
-  position: absolute;
-  right: 10px;
-  top: 50%;
-  transform: translateY(-50%);
-  color: var(--text-dim);
-  pointer-events: none;
+.row.list {
+  min-height: 48px;
 }
-.num-in {
-  width: 72px;
-  height: 32px;
-  padding: 0 10px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color: var(--text);
-  font-family: var(--font-mono);
-  font-size: 13px;
-  outline: none;
-}
-.num-in:focus {
-  border-color: var(--accent);
-}
-/* Hide the native (light-colored) number spinner; arrow keys still work. */
-.num-in::-webkit-inner-spin-button,
-.num-in::-webkit-outer-spin-button {
-  -webkit-appearance: none;
-  margin: 0;
-}
-.unit {
-  font-size: 12px;
+.row.empty {
+  justify-content: center;
+  min-height: 56px;
+  font-size: 12.5px;
   color: var(--text-faint);
 }
+.row.notes {
+  display: block;
+  max-height: 160px;
+  overflow-y: auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  color: var(--text-dim);
+}
+.row.actions-row {
+  min-height: 48px;
+}
+
+/* ---- Controls ---- */
+.btn.sm {
+  height: 30px;
+  padding: 0 11px;
+  font-size: 12.5px;
+}
+/* Segmented control: compact rounded rectangle, thumb concentric (8 − 2). */
 .seg {
-  display: flex;
-  gap: 3px;
-  padding: 3px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 30px;
+  padding: 2px;
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
 }
 .seg button {
-  padding: 5px 12px;
+  height: 24px;
+  padding: 0 12px;
   border-radius: 5px;
   font-size: 12.5px;
   color: var(--text-dim);
+  transition: background 0.16s var(--ease), color 0.16s var(--ease);
+}
+.seg button:hover {
+  color: var(--text);
 }
 .seg button.on {
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-.toggle-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  margin-top: 12px;
-  cursor: pointer;
-}
-.toggle-row .sub {
-  display: block;
-  margin-top: 3px;
-  font-size: 11.5px;
-  color: var(--text-faint);
-  line-height: 1.45;
-}
-.toggle-row .sub.err {
-  color: var(--danger);
-}
-.toggle-row > span:first-child {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-.toggle-row .text {
-  display: block;
-  width: 100%;
-  height: 32px;
-  margin-top: 6px;
-  padding: 0 11px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
   color: var(--text);
-  font-size: 12.5px;
-  outline: none;
-  box-sizing: border-box;
+  background: var(--thumb);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
 }
-.toggle-row .text:hover {
-  border-color: var(--border-strong);
-}
-.toggle-row .text:focus {
-  border-color: var(--accent);
-}
+/* Switch */
 .switch {
   flex: none;
   position: relative;
-  width: 38px;
+  width: 36px;
   height: 22px;
-  border-radius: 999px;
-  background: var(--bg-elev-2);
-  border: 1px solid var(--border-strong);
-  transition: background 0.15s;
+  border-radius: var(--r-pill);
+  background: var(--border-strong);
+  transition: background 0.18s var(--ease);
 }
 .switch i {
   position: absolute;
   top: 2px;
   left: 2px;
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   border-radius: 50%;
-  background: var(--text-faint);
-  transition: transform 0.15s, background 0.15s;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  transition: transform 0.18s var(--ease);
 }
 .switch.on {
   background: var(--accent);
-  border-color: var(--accent);
 }
 .switch.on i {
-  transform: translateX(16px);
-  background: #fff;
+  transform: translateX(14px);
 }
-
-.body {
-  display: flex;
-  flex: 1;
-  min-height: 0;
-}
-.nav {
-  flex: none;
-  width: 148px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 12px 8px;
-  border-right: 1px solid var(--border);
-  overflow-y: auto;
-}
-.nav-item {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 8px 10px;
+/* Boxed fields */
+.box {
+  height: 30px;
+  padding: 0 10px;
+  font-size: 12.5px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  font-size: 13px;
-  color: var(--text-dim);
-  text-align: left;
-  transition: background 0.13s, color 0.13s;
+  outline: none;
+  transition: border-color 0.16s var(--ease);
 }
-.nav-item:hover {
-  background: var(--bg-elev-2);
-  color: var(--text);
-}
-.nav-item.on {
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-.pane {
-  flex: 1;
-  min-width: 0;
-  overflow-y: auto;
-  padding: 16px 18px 20px;
-}
-.sc-row {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-  padding: 5px 0;
-}
-.sc-keys {
-  flex: none;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 3px;
-  width: 196px;
-}
-.sc-sep {
-  color: var(--text-faint);
-  font-size: 11px;
-  margin: 0 2px;
-}
-.sc-desc {
-  flex: 1;
-  min-width: 0;
-  font-size: 13px;
-  color: var(--text);
-}
-.sc-desc .sub {
-  display: block;
-  margin-top: 1px;
-  font-size: 11.5px;
-  color: var(--text-faint);
-}
-.sc-actions {
-  flex: none;
-  display: flex;
-  gap: 6px;
-}
-.sc-row.rebind {
-  align-items: center;
-}
-.sc-actions .ghost {
-  height: 24px;
-  padding: 0 8px;
-  font-size: 11.5px;
-}
-.kbd.rec {
-  color: var(--accent);
+.box:focus {
   border-color: var(--accent);
 }
+.text-in {
+  flex: none;
+  width: 240px;
+}
+.ext-in {
+  flex: none;
+  width: 96px;
+}
+.ta {
+  height: auto;
+  min-height: 76px;
+  padding: 8px 10px;
+  line-height: 1.5;
+  resize: vertical;
+}
+.ta.short {
+  min-height: 54px;
+}
+.num {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.num input {
+  width: 76px;
+  text-align: right;
+}
+.num input::-webkit-outer-spin-button,
+.num input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+/* Fixed width so the number fields line up down the card whatever the unit. */
+/* Short units in a fixed column, so the number fields line up. */
+.unit {
+  width: 52px;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+.select-box {
+  position: relative;
+  flex: none;
+  width: 240px;
+  height: 30px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  transition: border-color 0.16s var(--ease);
+}
+.select-box:focus-within {
+  border-color: var(--accent);
+}
+.select-box.grow {
+  flex: 1;
+  width: auto;
+}
+.select-box select {
+  width: 100%;
+  height: 100%;
+  padding: 0 28px 0 10px;
+  font-size: 12.5px;
+  color: var(--text);
+  background: none;
+  border: none;
+  outline: none;
+  appearance: none;
+  cursor: pointer;
+}
+.select-box .caret {
+  position: absolute;
+  top: 50%;
+  right: 9px;
+  transform: translateY(-50%);
+  color: var(--text-faint);
+  pointer-events: none;
+}
+.color-in {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: none;
+  border-radius: var(--r-pill);
+  background: none;
+  cursor: pointer;
+}
+.color-in::-webkit-color-swatch-wrapper {
+  padding: 3px;
+}
+.color-in::-webkit-color-swatch {
+  border: none;
+  border-radius: var(--r-pill);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.2);
+}
+.value {
+  flex: 0 1 auto;
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.value.dim {
+  font-family: inherit;
+  color: var(--text-faint);
+}
+.chip {
+  flex: none;
+  padding: 0 9px;
+  font-size: 12px;
+  line-height: 22px;
+  color: var(--text-dim);
+  background: var(--hover);
+  border-radius: var(--r-pill);
+  white-space: nowrap;
+}
+.chip.mono {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.chip.warn {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+.icon-x {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-pill);
+  color: var(--text-faint);
+  transition: background 0.16s var(--ease), color 0.16s var(--ease);
+}
+.icon-x:hover {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+.form-row {
+  background: color-mix(in srgb, var(--bg) 55%, var(--bg-elev));
+}
+.add-row {
+  justify-content: center;
+  gap: 6px;
+  min-height: 46px;
+  font-size: 13px;
+  color: var(--accent);
+  transition: background 0.16s var(--ease);
+}
+.add-row:hover {
+  background: var(--accent-soft);
+}
+
+/* Editing area opened inside a card (snippet form). */
+.sub {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  background: color-mix(in srgb, var(--bg) 55%, var(--bg-elev));
+}
+.sub-grid {
+  display: flex;
+  gap: 8px;
+}
+.sub-label {
+  margin: 2px 2px 0;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+.sub-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.switch-input {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent);
+}
+
+/* Connection log */
+.row.log {
+  min-height: 40px;
+  padding-top: 7px;
+  padding-bottom: 7px;
+  font-size: 12.5px;
+}
+.log-time {
+  flex: none;
+  width: 132px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+.log-event {
+  flex: none;
+  min-width: 64px;
+  padding: 0 8px;
+  font-size: 11.5px;
+  line-height: 20px;
+  text-align: center;
+  border-radius: var(--r-pill);
+  color: var(--text-dim);
+  background: var(--hover);
+}
+.log-event.connect {
+  color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 13%, transparent);
+}
+.log-event.error {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+.log-event.transfer,
+.log-event.forward {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.log-detail {
+  max-width: 240px;
+  font-size: 12px;
+}
+
+/* Shortcuts */
+.row.sc {
+  min-height: 46px;
+}
+.keys {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  max-width: 320px;
+}
+.sep {
+  padding: 0 3px;
+  font-size: 11.5px;
+  color: var(--text-faint);
+}
+.kbd.rec {
+  padding: 0 10px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+/* Invisible full-window catcher while recording a chord. */
 .rec-capture {
   position: fixed;
   inset: 0;
   z-index: 130;
-  cursor: crosshair;
-}
-@media (max-width: 620px) {
-  .sc-row { flex-direction: column; gap: 4px; padding: 8px 0; }
-  .sc-keys { width: auto; }
-  .nav { width: 112px; }
-}
-
-/* ---- snippets ---- */
-.snip-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 6px 0;
-}
-.snip-title {
-  flex: none;
-  min-width: 90px;
-  font-size: 13px;
-  color: var(--text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.snip-text {
-  flex: 1;
-  min-width: 0;
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  color: var(--text-faint);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.snip-form {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 8px;
-  padding: 10px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-}
-.snip-in {
-  width: 100%;
-  height: 32px;
-  padding: 0 10px;
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color: var(--text);
-  font-size: 12.5px;
   outline: none;
 }
-.snip-in:focus {
-  border-color: var(--accent);
-}
-.snip-ta {
-  height: 72px;
-  padding: 8px 10px;
-  font-family: var(--font-mono);
-  resize: vertical;
-}
-.snip-vars {
-  height: 54px;
-}
-.snip-lbl {
-  font-size: 11px;
-  color: var(--text-dim);
-}
-.host-scope {
-  flex-direction: column;
-  align-items: stretch;
-}
-.host-scope .snip-in.select {
-  height: 32px;
-  appearance: auto;
-  -webkit-appearance: auto;
-  cursor: pointer;
-}
-.snip-host {
-  flex: none;
-  font-size: 11px;
-  color: var(--accent);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 120px;
-}.snip-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
-.snip-actions .primary {
-  height: 30px;
-  padding: 0 14px;
-  border-radius: var(--radius-sm);
-  background: var(--accent);
-  color: #fff;
-  font-size: 13px;
-  font-weight: 500;
-}
-.snip-actions .primary:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
 
-/* ---- known hosts ---- */
-.kh-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 6px 0;
-}
-.kh-host {
-  flex: none;
-  min-width: 120px;
-  font-family: var(--font-mono);
-  font-size: 12.5px;
-  color: var(--text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.kh-fp {
-  flex: 1;
-  min-width: 0;
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  color: var(--text-faint);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.kh-age {
-  flex: none;
-  font-size: 11px;
-  color: var(--warn);
-  font-variant-numeric: tabular-nums;
-}
-.kh-age.stale {
-  color: var(--danger);
-  font-weight: 600;
-}
-.cl-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 5px 0;
-  font-size: 12px;
-}
-.cl-time {
-  flex: none;
-  width: 130px;
-  color: var(--text-faint);
-  font-variant-numeric: tabular-nums;
-}
-.cl-event {
-  flex: none;
-  width: 72px;
-  font-size: 11px;
-  padding: 1px 6px;
-  border-radius: 4px;
-  text-align: center;
-}
-.cl-event.connect {
-  color: var(--ok);
-  background: rgba(81, 207, 102, 0.12);
-}
-.cl-event.disconnect {
-  color: var(--warn);
-  background: rgba(255, 212, 59, 0.12);
-}
-.cl-event.error {
-  color: var(--danger);
-  background: rgba(255, 107, 107, 0.12);
-}
-.cl-event.transfer {
-  color: var(--accent);
-  background: rgba(96, 165, 250, 0.14);
-}
-.cl-event.forward {
-  color: var(--ok);
-  background: rgba(81, 207, 102, 0.12);
-}
-.cl-host {
-  flex: 1;
-  min-width: 0;
-  font-family: var(--font-mono);
-  color: var(--text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.cl-detail {
-  flex: none;
-  font-size: 11px;
-  color: var(--text-faint);
-  font-family: var(--font-mono);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 220px;
+/* The column narrows with the window and the sidebar, so ask the column. */
+@container (max-width: 640px) {
+  .text-in,
+  .select-box {
+    width: 180px;
+  }
+  .value {
+    max-width: 160px;
+  }
 }
 </style>

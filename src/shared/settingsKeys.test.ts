@@ -36,7 +36,6 @@ describe('renderer-settable settings keys', () => {
   it('accepts the keys the renderer actually writes', () => {
     // A sample of the real call sites, covering each section of SettingsDialog.
     for (const key of [
-      'theme',
       'lang',
       'keybindings',
       'transferConcurrency',
@@ -70,7 +69,7 @@ describe('renderer-settable settings keys', () => {
     expect(isRendererSettableKey(undefined)).toBe(false)
     expect(isRendererSettableKey(42)).toBe(false)
     // Guards against a key assembled from user input reaching the store.
-    expect(isRendererSettableKey({ toString: () => 'theme' })).toBe(false)
+    expect(isRendererSettableKey({ toString: () => 'lang' })).toBe(false)
   })
 
   it('never lists a key in both sets', () => {

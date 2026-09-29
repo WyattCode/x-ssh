@@ -26,7 +26,9 @@ import type {
   Snippet,
   SftpProgress,
   TransferHistoryItem,
-  DownloadItem
+  DownloadItem,
+  Reachability,
+  ForwardErrorCode
 } from '../../../shared/types'
 
 const { t } = useI18n()
@@ -35,6 +37,46 @@ const { confirm } = useConfirm()
 
 let counter = 0
 const uid = (p: string): string => `${p}-${Date.now()}-${counter++}`
+
+/** A live port-forward failure, in the UI language. */
+function forwardError(r: { error?: string; code?: ForwardErrorCode }): string {
+  switch (r.code) {
+    case 'no-session':
+      return t('app.needLiveSession')
+    case 'bad-port':
+      return t('fw.badPort')
+    case 'already':
+      return t('fw.errAlready')
+    case 'in-use':
+      return t('fw.errInUse')
+    default:
+      return r.error || t('fw.fail')
+  }
+}
+
+// Background online probe: one full round at a time, and results from a round
+// that started before a newer probe of the same host are dropped.
+let probeRoundBusy = false
+let lastFullProbe = 0
+let probeSeq = 0
+const probeSeqOf = new Map<string, number>()
+
+export const forwardKey = (f: HostForward): string => `${f.mode ?? 'local'}:${f.localPort}`
+export interface ForwardRow {
+  rule: HostForward
+  saved: boolean
+  running: boolean
+}
+/** One host's (or one unsaved session's) port forwards on the 端口转发 page. */
+export interface ForwardGroup {
+  id: string
+  host?: Host
+  title: string
+  sub: string
+  /** A connected pane of this host, when there is one. */
+  pane?: Pane
+  rows: ForwardRow[]
+}
 
 /** Recursively unwraps Vue reactive proxies into a plain, cloneable object.
  *  Pinia wraps store arrays/objects (snapshots, transfer history, queues) in
@@ -185,10 +227,36 @@ export interface DownloadQueueOp {
 
 export type SettingsTab = 'general' | 'terminal' | 'connection' | 'keys' | 'security'
 
+/** The page the left sidebar shows. */
+export type AppPage = 'hosts' | 'terminal' | 'sftp' | 'forwards' | 'settings'
+export type HostsView = 'grid' | 'list'
+export const SIDEBAR_DEFAULT_W = 224
+export const SIDEBAR_MIN_W = 180
+export const SIDEBAR_MAX_W = 360
+export const clampSidebarWidth = (w: number): number =>
+  Math.round(Math.min(SIDEBAR_MAX_W, Math.max(SIDEBAR_MIN_W, w)))
+export type HostsSort = 'recent' | 'name' | 'address'
+
 interface State {
   hosts: Host[]
   tabs: Tab[]
   activeId: string | null
+  /** Sidebar page. Terminals stay mounted (hidden) on every other page. */
+  page: AppPage
+  /** Where「设置」returns to when toggled off (Ctrl+, twice). */
+  prevPage: AppPage
+  sidebarCollapsed: boolean
+  /** On the 终端 page the sidebar can be hidden entirely (terminal full width);
+   *  remembered, so every session opens the way it was last left. */
+  termSidebarHidden: boolean
+  /** Sidebar width when expanded (dragged by its right edge). */
+  sidebarWidth: number
+  hostsView: HostsView
+  hostsSort: HostsSort
+  /** Background online probe results, by host id (see main/reachability.ts). */
+  reach: Record<string, Reachability>
+  /** Saved host being connected from 打开 SFTP (buttons show busy meanwhile). */
+  sftpConnecting: string
   paletteOpen: boolean
   sftpOpen: boolean
   settingsOpen: boolean
@@ -221,6 +289,8 @@ interface State {
   transferConcurrency: number
   /** Verify each downloaded file's SHA-256 against the remote copy. */
   verifyChecksums: boolean
+  /** Identify hosts' OS in the background (quiet read-only login). */
+  autoDetectOs: boolean
   shellIntegration: boolean
   terminalFontFamily: string
   terminalCursor: CursorStyle
@@ -252,6 +322,10 @@ interface State {
   restorePendingUnlock: boolean
   /** Pre-filled palette query (from a launch CLI/URL target), consumed on open. */
   paletteSeed: string | null
+  /** With paletteSeed: jump straight to the seeded quick connect's password step. */
+  paletteQuick: boolean
+  /** Open the palette on this saved host's password step (no password saved). */
+  palettePasswordFor: string | null
   confirmPaste: boolean
   /** Strip non-printing control characters from pasted text (default on). */
   sanitizePaste: boolean
@@ -294,6 +368,15 @@ export const useSessions = defineStore('sessions', {
     hosts: [],
     tabs: [],
     activeId: null,
+    page: 'hosts',
+    prevPage: 'hosts',
+    sidebarCollapsed: false,
+    termSidebarHidden: false,
+    sidebarWidth: SIDEBAR_DEFAULT_W,
+    hostsView: 'grid',
+    hostsSort: 'recent',
+    reach: {},
+    sftpConnecting: '',
     paletteOpen: false,
     sftpOpen: false,
     settingsOpen: false,
@@ -316,6 +399,7 @@ export const useSessions = defineStore('sessions', {
     connectRetries: 6,
     transferConcurrency: 4,
     verifyChecksums: false,
+    autoDetectOs: true,
     shellIntegration: true,
     terminalFontFamily: '',
     terminalCursor: 'bar',
@@ -336,6 +420,8 @@ export const useSessions = defineStore('sessions', {
     lockLocked: false,
     restorePendingUnlock: false,
     paletteSeed: null,
+    paletteQuick: false,
+    palettePasswordFor: null,
     confirmPaste: true,
     sanitizePaste: true,
     copyOnSelect: false,
@@ -356,6 +442,60 @@ export const useSessions = defineStore('sessions', {
   }),
 
   getters: {
+    /** Saved rules per host plus the temporary ones added to any of its live
+     *  sessions, then live sessions that aren't saved hosts. A saved rule is
+     *  "running" while its host has a connected session (main opens saved rules
+     *  on every connect). */
+    forwardGroups(s): ForwardGroup[] {
+      const panesByHost = new Map<string, Pane[]>()
+      const loose: { pane: Pane; title: string }[] = []
+      for (const tab of s.tabs) {
+        for (const p of tab.panes) {
+          if (p.status !== 'connected') continue
+          const hid = p.params.hostId
+          if (hid && s.hosts.some((h) => h.id === hid)) panesByHost.set(hid, [...(panesByHost.get(hid) ?? []), p])
+          else loose.push({ pane: p, title: tab.title })
+        }
+      }
+      const out: ForwardGroup[] = []
+      for (const h of s.hosts) {
+        const panes = panesByHost.get(h.id) ?? []
+        const saved = h.portForwards ?? []
+        const seen = new Set(saved.map(forwardKey))
+        const temp: HostForward[] = []
+        for (const p of panes) {
+          for (const f of p.params.portForwards ?? []) {
+            if (seen.has(forwardKey(f))) continue
+            seen.add(forwardKey(f))
+            temp.push(f)
+          }
+        }
+        if (!saved.length && !temp.length) continue
+        out.push({
+          id: h.id,
+          host: h,
+          title: h.label,
+          sub: `${h.username}@${h.host}${h.port && h.port !== 22 ? ':' + h.port : ''}`,
+          pane: panes[0],
+          rows: [
+            ...saved.map((rule) => ({ rule, saved: true, running: panes.length > 0 })),
+            ...temp.map((rule) => ({ rule, saved: false, running: true }))
+          ]
+        })
+      }
+      for (const { pane, title } of loose) {
+        const temp = pane.params.portForwards ?? []
+        if (!temp.length) continue
+        out.push({
+          id: pane.id,
+          title,
+          sub: `${pane.params.username}@${pane.params.host}`,
+          pane,
+          rows: temp.map((rule) => ({ rule, saved: false, running: true }))
+        })
+      }
+      return out
+    },
     active: (s): Tab | undefined => s.tabs.find((t) => t.id === s.activeId),
     activePane(s): Pane | undefined {
       const t = s.tabs.find((x) => x.id === s.activeId)
@@ -386,13 +526,14 @@ export const useSessions = defineStore('sessions', {
     },
 
     async loadSettings(): Promise<void> {
-      const [editor, ka, ct, cr, tc, vcs, si, ff, cur, thm, rt, ar, rcn, rcw, nt, ns, cp, sp, tq, dq, tfh, abk, abd, abh] = await Promise.all([
+      const [editor, ka, ct, cr, tc, vcs, ados, si, ff, cur, thm, rt, ar, rcn, rcw, nt, ns, cp, sp, tq, dq, tfh, abk, abd, abh] = await Promise.all([
         window.api.settings.get<string>('externalEditor'),
         window.api.settings.get<number>('keepaliveSec'),
         window.api.settings.get<number>('connectTimeoutSec'),
         window.api.settings.get<number>('connectRetries'),
         window.api.settings.get<number>('transferConcurrency'),
         window.api.settings.get<boolean>('verifyChecksums'),
+        window.api.settings.get<boolean>('autoDetectOs'),
         window.api.settings.get<boolean>('shellIntegration'),
         window.api.settings.get<string>('terminalFontFamily'),
         window.api.settings.get<CursorStyle>('terminalCursor'),
@@ -418,6 +559,7 @@ export const useSessions = defineStore('sessions', {
       this.connectRetries = typeof cr === 'number' && cr >= 0 ? cr : 6
       this.transferConcurrency = clampConcurrency(typeof tc === 'number' ? tc : 4, 4)
       this.verifyChecksums = vcs === true
+      this.autoDetectOs = ados !== false
       this.shellIntegration = si !== false
       this.transferQueue = tq ?? []
       this.downloadQueue = dq ?? []
@@ -443,6 +585,14 @@ export const useSessions = defineStore('sessions', {
       this.middleClickPaste = (await window.api.settings.get<boolean>('middleClickPaste')) !== false
       this.rightClickPaste = (await window.api.settings.get<boolean>('rightClickPaste')) === true
       this.confirmClose = (await window.api.settings.get<boolean>('confirmClose')) === true
+      this.sidebarCollapsed = (await window.api.settings.get<boolean>('sidebarCollapsed')) === true
+      this.termSidebarHidden = (await window.api.settings.get<boolean>('termSidebarHidden')) === true
+      const sw = Number(await window.api.settings.get<number>('sidebarWidth'))
+      if (sw > 0) this.sidebarWidth = clampSidebarWidth(sw)
+      const view = await window.api.settings.get<string>('hostsView')
+      if (view === 'grid' || view === 'list') this.hostsView = view
+      const sort = await window.api.settings.get<string>('hostsSort')
+      if (sort === 'recent' || sort === 'name' || sort === 'address') this.hostsSort = sort
       this.transferRateKbps =
         (await window.api.settings.get<number>('transferRateKbps')) ?? 0
       this.minimizeToTray = (await window.api.settings.get<boolean>('minimizeToTray')) === true
@@ -466,6 +616,8 @@ export const useSessions = defineStore('sessions', {
     async sendSnippet(snippet: Snippet): Promise<void> {
       const sid = this.activePane?.sshSessionId
       if (!sid) return
+      // Never type into a terminal that isn't on screen.
+      this.setPage('terminal')
       if (snippet.confirm) {
         const ok = await confirm(
           t('snip.confirm', { title: snippet.title })
@@ -909,12 +1061,121 @@ export const useSessions = defineStore('sessions', {
     togglePalette(open?: boolean): void {
       this.paletteOpen = open ?? !this.paletteOpen
     },
+    /** A saved host needs its password typed: the palette opens right on it,
+     *  instead of empty (where the host had to be found again). */
+    askPasswordFor(host: Host): void {
+      this.palettePasswordFor = host.id
+      this.togglePalette(true)
+    },
     toggleSftp(open?: boolean): void {
       this.sftpOpen = open ?? !this.sftpOpen
     },
+    /** Settings is a sidebar page now; toggling it off goes back to where you were. */
     toggleSettings(open?: boolean, tab?: SettingsTab): void {
       if (tab) this.settingsTab = tab
-      this.settingsOpen = open ?? !this.settingsOpen
+      const want = open ?? this.page !== 'settings'
+      if (want) this.setPage('settings')
+      else if (this.page === 'settings') this.setPage(this.prevPage === 'settings' ? 'hosts' : this.prevPage)
+    },
+    setPage(page: AppPage): void {
+      if (page === this.page) return
+      if (page === 'settings') this.prevPage = this.page
+      this.page = page
+      this.settingsOpen = page === 'settings'
+      this.paletteOpen = false
+    },
+    setSidebarCollapsed(v: boolean): void {
+      this.sidebarCollapsed = v
+      void this.saveSetting('sidebarCollapsed', v)
+    },
+    /** Live while dragging (`persist` false), saved on release. */
+    setSidebarWidth(w: number, persist = true): void {
+      this.sidebarWidth = clampSidebarWidth(w)
+      if (persist) void this.saveSetting('sidebarWidth', this.sidebarWidth)
+    },
+    /** 设置 → 常规 → 重置边栏: default width, expanded, out of 专注模式. */
+    resetSidebar(): void {
+      this.setSidebarWidth(SIDEBAR_DEFAULT_W)
+      this.setSidebarCollapsed(false)
+      this.setTermSidebarHidden(false)
+    },
+    setTermSidebarHidden(v: boolean): void {
+      this.termSidebarHidden = v
+      void this.saveSetting('termSidebarHidden', v)
+    },
+    setHostsView(v: HostsView): void {
+      this.hostsView = v
+      void this.saveSetting('hostsView', v)
+    },
+    setHostsSort(v: HostsSort): void {
+      this.hostsSort = v
+      void this.saveSetting('hostsSort', v)
+    },
+    /** Probes the given saved hosts (all when omitted) and merges the results. */
+    async probeReach(ids?: string[], opts: { maxAge?: number } = {}): Promise<void> {
+      const full = !ids
+      if (full) {
+        // Coming back to 连接 shouldn't knock on every server again.
+        if (probeRoundBusy || Date.now() - lastFullProbe < (opts.maxAge ?? 0)) return
+        probeRoundBusy = true
+        lastFullProbe = Date.now()
+      }
+      const seq = ++probeSeq
+      for (const id of ids ?? this.hosts.map((h) => h.id)) probeSeqOf.set(id, seq)
+      try {
+        const r = await window.api.hosts.probe(ids)
+        const fresh: Record<string, Reachability> = {}
+        for (const [id, v] of Object.entries(r)) if ((probeSeqOf.get(id) ?? 0) <= seq) fresh[id] = v
+        this.reach = { ...this.reach, ...fresh }
+      } catch {
+        /* keep what we had */
+      } finally {
+        if (full) probeRoundBusy = false
+      }
+    },
+    /** 打开 SFTP for a saved host: its live session if there is one, else
+     *  connect in the background and open the page only once it's up — a
+     *  failed connect stays put (its error is already toasted) instead of
+     *  showing some other host's files. */
+    async openSftpFor(host: Host): Promise<void> {
+      const live = this.tabs
+        .flatMap((tab) => tab.panes.map((pane) => ({ tab, pane })))
+        .find((x) => x.pane.status === 'connected' && x.pane.params.hostId === host.id)
+      if (live) {
+        this.setActive(live.tab.id)
+        this.setActivePane(live.tab.id, live.pane.id)
+        this.setPage('sftp')
+        return
+      }
+      if (this.sftpConnecting) return
+      this.sftpConnecting = host.id
+      try {
+        if ((await this.quickConnect(host, { stay: true })) === 'needs-password') {
+          this.askPasswordFor(host)
+          return
+        }
+      } finally {
+        this.sftpConnecting = ''
+      }
+      const tab = [...this.tabs].reverse().find((x) => x.hostId === host.id)
+      const pane = tab?.panes[0]
+      if (tab && pane?.status === 'connected') {
+        this.setActive(tab.id)
+        this.setPage('sftp')
+      }
+    },
+    /** Saves a host's profile fields (tags, forward rules…) without touching its secrets. */
+    async saveHost(host: Host): Promise<void> {
+      this.hosts = await window.api.hosts.save(toPlain(host) as Host)
+    },
+    async removeHost(id: string): Promise<void> {
+      this.hosts = await window.api.hosts.delete(id)
+    },
+    /** A copy under a fresh id. Saved passwords stay with the original (they're
+     *  keyed by id); the copy asks on first connect. */
+    async duplicateHost(host: Host): Promise<void> {
+      const { hasSavedPassword: _p, hasSavedPassphrase: _pp, lastUsedAt: _u, ...rest } = toPlain(host) as Host
+      await this.saveHost({ ...rest, id: uid('host'), label: t('hosts.copyOf', { name: host.label }) })
     },
     toggleHistory(open?: boolean): void {
       this.historyOpen = open ?? !this.historyOpen
@@ -938,22 +1199,31 @@ export const useSessions = defineStore('sessions', {
     /** Opens a port forward on the active session now, and records it on its
      *  pane so the status bar reflects it for the life of the session. */
     async addForward(rule: HostForward): Promise<{ ok: boolean; error?: string }> {
-      const sid = this.activePane?.sshSessionId
-      if (!sid) return { ok: false, error: t('app.needLiveSession') }
+      return this.addForwardTo(this.activePane, rule)
+    },
+    /** Same, on a given pane's session (the 端口转发 page works on any session). */
+    async addForwardTo(pane: Pane | undefined, rule: HostForward): Promise<{ ok: boolean; error?: string }> {
+      const sid = pane?.sshSessionId
+      if (!pane || !sid) return { ok: false, error: t('app.needLiveSession') }
       const r = await window.api.ssh.forwardAdd(sid, rule)
-      if (!r.ok) return r
-      const pane = this.activePane
-      if (pane) pane.params.portForwards = [...(pane.params.portForwards ?? []), rule]
+      if (!r.ok) return { ok: false, error: forwardError(r) }
+      pane.params.portForwards = [...(pane.params.portForwards ?? []), rule]
       this.auditForward(pane, rule)
       return { ok: true }
     },
     /** Stops a port forward on the active session and drops it from its pane. */
     async removeForward(mode: ForwardMode | undefined, localPort: number): Promise<{ ok: boolean; error?: string }> {
-      const sid = this.activePane?.sshSessionId
-      if (!sid) return { ok: false, error: t('app.needLiveSession') }
+      return this.removeForwardFrom(this.activePane, mode, localPort)
+    },
+    async removeForwardFrom(
+      pane: Pane | undefined,
+      mode: ForwardMode | undefined,
+      localPort: number
+    ): Promise<{ ok: boolean; error?: string }> {
+      const sid = pane?.sshSessionId
+      if (!pane || !sid) return { ok: false, error: t('app.needLiveSession') }
       const r = await window.api.ssh.forwardRemove(sid, { mode: mode ?? 'local', localPort })
-      if (!r.ok) return r
-      const pane = this.activePane
+      if (!r.ok) return { ok: false, error: forwardError(r) }
       const mm = mode ?? 'local'
       if (pane?.params.portForwards) {
         pane.params.portForwards = pane.params.portForwards.filter(
@@ -991,13 +1261,16 @@ export const useSessions = defineStore('sessions', {
         if (p) {
           this.activeId = tab.id
           tab.activePaneId = p.id
+          this.setPage('terminal')
           return
         }
       }
     },
 
-    /** Opens a tab (single pane) and connects it. Returns the new tab id. */
-    async openConnection(params: ConnectParams, title: string): Promise<string> {
+    /** Opens a tab (single pane) and connects it. Returns the new tab id.
+     *  Switches to the 终端 page unless `stay` (e.g. connecting from the SFTP page). */
+    async openConnection(params: ConnectParams, title: string, opts: { stay?: boolean } = {}): Promise<string> {
+      if (!opts.stay) this.setPage('terminal')
       const paneId = uid('pane')
       const tab: Tab = {
         id: uid('tab'),
@@ -1191,7 +1464,7 @@ export const useSessions = defineStore('sessions', {
 
     /** Connects a saved host directly. Returns 'needs-password' when it must be
      *  finished in the palette (password auth with no stored secret). */
-    async quickConnect(host: Host): Promise<'connected' | 'needs-password'> {
+    async quickConnect(host: Host, opts: { stay?: boolean } = {}): Promise<'connected' | 'needs-password'> {
       if (host.auth === 'password' && !host.hasSavedPassword) return 'needs-password'
       await this.openConnection(
         {
@@ -1205,7 +1478,8 @@ export const useSessions = defineStore('sessions', {
           onConnect: host.onConnect,
           onConnectDelayMs: host.onConnectDelayMs
         },
-        host.label
+        host.label,
+        opts
       )
       return 'connected'
     },

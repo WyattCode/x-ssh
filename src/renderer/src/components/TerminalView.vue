@@ -250,11 +250,37 @@ function toggleCase(): void {
 }
 
 
+/** Container size changes. A one-off jump (专注模式, collapsing the sidebar)
+ *  is fitted at once, so the text doesn't sit at the old width for a beat and
+ *  then jump. A stream of changes (dragging the sidebar edge, resizing the
+ *  window) is fitted once it settles: refitting every frame reflowed the text
+ *  frame by frame, which read as the terminal's text jittering. */
+let fitTimer: ReturnType<typeof setTimeout> | null = null
+let lastSizeChange = 0
+function scheduleFit(): void {
+  const now = performance.now()
+  const oneOff = now - lastSizeChange > 150
+  lastSizeChange = now
+  if (fitTimer) clearTimeout(fitTimer)
+  if (oneOff) doFit()
+  fitTimer = setTimeout(() => {
+    fitTimer = null
+    doFit()
+  }, 90)
+}
+/** The size last sent to the server, so a fit that changes nothing doesn't
+ *  send it again. */
+let sentSize = ''
+
 function doFit(): void {
   if (!fit || !term || !props.visible) return
   try {
     fit.fit()
-    window.api.ssh.resize(props.sessionId, term.cols, term.rows)
+    const size = `${props.sessionId}:${term.cols}x${term.rows}`
+    if (size !== sentSize) {
+      sentSize = size
+      window.api.ssh.resize(props.sessionId, term.cols, term.rows)
+    }
   } catch {
     /* container not measurable yet */
   }
@@ -515,7 +541,7 @@ onMounted(() => {
   // before this component mounted (MOTD, first prompt).
   window.api.ssh.attach(props.sessionId)
 
-  ro = new ResizeObserver(() => doFit())
+  ro = new ResizeObserver(() => scheduleFit())
   ro.observe(el.value)
 
   nextTick(() => {
@@ -523,6 +549,19 @@ onMounted(() => {
     if (props.focused) term?.focus()
   })
 })
+
+// The sidebar toggling (专注模式, collapse) changes our width in one step:
+// fit straight away rather than wait for the ResizeObserver, whose
+// notifications only arrive with the next rendered frame. The observer's own
+// call that follows is then a no-op (nothing changed, nothing sent).
+watch(
+  () => [store.termSidebarHidden, store.sidebarCollapsed],
+  () =>
+    nextTick(() => {
+      lastSizeChange = performance.now()
+      doFit()
+    })
+)
 
 watch(
   () => props.visible,
@@ -588,6 +627,7 @@ defineExpose({
 })
 
 onBeforeUnmount(() => {
+  if (fitTimer) clearTimeout(fitTimer)
   imeAbort.abort()
   offData?.()
   ro?.disconnect()
@@ -722,7 +762,7 @@ onBeforeUnmount(() => {
   padding: 5px;
   background: var(--bg-elev);
   border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
+  border-radius: var(--r-menu);
   box-shadow: var(--shadow);
 }
 .ctx button {
@@ -732,7 +772,7 @@ onBeforeUnmount(() => {
   gap: 24px;
   width: 100%;
   padding: 7px 10px;
-  border-radius: 5px;
+  border-radius: var(--r-item);
   font-size: 13px;
   color: var(--text);
   text-align: left;

@@ -29,6 +29,8 @@ import TransferPanel from './components/TransferPanel.vue'
 import SnippetVarsDialog from './components/SnippetVarsDialog.vue'
 import TooltipLayer from './components/TooltipLayer.vue'
 import LockScreen from './components/LockScreen.vue'
+import ZoomHud from './components/ZoomHud.vue'
+import { useZoom, ZOOM_STEP } from './composables/zoom'
 import { useI18n } from './lib/i18n'
 import { collectPaneIds } from './lib/paneLayout'
 import {
@@ -37,9 +39,10 @@ import {
   chordMatches,
   type RebindableAction
 } from './lib/shortcuts'
-// 新标识「X SSH」:白天 / 夜间两张,按界面主题显示其中一张(见 .lockup 样式)。
-import logoLight from './assets/logo-light.png'
-import logoDark from './assets/logo-dark.png'
+import AppSidebar from './components/AppSidebar.vue'
+import HostsPage from './components/HostsPage.vue'
+import ForwardsPage from './components/ForwardsPage.vue'
+import OsIcon from './components/OsIcon.vue'
 import type { Host } from '../../shared/types'
 
 // Neither of these can be on screen at startup — a restored tab comes back
@@ -56,29 +59,47 @@ const { t } = useI18n()
 const isMac = /mac|iphone|ipad/i.test(navigator.platform || navigator.userAgent)
 const modKey = isMac ? '⌘' : 'Ctrl'
 
-// Saved hosts for the welcome quick-connect, most-recently-used first.
-const recentHosts = computed(() =>
-  [...store.hosts]
-    .sort((a, b) => (b.lastUsedAt ?? 0) - (a.lastUsedAt ?? 0))
-    .slice(0, 6)
+// ---- SFTP page: which live session it browses ----
+/** Every connected pane, labelled by its tab (a split tab lists each pane). */
+const connectedPanes = computed(() =>
+  store.tabs.flatMap((tab) =>
+    tab.panes
+      .filter((p) => p.status === 'connected' && p.sshSessionId)
+      .map((pane) => ({ tab, pane, host: store.hosts.find((h) => h.id === pane.params.hostId) }))
+  )
 )
-/** The welcome list grouped by the saved host's group, preserving MRU order. */
-const recentGroups = computed(() => {
-  const groups: { group: string; hosts: Host[] }[] = []
-  for (const h of recentHosts.value) {
-    const g = h.group?.trim() || t('app.ungrouped')
-    let grp = groups.find((x) => x.group === g)
-    if (!grp) {
-      grp = { group: g, hosts: [] }
-      groups.push(grp)
-    }
-    grp.hosts.push(h)
-  }
-  return groups
-})
-async function onQuickConnect(h: Host): Promise<void> {
-  if ((await store.quickConnect(h)) === 'needs-password') store.togglePalette(true)
+/** The page follows the active pane when it's live, like the drawer does. */
+const sftpPane = computed(() =>
+  store.activePane?.status === 'connected' && store.activePane.sshSessionId ? store.activePane : undefined
+)
+function pickSftpPane(tabId: string, paneId: string): void {
+  store.setActive(tabId)
+  store.setActivePane(tabId, paneId)
 }
+// Arriving on SFTP with a dead / no active pane: take the first live one.
+watch(
+  () => [store.page, connectedPanes.value.length] as const,
+  ([page]) => {
+    if (page === 'sftp' && !sftpPane.value && connectedPanes.value.length) {
+      const first = connectedPanes.value[0]
+      pickSftpPane(first.tab.id, first.pane.id)
+    }
+  }
+)
+function connectForSftp(h: Host): Promise<void> {
+  return store.openSftpFor(h)
+}
+/** Online dot on the host picker, same meaning as on 连接 (no probe of its own). */
+const pickState = (h: Host): string => store.reach[h.id] ?? 'unknown'
+const sftpHosts = computed(() => [...store.hosts].sort((a, b) => (b.lastUsedAt ?? 0) - (a.lastUsedAt ?? 0)))
+
+// Closing the last terminal goes back to the host list rather than an empty page.
+watch(
+  () => store.tabs.length,
+  (n, before) => {
+    if (!n && before && store.page === 'terminal') store.setPage('hosts')
+  }
+)
 
 const editorOpen = ref(false)
 const editingHost = ref<Host | null>(null)
@@ -161,26 +182,16 @@ function openEditHost(h: Host): void {
   editorOpen.value = true
 }
 
-let zoomSaveTimer: ReturnType<typeof setTimeout> | null = null
-function setZoom(level: number): void {
-  const clamped = Math.max(-3, Math.min(5, level))
-  window.api.zoom.set(clamped)
-  // Apply immediately but debounce the persist: a Ctrl+wheel gesture fires many
-  // notches, and each write is a full re-read+rewrite of settings.json that a
-  // second instance could be reading at the same moment.
-  if (zoomSaveTimer) clearTimeout(zoomSaveTimer)
-  zoomSaveTimer = setTimeout(() => void window.api.settings.set('zoom', clamped), 300)
-}
-function bumpZoom(delta: number): void {
-  setZoom(window.api.zoom.get() + delta)
-}
+// Zoom (shortcuts, Ctrl+wheel, the pill's own buttons) goes through one place,
+// which also shows the percentage pill — see composables/zoom.ts.
+const zoom = useZoom()
 
 function onWheel(e: WheelEvent): void {
   if (!(e.ctrlKey || e.metaKey)) return
   // Ctrl + wheel zooms the whole UI; intercept before the terminal scrolls.
   e.preventDefault()
   e.stopPropagation()
-  bumpZoom(e.deltaY < 0 ? 0.5 : -0.5)
+  zoom.bump(e.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP)
 }
 
 function onNetworkOnline(): void {
@@ -205,7 +216,10 @@ function onGlobalKey(e: KeyboardEvent): void {
     e.preventDefault()
     const n = Number(e.key)
     const tab = n === 9 ? store.tabs[store.tabs.length - 1] : store.tabs[n - 1]
-    if (tab) store.setActive(tab.id)
+    if (tab) {
+      store.setActive(tab.id)
+      store.setPage('terminal')
+    }
     return
   }
 
@@ -213,23 +227,34 @@ function onGlobalKey(e: KeyboardEvent): void {
   // default) and dispatch to a handler when the key matches. Ctrl+W respects a
   // live terminal (werase) via a flag on the handler.
   const effective = (id: string): string => store.keybindings[id] ?? DEFAULT_BINDINGS[id as RebindableAction]
+  // Terminals stay mounted behind the other pages; the shortcuts that act on
+  // one (close, split, focus…) only apply where you can see it.
+  const onTerm = store.page === 'terminal'
   const handlers: Record<RebindableAction, () => void> = {
     palette: () => store.togglePalette(),
     palette2: () => store.togglePalette(),
     newTab: () => store.togglePalette(true),
     closeTab: () => {
+      if (!onTerm) return
       if (inTerminal && store.activePane?.status === 'connected') return
       if (store.activeId) void store.closeTabSafe(store.activeId)
     },
-    nextTab: () => store.nextTab(1),
-    prevTab: () => store.nextTab(-1),
+    nextTab: () => {
+      store.nextTab(1)
+      if (store.tabs.length) store.setPage('terminal')
+    },
+    prevTab: () => {
+      store.nextTab(-1)
+      if (store.tabs.length) store.setPage('terminal')
+    },
     split: () => {
-      if (store.active && store.activePane?.status === 'connected') void store.splitPane(store.active.id, 'row')
+      if (onTerm && store.active && store.activePane?.status === 'connected') void store.splitPane(store.active.id, 'row')
     },
     splitCol: () => {
-      if (store.active && store.activePane?.status === 'connected') void store.splitPane(store.active.id, 'col')
+      if (onTerm && store.active && store.activePane?.status === 'connected') void store.splitPane(store.active.id, 'col')
     },
     focus: () => {
+      if (!onTerm) return
       const tab = store.active
       const order = tab ? collectPaneIds(tab.layout) : []
       if (order.length > 1) {
@@ -239,15 +264,16 @@ function onGlobalKey(e: KeyboardEvent): void {
       }
     },
     closePane: () => {
-      if (store.activePane) store.closePane(store.activePane.id)
+      if (onTerm && store.activePane) store.closePane(store.activePane.id)
     },
-    sftp: () => store.toggleSftp(),
+    // The drawer on the terminal page; from anywhere else, the SFTP page.
+    sftp: () => (onTerm ? store.toggleSftp() : store.setPage('sftp')),
     history: () => store.toggleHistory(),
     settings: () => store.toggleSettings(),
     shortcuts: () => store.toggleSettings(true, 'keys'),
-    zoomIn: () => bumpZoom(0.5),
-    zoomOut: () => bumpZoom(-0.5),
-    zoomReset: () => setZoom(0)
+    zoomIn: () => zoom.bump(ZOOM_STEP),
+    zoomOut: () => zoom.bump(-ZOOM_STEP),
+    zoomReset: () => zoom.reset()
   }
   for (const id of REBINDABLE_ACTIONS) {
     if (chordMatches(e, effective(id))) {
@@ -261,6 +287,7 @@ function onGlobalKey(e: KeyboardEvent): void {
 let offEvent: (() => void) | null = null
 let offOpenTarget: (() => void) | null = null
 let offOnlineChanged: (() => void) | null = null
+let offHostsChanged: (() => void) | null = null
 /** Converts a #rrggbb hex color into an rgba() string at the given alpha. */
 function accentSoft(hex: string, alpha = 0.14): string {
   const m = /^#?([0-9a-f]{6})$/i.exec(hex)
@@ -288,9 +315,10 @@ watch(
   { immediate: true }
 )
 
+const booted = ref(false)
 onMounted(async () => {
   const savedZoom = Number(window.api.prefs.zoom)
-  if (!Number.isNaN(savedZoom) && savedZoom !== 0) window.api.zoom.set(savedZoom)
+  if (!Number.isNaN(savedZoom) && savedZoom !== 0) zoom.restore(savedZoom)
   await Promise.all([
     store.loadHosts(),
     store.loadSettings(),
@@ -302,6 +330,9 @@ onMounted(async () => {
     store.loadLockStatus()
   ])
   await store.restoreSavedTabs()
+  // Tabs restored from last time: open on them rather than the host list.
+  if (store.tabs.length) store.setPage('terminal')
+  booted.value = true
   store.initSftpProgress()
   store.networkOnline = navigator.onLine
   window.addEventListener('keydown', onGlobalKey)
@@ -321,6 +352,8 @@ onMounted(async () => {
   // Machine woke from sleep / screen unlocked: the network may have dropped while
   // suspended, so re-evaluate connectivity and let dropped sessions retry.
   offOnlineChanged = window.api.onOnlineChanged(() => store.handleWake())
+  // Main updated a saved host on its own (the OS detected on connect).
+  offHostsChanged = window.api.hosts.onChanged(() => void store.loadHosts())
   // Pull the deferred chunks in while the app is idle, so the first connection
   // never waits on them.
   const prefetch = (): void => {
@@ -339,104 +372,131 @@ onBeforeUnmount(() => {
   offEvent?.()
   offOpenTarget?.()
   offOnlineChanged?.()
+  offHostsChanged?.()
 })
 </script>
 
 <template>
-  <div class="app">
-    <TabBar />
+  <div class="app" :class="{ 'no-sidebar': store.page === 'terminal' && store.termSidebarHidden }">
+    <!-- macOS: a strip to drag the window by on pages without a tab bar. -->
+    <div v-if="store.page !== 'terminal'" class="mac-drag" />
+    <AppSidebar :hidden="store.page === 'terminal' && store.termSidebarHidden" />
 
-    <div v-if="!store.networkOnline" class="offline-banner">
-      <Icon name="wifi-off" :size="14" />
-      <span>{{ t('app.networkOffline') }}</span>
-    </div>
+    <div class="workspace">
+      <div v-if="!store.networkOnline" class="offline-banner">
+        <Icon name="wifi-off" :size="14" />
+        <span>{{ t('app.networkOffline') }}</span>
+      </div>
 
-    <main class="stage">
-      <div class="main-area">
-      <!-- Live terminals: kept mounted, shown by visibility. A tab holds a
-           nested split tree of panes rendered recursively. -->
-      <template v-for="tab in store.tabs" :key="tab.id">
-        <PaneNode
-          v-show="tab.id === store.activeId"
-          :node="tab.layout"
-          :tab="tab"
-          :root="true"
-          :path="[]"
-          :tab-active="tab.id === store.activeId"
-          :mod-key="modKey"
-          @cwd="onCwd"
-        />
-      </template>
-
-      <!-- Empty state -->
-      <div v-if="!store.tabs.length" class="welcome">
-        <div class="hero">
-          <h1 class="brand">
-            <img class="lockup lockup-light" :src="logoLight" alt="X-SSH" draggable="false" />
-            <img class="lockup lockup-dark" :src="logoDark" alt="X-SSH" draggable="false" />
-          </h1>
-        </div>
-
-        <div class="dock">
-          <button class="cta" @click="store.togglePalette(true)">
-            <span class="cta-left"><Icon name="plus" :size="16" /><span>{{ t('app.newConn') }}</span></span>
-            <span class="cta-keys"><span class="kbd">{{ modKey }}</span><span class="kbd">K</span></span>
-          </button>
-
-          <div v-if="recentHosts.length" class="saved">
-            <template v-for="grp in recentGroups" :key="grp.group">
-              <div class="saved-label">{{ grp.group }}</div>
-              <button
-                v-for="h in grp.hosts"
-                :key="h.id"
-                class="host-row"
-                @click="onQuickConnect(h)"
-              >
-                <span class="h-icon" :style="{ color: h.color || 'var(--accent)' }">
-                  <Icon name="server" :size="17" />
-                </span>
-                <span class="h-main">
-                  <span class="h-label">{{ h.label }}</span>
-                  <span class="h-sub">{{ h.username }}@{{ h.host }}<template v-if="h.port !== 22">:{{ h.port }}</template></span>
-                </span>
-                <Icon name="arrow-right" :size="15" class="h-go" />
-              </button>
+      <!-- 终端: kept mounted on every page (v-show) so sessions and scrollback live on. -->
+      <section v-show="store.page === 'terminal'" class="page term-page">
+        <TabBar />
+        <main class="stage">
+          <div class="main-area">
+            <!-- A tab holds a nested split tree of panes rendered recursively. -->
+            <template v-for="tab in store.tabs" :key="tab.id">
+              <PaneNode
+                v-show="tab.id === store.activeId"
+                :node="tab.layout"
+                :tab="tab"
+                :root="true"
+                :path="[]"
+                :tab-active="tab.id === store.activeId && store.page === 'terminal'"
+                :mod-key="modKey"
+                @cwd="onCwd"
+              />
             </template>
+
+            <div v-if="!store.tabs.length" class="term-empty">
+              <span class="term-empty-icon"><Icon name="terminal" :size="26" /></span>
+              <p>{{ t('term.empty') }}</p>
+              <button class="btn btn-tinted pill" @click="store.setPage('hosts')">{{ t('nav.hosts') }}</button>
+            </div>
+
+            <!-- Disconnected banner for the active pane -->
+            <div v-if="bannerShown" class="closed-banner">
+              <span>{{ t('app.sessionClosed') }}</span>
+              <button
+                ref="bannerBtn"
+                class="banner-btn"
+                @click="store.activePane && store.reconnect(store.activePane.id)"
+              >{{ t('app.reconnect') }}</button>
+              <span class="banner-dim">{{ t('app.orClose', { keys: `${modKey}+W` }) }}</span>
+            </div>
           </div>
-          <p v-else class="hint">
-            {{ t('app.hintBefore') }}<code>user@host</code>{{ t('app.hintAfter') }}
-          </p>
+
+          <SftpDrawer
+            v-if="store.page === 'terminal' && store.sftpOpen && store.activePane?.status === 'connected'"
+            :session-id="store.activePane?.sshSessionId"
+            :open="store.sftpOpen"
+            :terminal-cwd="activeCwd"
+            :reload-key="sftpReloadKey"
+            @close="store.toggleSftp(false)"
+            @edit-file="onEditFile"
+            @edit-external="onEditExternal"
+            @open-with="onOpenWith"
+            @cd-terminal="onCdTerminal"
+          />
+        </main>
+        <StatusBar />
+      </section>
+
+      <HostsPage v-if="store.page === 'hosts' && booted" class="page" @new-host="openNewHost" @edit-host="openEditHost" />
+
+      <section v-if="store.page === 'sftp'" class="page sftp-page">
+        <header class="page-head">
+          <h1>SFTP</h1>
+          <nav v-if="connectedPanes.length" class="sessions">
+            <button
+              v-for="c in connectedPanes"
+              :key="c.pane.id"
+              class="session"
+              :class="{ on: sftpPane?.id === c.pane.id }"
+              @click="pickSftpPane(c.tab.id, c.pane.id)"
+            >
+              <OsIcon :os="c.host?.os" :color="c.host?.color" :size="22" />
+              <span>{{ c.tab.title }}</span>
+            </button>
+          </nav>
+        </header>
+        <div v-if="sftpPane" class="sftp-body">
+          <SftpDrawer
+            page
+            :session-id="sftpPane.sshSessionId"
+            :open="true"
+            :terminal-cwd="activeCwd"
+            :reload-key="sftpReloadKey"
+            @edit-file="onEditFile"
+            @edit-external="onEditExternal"
+            @open-with="onOpenWith"
+            @cd-terminal="onCdTerminal"
+          />
         </div>
-      </div>
+        <div v-else class="sftp-pick">
+          <p>{{ t('sftpPage.pick') }}</p>
+          <div class="pick-grid">
+            <button
+              v-for="h in sftpHosts"
+              :key="h.id"
+              class="pick"
+              :class="{ busy: store.sftpConnecting === h.id }"
+              :disabled="!!store.sftpConnecting"
+              @click="connectForSftp(h)"
+            >
+              <OsIcon :os="h.os" :color="h.color" :size="34" />
+              <span class="pick-main">
+                <b><span class="pdot" :class="pickState(h)" />{{ h.label }}</b>
+                <small>{{ h.username }}@{{ h.host }}</small>
+              </span>
+            </button>
+          </div>
+        </div>
+      </section>
 
-      <!-- Disconnected banner for the active pane -->
-      <div v-if="bannerShown" class="closed-banner">
-        <span>{{ t('app.sessionClosed') }}</span>
-        <button
-          ref="bannerBtn"
-          class="banner-btn"
-          @click="store.activePane && store.reconnect(store.activePane.id)"
-        >{{ t('app.reconnect') }}</button>
-        <span class="banner-dim">{{ t('app.orClose', { keys: `${modKey}+W` }) }}</span>
-      </div>
-      </div>
+      <ForwardsPage v-if="store.page === 'forwards'" class="page" />
 
-      <SftpDrawer
-        v-if="store.sftpOpen && store.activePane?.status === 'connected'"
-        :session-id="store.activePane?.sshSessionId"
-        :open="store.sftpOpen"
-        :terminal-cwd="activeCwd"
-        :reload-key="sftpReloadKey"
-        @close="store.toggleSftp(false)"
-        @edit-file="onEditFile"
-        @edit-external="onEditExternal"
-        @open-with="onOpenWith"
-        @cd-terminal="onCdTerminal"
-      />
-    </main>
-
-    <StatusBar />
-
+      <SettingsDialog />
+    </div>
 
     <CommandPalette @new-host="openNewHost" @edit-host="openEditHost" />
         <HostEditor :open="editorOpen" :host="editingHost" @close="editorOpen = false" />
@@ -448,12 +508,12 @@ onBeforeUnmount(() => {
       @close="editorFileOpen = false"
       @saved="onEditorSaved"
     />
-    <SettingsDialog />
     <TransferPanel />
     <SnippetVarsDialog />
     <TooltipLayer />
     <ConfirmDialog />
     <ToastHost />
+    <ZoomHud />
     <HistorySearch />
     <TmuxDialog />
     <ForwardDialog />
@@ -466,8 +526,181 @@ onBeforeUnmount(() => {
 <style scoped>
 .app {
   display: flex;
-  flex-direction: column;
   height: 100%;
+}
+.workspace {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  background: var(--bg);
+}
+.page {
+  flex: 1;
+  min-height: 0;
+}
+.term-page {
+  display: flex;
+  flex-direction: column;
+}
+.term-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  height: 100%;
+  font-size: 13px;
+  color: var(--text-faint);
+}
+.term-empty p {
+  margin: 0;
+}
+.term-empty-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  color: var(--text-dim);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+}
+.sftp-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+  max-width: 1320px;
+  margin: 0 auto;
+  padding: 24px 36px 28px;
+}
+.sessions {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.session {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 12px 0 5px;
+  border-radius: var(--r-pill);
+  font-size: 13px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  transition: background 0.16s var(--ease), color 0.16s var(--ease);
+}
+.session:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+.session.on {
+  color: var(--text);
+  background: var(--selected);
+}
+.session :deep(.os-tile) {
+  border-radius: var(--r-pill);
+}
+.sftp-body {
+  flex: 1;
+  min-height: 0;
+}
+.sftp-pick {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.sftp-pick p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-faint);
+}
+.pick-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 10px;
+}
+.pick {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  text-align: left;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--r-menu);
+  transition: border-color 0.18s var(--ease), background 0.18s var(--ease), transform 0.18s var(--ease), box-shadow 0.18s var(--ease);
+}
+/* Same hover as the host cards on the 连接 page. */
+.pick:hover {
+  border-color: var(--border-strong);
+  background: color-mix(in srgb, var(--text) 3%, var(--bg-elev));
+  transform: translateY(-1px);
+  box-shadow: 0 10px 24px -18px rgba(0, 0, 0, 0.55);
+}
+.pick:active {
+  transform: scale(0.99);
+}
+.pick:disabled {
+  cursor: default;
+}
+.pick:disabled:not(.busy) {
+  opacity: 0.55;
+}
+.pick.busy {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  animation: pick-busy 1.2s ease-in-out infinite;
+}
+@keyframes pick-busy {
+  50% {
+    opacity: 0.6;
+  }
+}
+.pick-main b {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.pdot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--text-faint);
+}
+.pdot.online {
+  background: var(--ok);
+  box-shadow: none;
+}
+.pdot.offline {
+  background: var(--text-faint);
+  box-shadow: none;
+}
+.pick-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.pick-main b {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+.pick-main small {
+  font-size: 12px;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .stage {
   position: relative;
@@ -502,168 +735,6 @@ onBeforeUnmount(() => {
   to {
     transform: rotate(360deg);
   }
-}
-.welcome {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  /* `safe`: once the saved-host list makes the content taller than the pane,
-     plain `center` splits the overflow across BOTH edges — the logo rides up
-     over the tab bar and the top is unreachable, because a scroll container
-     can't scroll above its origin. `safe` falls back to flex-start in exactly
-     that case, and overflow-y keeps the rest reachable. */
-  justify-content: safe center;
-  overflow-y: auto;
-  gap: 30px;
-  height: 100%;
-  text-align: center;
-  padding: 24px;
-}
-.hero {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-}
-.brand {
-  margin: 0;
-  line-height: 0;
-}
-.lockup {
-  height: 48px;
-  width: auto;
-  -webkit-user-drag: none;
-  user-select: none;
-}
-/* 渲染层总会在 <html> 上打 data-theme(见 styles/global.css):浅色主题用白天版,其余用夜间版。
-   别写成 :global(:root[...]) .lockup-light —— Vue 会把后半截丢掉,编出 :root[...]{display:none},
-   浅色主题下整个页面就没了。scoped 本来就只给最后一段加属性,祖先选择器直接写即可。 */
-.lockup-light {
-  display: none;
-}
-:root[data-theme='light'] .lockup-light {
-  display: inline;
-}
-:root[data-theme='light'] .lockup-dark {
-  display: none;
-}
-.dock {
-  width: min(360px, 84vw);
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-.cta {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  width: 100%;
-  padding: 12px 14px 12px 16px;
-  background: var(--bg-elev);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  font-size: 14px;
-  transition: border-color 0.15s, background 0.15s, transform 0.05s;
-}
-.cta-left {
-  display: inline-flex;
-  align-items: center;
-  gap: 9px;
-  color: var(--text);
-}
-.cta:hover {
-  border-color: var(--accent);
-  background: var(--bg-elev-2);
-}
-.cta:active {
-  transform: translateY(1px);
-}
-.cta-keys {
-  display: flex;
-  gap: 3px;
-}
-.saved {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  text-align: left;
-}
-.saved-label {
-  font-size: 11px;
-  color: var(--text-faint);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  padding: 4px 4px 6px;
-}
-.host-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-  padding: 9px 12px;
-  border-radius: var(--radius-sm);
-  text-align: left;
-  transition: background 0.13s;
-}
-.host-row:hover {
-  background: var(--bg-elev);
-}
-.h-icon {
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 34px;
-  height: 34px;
-  border-radius: 9px;
-  background: var(--bg-elev-2);
-}
-.h-main {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.h-label {
-  font-size: 13.5px;
-  color: var(--text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.h-sub {
-  font-size: 11.5px;
-  color: var(--text-faint);
-  font-family: var(--font-mono);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.h-go {
-  flex: none;
-  color: var(--text-faint);
-  opacity: 0;
-  transform: translateX(-4px);
-  transition: opacity 0.13s, transform 0.13s;
-}
-.host-row:hover .h-go {
-  opacity: 1;
-  transform: translateX(0);
-  color: var(--accent);
-}
-.welcome .hint {
-  font-size: 12px;
-  color: var(--text-faint);
-  text-align: center;
-}
-.welcome code {
-  font-family: var(--font-mono);
-  color: var(--text-dim);
-  background: var(--bg-elev-2);
-  padding: 1px 6px;
-  border-radius: 4px;
 }
 .closed-banner {
   position: absolute;

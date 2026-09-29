@@ -6,6 +6,7 @@ import { parseTarget } from '../lib/target'
 import { useI18n } from '../lib/i18n'
 import { useToast } from '../composables/toast'
 import Icon from './Icon.vue'
+import OsIcon from './OsIcon.vue'
 import type { ConnectParams, Host, Snippet } from '../../../shared/types'
 
 const store = useSessions()
@@ -262,7 +263,18 @@ watch(
       pending.value = null
       password.value = ''
       remember.value = true
-      nextTick(() => inputEl.value?.focus())
+      const quick = store.paletteQuick
+      const pwHost = store.hosts.find((h) => h.id === store.palettePasswordFor)
+      store.paletteQuick = false
+      store.palettePasswordFor = null
+      nextTick(() => {
+        // From 连接: a typed address, or a saved host with no password saved —
+        // go straight to its password.
+        const first = sections.value[0]?.items[0]
+        if (pwHost) activateHost(pwHost)
+        else if (quick && first?.kind === 'quick') activate(first)
+        else inputEl.value?.focus()
+      })
     }
   }
 )
@@ -448,16 +460,12 @@ function onKey(e: KeyboardEvent): void {
               @click="activate(item)"
               @mousemove="selected = sectionStarts[si] + ii"
             >
-              <span class="icon" :class="item.kind">
+              <!-- Hosts look as they do on 连接: their OS tile. -->
+              <OsIcon v-if="item.kind === 'host'" :os="item.host.os" :color="item.host.color" :size="30" />
+              <span v-else class="icon" :class="item.kind">
                 <Icon
                   :name="
-                    item.kind === 'quick'
-                      ? 'arrow-right'
-                      : item.kind === 'host'
-                        ? 'server'
-                        : item.kind === 'snippet'
-                          ? 'zap'
-                          : item.icon
+                    item.kind === 'quick' ? 'arrow-right' : item.kind === 'snippet' ? 'zap' : item.icon
                   "
                   :size="15"
                 />
@@ -568,16 +576,16 @@ function onKey(e: KeyboardEvent): void {
   text-align: left;
 }
 .row.sel {
-  background: var(--accent-soft);
+  background: var(--selected);
 }
 .icon {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 30px;
+  height: 30px;
   flex: none;
-  border-radius: 6px;
+  border-radius: 8px;
   color: var(--text-dim);
   background: var(--bg-elev-2);
 }

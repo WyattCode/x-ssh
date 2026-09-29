@@ -1,12 +1,10 @@
 <script setup lang="ts">
 import { reactive, ref, computed, nextTick } from 'vue'
 import { useSessions, type Tab } from '../stores/sessions'
-import { useTheme } from '../composables/theme'
 import { useI18n } from '../lib/i18n'
 import Icon from './Icon.vue'
 
 const store = useSessions()
-const { mode, toggle } = useTheme()
 const { t } = useI18n()
 const modKey = /mac|iphone|ipad/i.test(navigator.platform || navigator.userAgent) ? '⌘' : 'Ctrl'
 /** Layout/split operations need a connected active tab. */
@@ -176,7 +174,8 @@ function cancelRename(): void {
     </button>
     <div class="drag-spacer" />
     <div class="right-tools">
-      <button class="tool" :class="{ on: filterOpen }" :title="t('tabbar.filter')" @click="toggleFilter">
+      <!-- Tab search and layouts only mean something once there are tabs. -->
+      <button v-if="store.tabs.length" class="tool" :class="{ on: filterOpen }" :title="t('tabbar.filter')" @click="toggleFilter">
         <Icon name="search" :size="16" />
       </button>
       <div v-if="filterOpen" class="filter-box">
@@ -192,6 +191,7 @@ function cancelRename(): void {
         <span class="filter-count">{{ visibleTabs.length }}/{{ store.tabs.length }}</span>
       </div>
       <button
+        v-if="store.tabs.length"
         class="tool"
         :class="{ on: layoutMenu.open }"
         :title="t('tabbar.layout')"
@@ -208,20 +208,16 @@ function cancelRename(): void {
       >
         <Icon name="folder" :size="16" />
       </button>
+
+      <!-- 专注模式: hides the sidebar so the terminal takes the whole window
+           (not "全屏", which reads as the window going full screen); remembered. -->
       <button
         class="tool"
-        :class="{ on: store.settingsOpen }"
-        :title="t('tabbar.settings', { key: `${modKey}+,` })"
-        @click="store.toggleSettings()"
+        :class="{ on: store.termSidebarHidden }"
+        :title="store.termSidebarHidden ? t('nav.exitFocus') : t('nav.focus')"
+        @click="store.setTermSidebarHidden(!store.termSidebarHidden)"
       >
-        <Icon name="settings" :size="16" />
-      </button>
-      <button
-        class="tool"
-        :title="mode === 'dark' ? t('tabbar.toLight') : t('tabbar.toDark')"
-        @click="toggle"
-      >
-        <Icon :name="mode === 'dark' ? 'sun' : 'moon'" :size="16" />
+        <Icon name="focus" :size="16" />
       </button>
     </div>
   </div>
@@ -421,11 +417,15 @@ function cancelRename(): void {
 }
 .new:hover,
 .tool:hover {
-  background: var(--bg-elev-2);
+  background: var(--hover);
   color: var(--text);
 }
+.new:active,
+.tool:active {
+  background: var(--selected);
+}
 .tool.on {
-  background: var(--accent-soft);
+  background: var(--selected);
   color: var(--accent);
 }
 .drag-spacer {
@@ -445,7 +445,7 @@ function cancelRename(): void {
   backdrop-filter: blur(14px) saturate(1.15);
   -webkit-backdrop-filter: blur(14px) saturate(1.15);
   border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
+  border-radius: var(--r-menu);
   box-shadow: var(--shadow);
 }
 .ctx button {
@@ -453,7 +453,7 @@ function cancelRename(): void {
   align-items: center;
   width: 100%;
   padding: 7px 10px;
-  border-radius: 5px;
+  border-radius: var(--r-item);
   font-size: 13px;
   color: var(--text);
   text-align: left;

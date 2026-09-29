@@ -16,6 +16,8 @@ X-SSH 图标生成器:一套几何 + 配色,产出所有平台的图标文件。
                               Windows、Linux、托盘、窗口图标:夜间配色的圆角方块(整块铺满)。
 - src/renderer/src/assets/logo-light.png / logo-dark.png
                               欢迎页的标识(「X」+「SSH」),裁自参考图,背景抠成透明。
+- src/renderer/src/assets/mark-light.svg / mark-dark.svg
+                              只有「X」的矢量图:连接页背景水印、侧栏收起时的标。
 - mobile/android/.../res/     自适应图标(白天 / 夜间)、单色主题图标、状态栏小图标。
 """
 import io
@@ -384,6 +386,20 @@ def matte(a, floor=0.14):
     return img.crop(img.getchannel("A").point(lambda v: 255 if v > 8 else 0).getbbox())
 
 
+def svg_mark(pal_name):
+    """只有两根条的「X」矢量图(透明底、裁到图形本身),连接页的背景水印和侧栏收起时的标用。
+    和图标同一套几何与渐变;矢量的好处是放大、旋转都不糊 —— 参考图里的 X 只有约 740px 高。"""
+    pal = PALETTES[pal_name]
+    front, back = bar_polys()
+    xs = [x for poly in (front, back) for x, _ in poly]
+    ys = [y for poly in (front, back) for _, y in poly]
+    x0, y0, x1, y1 = min(xs), min(ys), max(xs), max(ys)
+    vb = f"{x0:.2f} {y0:.2f} {x1 - x0:.2f} {y1 - y0:.2f}"
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{vb}" width="{x1 - x0:.0f}" height="{y1 - y0:.0f}">'
+            f'<defs>{svg_gradients("b", back, pal, "back")}{svg_gradients("f", front, pal, "front")}</defs>'
+            f'{svg_bar("b", back, pal, "back")}{svg_bar("f", front, pal, "front")}</svg>\n')
+
+
 def lockups():
     """欢迎页字标 = 应用图标里的「X」+ 设计稿里的「SSH」,白天 / 夜间各一张。
     两样都直接用用户给的原图(reference/icon-*.webp、ssh-*.png),只抠底、缩放、排版 ——
@@ -394,6 +410,7 @@ def lockups():
         # 默认门槛(约 36 级)会把它抠掉,所以按底噪单独给。
         floor = {"light": 0.02, "dark": 0.07}[name]
         mark = matte(np.asarray(Image.open(os.path.join(REF, f"icon-{name}.webp")).convert("RGB")), floor)
+        mark = brighten(mark, MARK_GAMMA[name])
         text = matte(np.asarray(Image.open(os.path.join(REF, f"ssh-{name}.png")).convert("RGB")), 0.03)  # 底噪 ≤3 级
         res[name] = compose(mark, text)
     return res
@@ -406,6 +423,20 @@ def lockups():
 LOCKUP_H = 160
 LOCKUP_X = 1.0
 LOCKUP_GAP = 0.22
+
+
+# 夜间版 X 放在几乎纯白的「SSH」旁边显得发暗(用户反馈):X 平均亮度 147,字母 242。
+# 黑底抠出来的 X 颜色基本是白的、明暗全在不透明度里,所以提亮 = 对不透明度做 gamma:
+# 0.6 时平均 172,金属渐变还在。只动欢迎页字标,应用图标本身不变。
+MARK_GAMMA = {"dark": 0.6, "light": 1.0}
+
+
+def brighten(img, gamma):
+    if gamma == 1.0:
+        return img
+    a = np.asarray(img).copy()
+    a[..., 3] = np.round(255 * (a[..., 3] / 255.0) ** gamma).astype(np.uint8)
+    return Image.fromarray(a, "RGBA")
 
 
 def compose(mark, text):
@@ -530,6 +561,8 @@ def main():
         buf = io.BytesIO()
         img.save(buf, "PNG", optimize=True)
         write(os.path.join(RENDERER_ASSETS, f"logo-{name}.png"), buf.getvalue(), "wb")
+    for name in ("dark", "light"):
+        write(os.path.join(RENDERER_ASSETS, f"mark-{name}.svg"), svg_mark(name))
 
     # Android 自适应图标:白天(默认)/ 夜间
     for pal, folder in (("light", "drawable"), ("dark", "drawable-night")):

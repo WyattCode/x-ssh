@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain, dialog, nativeImage, screen, Menu, Notification, Tray, globalShortcut, powerMonitor } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, dialog, nativeImage, nativeTheme, screen, Menu, Notification, Tray, globalShortcut, powerMonitor } from 'electron'
 import { join, dirname, basename, isAbsolute } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { tmpdir, homedir } from 'node:os'
@@ -6,12 +6,14 @@ import { mkdtemp, rm, readFile, stat, readdir, mkdir, unlink, rename, writeFile 
 import { watchFile, unwatchFile } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { IPC, PREFS_ARG } from '../shared/ipc'
-import type { ConnectParams, Host, HostForward, ForwardMode, JumpConfig, LocalEntry, Snippet, UiPrefs, UploadOverwrite } from '../shared/types'
+import type { ConnectParams, Host, HostForward, ForwardMode, JumpConfig, LocalEntry, Snippet, ThemePref, UiPrefs, UploadOverwrite } from '../shared/types'
 import { readLaunchTarget, targetFromUrl, PROTOCOL, compareVersions } from '../shared/launchTarget'
 import { isRendererSettableKey } from '../shared/settingsKeys'
 import { resolveLang, type LangPref, type UiLang } from '../shared/lang'
 import { resolveDir, resolveInside } from '../shared/localPaths'
 import { SshManager } from './ssh'
+import { probeHosts } from './reachability'
+import { OS_PROBE_COMMAND, parseOsProbe } from '../shared/hostOs'
 import { HostStore } from './store'
 import { KnownHosts } from './knownHosts'
 import { SettingsStore } from './settings'
@@ -678,10 +680,144 @@ async function importSshConfig(): Promise<{ ok: boolean; count: number; error?: 
   return { ok: true, count }
 }
 
+/** Reads the connected host's OS (read-only, own exec channel — never the
+ *  user's shell) and stores it for the host card's icon. Best effort: a
+ *  non-POSIX shell or a slow server just leaves the card icon as it was. */
+async function detectHostOs(hostId: string, sessionId: string | undefined, at?: { host: string; port?: number }): Promise<void> {
+  if (!sessionId || !sshManager) return
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    const out = await Promise.race([
+      sshManager.execCommand(sessionId, OS_PROBE_COMMAND),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('timeout')), 8000)
+      })
+    ])
+    const os = parseOsProbe(out)
+    if (os && (await store.setOs(hostId, os, at))) notifyHostsChanged()
+  } catch {
+    /* leave the icon as it was */
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+function notifyHostsChanged(): void {
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (!w.isDestroyed()) w.webContents.send(IPC.hostsChanged)
+  }
+}
+
+/** A saved host's jump hop, with its saved secret; null when it can't be used
+ *  unattended (missing, or a password hop with no saved password). */
+async function quietJumpConfig(jumpId: string): Promise<JumpConfig | null> {
+  const jh = (await store.list()).find((x) => x.id === jumpId)
+  if (!jh) return null
+  const jump: JumpConfig = { host: jh.host, port: jh.port, username: jh.username, auth: jh.auth, keyPath: jh.keyPath }
+  if (jh.auth === 'password') {
+    jump.password = await store.getPassword(jh.id)
+    if (!jump.password) return null
+  }
+  if (jh.auth === 'key') jump.passphrase = await store.getPassphrase(jh.id)
+  return jump
+}
+
+/** Connect params for an unattended login with the host's saved credentials;
+ *  null when there's nothing to log in with (password auth, none saved). */
+async function quietParams(h: Host): Promise<ConnectParams | null> {
+  const p: ConnectParams = { host: h.host, port: h.port, username: h.username, auth: h.auth, keyPath: h.keyPath, hostId: h.id }
+  if (h.auth === 'password') {
+    p.password = await store.getPassword(h.id)
+    if (!p.password) return null
+  }
+  if (h.auth === 'key') {
+    if (!h.keyPath) return null
+    p.passphrase = await store.getPassphrase(h.id)
+  }
+  if (h.jumpHostId) {
+    const jump = await quietJumpConfig(h.jumpHostId)
+    if (!jump) return null
+    p.jump = jump
+  } else if (h.proxy) {
+    p.proxy = h.proxy
+  }
+  return p
+}
+
+/** Hosts that were connected before the OS icons existed (or never since)
+ *  have no OS on record, so their cards showed the generic glyph while the
+ *  rest had logos. Fill them in with a quiet read-only login using the saved
+ *  credentials (SshManager.quietExec: no terminal, host key must already be on
+ *  record). Two at a time, each address at most once per run; skipped while
+ *  locked or when turned off in 设置 → 连接. */
+const osTried = new Set<string>()
+let osDetectBusy = false
+/** Addresses whose background login was refused (wrong saved password) or
+ *  whose shell couldn't answer: not retried for a week, so a stale password
+ *  doesn't cost one failed login per launch. Kept in settings (main only). */
+const OS_BACKOFF_MS = 7 * 24 * 3600_000
+async function detectMissingOs(onlineIds: string[]): Promise<void> {
+  if (!sshManager || store.isLocked || osDetectBusy || !onlineIds.length) return
+  // Claimed before the first await: a second probe finishing meanwhile must
+  // not start a parallel run over the same hosts.
+  osDetectBusy = true
+  try {
+    if ((await settings.get<boolean>('autoDetectOs')) === false) return
+    const failed = (await settings.get<Record<string, number>>('osDetectFailed')) ?? {}
+    const online = new Set(onlineIds)
+    const addr = (h: Host): string => `${h.host}:${h.port || 22}`
+    const key = (h: Host): string => `${h.id}|${addr(h)}`
+    const now = Date.now()
+    const todo = (await store.list()).filter(
+      (h) => !h.os && online.has(h.id) && !osTried.has(key(h)) && !(now - (failed[addr(h)] ?? 0) < OS_BACKOFF_MS)
+    )
+    let next = 0
+    const markFailed = async (h: Host): Promise<void> => {
+      failed[addr(h)] = Date.now()
+      await settings.set('osDetectFailed', failed).catch(() => undefined)
+    }
+    const worker = async (): Promise<void> => {
+      while (next < todo.length) {
+        if (store.isLocked || !sshManager) return
+        if ((await settings.get<boolean>('autoDetectOs')) === false) return
+        const h = todo[next++]
+        const log = (event: 'connect' | 'error'): void => {
+          void pushConnLog({ at: Date.now(), event, host: h.host, port: h.port, username: h.username, detail: 'os-detect' }).catch(() => undefined)
+        }
+        try {
+          const params = await quietParams(h)
+          if (!params) continue // nothing to log in with (yet): try again once there is
+          osTried.add(key(h))
+          const out = await sshManager.quietExec(params, OS_PROBE_COMMAND)
+          log('connect')
+          const os = parseOsProbe(out)
+          if (!os) await markFailed(h)
+          else if (await store.setOs(h.id, os, { host: h.host, port: h.port })) notifyHostsChanged()
+        } catch (e) {
+          if (!osTried.has(key(h))) continue // failed before any login (params)
+          log('error')
+          // A refused login backs off; timeouts / drops just wait for the next run.
+          if ((e as { level?: string })?.level === 'client-authentication') await markFailed(h)
+        }
+      }
+    }
+    await Promise.all([worker(), worker()])
+  } finally {
+    osDetectBusy = false
+  }
+}
+
+/** Pins Chromium's native theme to the user's appearance choice: the Windows
+ *  title bar, native menus and scrollbars follow it (a light app under a dark
+ *  OS no longer keeps a black title bar). 'system' / unset tracks the OS. */
+function applyThemeSource(pref: unknown): void {
+  nativeTheme.themeSource = pref === 'light' || pref === 'dark' ? pref : 'system'
+}
+
 /** Reads the handful of preferences the renderer needs before its first paint. */
 async function readUiPrefs(): Promise<UiPrefs> {
   const [theme, fontSize, zoom, sftpShowHidden, sftpWidth, lang] = await Promise.all([
-    settings.get<'light' | 'dark'>('theme'),
+    settings.get<ThemePref>('theme'),
     settings.get<number>('fontSize'),
     settings.get<number>('zoom'),
     settings.get<boolean>('sftpShowHidden'),
@@ -723,7 +859,10 @@ function createWindow(saved?: SavedBounds, prefs: UiPrefs = {}): void {
     show: false,
     autoHideMenuBar: true,
     icon: join(__dirname, '../../build/icon.ico'),
-    backgroundColor: '#0e0f12',
+    // The first frame, before the renderer paints: match the theme it will use
+    // (themeSource is already pinned to the saved choice) so a light-theme
+    // launch doesn't flash dark. Same colors as --bg in styles/global.css.
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#0e0f12' : '#f7f8fa',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     webPreferences: {
       preload: join(__dirname, '../preload/index.mjs'),
@@ -1124,7 +1263,11 @@ function registerIpc(): void {
     if (params.hostId) {
       const h = (await store.list()).find((x) => x.id === params.hostId)
       if (h) {
-        if (!params.portForwards && h.portForwards?.length) params.portForwards = h.portForwards
+        if (h.portForwards?.length) {
+          const fk = (f: { mode?: string; localPort: number }): string => `${f.mode ?? 'local'}:${f.localPort}`
+          const extra = (params.portForwards ?? []).filter((f) => !h.portForwards!.some((s) => fk(s) === fk(f)))
+          params.portForwards = [...h.portForwards, ...extra]
+        }
         if (params.agentForward === undefined) params.agentForward = h.agentForward
         if (params.onConnect === undefined) params.onConnect = h.onConnect
         if (params.onConnectDelayMs === undefined) params.onConnectDelayMs = h.onConnectDelayMs
@@ -1160,7 +1303,11 @@ function registerIpc(): void {
     }
     if (params.multiplex === undefined) params.multiplex = (await settings.get<boolean>('connectionMultiplex')) === true
     const result = await sshManager.connect(params)
-    if (result.ok && params.hostId) await store.touch(params.hostId)    // Audit the connection attempt (success or failure) for the security log.
+    if (result.ok && params.hostId) {
+      await store.touch(params.hostId)
+      void detectHostOs(params.hostId, result.sessionId, { host: params.host, port: params.port })
+    }
+    // Audit the connection attempt (success or failure) for the security log.
     void pushConnLog({
       at: Date.now(),
       event: result.ok ? 'connect' : 'error',
@@ -1688,6 +1835,22 @@ function registerIpc(): void {
     await settings.set(key, value)
     return { ok: true }
   })
+  ipcMain.handle(IPC.hostsProbe, async (_e, ids?: unknown) => {
+    const all = await store.list()
+    const want = Array.isArray(ids) ? new Set(ids.filter((x): x is string => typeof x === 'string')) : null
+    const result = await probeHosts(want ? all.filter((h) => want.has(h.id)) : all)
+    // Online hosts with no OS on record get identified in the background
+    // (jump / proxy hosts aren't probed, so they're simply tried).
+    const viaHop = new Set(all.filter((h) => h.jumpHostId || h.proxy).map((h) => h.id))
+    void detectMissingOs(Object.keys(result).filter((id) => result[id] === 'online' || viaHop.has(id))).catch(() => undefined)
+    return result
+  })
+  ipcMain.handle(IPC.themeSet, async (_e, pref: unknown) => {
+    const value: ThemePref = pref === 'light' || pref === 'dark' ? pref : 'system'
+    applyThemeSource(value)
+    await settings.set('theme', value)
+    return { dark: nativeTheme.shouldUseDarkColors }
+  })
   ipcMain.handle(IPC.connLogList, async () => (await settings.get<ConnLogEntry[]>('connectionLog')) ?? [])
   ipcMain.handle(IPC.connLogPush, async (_e, entry: ConnLogEntry) => {
     await pushConnLog(entry)
@@ -1986,6 +2149,7 @@ app.whenReady().then(async () => {
     settings.get<SavedBounds>('windowBounds'),
     readUiPrefs()
   ])
+  applyThemeSource(prefs.theme)
   createWindow(saved, prefs)
 
   // Finer network-health trigger: when the machine wakes from sleep the network
@@ -2004,7 +2168,9 @@ app.whenReady().then(async () => {
   })
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow(saved, prefs)
+    // Re-read: the theme / language may have changed since launch (macOS keeps
+    // the app alive with no window).
+    if (BrowserWindow.getAllWindows().length === 0) void readUiPrefs().then((p) => createWindow(saved, p))
   })
 })
 

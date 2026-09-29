@@ -17,8 +17,23 @@
   --warn: #ffd43b;
   /* Scrim that recedes an unfocused split pane (darkens on the dark surface). */
   --scrim: rgba(0, 0, 0, 0.3);
-  --radius: 10px;
-  --radius-sm: 7px;
+  /* Selected thumb of a segmented control: lifted off its track. */
+  --thumb: var(--bg-elev-2);
+  /* Corner radii, macOS 27 style: nested shapes are concentric (inner radius =
+     outer radius − the padding between them), compact controls are rounded
+     rectangles, standout controls are capsules. */
+  --radius: 12px; /* dialogs, larger panels */
+  --radius-sm: 8px; /* medium controls: text fields, selects, buttons, rows */
+  --r-card: 16px; /* content cards */
+  --r-tile: 11px; /* icon tiles inside a card (concentric fallback) */
+  --r-menu: 12px; /* menus / popovers */
+  --r-item: 7px; /* rows inside a menu: --r-menu − its 5px padding */
+  --r-pill: 999px; /* capsules */
+  /* Interaction states, shared by every page: a neutral hover layer, a
+     stronger one for the selected item, one curve for all motion. */
+  --hover: color-mix(in srgb, var(--text) 5%, transparent);
+  --selected: color-mix(in srgb, var(--text) 9%, transparent);
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
   --shadow: 0 18px 50px -12px rgba(0, 0, 0, 0.6);
   --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica,
     Arial, sans-serif;
@@ -44,6 +59,10 @@
   --row-sel-ring: rgba(47, 111, 237, 0.26);
   --shadow: 0 18px 50px -12px rgba(20, 30, 60, 0.18);
   --scrim: rgba(20, 24, 32, 0.055);
+  --thumb: #ffffff;
+  --danger: #d63c3c;
+  --ok: #1f9a44;
+  --warn: #b7791f;
 }
 
 @media (prefers-color-scheme: light) {
@@ -62,6 +81,10 @@
     --row-sel-ring: rgba(47, 111, 237, 0.26);
     --shadow: 0 18px 50px -12px rgba(20, 30, 60, 0.18);
     --scrim: rgba(20, 24, 32, 0.055);
+    --thumb: #ffffff;
+    --danger: #d63c3c;
+    --ok: #1f9a44;
+    --warn: #b7791f;
   }
 }
 
@@ -109,6 +132,108 @@ textarea,
 select {
   font-family: inherit;
   color: inherit;
+}
+
+/* ---- Buttons: one family on every page and dialog ----
+   Medium (32px) rounded rectangle; add `.pill` for a capsule when the button
+   stands on its own on a page (macOS 27: capsules for standout actions). */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 14px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  white-space: nowrap;
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid var(--border);
+  transition: background 0.16s var(--ease), color 0.16s var(--ease), border-color 0.16s var(--ease),
+    filter 0.16s var(--ease), transform 0.12s var(--ease);
+}
+.btn:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--hover);
+  border-color: var(--border-strong);
+}
+.btn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+.btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+/* Primary: the one action a view is for (save, add, confirm). */
+.btn-primary {
+  color: #fff;
+  font-weight: 500;
+  background: var(--accent);
+  border-color: transparent;
+}
+.btn-primary:hover:not(:disabled) {
+  color: #fff;
+  background: var(--accent);
+  border-color: transparent;
+  filter: brightness(1.08);
+}
+/* Tinted: a secondary action that still wants attention. */
+.btn-tinted {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 28%, transparent);
+}
+.btn-tinted:hover:not(:disabled) {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+.btn-danger {
+  color: var(--danger);
+  border-color: transparent;
+}
+.btn-danger:hover:not(:disabled) {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  border-color: transparent;
+}
+.btn.pill {
+  border-radius: var(--r-pill);
+}
+
+/* ---- Page header: the same title row on 端口转发 / SFTP / 设置 ---- */
+.page-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-height: 40px;
+  min-width: 0;
+}
+.page-head h1 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  font-size: 22px;
+  font-weight: 650;
+  color: var(--text);
+  white-space: nowrap;
+}
+.page-head .count {
+  padding: 1px 8px;
+  border-radius: var(--r-pill);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-dim);
+  background: var(--hover);
+  font-variant-numeric: tabular-nums;
+}
+.page-head .page-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
 }
 
 /* Consistent, legible placeholders across both themes & DPI scales. */
@@ -207,4 +332,28 @@ select:focus-visible {
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
   }
+}
+
+/* ---- macOS window chrome (see main.ts) ---- */
+.mac-drag {
+  display: none;
+}
+:root.mac .mac-drag {
+  display: block;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 20px;
+  z-index: 60;
+  -webkit-app-region: drag;
+}
+/* Room for the traffic lights above the brand; the brand row drags too. */
+:root.mac .sidebar .brand {
+  margin-top: 22px;
+  -webkit-app-region: drag;
+}
+/* 专注模式 hides the sidebar: the tab bar makes room for the buttons instead. */
+:root.mac .no-sidebar .tabbar {
+  padding-left: 78px;
 }

@@ -25,6 +25,8 @@ async function list(): Promise<void> {
 function attach(name: string): void {
   const id = sid()
   if (!id) return
+  // Attaching types into the terminal: show it.
+  store.setPage('terminal')
   busy.value = true
   void window.api.ssh.tmuxAttach(id, name).finally(() => {
     busy.value = false

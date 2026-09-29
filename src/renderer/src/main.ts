@@ -18,4 +18,8 @@ if (typeof navigator !== 'undefined') {
   if (lowEnd) document.documentElement.classList.add('perf-no-blur')
 }
 
+// macOS draws its window buttons inside our content (titleBarStyle hiddenInset);
+// the stylesheet makes room for them and marks where the window can be dragged.
+if (/mac/i.test(navigator.platform || navigator.userAgent)) document.documentElement.classList.add('mac')
+
 createApp(App).use(createPinia()).mount('#app')
