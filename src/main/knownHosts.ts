@@ -58,7 +58,9 @@ export class KnownHosts {
   async set(host: string, port: number, fingerprint: string): Promise<void> {
     const k = KnownHosts.key(host, port)
     const existing = this.map[k]
-    this.map[k] = { fp: fingerprint, firstSeen: existing?.firstSeen ?? Date.now() }
+    // A replaced key is a new key: its age starts now (firstSeen drives the
+    // stale-key hint), only re-saving the same key keeps the original date.
+    this.map[k] = { fp: fingerprint, firstSeen: existing && existing.fp === fingerprint ? existing.firstSeen ?? Date.now() : Date.now() }
     await this.persist()
   }
 

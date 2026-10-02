@@ -87,6 +87,20 @@ interface WatchSyncState {
   busy: boolean
 }
 
+/** A connect() failure caused by a host-key rejection. Carries the machine
+ *  code and fingerprint (plus which hop, for jumps) so connect() can pass
+ *  them on in ConnectResult. */
+export class KeyError extends Error {
+  code?: string
+  key?: string
+  keyHost?: string
+  keyPort?: number
+  constructor(message: string, opts?: { code?: string; key?: string; keyHost?: string; keyPort?: number }) {
+    super(message)
+    Object.assign(this, opts)
+  }
+}
+
 /**
  * Owns all live SSH connections. One shell channel per session.
  * Data flows: renderer keystroke -> write(); server output -> IPC sshData.
@@ -349,7 +363,11 @@ export class SshManager {
   }
 
   /** Connects to a jump host, authenticates, and returns a tunneled `sock` for
-   *  the target ssh2 Client to connect through (ProxyJump). */
+   *  the target ssh2 Client to connect through (ProxyJump).
+   *  The jump's host key is verified the same way as the target's: an unknown
+   *  or changed key refuses to send the user's credential through a tunnel, and
+   *  the reason travels back as {@link KeyError} so connect() surfaces it with a
+   *  code + fingerprint. (The verifier here does not record a first key.) */
   private connectJump(
     jump: JumpConfig,
     targetHost: string,
@@ -358,26 +376,41 @@ export class SshManager {
     return new Promise((res, rej) => {
       const client = new Client()
       const config = SshManager.baseConfig(jump.host, jump.port, jump.username, undefined)
-      let keyChanged = false
+      let keyRejected = false
+      let keyUnknown = false
+      let lastKey = ''
+      // Same normalization as the target verifier.
       config.hostVerifier = (
-        hashedKey: string,
+        keyOrHash: string | Buffer,
         cb: (valid: boolean) => void
       ): void => {
+        // Same normalization as the target's verifier in connect().
+        const hashedKey = Buffer.isBuffer(keyOrHash)
+          ? createHash('sha256').update(keyOrHash).digest('hex')
+          : keyOrHash
         const known = this.knownHosts.get(jump.host, jump.port)
         if (!known) {
-          void this.knownHosts.set(jump.host, jump.port, hashedKey).catch(() => undefined)
-          return cb(true)
+          keyRejected = true
+          keyUnknown = true
+          lastKey = hashedKey
+          this.noteRejected(jump.host, jump.port, hashedKey)
+          return cb(false)
         }
         if (known === hashedKey) return cb(true)
-        keyChanged = true
+        this.noteRejected(jump.host, jump.port, hashedKey)
+        keyRejected = true
+        lastKey = hashedKey
         cb(false)
       }
       let settled = false
-      const fail = (msg: string): void => {
+      const fail = (
+        msg: string,
+        keyErr?: { code?: string; key?: string; keyHost?: string; keyPort?: number }
+      ): void => {
         if (settled) return
         settled = true
         client.end()
-        rej(new Error(msg))
+        rej(new KeyError(msg, keyErr))
       }
       this.authConfig(jump.auth, jump.keyPath, jump.passphrase, jump.password)
         .then((auth) => {
@@ -385,9 +418,15 @@ export class SshManager {
           client.connect(config)
         })
         .catch((e) => fail(friendlyError((e as Error).message)))
-      client.on('error', (err) =>
-        fail(keyChanged ? '跳板机主机密钥与记录不一致,已中止' : friendlyError(err.message))
-      )
+      client.on('error', (err) => {
+        if (!keyRejected) return fail(friendlyError(err.message))
+        fail('跳板机主机密钥未获信任,连接已中止', {
+          code: keyUnknown ? 'host_key_unknown' : 'host_key_changed',
+          key: lastKey,
+          keyHost: jump.host,
+          keyPort: jump.port || 22
+        })
+      })
       client.on('ready', () => {
         client.forwardOut(
           '127.0.0.1',
@@ -808,20 +847,36 @@ export class SshManager {
       `${params.username}@${params.host}${port !== 22 ? `:${port}` : ''}`
     const config = SshManager.baseConfig(params.host, port, params.username, params.keepaliveMs, params.readyTimeoutMs)
 
-    // Trust-on-first-use host-key verification.
+    // Host-key verification: an unrecognized key is never trusted silently —
+    // refuse the handshake and hand the fingerprint to the renderer, which asks
+    // the user before the user's credential goes anywhere. A changed key does
+    // the same with the 'host_key_changed' code.
     await this.knownHosts.load()
-    let keyChanged = false
+    let keyRejected = false
+    let keyUnknown = false
+    let lastKey = ''
     config.hostVerifier = (
-      hashedKey: string,
+      keyOrHash: string | Buffer,
       cb: (valid: boolean) => void
     ): void => {
+      // Should ssh2 ever hand over the raw wire-format key instead of the hash,
+      // normalize it so the verifier always reasons about the same sha256 hex
+      // it is asked to compare and later trust.
+      const hashedKey = Buffer.isBuffer(keyOrHash)
+        ? createHash('sha256').update(keyOrHash).digest('hex')
+        : keyOrHash
       const known = this.knownHosts.get(params.host, port)
       if (!known) {
-        void this.knownHosts.set(params.host, port, hashedKey).catch(() => undefined)
-        return cb(true)
+        keyRejected = true
+        keyUnknown = true
+        lastKey = hashedKey
+        this.noteRejected(params.host, port, hashedKey)
+        return cb(false)
       }
       if (known === hashedKey) return cb(true)
-      keyChanged = true
+      this.noteRejected(params.host, port, hashedKey)
+      keyRejected = true
+      lastKey = hashedKey
       cb(false)
     }
 
@@ -835,7 +890,8 @@ export class SshManager {
         jumpClient = jc
       } catch (err) {
         this.sessions.delete(id)
-        return { ok: false, error: (err as Error).message }
+        const e = err as Error & { code?: string; key?: string; keyHost?: string; keyPort?: number }
+        return { ok: false, error: e.message, code: e.code, key: e.key, keyHost: e.keyHost, keyPort: e.keyPort }
       }
     }
 
@@ -979,8 +1035,10 @@ export class SshManager {
       })
 
       client.on('error', (err) => {
-        const message = keyChanged
-          ? '主机密钥与首次连接时记录的不一致,连接已中止;这可能是中间人攻击,若你确认服务器已重装或更换,可选择“信任新密钥并重连”'
+        const message = keyRejected
+          ? keyUnknown
+            ? '主机密钥未获信任,连接已中止;若此服务器是你自己的,可确认其身份后信任'
+            : '主机密钥与首次连接时记录的不一致,连接已中止;这可能是中间人攻击,若你确认服务器已重装或更换,可选择“信任新密钥并重连”'
           : friendlyError(err.message)
         this.emit({ sessionId: id, status: 'error', message })
         this.stopLog(id)
@@ -989,7 +1047,10 @@ export class SshManager {
         settle({
           ok: false,
           error: message,
-          code: keyChanged ? 'host_key_changed' : undefined
+          code: keyRejected ? (keyUnknown ? 'host_key_unknown' : 'host_key_changed') : undefined,
+          key: keyRejected ? lastKey : undefined,
+          keyHost: keyRejected ? params.host : undefined,
+          keyPort: keyRejected ? port : undefined
         })
       })
 
@@ -2510,6 +2571,22 @@ export class SshManager {
     })
   }
 
+  /** Keys this manager refused, by host:port: the only ones the user can then
+   *  trust (ssh:trustHostKey) — a renderer can't plant an arbitrary key. */
+  private readonly rejectedKeys = new Map<string, string>()
+
+  private noteRejected(host: string, port: number | undefined, fp: string): void {
+    this.rejectedKeys.set(`${host}:${port || 22}`, String(fp).toLowerCase())
+  }
+
+  /** True (and forgotten) when `fp` is the key last refused for host:port. */
+  takeRejectedKey(host: string, port: number | undefined, fp: string): boolean {
+    const k = `${host}:${port || 22}`
+    if (this.rejectedKeys.get(k) !== String(fp).toLowerCase()) return false
+    this.rejectedKeys.delete(k)
+    return true
+  }
+
   /** Background, read-only: logs in without a terminal, runs one command on an
    *  exec channel, returns its stdout and disconnects. Nothing is emitted to the
    *  renderer and no session is registered. Only for a server whose host key is
@@ -2519,8 +2596,8 @@ export class SshManager {
     const port = params.port || 22
     await this.knownHosts.load()
     if (!this.knownHosts.get(params.host, port)) throw new Error('host key not on record')
-    // The hop too: connectJump would otherwise trust an unknown jump host on
-    // first use and hand it the saved credential, with nobody watching.
+    // The hop too: an unknown jump host would get the saved credential through
+    // its tunnel with nobody watching, and connectJump does not record first keys.
     if (params.jump && !this.knownHosts.get(params.jump.host, params.jump.port || 22)) {
       throw new Error('jump host key not on record')
     }

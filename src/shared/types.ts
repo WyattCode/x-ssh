@@ -302,8 +302,16 @@ export interface ConnectResult {
   ok: boolean
   sessionId?: string
   error?: string
-  /** Machine-readable failure code, e.g. 'host_key_changed'. */
+  /** Machine-readable failure code: 'host_key_unknown' (first connect),
+   *  'host_key_changed', 'jump_needs_password', 'locked', 'forward:*'. */
   code?: string
+  /** Fingerprint the server presented when a host-key rejection failed the
+   *  connect — what the user is being asked to trust. */
+  key?: string
+  /** Which hop a host-key rejection concerns (default: the target itself;
+   *  for 'jump_*' codes the jump host). Needed to write back the right entry. */
+  keyHost?: string
+  keyPort?: number
 }
 
 /**
@@ -326,6 +334,14 @@ export interface UiPrefs {
   lang?: 'zh' | 'zh-TW' | 'en' | 'system'
   /** The OS's preferred locales (most preferred first), for "follow system". */
   systemLocales?: string[]
+  /** Layout state the first frame must already have (else it paints the
+   *  default and then jumps): sidebar collapsed / width / focus mode, and the
+   *  connections page's view and sort. */
+  sidebarCollapsed?: boolean
+  sidebarWidth?: number
+  termSidebarHidden?: boolean
+  hostsView?: string
+  hostsSort?: string
 }
 
 /** Result of a `settings:set`. Main refuses keys outside its allowlist

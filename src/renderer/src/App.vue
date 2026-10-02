@@ -317,8 +317,11 @@ watch(
 
 const booted = ref(false)
 onMounted(async () => {
-  const savedZoom = Number(window.api.prefs.zoom)
-  if (!Number.isNaN(savedZoom) && savedZoom !== 0) zoom.restore(savedZoom)
+  // The preload already applied the launch-time zoom before the first paint;
+  // the stored value wins if it differs (a renderer reload after the user
+  // zoomed carries stale launch prefs).
+  const storedZoom = Number(await window.api.settings.get<number>('zoom'))
+  if (Number.isFinite(storedZoom) && storedZoom !== zoom.level.value) zoom.restore(storedZoom)
   await Promise.all([
     store.loadHosts(),
     store.loadSettings(),

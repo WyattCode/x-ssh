@@ -166,6 +166,12 @@ export interface Pane {
   message?: string
   /** Machine-readable failure code from the last connect attempt. */
   errorCode?: string
+  /** Fingerprint the last host-key rejection reported (to trust on confirm). */
+  hostKey?: string
+  /** Which host a host-key rejection concerns (jump hop — the target's own
+   *  address is already in `params` and needs no copy). */
+  hostKeyHost?: string
+  hostKeyPort?: number
   /** Params used to open the session; retained in-memory for reconnect. */
   params: ConnectParams
   /** Auto-reconnect state (set while retrying after an unexpected drop). */
@@ -236,6 +242,12 @@ export const SIDEBAR_MAX_W = 360
 export const clampSidebarWidth = (w: number): number =>
   Math.round(Math.min(SIDEBAR_MAX_W, Math.max(SIDEBAR_MIN_W, w)))
 export type HostsSort = 'recent' | 'name' | 'address'
+
+/** Startup layout from main's launch prefs (read synchronously by the preload),
+ *  so the first frame already has the saved sidebar / view — loading them
+ *  later from settings painted the defaults first and then jumped. */
+const bootPrefs = (typeof window !== 'undefined' ? window.api?.prefs : undefined) ?? {}
+const bootWidth = Number(bootPrefs.sidebarWidth)
 
 interface State {
   hosts: Host[]
@@ -370,11 +382,11 @@ export const useSessions = defineStore('sessions', {
     activeId: null,
     page: 'hosts',
     prevPage: 'hosts',
-    sidebarCollapsed: false,
-    termSidebarHidden: false,
-    sidebarWidth: SIDEBAR_DEFAULT_W,
-    hostsView: 'grid',
-    hostsSort: 'recent',
+    sidebarCollapsed: bootPrefs.sidebarCollapsed === true,
+    termSidebarHidden: bootPrefs.termSidebarHidden === true,
+    sidebarWidth: bootWidth > 0 ? clampSidebarWidth(bootWidth) : SIDEBAR_DEFAULT_W,
+    hostsView: bootPrefs.hostsView === 'list' ? 'list' : 'grid',
+    hostsSort: bootPrefs.hostsSort === 'name' || bootPrefs.hostsSort === 'address' ? bootPrefs.hostsSort : 'recent',
     reach: {},
     sftpConnecting: '',
     paletteOpen: false,
@@ -585,14 +597,25 @@ export const useSessions = defineStore('sessions', {
       this.middleClickPaste = (await window.api.settings.get<boolean>('middleClickPaste')) !== false
       this.rightClickPaste = (await window.api.settings.get<boolean>('rightClickPaste')) === true
       this.confirmClose = (await window.api.settings.get<boolean>('confirmClose')) === true
-      this.sidebarCollapsed = (await window.api.settings.get<boolean>('sidebarCollapsed')) === true
-      this.termSidebarHidden = (await window.api.settings.get<boolean>('termSidebarHidden')) === true
-      const sw = Number(await window.api.settings.get<number>('sidebarWidth'))
-      if (sw > 0) this.sidebarWidth = clampSidebarWidth(sw)
-      const view = await window.api.settings.get<string>('hostsView')
-      if (view === 'grid' || view === 'list') this.hostsView = view
-      const sort = await window.api.settings.get<string>('hostsSort')
-      if (sort === 'recent' || sort === 'name' || sort === 'address') this.hostsSort = sort
+      // Sidebar collapsed / width / focus mode and the hosts view + sort start
+      // from the launch prefs in state(), so the first frame is already right.
+      // Re-read here only to catch up after a renderer reload (main reloads once
+      // after a crash, and the launch prefs are from window creation): applied
+      // only when the stored value exists and differs — on a normal launch they
+      // match and nothing moves.
+      const [sc, ts, swRaw, hv, hs] = await Promise.all([
+        window.api.settings.get<boolean>('sidebarCollapsed'),
+        window.api.settings.get<boolean>('termSidebarHidden'),
+        window.api.settings.get<number>('sidebarWidth'),
+        window.api.settings.get<string>('hostsView'),
+        window.api.settings.get<string>('hostsSort')
+      ])
+      if (typeof sc === 'boolean' && sc !== this.sidebarCollapsed) this.sidebarCollapsed = sc
+      if (typeof ts === 'boolean' && ts !== this.termSidebarHidden) this.termSidebarHidden = ts
+      const sw = Number(swRaw)
+      if (sw > 0 && clampSidebarWidth(sw) !== this.sidebarWidth) this.sidebarWidth = clampSidebarWidth(sw)
+      if ((hv === 'grid' || hv === 'list') && hv !== this.hostsView) this.hostsView = hv
+      if ((hs === 'recent' || hs === 'name' || hs === 'address') && hs !== this.hostsSort) this.hostsSort = hs
       this.transferRateKbps =
         (await window.api.settings.get<number>('transferRateKbps')) ?? 0
       this.minimizeToTray = (await window.api.settings.get<boolean>('minimizeToTray')) === true
@@ -1424,6 +1447,11 @@ export const useSessions = defineStore('sessions', {
         live.pane.sshSessionId = result.sessionId
         live.pane.status = 'connected'
         live.pane.errorCode = undefined
+        // A rejected first/changed key may have been confirmed since the error
+        // card was drawn: drop the stale trust payload.
+        live.pane.hostKey = undefined
+        live.pane.hostKeyHost = undefined
+        live.pane.hostKeyPort = undefined
         // A first-ever connection may have just recorded the host key.
         void this.loadKnownHosts()
         // Return to the directory the pane last browsed (on restore / reconnect /
@@ -1444,21 +1472,49 @@ export const useSessions = defineStore('sessions', {
         live.pane.status = 'error'
         // Map the codes main uses to their own wording. Anything unmapped keeps
         // main's message, which is already user-facing (friendlyError).
+        const keyCode = result.code === 'host_key_unknown' || result.code === 'host_key_changed'
+        // A refused key names the machine it came from: the target, or the
+        // jump host when keyHost differs from the pane's own address.
+        const keyHost = result.keyHost ?? found.pane.params.host
+        const keyPort = result.keyPort ?? (found.pane.params.port || 22)
+        const viaJump = keyCode && keyHost !== found.pane.params.host
+        const keyWhere = `${keyHost}${keyPort !== 22 ? ':' + keyPort : ''}`
         const msg =
           result.code === 'jump_needs_password'
             ? t('app.jumpNeedsPassword')
             : result.code === 'locked'
               ? t('app.locked')
-              : (result.error ?? t('app.connectFail'))
+              : result.code === 'host_key_unknown'
+                ? viaJump
+                  ? t('app.keyUnknownJumpMsg', { host: keyWhere })
+                  : t('app.keyUnknownMsg', { host: keyWhere })
+                : result.code === 'host_key_changed'
+                  ? viaJump
+                    ? t('app.keyChangedJumpMsg', { host: keyWhere })
+                    : t('app.keyChangedMsg', { host: keyWhere })
+                  : (result.error ?? t('app.connectFail'))
         live.pane.message = msg
         live.pane.errorCode = result.code
+        // Host-key rejection: stash what the user is being asked to trust —
+        // the presented fingerprint and which host it belongs to (a rejected
+        // jump hop reports itself via keyHost; the target does not need one,
+        // its address is the pane's own). trustAndReconnect uses these to
+        // write the key back to the right entry.
+        if (keyCode) {
+          // All three together, so a key can never be paired with another host.
+          live.pane.hostKey = result.key
+          live.pane.hostKeyHost = keyHost
+          live.pane.hostKeyPort = keyPort
+        }
         // A locked app is not a connection failure — it needs the unlock screen.
         // Re-read the lock status so LockScreen (gated on `lockLocked`) appears
         // even if this pane was started before the app was locked.
         if (result.code === 'locked') void this.loadLockStatus()
         // Avoid stacking toasts during an auto-reconnect storm (each attempt
         // re-enters runConnect); only shout for the first, user-initiated try.
-        if (!live.pane.reconnectAttempt) toast(msg, 'error')
+        // A refused host key already explains itself on the pane's card
+        // (with the fingerprint); a toast would only repeat it.
+        if (!live.pane.reconnectAttempt && !keyCode) toast(msg, 'error')
       }
     },
 
@@ -1484,11 +1540,26 @@ export const useSessions = defineStore('sessions', {
       return 'connected'
     },
 
-    /** Forgets the stored host key, then reconnects (server was re-installed). */
+    /** Registers the host key the user just confirmed, then reconnects.
+     *  Used for both an unrecognized key (first connect) and a changed one
+     *  (trust the new key, overwriting the stale record). The fingerprint comes
+     *  from the last rejection (result of connect), not from the saved host, so
+     *  it lands on the right entry even when a jump hop is the one rejected. */
     async trustAndReconnect(paneId: string): Promise<void> {
       const found = this.findPane(paneId)
       if (!found) return
-      await window.api.ssh.forgetHostKey(found.pane.params.host, found.pane.params.port || 22)
+      const { hostKey, hostKeyHost, hostKeyPort } = found.pane
+      // Main only accepts the key it just refused for that host:port; with no
+      // fingerprint captured there is nothing to trust — reconnecting shows the
+      // card again with the key the server presents.
+      if (hostKey) {
+        const host = hostKeyHost ?? found.pane.params.host
+        const r = await window.api.ssh.trustHostKey(host, hostKeyPort ?? (found.pane.params.port || 22), hostKey)
+        if (!r?.ok) {
+          await this.reconnect(paneId)
+          return
+        }
+      }
       await this.loadKnownHosts()
       await this.reconnect(paneId)
     },
@@ -1578,7 +1649,11 @@ export const useSessions = defineStore('sessions', {
         const after = this.findPane(paneId)
         if (!after) return
         if (after.pane.status === 'connected') after.pane.reconnectAttempt = undefined
-        else this.scheduleReconnect(paneId)
+        // A refused host key won't fix itself by retrying: stop, and leave the
+        // card (with its fingerprint) for the user to decide.
+        else if (after.pane.errorCode === 'host_key_unknown' || after.pane.errorCode === 'host_key_changed') {
+          after.pane.reconnectAttempt = undefined
+        } else this.scheduleReconnect(paneId)
       }, delay)
     },
 

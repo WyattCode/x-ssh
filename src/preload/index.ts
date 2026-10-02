@@ -137,6 +137,8 @@ const api = {
       ipcRenderer.invoke(IPC.sshDisconnect, sessionId),
     forgetHostKey: (host: string, port: number): Promise<void> =>
       ipcRenderer.invoke(IPC.sshForgetHostKey, host, port),
+    trustHostKey: (host: string, port: number, fingerprint: string): Promise<{ ok: boolean }> =>
+      ipcRenderer.invoke(IPC.sshTrustHostKey, host, port, fingerprint),
     input: (sessionId: string, data: string): void =>
       ipcRenderer.send(IPC.sshInput, sessionId, data),
     resize: (sessionId: string, cols: number, rows: number): void =>
@@ -356,6 +358,13 @@ const api = {
     readText: (): string => clipboard.readText(),
     writeText: (text: string): void => clipboard.writeText(text)
   }
+}
+
+// The saved zoom goes on before the page's first paint; restored later from
+// App.vue it showed one frame at 100 % and then jumped.
+{
+  const z = Number(api.prefs.zoom)
+  if (Number.isFinite(z) && z !== 0) webFrame.setZoomLevel(z)
 }
 
 contextBridge.exposeInMainWorld('api', api)

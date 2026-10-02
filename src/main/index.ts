@@ -16,6 +16,7 @@ import { probeHosts } from './reachability'
 import { OS_PROBE_COMMAND, parseOsProbe } from '../shared/hostOs'
 import { HostStore } from './store'
 import { KnownHosts } from './knownHosts'
+import { isFingerprintHex } from '../shared/hostKey'
 import { SettingsStore } from './settings'
 import { friendlyError } from './friendlyError'
 import { KeyManager } from './keyManager'
@@ -816,15 +817,34 @@ function applyThemeSource(pref: unknown): void {
 
 /** Reads the handful of preferences the renderer needs before its first paint. */
 async function readUiPrefs(): Promise<UiPrefs> {
-  const [theme, fontSize, zoom, sftpShowHidden, sftpWidth, lang] = await Promise.all([
-    settings.get<ThemePref>('theme'),
-    settings.get<number>('fontSize'),
-    settings.get<number>('zoom'),
-    settings.get<boolean>('sftpShowHidden'),
-    settings.get<number>('sftpWidth'),
-    settings.get<UiPrefs['lang']>('lang')
-  ])
-  return { theme, fontSize, zoom, sftpShowHidden, sftpWidth, lang, systemLocales: systemLocales() }
+  const [theme, fontSize, zoom, sftpShowHidden, sftpWidth, lang, sidebarCollapsed, sidebarWidth, termSidebarHidden, hostsView, hostsSort] =
+    await Promise.all([
+      settings.get<ThemePref>('theme'),
+      settings.get<number>('fontSize'),
+      settings.get<number>('zoom'),
+      settings.get<boolean>('sftpShowHidden'),
+      settings.get<number>('sftpWidth'),
+      settings.get<UiPrefs['lang']>('lang'),
+      settings.get<boolean>('sidebarCollapsed'),
+      settings.get<number>('sidebarWidth'),
+      settings.get<boolean>('termSidebarHidden'),
+      settings.get<string>('hostsView'),
+      settings.get<string>('hostsSort')
+    ])
+  return {
+    theme,
+    fontSize,
+    zoom,
+    sftpShowHidden,
+    sftpWidth,
+    lang,
+    systemLocales: systemLocales(),
+    sidebarCollapsed,
+    sidebarWidth,
+    termSidebarHidden,
+    hostsView,
+    hostsSort
+  }
 }
 
 function createWindow(saved?: SavedBounds, prefs: UiPrefs = {}): void {
@@ -1336,6 +1356,21 @@ function registerIpc(): void {
     async (_e, host: string, port: number) => {
       await knownHosts.load()
       await knownHosts.forget(host, port)
+    }
+  )
+  ipcMain.handle(
+    IPC.sshTrustHostKey,
+    async (_e, host: unknown, port: unknown, fingerprint: unknown): Promise<{ ok: boolean }> => {
+      // Only a key a connection actually presented and we refused — and only
+      // for the host:port it came from. Anything else is refused, so a buggy
+      // or hostile renderer can't write keys into known_hosts.
+      if (typeof host !== 'string' || !host || !isFingerprintHex(fingerprint)) return { ok: false }
+      const p = typeof port === 'number' && Number.isInteger(port) && port > 0 && port < 65536 ? port : 22
+      if (!sshManager?.takeRejectedKey(host, p, fingerprint)) return { ok: false }
+      await knownHosts.load()
+      await knownHosts.set(host, p, fingerprint.toLowerCase())
+      void pushConnLog({ at: Date.now(), event: 'connect', host, port: p, username: '', detail: 'trust-host-key' }).catch(() => undefined)
+      return { ok: true }
     }
   )
 

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatFingerprint } from '../../../shared/hostKey'
 import { ref, computed, watch, nextTick, reactive } from 'vue'
 import { useSessions } from '../stores/sessions'
 import Icon from './Icon.vue'
@@ -1175,7 +1176,7 @@ async function resetMasterLock(): Promise<void> {
                 <div v-for="k in store.knownHosts" :key="`${k.host}:${k.port}`" class="row list">
                   <div class="r-text">
                     <span class="r-title mono">{{ k.host }}:{{ k.port }}</span>
-                    <span class="r-desc mono ellipsis">{{ k.fingerprint }}</span>
+                    <span class="r-desc mono ellipsis" :title="formatFingerprint(k.fingerprint)">{{ formatFingerprint(k.fingerprint) }}</span>
                   </div>
                   <span
                     v-if="keyAge(k.firstSeen)"

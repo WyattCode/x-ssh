@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatFingerprint } from '../../../shared/hostKey'
 import { computed, ref, defineAsyncComponent } from 'vue'
 import { useSessions } from '../stores/sessions'
 import { useI18n } from '../lib/i18n'
@@ -37,6 +38,21 @@ const grows = computed(() => (split.value ? childSizes(split.value) : []))
 
 const isFocused = computed(
   () => props.tabActive && pane.value?.id === props.tab.activePaneId
+)
+
+/** A host-key rejection (first connect or a changed key): the pane needs a
+ *  trust action, not a plain reconnect. */
+const oldFingerprint = computed(() => {
+  const pn = pane.value
+  if (pn?.errorCode !== 'host_key_changed') return ''
+  const host = pn.hostKeyHost ?? pn.params.host
+  const port = pn.hostKeyPort ?? (pn.params.port || 22)
+  return store.knownHosts.find((k) => k.host === host && k.port === port)?.fingerprint ?? ''
+})
+const hostKeyRejected = computed(
+  () =>
+    pane.value?.errorCode === 'host_key_unknown' ||
+    pane.value?.errorCode === 'host_key_changed'
 )
 
 function onDividerDown(e: PointerEvent, i: number): void {
@@ -104,20 +120,28 @@ const splitEl = ref<HTMLElement>()
     <div v-else-if="pane.status === 'error'" class="idle">
       <div class="idle-card">
         <div class="idle-title">{{ tab.title }}</div>
-        <div class="idle-status" :class="{ warn: pane.errorCode === 'host_key_changed' }">
-          {{ pane.errorCode === 'host_key_changed' ? t('app.keyChanged') : t('app.connectFail') }}
+        <div class="idle-status" :class="{ warn: hostKeyRejected }">
+          {{ hostKeyRejected ? (pane.errorCode === 'host_key_unknown' ? t('app.keyUntrusted') : t('app.keyChanged')) : t('app.connectFail') }}
         </div>
-        <p class="idle-msg">{{ pane.message }}</p>
+        <p class="idle-msg" :class="{ plain: hostKeyRejected }">{{ pane.message }}</p>
+        <!-- The key being trusted, as ssh-keygen -lf prints it; for a changed
+             key also the one on record, so there is something to check. -->
+        <div v-if="hostKeyRejected && pane.hostKey" class="fp-block">
+          <div class="fp-row">
+            <span class="fp-label">{{ t('app.keyFpNow') }}</span>
+            <code class="fp">{{ formatFingerprint(pane.hostKey) }}</code>
+          </div>
+          <div v-if="oldFingerprint" class="fp-row">
+            <span class="fp-label">{{ t('app.keyFpOld') }}</span>
+            <code class="fp old">{{ formatFingerprint(oldFingerprint) }}</code>
+          </div>
+        </div>
         <button
           class="idle-connect"
-          @click.stop="
-            pane.errorCode === 'host_key_changed'
-              ? store.trustAndReconnect(pane.id)
-              : store.reconnect(pane.id)
-          "
+          @click.stop="hostKeyRejected ? store.trustAndReconnect(pane.id) : store.reconnect(pane.id)"
         >
           <Icon name="refresh" :size="15" />
-          <span>{{ pane.errorCode === 'host_key_changed' ? t('app.trustReconnect') : t('app.reconnect') }}</span>
+          <span>{{ hostKeyRejected ? (pane.errorCode === 'host_key_unknown' ? t('app.trustKey') : t('app.trustReconnect')) : t('app.reconnect') }}</span>
         </button>
         <button
           class="idle-close"
@@ -337,6 +361,45 @@ const splitEl = ref<HTMLElement>()
 }
 .idle-status.warn {
   color: var(--warn);
+}
+.idle-msg.plain {
+  max-width: 320px;
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  color: var(--text-dim);
+}
+.fp-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  max-width: 340px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.fp-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  text-align: left;
+}
+.fp-label {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.fp {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text);
+  word-break: break-all;
+  user-select: text;
+}
+.fp.old {
+  color: var(--text-dim);
+  text-decoration: line-through;
 }
 .idle-msg {
   margin-top: 8px;

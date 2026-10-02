@@ -11,8 +11,8 @@
 ## 常用命令(Windows/PowerShell)
 - 必须用 `npm.cmd`(直接 `npm` 会因执行策略失败)。
 - 校验: `npm.cmd run typecheck`、`npm.cmd run build`
-- **单元测试**: `npm.cmd run test`(Vitest 2,与 Vite 5 兼容;共 **280** 用例,全部落在纯逻辑层:`src/shared/*`、`src/renderer/src/lib/*`、`composables/*`)。**没有任何组件测试**,界面交互只能人工验。)
-- **i18n 键对称校验**: `npm.cmd run lint:i18n`(现在串跑两个脚本:桌面端 `scripts/lint-i18n.mjs` + 移动端 `scripts/lint-i18n-mobile.mjs`;桌面端 zh / zh-TW / en 690/690/690 全对称,移动端三份资源对称且代码里 0 条内联中文)。
+- **单元测试**: `npm.cmd run test`(Vitest 2;共 **295** 用例:纯逻辑在 `src/shared/*` / `src/renderer/src/lib/*`,外加 `src/main/*.test.ts` 的集成测试(起真 ssh2 服务器)。**没有任何组件测试**,界面交互只能人工验。
+- **i18n 键对称校验**: `npm.cmd run lint:i18n`(现在串跑两个脚本:桌面端 `scripts/lint-i18n.mjs` + 移动端 `scripts/lint-i18n-mobile.mjs`;桌面端 zh / zh-TW / en 722/722/722 全对称,移动端三份资源对称且代码里 0 条内联中文)。
 - 打包: `npm.cmd run dist` → `release\X-SSH Setup 0.3.0.exe`(NSIS)+ `release\win-unpacked\X-SSH.exe` + `.blockmap`。electron-builder 已是 **26.x**。
 - **图标**:全部由 `python build/icon-src/make_icons.py` 生成(Pillow + numpy),别手改产物。几何是从 `build/icon-src/reference/` 里用户给的三张参考图拟合的
   (两根镜像的平行四边形条、水平切口、倾角约 45.4°、圆角 63/1024,形状 IoU 0.97)。产物:`build/icon.icon`(macOS 26/27 Icon Composer 文档:
@@ -28,7 +28,8 @@
 - **CI**: `.github/workflows/ci.yml`,两个作业 —— `test-build`(`windows-latest`:typecheck → lint:i18n → unit test → build;NOTE: 仅 build,不跑 electron-builder,因无代码签名配置)、`rust-core`(`cargo test --workspace` + `cargo clippy -- -D warnings`;移动端核心不需要设备,所以进了 CI)。
 
 ## 架构要点
-- **密码/密钥永不离开主进程**:SSH 在主进程(`src/main/ssh.ts`),渲染层经 IPC(preload `src/preload/index.ts`)调用。
+
+- **主机密钥:首次连接也人工确认(第十五次会话,2026-10-03)。** 原来 `connect()` 对**未知**主机密钥静默记下就放行(纯 TOFU)、`connectJump()` 对跳板机同样静默信任;「变更」才拒绝。现在 `hostVerifier` 对**未知 / 变更都拒绝**,把服务器出示的 SHA-256 指纹回传渲染层,面板弹(与密钥变更同款)确认卡,用户点按钮经新 IPC `ssh:trustHostKey`(写 `known_hosts.json`)显式信任再重连——替代原来的「删除记录 + 重碰」。跳板机密钥失败从此自带 code / 指纹 / 是哪一台(`KeyError`,`connect` 的 catch 透传),不再被吞成无 code 的普通失败;密钥类报错改按界面语言翻译(原来英文界面弹主进程硬编码中文)。`quietExec` 的后台探测不放松(仍只碰已记录主机);连接复用(multiplex)复用已验证过的连接,不引入新信任面。`src/main/connect.test.ts` 起真 ssh2 服务器 5 条钉住这条链。- **密码/密钥永不离开主进程**:SSH 在主进程(`src/main/ssh.ts`),渲染层经 IPC(preload `src/preload/index.ts`)调用。
 - **共享纯函数**: `src/shared/fsUtils.ts`(POSIX 路径 `posixJoin`/`parentOf`、并发钳制 `clampConcurrency`、归档命令构造 `buildPackCommand`/`buildExtractCommand`、粘贴清理 `sanitizePasteText`、私钥识别 `isPrivateKey`/`sanitizeKeyName`),由主进程(`ssh.ts`)与渲染层(store/组件)共用并配套单元测试。**新增通用纯逻辑请放这里**。
 - **SSH 密钥库**: `src/main/keyManager.ts` 管理用户密钥到 `<userData>/keys/`(每个密钥一个 id 文件 + `.pub`);`ssh-keygen` 生成/`-lf` 指纹。IPC `keys:list/generate/import/delete` → preload `api.keys.*`。**只存私钥文件不存 passphrase**;主机编辑器(认证为 key 时)从密钥库下拉选择、生成、导入、删除。
 - **其余共享纯逻辑**(都在 `src/shared/`,测试与实现同目录):
@@ -93,12 +94,79 @@
 - **主进程里没有非空断言了**。需要 SSH 管理器的地方用 `requireSshManager()`(只有晚于窗口创建的 handler 才可以用);能在窗口创建前被调用到的(如 `sessionLog`、fire-and-forget 的 `send`)必须自己判空。
 
 ## 下一步(如果继续)
-- **待亲眼看的**(第十二次会话末只过了 typecheck / 单测):设置 → 常规 → 语言那一排四个按钮排不排得下;
-  Codex 里右键「复制」和菜单靠底部时收进窗口;繁体界面整体过一遍。
-- `CHANGELOG.md` 还没写这一轮(三种语言、设置 / 主机列表防丢失、右键复制);要发版时补上并改版本号。
+- **待亲眼看的**(都只过了 typecheck / 单测):
+  - 设置 → 常规 → 语言那一排四个按钮排不排得下;Codex 里右键「复制」和菜单靠底部时收进窗口;繁体界面整体过一遍。(第十二次会话末记;「桌面版语言」代码在 `f6fef73` 已做完,这四项至今**没在应用里点过**。)
+  - **第十五次会话记:host-key 确认卡的三种形态**——首次连接(未信任)、密钥变更、跳板机密钥失败(本会话改动未提交,需先 dist)。
+    **已验一种**:① 首次连接(未信任)在应用内点通过(2026-10-03,临时 profile + 回环假 sshd,非装包验证):
+    卡片标题「主机密钥未信任」、按钮「信任此密钥并连接」、正文「主机密钥未获信任,连接已中止;若此服务器是你自己的,
+    可确认其身份后信任」;点下信任后 `known_hosts.json` 精确写入该主机指纹(与靶机 `ssh-keygen` 输出逐字相同)并带
+    `firstSeen`。**未验两种**:② 密钥变更卡、③ 跳板机密钥失败卡——驱动脚本在这两段没跑通(先找不到主机页搜索框,
+    后靶机进程被行内命令的收尾带走),留待装包后手工点或把脚本流程修稳再跑。
+  - 移动端 M3.65 字标:MuMu 验过、**真机(18 Fold 等)没验**(见 `mobile/HANDOVER.md` M3.65)。
+- `CHANGELOG.md` 的 Unreleased 已累积这一轮(快速连接 / 后台识别系统 / 新界面,第十五次会话补了主机密钥确认);三种语言 / 防丢失 / 右键复制已随 0.3.0 发过。要发版时升版本号、改日期。
 - 按用户截图式 UI 反馈继续修复。
 - 如版本号增加,改 `package.json` + 更新 `CHANGELOG.md` 后 `npm.cmd run dist` 重打包。
 - 大规模改动前先跑 `npm.cmd run typecheck && npm.cmd run build` 与 `npm.cmd run lint:i18n` 保证通过。
+
+# 会话记录:二次复核(2026-10-03,启动闪跳 + 主机密钥确认)
+
+- **启动闪跳的补漏**:启动偏好是窗口创建那一刻读的,渲染进程崩溃后主进程会 `win.reload()` 一次,重载拿到的是旧值。`loadSettings`
+  恢复读这五项,但**只在设置里有值且和当前不同时才改**(正常启动两边相同、什么都不动);缩放同理(`App.vue` 读设置里的 `zoom`,和当前不同才恢复)。
+- **主机密钥确认(第十五次会话那批)审出 8 条,全修**:
+  1. **卡片上没有指纹** —— 用户点「信任」时根本看不到在信任什么,等于多点一下的静默信任。现在卡片显示「服务器出示的指纹」,
+     密钥变更时再显示「之前记录的指纹」(划线);格式和 `ssh-keygen -lf` 一样(`SHA256:` + base64 无填充,`shared/hostKey.ts formatFingerprint`,
+     存储仍是 sha256 hex)。设置 → 安全的 known_hosts 列表也改成这个格式。
+  2. 主机密钥类报错原来显示主进程硬编码的中文、跳板机不说是哪一台(交接文档写的「已按语言翻译」与代码不符)。现在按 `code` + `keyHost`
+     走四条新文案(未信任 / 变更 × 目标 / 跳板机,带 `{host}`),三字典齐全;这类情况不再弹 toast(卡片已经说明)。
+  3. `ssh:trustHostKey` 原来什么都不校验。现在 `SshManager` 记住每个 host:port **最近一次被拒的那把钥匙**(`noteRejected` / `takeRejectedKey`),
+     只有和它完全一致才写入(用一次就作废),外加类型 / 64 位 hex 校验;信任动作记连接日志(`trust-host-key`)。渲染层收到拒绝就直接重连,
+     让卡片按服务器当前出示的钥匙重新出现。
+  4. 换了新钥匙时 `firstSeen` 重置(原来沿用旧钥匙的日期)。5. 钥匙 / 主机 / 端口三项一起赋值(原来钥匙可能沿用上一台的)。
+  6. 跳板机 `keyPort` 默认 22。7. 删掉了「没有指纹就忘掉目标记录」的兜底(会忘错机器)。8. 主机密钥被拒时自动重连不再重试(原来最多重试 6 次、卡片一直不出现)。
+  新测试:`shared/hostKey.test.ts`(3 条,和 node 的 base64 对照)、`connect.test.ts` 加一条「只能信任刚被拒的那把、换钥匙 / 换端口都不行、只能用一次」。
+  桩页面截图核对了未信任 / 变更两种卡片。typecheck、vitest 299、lint:i18n、build 都过。
+
+# 会话记录:启动闪跳修复(2026-10-03)
+
+用户:侧栏收起的状态下打开程序会闪跳。原因:侧栏收起 / 宽度 / 专注模式、连接页的卡片 / 列表和排序都在 `loadSettings` 里**异步**读,
+第一帧按默认值(展开 224px)画出来,读到设置后再收起、还带 0.2s 宽度动画;缩放比例也是挂载后才在 `App.vue` 里恢复,先画一帧 100%。
+现在这些都放进主进程启动时同步交给页面的 `UiPrefs`(`readUiPrefs` → 启动参数 → preload `api.prefs`):store 的 `state()` 直接用它们
+做初值(`bootPrefs`),`loadSettings` **不再重读**这五项(否则第一帧一个值、过一会儿又来一个);preload 里在页面任何脚本之前就
+`webFrame.setZoomLevel(prefs.zoom)`。验证:桩页面在第一个 `.sidebar` 出现时量宽度 = 最终宽度(收起 64 / 展开 300)、启动期间
+没有任何 `sidebar:width` 过渡;真程序用临时 `--user-data-dir`(预置 settings.json)+ CDP 读到 `api.prefs` 正确、侧栏一开始就是 64、
+列表视图直接是列表。typecheck、vitest 295、build 都过。
+
+# 会话记录:第十五次会话(2026-10-03,凭据安全收尾,桌面侧)
+
+用户方向:把上一轮排好的两层做完——**TOFU 统一(桌面版首次改人工确认)** 与 **凭据 zeroize**。
+移动端 M3.65(字标)那批未提交改动**不属于本会话**,未动;「语言」指桌面版(已在 `f6fef73` 做完),
+只补了「待亲眼看」。本会话的全部改动 = 凭据/密钥安全那一层。
+
+- **TOFU 统一(桌面版,8 个文件 + 测试)**:见「架构要点」新增条。改动:`shared/types.ts`(`ConnectResult`
+  加 code / key / keyHost / keyPort)、`main/ssh.ts`(`connect` / `connectJump` 两处 `hostVerifier` 未知 / 变更
+  统一拒绝;跳板失败改抛带身份的 `KeyError`;`connect` catch 透传;两个 verifier 统一 `String(hashedKey)`
+  归一化)、`main/index.ts`(新 IPC `ssh:trustHostKey` 显式写指纹)、`shared/ipc.ts` / `preload/index.ts`
+  (通道 + 暴露)、`renderer/src/stores/sessions.ts`(`Pane` 存 `hostKey / hostKeyHost / hostKeyPort`;
+  `trustAndReconnect` 改「显式写入 → 重连」,无指纹时退回原 forget 路径)、`components/PaneNode.vue`
+  (unknown 也走确认卡,按钮 / 文案按 unknown vs changed 区分)、`lib/i18n.ts`(三字典各 4 键)。
+  测试:`src/main/connect.test.ts`(新,真 ssh2 服务器 5 条:已记录直通 / 未记录拒且不留痕 / 变更拒
+  保留旧记录 / 未记录跳板在凭据送出前拒且不给隧道 / 已批准跳板走 direct-tcpip **双向**通道连到目标
+  shell——ssh2 服务端对 `direct-tcpip` 发 `'tcpip'` 事件,数据是 `{destIP, destPort}`,**字段名是
+  `destIP` 不是 `destAddr`**,客户端发的 `forwardOut` 目标地址在 `srcIP`/`srcPort` 里,**别按 RFC 想当然**)。
+  验证:`typecheck`、`npm.cmd test`(295)、`lint:i18n`、`build` 全过。**应用内点验只做了第一种形态**
+  (首次连接未信任卡,证据见「下一步」;② 变更卡、③ 跳板机卡未验,装 `D:\Apps\X-SSH` 后补)。
+  点验用临时 profile(`--user-data-dir` 指向 `%APPDATA%\x-ssh-verify-15`)+ 回环假 sshd(ssh2 真服务器,
+  ed25519 主机密钥持久化在 PEM 里以便跨重启身份稳定),全程不碰真实 userData;收尾已核对真实
+  `known_hosts.json` 仍是 28 条、`hosts.json` 15 台、无 `127.0.0.1` 测试残留,临时目录与副本已删。
+- **凭据 zeroize(核查,无代码改动)**:Rust 核心**认证完成后不长期持有明文凭据**——`Ssh` 结构体不含
+  `Auth` 字段(russh `Handle` 不持有凭据,`Target.auth` 是 `connect` 的栈局部,返回即 drop);`russh::Method::Password`
+  与 `ssh-key` 各算法的私钥在 Drop 时 zeroize(逐行核过 registry 源码:`russh-0.63.3` `auth.rs`、
+  `ssh-key-0.7.0-rc.11` 各算法模块)。`SshError` 各支的 Display 全是固定短语(如「The key is encrypted」),
+  不回显口令 / PEM —— 经 `FfiError::Message` 进 logcat / 界面这条路不泄凭据。所以 T2 的结论就是
+  「**核心侧无需新增零化代码**」,证据写进了 `mobile/HANDOVER.md` §6。
+  **唯一长期持有者是 Kotlin 侧**:`HostStore.load` 启动即把保存过凭据的主机全部解密成 `String`
+  常驻进程列表;`String` 不可变,清零也留字节,只能等 GC(会话级 `credentials=null` 已做)。列为已知残留,
+  下次单独立项(要重定义 `Host` / `Secrets` / `unlockCredentials` 契约,不是小活)。
 
 # 会话记录:第三次复核(2026-09-30,后台识别 + 连接页新改动)
 

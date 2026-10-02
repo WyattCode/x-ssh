@@ -30,6 +30,7 @@ export const IPC = {
   sshConnect: 'ssh:connect',
   sshDisconnect: 'ssh:disconnect',
   sshForgetHostKey: 'ssh:forgetHostKey',
+  sshTrustHostKey: 'ssh:trustHostKey',
   // Per-session output log-to-file (invoke/handle)
   sessionLogStart: 'sessionLog:start',
   sessionLogStop: 'sessionLog:stop',
