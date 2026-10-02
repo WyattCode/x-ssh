@@ -78,10 +78,12 @@ SFTP 已做(上传/下载/重命名/删除,上传是"先写临时文件再改名
    - **桌面版**(Electron)设置里语言四个按钮排不排得下,没打开应用看过。
      ⚠️ 别和 M3.63 那条混淆 —— 那里验的是**移动端**设置页的四个语言按钮,桌面版这一条**仍然没验**。
    - 桌面版右键复制(Codex 里)和菜单量高度收进窗口,没在真实界面试过。
-7. 发布前:HyperOS 省电白名单引导、通知权限被拒的兜底、TOFU 策略与桌面版统一、密码 zeroize。
-8. **第十四次会话有两处改动还没提交**(工作区里):`mobile/HANDOVER.md` 自己,以及 M3.64 的指纹修复
-   (`HostInfo.kt` 新增 `FingerprintRow`、`HostEditorScreen.kt` 改用它)。**接手的先 `git status` 看一眼**,
-   别当成别人没干完的活。
+7. 发布前:HyperOS 省电白名单引导、通知权限被拒的兜底。~~TOFU 策略与桌面版统一、密码 zeroize~~
+   已收(见 §6 打勾两条);**桌面版 TOFU 的应用内点验只做了「首次连接未信任卡」一种**(2026-10-03 临时 profile 点验,见根 `HANDOVER.md` 第十五次会话记录与「下一步」);**密钥变更卡、跳板机密钥失败卡未验**,装 `D:\Apps\X-SSH` 时一并补。
+8. **工作区里有一批未提交改动(第十四次会话留的,别混进自己的 commit)**:`mobile/HANDOVER.md` 自己(M3.63–M3.65)、
+   M3.65 桌面字标那批(`build/icon-src/make_icons.py`、`src/renderer/**` 字标相关)、安卓 M3.65 那批(未跟踪的
+   `Brand.kt` / `logo_lockup_*` 资源、`HomeScreen.kt` / `Tablet.kt`),外加 M3.64 的指纹修复(`HostInfo.kt` 的
+   `FingerprintRow`、`HostEditorScreen.kt`)。提交按批次切,**接手的先 `git status` 看一眼**。
 
 > **第九次会话的教训(M3.56、坑 100–101)**:验证要选**别人干扰不了**的判据。小米输入法给密码框
 > 挂 `FLAG_SECURE` 会把整屏截图弄黑,锁屏也会 —— 两次都让我以为"保护住了"。读 `dumpsys window` 的
@@ -1978,6 +1980,19 @@ Linux 服务器没有这一下,旧输出直接留在屏上。
 **真机**:Fold 外屏简体 / 英文 / 繁体看了设置、主机详情、编辑页;平板看了设置浮层和详情页、录屏验证不闪。测后都恢复「跟随系统」、主机数据没动
 (平板的 `xssh_hosts.xml` 在这之前被用户自己用过 —— 信任了主机密钥、重存了密码,md5 变成 `470b19c9…`,不是测试造成的,没去还原)。
 
+### M3.65 主页左上角换成 X SSH 字标(第十五个会话,2026-09-30)
+
+用户要三种设备(直板机 / 折叠屏 / 平板)都把左上角的「X-SSH」文字换成桌面版同款字标「X SSH」。先在 MuMu 上截现状、合成效果图给用户看,
+按我的两点建议定稿:**比效果图小约 10%**(28dp 高,原位是 34sp 粗体,字标更重,等大会压过下面的主机名)、**白天版 X 压深一点**。
+
+- 资源:`build/icon-src/make_icons.py` 新出 `res/drawable-{m,h,xh,xxh,xxxh}dpi/logo_lockup_{light,dark}.png`(28dp × 密度,裁到不透明部分无留白)。
+  白天版的 X 用 `deepen_on_white`:按「贴在白底上看到的颜色」做 1.7 次幂压暗,再按白底反抠回透明 —— 金属渐变保留、整体变重。夜间版和桌面一致。
+  **不用系统 night 资源**:应用有自己的浅色 / 深色选择,按 `LocalXssh.current.dark` 选图。
+- `Brand.kt`:`BrandLockup(height)`(高质量缩放,平板缩到 18dp 不起锯齿;无障碍名「X-SSH」)、`BrandTitleLine`(占一行 34sp 粗体的行高、字标竖直居中 ——
+  折叠屏两栏时右栏文字大标题和左栏字标仍在一条线上)。字标图左边缘就是 X 的笔画,**不加** `TitleOptical` 的 2dp 补偿。
+- 用在三处:主机列表大标题(`PaneTitle(brand = true)`)、空状态页的大标题、平板侧栏顶栏(原 20sp 文字 → 18dp 字标,右边三个按钮不动)。
+- MuMu 上验过三种尺寸 × 深浅色(`wm size/density` 模拟,测完已还原;模拟器已关)。**还没上真机。**
+
 ### M3.63 在 MuMu 模拟器上复核(第十四次会话)
 
 用户提醒本机有安卓虚拟机。**找的过程本身值得记**:我一开始按官方 SDK 找 `emulator.exe`,没找到就下了
@@ -2353,8 +2368,8 @@ adb shell input swipe 2134 113 2134 113 80   # 80ms 的零长度 swipe
 
 **发布前**
 - [ ] HyperOS 省电白名单引导;通知权限被拒时的兜底(现在只是通知不显示)
-- [ ] 桌面版是 TOFU(首次静默记下),移动端首次也要人确认 —— 统一策略
-- [ ] 密码 / 私钥 zeroize(FFI 跨边界有副本)
+- [x] ~~桌面版是 TOFU(首次静默记下),移动端首次也要人确认 —— 统一策略~~ 桌面已改成人确认(`ssh:trustHostKey` 确认后写指纹,unknown / changed 同一套卡片,跳板机同一待遇)—— 2026-10-03 会话;**桌面版改动未提交**;应用内点验 2026-10-03 补了「首次连接未信任卡」一种(临时 profile,证据见根 `HANDOVER.md`),**密钥变更卡与跳板机卡仍未验**,发版装 `D:\Apps\X-SSH` 时一并验。移动端原本就在弹,不受影响。
+- [x] ~~密码 / 私钥 zeroize(FFI 跨边界有副本)~~ 核查后核心本就无残留:认证完成的 `Ssh` 结构体不存 `Auth`(registry 源码核对过)——凭据只是 `connect(&Target)` 的栈局部,返回即 drop;密码由 russh `Method::Password` 的 Drop 零化、私钥各算法 Drop 零化,`SshError` 各支 Display 是固定短语,不回显口令 / PEM。**无代码改动**。残留:Kotlin 侧 `Host` / 宿主机列表把全部凭据解成 String 长期持有(`String` 不可变、不能原地清,靠 GC)—— 下次单独立项。
 
 **工程**
 - [ ] `jniLibs/*.so` 已 gitignore;挂到 Gradle 任务里自动 `cargo ndk`(换机一键构建)

@@ -18,7 +18,8 @@ X-SSH 图标生成器:一套几何 + 配色,产出所有平台的图标文件。
                               欢迎页的标识(「X」+「SSH」),裁自参考图,背景抠成透明。
 - src/renderer/src/assets/mark-light.svg / mark-dark.svg
                               只有「X」的矢量图:连接页背景水印、侧栏收起时的标。
-- mobile/android/.../res/     自适应图标(白天 / 夜间)、单色主题图标、状态栏小图标。
+- mobile/android/.../res/     自适应图标(白天 / 夜间)、单色主题图标、状态栏小图标;
+                              drawable-*dpi/logo_lockup_{light,dark}.png:主页左上角的字标(按密度出图)。
 """
 import io
 import math
@@ -439,6 +440,46 @@ def brighten(img, gamma):
     return Image.fromarray(a, "RGBA")
 
 
+# 安卓主页左上角的字标:白天版的 X 在浅底上比「SSH」轻太多(用户认可「稍微压深一点」),
+# 按"贴在白底上看到的颜色"做一次幂次压暗(1.7:前条最亮处从约 0.93 到 0.88,金属渐变保留),
+# 再按白底反抠回透明 —— 在白底上正好是压暗后的样子,在浅灰底上也一样自然。夜间版不动。
+ANDROID_LOCKUP_DEEPEN = 1.7
+ANDROID_LOCKUP_DP = 28   # 直板机 / 折叠屏的大标题位(平板侧栏用同一张缩到 18dp)
+ANDROID_DENSITIES = {"mdpi": 1.0, "hdpi": 1.5, "xhdpi": 2.0, "xxhdpi": 3.0, "xxxhdpi": 4.0}
+
+
+def deepen_on_white(img, power):
+    a = np.asarray(img).astype(float) / 255
+    al = a[..., 3:4]
+    seen = a[..., :3] * al + (1 - al)   # as seen on white
+    seen = seen ** power
+    a2 = np.clip((1 - seen).max(axis=2, keepdims=True), 0, 1)
+    rgb = np.where(a2 > 1e-4, (seen - (1 - a2)) / np.maximum(a2, 1e-4), 0)
+    out = np.concatenate([np.clip(rgb, 0, 1), a2], axis=2)
+    return Image.fromarray((out * 255 + 0.5).astype(np.uint8), "RGBA")
+
+
+def android_lockups():
+    """{(name, density): PNG bytes},字标裁到不透明部分(无留白),高 = 28dp × 密度。"""
+    out = {}
+    for name in ("light", "dark"):
+        floor = {"light": 0.02, "dark": 0.07}[name]
+        mark = matte(np.asarray(Image.open(os.path.join(REF, f"icon-{name}.webp")).convert("RGB")), floor)
+        mark = brighten(mark, MARK_GAMMA[name])
+        if name == "light":
+            mark = deepen_on_white(mark, ANDROID_LOCKUP_DEEPEN)
+        text = matte(np.asarray(Image.open(os.path.join(REF, f"ssh-{name}.png")).convert("RGB")), 0.03)
+        full = compose(mark, text)
+        full = full.crop(full.getchannel("A").point(lambda v: 255 if v > 8 else 0).getbbox())
+        for dens, k in ANDROID_DENSITIES.items():
+            h = round(ANDROID_LOCKUP_DP * k)
+            img = full.resize((round(full.width * h / full.height), h), Image.LANCZOS)
+            buf = io.BytesIO()
+            img.save(buf, "PNG", optimize=True)
+            out[(name, dens)] = buf.getvalue()
+    return out
+
+
 def compose(mark, text):
     th = LOCKUP_H
     text = text.resize((round(text.width * th / text.height), th), Image.LANCZOS)
@@ -563,6 +604,10 @@ def main():
         write(os.path.join(RENDERER_ASSETS, f"logo-{name}.png"), buf.getvalue(), "wb")
     for name in ("dark", "light"):
         write(os.path.join(RENDERER_ASSETS, f"mark-{name}.svg"), svg_mark(name))
+
+    # Android 主页字标(按密度)
+    for (name, dens), data in android_lockups().items():
+        write(os.path.join(ANDROID_RES, f"drawable-{dens}", f"logo_lockup_{name}.png"), data, "wb")
 
     # Android 自适应图标:白天(默认)/ 夜间
     for pal, folder in (("light", "drawable"), ("dark", "drawable-night")):

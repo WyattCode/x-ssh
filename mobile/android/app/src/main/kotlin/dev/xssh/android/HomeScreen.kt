@@ -524,7 +524,8 @@ private fun HostListPane(
                             .fillMaxWidth()
                             .padding(start = TitlePad, top = Gutter, bottom = 2.dp),
                         "X-SSH",
-                        if (total == 0) {
+                        brand = true,
+                        subtitle = if (total == 0) {
                             stringResource(R.string.host_none_yet)
                         } else {
                             pluralStringResource(R.plurals.host_count, total, total)
@@ -653,13 +654,7 @@ private fun FirstRun(modifier: Modifier) {
             .padding(horizontal = Gutter + BoxPad),
         verticalArrangement = Arrangement.Center,
     ) {
-        Text(
-            "X-SSH",
-            Modifier.offset(x = -TitleOptical),
-            color = p.text,
-            fontSize = 34.sp,
-            fontWeight = FontWeight.SemiBold,
-        )
+        BrandTitleLine(BrandTitleHeight, titleSize = 34.sp)
         Spacer(Modifier.height(10.dp))
         Text(stringResource(R.string.host_none_yet), color = p.textDim, fontSize = 15.sp)
     }
@@ -1005,10 +1000,14 @@ private fun PaneTitle(
     title: String,
     subtitle: String,
     monoSubtitle: Boolean = false,
+    /** 主机列表那一栏:大标题位放字标(见 Brand.kt),其余栏是文字。 */
+    brand: Boolean = false,
 ) {
     val p = LocalXssh.current
     Column(modifier) {
-        Text(
+        if (brand) {
+            BrandTitleLine(BrandTitleHeight, titleSize = 34.sp)
+        } else Text(
             title,
             modifier = Modifier.offset(x = -TitleOptical),
             color = p.text,

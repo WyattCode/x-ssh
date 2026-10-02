@@ -657,7 +657,7 @@ private fun Sidebar(
             Modifier.fillMaxWidth().height(ToolbarHeight).padding(start = 20.dp, end = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("X-SSH", color = p.text, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) { BrandLockup(BrandToolbarHeight) }
             ToolbarIcon(theme.mode.icon, stringResource(R.string.tab_appearance, theme.mode.label)) { theme.onChange(theme.mode.next()) }
             ToolbarIcon(XIcons.Settings, stringResource(R.string.set_title)) { onFonts() }
             ToolbarIcon(XIcons.Plus, stringResource(R.string.tab_new_host) + "  Ctrl+N") { onNew() }
