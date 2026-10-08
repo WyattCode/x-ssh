@@ -35,6 +35,11 @@ const zh: Dict = {
   'status.forwardsTip': '{n} 个本地端口转发',
   'status.trustedTip': '主机密钥已信任',
   'status.unknownTip': '主机密钥尚未记录(首次连接)',
+  'status.linkConnected': '已连接',
+  'status.linkConnecting': '正在连接',
+  'status.linkError': '连接失败',
+  'status.linkClosed': '会话已关闭',
+  'status.linkIdle': '未连接',
 
   // app / welcome
   'app.newConn': '新建连接',
@@ -797,6 +802,11 @@ const en: Dict = {
   'status.forwardsTip': '{n} local port forward(s)',
   'status.trustedTip': 'Host key is trusted',
   'status.unknownTip': 'Host key not recorded yet (first connect)',
+  'status.linkConnected': 'Connected',
+  'status.linkConnecting': 'Connecting',
+  'status.linkError': 'Connection failed',
+  'status.linkClosed': 'Session closed',
+  'status.linkIdle': 'Not connected',
 
   'app.newConn': 'New connection',
   'app.ungrouped': 'Ungrouped',
@@ -1550,6 +1560,11 @@ const zhTW: Dict = {
   'status.forwardsTip': '{n} 個本機連接埠轉送',
   'status.trustedTip': '主機金鑰已信任',
   'status.unknownTip': '主機金鑰尚未記錄(首次連線)',
+  'status.linkConnected': '已連線',
+  'status.linkConnecting': '正在連線',
+  'status.linkError': '連線失敗',
+  'status.linkClosed': '工作階段已關閉',
+  'status.linkIdle': '未連線',
 
   // app / welcome
   'app.newConn': '新增連線',

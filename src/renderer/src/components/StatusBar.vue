@@ -43,6 +43,28 @@ const uptime = computed(() => {
   return mm > 0 ? `${mm}m${ss}s` : `${s}s`
 })
 const forwards = computed(() => pane.value?.params.portForwards?.length ?? 0)
+/** Link state of the tracked pane. The dot next to the host name follows this,
+ *  never the host colour — a green host colour must not read as "connected"
+ *  while the pane is sitting on a failed-connection card. Mirrors the four
+ *  `SessionStatus` values; `idle` only covers "no pane yet". */
+const linkState = computed(() => {
+  const s = pane.value?.status
+  if (s === 'connected') return 'connected'
+  if (s === 'connecting') return 'connecting'
+  if (s === 'error') return 'error'
+  if (s === 'closed') return 'closed'
+  return 'idle'
+})
+const linkTip = computed(
+  () =>
+    ({
+      connected: 'status.linkConnected',
+      connecting: 'status.linkConnecting',
+      error: 'status.linkError',
+      closed: 'status.linkClosed',
+      idle: 'status.linkIdle'
+    })[linkState.value]
+)
 const hasJump = computed(() => !!pane.value?.params.jumpHostId)
 const keyKnown = computed(() => {
   const p = pane.value?.params
@@ -50,10 +72,11 @@ const keyKnown = computed(() => {
   return store.hostKeyKnown(p.host, p.port || 22)
 })
 
-// Host color accent for the current tab, if any.
-const accent = computed(() => {
+// Host colour for the current tab, if any (identity marker, not link state).
+// Falls back to the accent colour, the same way host cards do.
+const hostColor = computed(() => {
   const id = tab.value?.hostId
-  return id ? store.hosts.find((h) => h.id === id)?.color : undefined
+  return (id ? store.hosts.find((h) => h.id === id)?.color : undefined) || 'var(--accent)'
 })
 
 // Running SFTP transfers across all panes (opens the global transfers panel).
@@ -62,8 +85,9 @@ const activeTransfers = computed(() => store.transfers.filter((x) => !x.done && 
 
 <template>
   <div class="statusbar">
-    <span v-if="hostLabel" class="seg host" :style="{ '--accent': accent }">
-      <span class="accent" />
+    <span v-if="hostLabel" class="seg host" :style="{ '--host': hostColor }">
+      <span class="host-bar" />
+      <span class="link" :class="linkState" :title="t(linkTip)" />
       <span class="host-text">{{ hostLabel }}</span>
       <span v-if="uptime" class="uptime">{{ uptime }}</span>
     </span>
@@ -132,11 +156,38 @@ const activeTransfers = computed(() => store.transfers.filter((x) => !x.done && 
 .seg.host {
   font-family: var(--font-mono);
 }
-.accent {
+/* The host's own colour, kept as a thin bar so the identity marker is not
+   mistaken for the link state (the dot beside it is the link state). */
+.host-bar {
+  width: 3px;
+  height: 12px;
+  border-radius: 1.5px;
+  background: var(--host, var(--accent));
+  flex: none;
+}
+.link {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--accent);
+  flex: none;
+}
+.link.connected {
+  background: var(--ok, #3fb950);
+}
+.link.connecting {
+  background: var(--warn, #d29922);
+}
+.link.error {
+  background: var(--danger, #f0616d);
+}
+/* A cleanly closed session (the user typed `exit`): ended, not failed. */
+.link.closed {
+  background: var(--text-dim);
+}
+.link.idle {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--text-faint);
+  opacity: 0.8;
 }
 .uptime {
   margin-left: 4px;
