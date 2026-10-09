@@ -11,10 +11,12 @@ const { t } = useI18n()
 const { factor } = useZoom()
 const modKey = isMac ? '⌘' : 'Ctrl'
 
-// The traffic lights are drawn by the OS at a fixed size, so a zoomed UI would
-// leave the tab bar out of step with them. Counter-scale just the bar so its
-// row stays glued to the lights whatever the app zoom is.
-const barStyle = computed(() => (isMac ? { zoom: 1 / factor.value } : {}))
+// The traffic lights sit over the sidebar, and only land on this bar when the
+// sidebar is hidden (focus mode). Then they need room, and since the OS draws
+// them at a fixed size the bar is counter-scaled so its row stays glued to
+// them whatever the app zoom is.
+const underLights = computed(() => isMac && store.termSidebarHidden)
+const barStyle = computed(() => (underLights.value ? { zoom: 1 / factor.value } : {}))
 /** Layout/split operations need a connected active tab. */
 const canLayout = computed(() => store.activePane?.status === 'connected')
 
@@ -138,7 +140,7 @@ function cancelRename(): void {
 </script>
 
 <template>
-  <div class="tabbar" :class="{ mac: isMac }" :style="barStyle">
+  <div class="tabbar" :class="{ mac: underLights }" :style="barStyle">
     <div class="tabs">
       <div
         v-for="tab in visibleTabs"
