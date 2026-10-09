@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { useSessions, type AppPage } from '../stores/sessions'
 import { useTheme } from '../composables/theme'
 import { useI18n } from '../lib/i18n'
+import { isMac } from '../composables/platform'
 import Icon from './Icon.vue'
 import logoLight from '../assets/logo-light.png'
 import logoDark from '../assets/logo-dark.png'
@@ -63,7 +64,7 @@ const themeName = computed(
 <template>
   <aside
     class="sidebar"
-    :class="{ collapsed: store.sidebarCollapsed, hidden, dragging, instant: store.page === 'terminal' }"
+    :class="{ collapsed: store.sidebarCollapsed, mac: isMac, hidden, dragging, instant: store.page === 'terminal' }"
     :style="store.sidebarCollapsed ? undefined : { width: store.sidebarWidth + 'px' }"
   >
     <div v-if="!store.sidebarCollapsed" class="edge" @pointerdown.prevent="onEdgeDown" />
@@ -133,6 +134,10 @@ const themeName = computed(
 }
 .sidebar.collapsed {
   width: 64px;
+}
+/* macOS: the traffic lights span ~65px, so the 64px rail would cut them off. */
+.sidebar.collapsed.mac {
+  width: 80px;
 }
 .sidebar.dragging {
   transition: none;
