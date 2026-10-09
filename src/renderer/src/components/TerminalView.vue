@@ -19,6 +19,7 @@ import {
 } from '../lib/shortcuts'
 import { sanitizePasteText } from '../../../shared/fsUtils'
 import { isMac } from '../composables/platform'
+import { createImeMirror, isPlainText } from '../lib/imeSync'
 import Icon from './Icon.vue'
 
 const props = withDefaults(
@@ -82,12 +83,19 @@ let search: SearchAddon | null = null
 let webgl: WebglAddon | null = null
 let ro: ResizeObserver | null = null
 let offData: (() => void) | null = null
+/** Removes the IME listeners added to xterm's textarea (and cancels a pending catch-up). */
+const imeAbort = new AbortController()
 
 // ---- Clipboard actions ----
 const { confirm } = useConfirm()
 async function copySelection(): Promise<void> {
   const sel = term?.getSelection()
   if (sel) window.api.clipboard.writeText(sel)
+}
+/** Right-click Copy: the terminal's own selection, else what the program last copied (see [lastAppCopy]). */
+async function copyFromMenu(): Promise<void> {
+  if (term?.hasSelection()) return copySelection()
+  if (menu.appCopy) window.api.clipboard.writeText(menu.appCopy)
 }
 async function pasteClipboard(): Promise<void> {
   const text = window.api.clipboard.readText()
@@ -124,7 +132,19 @@ function clearTerm(): void {
 }
 
 // ---- Right-click context menu ----
-const menu = reactive({ open: false, x: 0, y: 0, hasSel: false })
+const menu = reactive({ open: false, x: 0, y: 0, hasSel: false, appCopy: null as string | null, mouseApp: false })
+
+/**
+ * The last text a program copied through OSC 52 (Codex / Claude Code / vim …).
+ * Those programs take over the mouse: a drag selects inside *their* UI, the
+ * terminal itself has no selection, and the right-click Copy used to be greyed
+ * out even though the text is highlighted on screen. Copy now uses this text
+ * when the terminal has no selection of its own (only while it's recent).
+ */
+let lastAppCopy: { text: string; at: number } | null = null
+const APP_COPY_TTL_MS = 2 * 60 * 1000
+/** The context menu element — measured after it opens so it can be kept inside the window. */
+const menuEl = ref<HTMLElement | null>(null)
 
 // ---- Auto-scroll follow ----
 // While the user hasn't scrolled up, new output keeps the view pinned to the
@@ -164,11 +184,26 @@ async function toggleLog(): Promise<void> {
 function openMenu(e: MouseEvent): void {
   e.preventDefault()
   menu.hasSel = !!term?.hasSelection()
-  const mw = 172
-  const mh = 240
-  menu.x = Math.min(e.clientX, window.innerWidth - mw - 8)
-  menu.y = Math.min(e.clientY, window.innerHeight - mh - 8)
+  // A program owns the mouse (Codex, vim, tmux mouse mode…): a plain drag goes to
+  // it, Shift+drag makes a terminal selection. Say so when Copy has nothing to copy.
+  menu.mouseApp = !!term && term.modes.mouseTrackingMode !== 'none'
+  // The program's own copy only counts while it still owns the mouse (its
+  // highlight is what the user sees) and it's recent. Otherwise an old OSC 52
+  // text could overwrite whatever the user copied elsewhere since.
+  const recent = lastAppCopy && Date.now() - lastAppCopy.at < APP_COPY_TTL_MS ? lastAppCopy.text : null
+  menu.appCopy = menu.hasSel || !menu.mouseApp ? null : recent
+  menu.x = e.clientX
+  menu.y = e.clientY
   menu.open = true
+  // Keep the whole menu inside the window. It used to be clamped with a fixed
+  // 240px guess while the real menu is ~310px, so near the bottom its last items
+  // were cut off. Measure it once it's rendered.
+  void nextTick(() => {
+    const r = menuEl.value?.getBoundingClientRect()
+    if (!r) return
+    menu.x = Math.max(8, Math.min(menu.x, window.innerWidth - r.width - 8))
+    menu.y = Math.max(8, Math.min(menu.y, window.innerHeight - r.height - 8))
+  })
 }
 /** Right-click pastes when that option is on; otherwise shows the menu. */
 function onContextMenu(e: MouseEvent): void {
@@ -217,11 +252,37 @@ function toggleCase(): void {
 }
 
 
+/** Container size changes. A one-off jump (专注模式, collapsing the sidebar)
+ *  is fitted at once, so the text doesn't sit at the old width for a beat and
+ *  then jump. A stream of changes (dragging the sidebar edge, resizing the
+ *  window) is fitted once it settles: refitting every frame reflowed the text
+ *  frame by frame, which read as the terminal's text jittering. */
+let fitTimer: ReturnType<typeof setTimeout> | null = null
+let lastSizeChange = 0
+function scheduleFit(): void {
+  const now = performance.now()
+  const oneOff = now - lastSizeChange > 150
+  lastSizeChange = now
+  if (fitTimer) clearTimeout(fitTimer)
+  if (oneOff) doFit()
+  fitTimer = setTimeout(() => {
+    fitTimer = null
+    doFit()
+  }, 90)
+}
+/** The size last sent to the server, so a fit that changes nothing doesn't
+ *  send it again. */
+let sentSize = ''
+
 function doFit(): void {
   if (!fit || !term || !props.visible) return
   try {
     fit.fit()
-    window.api.ssh.resize(props.sessionId, term.cols, term.rows)
+    const size = `${props.sessionId}:${term.cols}x${term.rows}`
+    if (size !== sentSize) {
+      sentSize = size
+      window.api.ssh.resize(props.sessionId, term.cols, term.rows)
+    }
   } catch {
     /* container not measurable yet */
   }
@@ -289,7 +350,9 @@ onMounted(() => {
     if (!payload || payload === '?' || payload.length > 2_000_000) return true
     try {
       const bytes = Uint8Array.from(atob(payload), (ch) => ch.charCodeAt(0))
-      window.api.clipboard.writeText(new TextDecoder().decode(bytes))
+      const text = new TextDecoder().decode(bytes)
+      window.api.clipboard.writeText(text)
+      lastAppCopy = { text, at: Date.now() }
     } catch {
       return false
     }
@@ -409,7 +472,92 @@ onMounted(() => {
     return true
   })
 
-  term.onData((data) => window.api.ssh.input(props.sessionId, data))
+  // IME text (pinyin, and especially voice input that rewrites its own
+  // draft) goes through a mirror of xterm's hidden textarea rather than
+  // straight from xterm — see lib/imeSync. The textarea is the source of
+  // truth; the flags below say which part of it is settled.
+  const ta = term.textarea
+  const ime = createImeMirror()
+  const send = (data: string): void => window.api.ssh.input(props.sessionId, data)
+  let composing = false
+  let compStart = 0
+  /** A keystroke's own character was just sent; its input event (if the
+   *  browser still inserts it) must not be sent a second time. */
+  let keyTextSent = false
+  if (ta) {
+    const signal = imeAbort.signal
+    ta.addEventListener('compositionstart', () => {
+      composing = true
+      // A reconversion starts at the replaced range, not at the end.
+      compStart = ta.selectionStart ?? ta.value.length
+    }, { signal })
+    // Catch up after each commit in case xterm emitted nothing for it (see
+    // ImeMirror.sync). Deferred so xterm's own timer-based send runs first;
+    // whatever it mirrors makes this a no-op.
+    ta.addEventListener('compositionend', () => {
+      composing = false
+      setTimeout(() => {
+        if (composing || signal.aborted) return
+        const out = ime.sync(ta.value)
+        if (out) send(out)
+      }, 0)
+    }, { signal })
+    // Same for text committed without a composition (voice input). xterm's
+    // capture listener has already handled — or silently dropped — it.
+    ta.addEventListener('input', (e) => {
+      const kind = (e as InputEvent).inputType
+      if (composing || kind === 'insertCompositionText') return
+      if ((kind === 'insertText' || kind === 'insertReplacementText') && !keyTextSent) {
+        const out = ime.sync(ta.value)
+        if (out) send(out)
+        return
+      }
+      // Anything else lands text xterm already sent or that isn't typing at
+      // all: a native paste (xterm sends it, empties the textarea, then the
+      // browser inserts it anyway), a drop, an undo, a keystroke's own
+      // character. Account for it without sending it again.
+      ime.adopt(ta.value)
+    }, { signal })
+    // Every time xterm itself rewrites the textarea — emptying it on Enter,
+    // Ctrl+C, blur and after a paste, or filling it with the selection on
+    // right-click — that text is not something the IME typed. Catch all of
+    // them at the one place they share (the value setter; IME edits never go
+    // through it) instead of listing xterm's code paths one by one.
+    const native = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')
+    if (native?.get && native.set) {
+      const { get, set } = native
+      Object.defineProperty(ta, 'value', {
+        configurable: true,
+        get(this: HTMLTextAreaElement) {
+          return get.call(this)
+        },
+        set(this: HTMLTextAreaElement, v: string) {
+          set.call(this, v)
+          ime.adopt(get.call(this))
+        }
+      })
+    }
+  }
+  term.onKey(() => {
+    lastAppCopy = null
+  })
+  term.onData((data) => {
+    let out = data
+    if (ta) {
+      const eventType = (window.event as Event | undefined)?.type
+      // A non-IME key during composition makes xterm finish it on the spot,
+      // so the whole textarea counts as settled then.
+      const settled = composing && eventType !== 'keydown' ? ta.value.slice(0, compStart) : ta.value
+      out = ime.input(data, { settled, eventType })
+      if ((eventType === 'keydown' || eventType === 'keypress') && isPlainText(data)) {
+        // The browser inserts a key's character (if at all) within the same
+        // task, so this only covers that key.
+        keyTextSent = true
+        setTimeout(() => { keyTextSent = false }, 0)
+      }
+    }
+    if (out) send(out)
+  })
 
   offData = window.api.ssh.onData((payload) => {
     if (payload.sessionId === props.sessionId) {
@@ -426,7 +574,7 @@ onMounted(() => {
   // before this component mounted (MOTD, first prompt).
   window.api.ssh.attach(props.sessionId)
 
-  ro = new ResizeObserver(() => doFit())
+  ro = new ResizeObserver(() => scheduleFit())
   ro.observe(el.value)
 
   nextTick(() => {
@@ -434,6 +582,19 @@ onMounted(() => {
     if (props.focused) term?.focus()
   })
 })
+
+// The sidebar toggling (专注模式, collapse) changes our width in one step:
+// fit straight away rather than wait for the ResizeObserver, whose
+// notifications only arrive with the next rendered frame. The observer's own
+// call that follows is then a no-op (nothing changed, nothing sent).
+watch(
+  () => [store.termSidebarHidden, store.sidebarCollapsed],
+  () =>
+    nextTick(() => {
+      lastSizeChange = performance.now()
+      doFit()
+    })
+)
 
 watch(
   () => props.visible,
@@ -504,6 +665,8 @@ defineExpose({
 })
 
 onBeforeUnmount(() => {
+  if (fitTimer) clearTimeout(fitTimer)
+  imeAbort.abort()
   offData?.()
   ro?.disconnect()
   term?.dispose()
@@ -542,10 +705,11 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-if="menu.open" class="ctx-overlay" @mousedown="menu.open = false" @contextmenu.prevent="menu.open = false">
-      <div class="ctx" :style="{ left: menu.x + 'px', top: menu.y + 'px' }" @mousedown.stop>
-        <button :disabled="!menu.hasSel" @click="runMenu(copySelection)">
+      <div ref="menuEl" class="ctx" :style="{ left: menu.x + 'px', top: menu.y + 'px' }" @mousedown.stop>
+        <button :disabled="!menu.hasSel && !menu.appCopy" @click="runMenu(copyFromMenu)">
           <span>{{ t('term.copy') }}</span><span class="k">Ctrl+C</span>
         </button>
+        <div v-if="!menu.hasSel && !menu.appCopy && menu.mouseApp" class="hint">{{ t('term.shiftSelectHint') }}</div>
         <button @click="runMenu(pasteClipboard)">
           <span>{{ t('term.paste') }}</span><span class="k">Ctrl+V</span>
         </button>
@@ -637,7 +801,7 @@ onBeforeUnmount(() => {
   padding: 5px;
   background: var(--bg-elev);
   border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
+  border-radius: var(--r-menu);
   box-shadow: var(--shadow);
 }
 .ctx button {
@@ -647,7 +811,7 @@ onBeforeUnmount(() => {
   gap: 24px;
   width: 100%;
   padding: 7px 10px;
-  border-radius: 5px;
+  border-radius: var(--r-item);
   font-size: 13px;
   color: var(--text);
   text-align: left;
@@ -666,6 +830,11 @@ onBeforeUnmount(() => {
 }
 .ctx .k.on {
   color: var(--accent);
+}
+.ctx .hint {
+  padding: 0 10px 6px;
+  font-size: 11.5px;
+  color: var(--text-faint);
 }
 .ctx .sep {
   height: 1px;

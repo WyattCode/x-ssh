@@ -1,0 +1,17 @@
+[package]
+name = "xssh-ffi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+
+[dependencies]
+xssh-core = { path = "../xssh-core" }
+uniffi = { version = "0.32", features = ["cli"] }

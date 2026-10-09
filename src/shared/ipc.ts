@@ -4,6 +4,9 @@ export const IPC = {
   hostsList: 'hosts:list',
   hostsSave: 'hosts:save',
   hostsDelete: 'hosts:delete',
+  hostsProbe: 'hosts:probe',
+  /** main → renderer: saved hosts changed outside the renderer (e.g. OS detected). */
+  hostsChanged: 'hosts:changed',
   hostsImportSshConfig: 'hosts:importSshConfig',
   hostsExportJson: 'hosts:exportJson',
   hostsExportSshConfig: 'hosts:exportSshConfig',
@@ -27,6 +30,7 @@ export const IPC = {
   sshConnect: 'ssh:connect',
   sshDisconnect: 'ssh:disconnect',
   sshForgetHostKey: 'ssh:forgetHostKey',
+  sshTrustHostKey: 'ssh:trustHostKey',
   // Per-session output log-to-file (invoke/handle)
   sessionLogStart: 'sessionLog:start',
   sessionLogStop: 'sessionLog:stop',
@@ -99,6 +103,7 @@ export const IPC = {
   // Settings (invoke/handle)
   settingsGet: 'settings:get',
   settingsSet: 'settings:set',
+  themeSet: 'theme:set',
 
   // Connection audit log (invoke/handle)
   connLogList: 'connLog:list',

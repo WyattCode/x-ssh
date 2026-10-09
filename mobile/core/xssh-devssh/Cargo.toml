@@ -1,0 +1,10 @@
+[package]
+name = "xssh-devssh"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+xssh-core = { path = "../xssh-core" }
+anyhow = "1"

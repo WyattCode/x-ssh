@@ -1,14 +1,12 @@
 <script setup lang="ts">
 import { reactive, ref, computed, nextTick } from 'vue'
 import { useSessions, type Tab } from '../stores/sessions'
-import { useTheme } from '../composables/theme'
 import { useI18n } from '../lib/i18n'
 import { isMac } from '../composables/platform'
 import { useZoom } from '../composables/zoom'
 import Icon from './Icon.vue'
 
 const store = useSessions()
-const { mode, toggle } = useTheme()
 const { t } = useI18n()
 const { factor } = useZoom()
 const modKey = isMac ? '⌘' : 'Ctrl'
@@ -179,57 +177,57 @@ function cancelRename(): void {
         <span class="close" :title="t('tabbar.close')" @click.stop="store.closeTabSafe(tab.id)"><Icon name="close" :size="13" /></span>
       </div>
     </div>
-    <div v-if="filterOpen" class="filter-box">
-      <Icon name="search" :size="14" />
-      <input
-        ref="filterEl"
-        v-model="filterQuery"
-        class="filter-input"
-        :placeholder="t('tabbar.filter')"
-        spellcheck="false"
-        @keydown.esc.prevent="toggleFilter"
-      />
-      <span class="filter-count">{{ visibleTabs.length }}/{{ store.tabs.length }}</span>
-    </div>
-    <button class="tool" :class="{ on: filterOpen }" :title="t('tabbar.filter')" @click="toggleFilter">
-      <Icon name="search" :size="16" />
-    </button>
     <button class="new" :title="t('tabbar.newConn', { key: `${modKey}+K` })" @click="store.togglePalette(true)">
       <Icon name="plus" :size="17" />
     </button>
     <div class="drag-spacer" />
-    <button
-      class="tool"
-      :class="{ on: layoutMenu.open }"
-      :title="t('tabbar.layout')"
-      @click.stop="openLayoutMenu"
-    >
-      <Icon name="layout" :size="16" />
-    </button>
-    <button
-      v-if="store.activePane?.status === 'connected'"
-      class="tool"
-      :class="{ on: store.sftpOpen }"
-      :title="t('tabbar.sftp')"
-      @click="store.toggleSftp()"
-    >
-      <Icon name="folder" :size="16" />
-    </button>
-    <button
-      class="tool"
-      :class="{ on: store.settingsOpen }"
-      :title="t('tabbar.settings', { key: `${modKey}+,` })"
-      @click="store.toggleSettings()"
-    >
-      <Icon name="settings" :size="16" />
-    </button>
-    <button
-      class="tool"
-      :title="mode === 'dark' ? t('tabbar.toLight') : t('tabbar.toDark')"
-      @click="toggle"
-    >
-      <Icon :name="mode === 'dark' ? 'sun' : 'moon'" :size="16" />
-    </button>
+    <div class="right-tools">
+      <!-- Tab search and layouts only mean something once there are tabs. -->
+      <button v-if="store.tabs.length" class="tool" :class="{ on: filterOpen }" :title="t('tabbar.filter')" @click="toggleFilter">
+        <Icon name="search" :size="16" />
+      </button>
+      <div v-if="filterOpen" class="filter-box">
+        <Icon name="search" :size="14" />
+        <input
+          ref="filterEl"
+          v-model="filterQuery"
+          class="filter-input"
+          :placeholder="t('tabbar.filter')"
+          spellcheck="false"
+          @keydown.esc.prevent="toggleFilter"
+        />
+        <span class="filter-count">{{ visibleTabs.length }}/{{ store.tabs.length }}</span>
+      </div>
+      <button
+        v-if="store.tabs.length"
+        class="tool"
+        :class="{ on: layoutMenu.open }"
+        :title="t('tabbar.layout')"
+        @click.stop="openLayoutMenu"
+      >
+        <Icon name="layout" :size="16" />
+      </button>
+      <button
+        v-if="store.activePane?.status === 'connected'"
+        class="tool"
+        :class="{ on: store.sftpOpen }"
+        :title="t('tabbar.sftp')"
+        @click="store.toggleSftp()"
+      >
+        <Icon name="folder" :size="16" />
+      </button>
+
+      <!-- 专注模式: hides the sidebar so the terminal takes the whole window
+           (not "全屏", which reads as the window going full screen); remembered. -->
+      <button
+        class="tool"
+        :class="{ on: store.termSidebarHidden }"
+        :title="store.termSidebarHidden ? t('nav.exitFocus') : t('nav.focus')"
+        @click="store.setTermSidebarHidden(!store.termSidebarHidden)"
+      >
+        <Icon name="focus" :size="16" />
+      </button>
+    </div>
   </div>
 
   <div v-if="layoutMenu.open" class="ctx-overlay" @mousedown="layoutMenu.open = false" @contextmenu.prevent="layoutMenu.open = false">
@@ -426,13 +424,24 @@ function cancelRename(): void {
   transition: background 0.14s, color 0.14s;
   -webkit-app-region: no-drag;
 }
+.right-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  -webkit-app-region: no-drag;
+  flex: none;
+}
 .new:hover,
 .tool:hover {
-  background: var(--bg-elev-2);
+  background: var(--hover);
   color: var(--text);
 }
+.new:active,
+.tool:active {
+  background: var(--selected);
+}
 .tool.on {
-  background: var(--accent-soft);
+  background: var(--selected);
   color: var(--accent);
 }
 .drag-spacer {
@@ -452,7 +461,7 @@ function cancelRename(): void {
   backdrop-filter: blur(14px) saturate(1.15);
   -webkit-backdrop-filter: blur(14px) saturate(1.15);
   border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
+  border-radius: var(--r-menu);
   box-shadow: var(--shadow);
 }
 .ctx button {
@@ -460,7 +469,7 @@ function cancelRename(): void {
   align-items: center;
   width: 100%;
   padding: 7px 10px;
-  border-radius: 5px;
+  border-radius: var(--r-item);
   font-size: 13px;
   color: var(--text);
   text-align: left;

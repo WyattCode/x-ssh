@@ -1,7 +1,19 @@
 import { app, safeStorage } from 'electron'
 import { join } from 'node:path'
-import { readFile, writeFile, mkdir } from 'node:fs/promises'
-import type { Host } from '../shared/types'
+import { mkdir } from 'node:fs/promises'
+import { parseJson, readDurable, writeDurable } from './durableFile'
+import type { Host, HostOs } from '../shared/types'
+
+/**
+ * Drop the fields that describe the *current session* rather than the saved
+ * profile, so they never reach hosts.json: the two `hasSaved*` flags are filled
+ * in by `list()` from the secrets map.
+ */
+function stripRuntimeFlags(host: Host): Host {
+  const { hasSavedPassword: _p, hasSavedPassphrase: _pp, ...rest } = host
+  return rest
+}
+
 /**
  * Flat-file host store. Hosts live in hosts.json (non-secret metadata).
  * Passwords, when the user opts to save them, are encrypted per-OS via
@@ -15,34 +27,43 @@ export class HostStore {
   private secrets: Record<string, string> = {}
   private loaded = false
   private secretsLoadFailed = false
+  /**
+   * hosts.json exists but neither it nor its backup could be read. Starting from an
+   * empty list is unavoidable, but persisting that empty list would erase the file
+   * for good — every saved host gone. Same rule as secrets below.
+   */
+  private hostsLoadFailed = false
   private locked = false
 
   private async ensureLoaded(): Promise<void> {
     if (this.loaded) return
     await mkdir(this.dir, { recursive: true })
-    try {
-      this.hosts = JSON.parse(await readFile(this.hostsFile, 'utf8'))
-    } catch {
-      this.hosts = []
-    }
-    try {
-      const raw = await readFile(this.secretsFile)
-      if (safeStorage.isEncryptionAvailable()) {
-        this.secrets = JSON.parse(safeStorage.decryptString(raw))
-      }
-    } catch (e) {
-      this.secrets = {}
+    // Crash-safe reads (fall back to the .bak copy written before every save),
+    // see durableFile.ts. A half-written hosts.json used to parse as "no hosts".
+    const hosts = await readDurable(this.hostsFile, (buf) => {
+      const v = parseJson<unknown>(buf)
+      if (!Array.isArray(v)) throw new Error('not a host list')
+      return v as Host[]
+    })
+    this.hosts = hosts.status === 'ok' ? hosts.value : []
+    this.hostsLoadFailed = hosts.status === 'bad'
+    if (safeStorage.isEncryptionAvailable()) {
+      const secrets = await readDurable(this.secretsFile, (buf) =>
+        JSON.parse(safeStorage.decryptString(buf)) as Record<string, string>
+      )
+      this.secrets = secrets.status === 'ok' ? secrets.value : {}
       // The file exists but could not be decrypted — do NOT let a later
       // persist() overwrite it with an empty object and lose the passwords.
-      if ((e as NodeJS.ErrnoException).code !== 'ENOENT') {
-        this.secretsLoadFailed = true
-      }
+      this.secretsLoadFailed = secrets.status === 'bad'
     }
     this.loaded = true
   }
 
   private async persist(): Promise<void> {
-    await writeFile(this.hostsFile, JSON.stringify(this.hosts, null, 2), 'utf8')
+    if (!(this.hostsLoadFailed && this.hosts.length === 0)) {
+      await writeDurable(this.hostsFile, JSON.stringify(this.hosts, null, 2))
+      this.hostsLoadFailed = false
+    }
     if (!safeStorage.isEncryptionAvailable()) return
     // If a prior load couldn't decrypt secrets.bin (e.g. it was copied from
     // another machine — DPAPI is per-machine), don't clobber it with an EMPTY
@@ -51,7 +72,7 @@ export class HostStore {
     // must not stay permanently unable to save new passwords.
     if (this.secretsLoadFailed && Object.keys(this.secrets).length === 0) return
     const enc = safeStorage.encryptString(JSON.stringify(this.secrets))
-    await writeFile(this.secretsFile, enc)
+    await writeDurable(this.secretsFile, enc)
     this.secretsLoadFailed = false
   }
 
@@ -88,9 +109,7 @@ export class HostStore {
   ): Promise<Host[]> {
     await this.ensureLoaded()
     // Never persist runtime-only flags.
-    const { hasSavedPassword: _p, hasSavedPassphrase: _pp, ...clean } = host
-    void _p
-    void _pp
+    const clean = stripRuntimeFlags(host)
     const idx = this.hosts.findIndex((h) => h.id === clean.id)
     if (idx >= 0) this.hosts[idx] = clean
     else this.hosts.push(clean)
@@ -128,6 +147,19 @@ export class HostStore {
     return this.secrets[this.ppKey(id)]
   }
 
+  /** Records the OS detected on connect. Returns whether anything changed, so
+   *  the caller only tells the renderer to reload when it has to. */
+  async setOs(id: string, os: HostOs, at?: { host: string; port?: number }): Promise<boolean> {
+    await this.ensureLoaded()
+    const host = this.hosts.find((h) => h.id === id)
+    if (!host || (host.os?.id === os.id && host.os?.pretty === os.pretty)) return false
+    // Read from an address the host no longer has (edited meanwhile): not its OS.
+    if (at && (host.host !== at.host || (host.port || 22) !== (at.port || 22))) return false
+    host.os = os
+    await this.persist()
+    return true
+  }
+
   async touch(id: string): Promise<void> {
     await this.ensureLoaded()
     const host = this.hosts.find((h) => h.id === id)
@@ -163,10 +195,8 @@ export class HostStore {
     const newSecrets: Record<string, string> = {}
     for (const h of data.hosts) {
       if (!h || typeof h.id !== 'string' || typeof h.host !== 'string') continue
-      const { password, passphrase, hasSavedPassword: _p, hasSavedPassphrase: _pp, ...clean } = h
-      void _p
-      void _pp
-      imported.push(clean as Host)
+      const { password, passphrase, ...rest } = h
+      imported.push(stripRuntimeFlags(rest))
       if (password) newSecrets[h.id as string] = password
       if (passphrase) newSecrets[this.ppKey(h.id as string)] = passphrase
     }

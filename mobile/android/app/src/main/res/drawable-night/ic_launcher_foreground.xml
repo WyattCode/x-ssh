@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 由 build/icon-src/make_icons.py 生成,别手改(改那个脚本再跑一遍)。前景:两根银条,只占中间 72dp 可见区的约 2/3。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="1024"
+    android:viewportHeight="1024">
+    <path android:pathData="M610.23,329.26 A41.96,41.96 0 0,1 639.68,317.19 L694.60,317.19 A41.96,41.96 0 0,1 724.05,389.04 L413.77,694.74 A41.96,41.96 0 0,1 384.32,706.81 L329.40,706.81 A41.96,41.96 0 0,1 299.95,634.96Z">
+        <aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="709.73" android:startY="317.19" android:endX="314.27" android:endY="706.81"><item android:offset="0.000" android:color="#FFABB2BD"/><item android:offset="0.080" android:color="#FF949BA6"/><item android:offset="0.165" android:color="#FF646B77"/><item android:offset="0.249" android:color="#FF40454F"/><item android:offset="0.333" android:color="#FF20262D"/><item android:offset="0.500" android:color="#FF181C21"/><item android:offset="0.670" android:color="#FF1C2026"/><item android:offset="0.754" android:color="#FF333942"/><item android:offset="0.838" android:color="#FF535A66"/><item android:offset="0.922" android:color="#FF808794"/><item android:offset="1.000" android:color="#FF949BA7"/></gradient></aapt:attr>
+    </path>
+    <path android:pathData="M610.23,329.26 A41.96,41.96 0 0,1 639.68,317.19 L694.60,317.19 A41.96,41.96 0 0,1 724.05,389.04 L413.77,694.74 A41.96,41.96 0 0,1 384.32,706.81 L329.40,706.81 A41.96,41.96 0 0,1 299.95,634.96Z">
+        <aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="469.03" android:startY="468.38" android:endX="554.97" android:endY="555.62"><item android:offset="0.000" android:color="#4C000000"/><item android:offset="0.500" android:color="#00000000"/><item android:offset="0.500" android:color="#00FFFFFF"/><item android:offset="1.000" android:color="#47FFFFFF"/></gradient></aapt:attr>
+    </path>
+    <path android:pathData="M299.95,389.04 A41.96,41.96 0 0,1 329.40,317.19 L384.32,317.19 A41.96,41.96 0 0,1 413.77,329.26 L724.05,634.96 A41.96,41.96 0 0,1 694.60,706.81 L639.68,706.81 A41.96,41.96 0 0,1 610.23,694.74Z">
+        <aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="314.27" android:startY="317.19" android:endX="709.73" android:endY="706.81"><item android:offset="0.000" android:color="#FFEEF1F5"/><item android:offset="0.089" android:color="#FFE2E6EB"/><item android:offset="0.172" android:color="#FFBEC5CF"/><item android:offset="0.256" android:color="#FF9EA6B3"/><item android:offset="0.339" android:color="#FF818A99"/><item android:offset="0.423" android:color="#FF77808F"/><item android:offset="0.506" android:color="#FF6D7887"/><item android:offset="0.590" android:color="#FF67707D"/><item android:offset="0.673" android:color="#FF6A7381"/><item android:offset="0.757" android:color="#FF7B8494"/><item android:offset="0.840" android:color="#FF8B94A3"/><item android:offset="0.924" android:color="#FF8D97A3"/><item android:offset="1.000" android:color="#FF97A1AD"/></gradient></aapt:attr>
+    </path>
+    <path android:pathData="M299.95,389.04 A41.96,41.96 0 0,1 329.40,317.19 L384.32,317.19 A41.96,41.96 0 0,1 413.77,329.26 L724.05,634.96 A41.96,41.96 0 0,1 694.60,706.81 L639.68,706.81 A41.96,41.96 0 0,1 610.23,694.74Z">
+        <aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="554.97" android:startY="468.38" android:endX="469.03" android:endY="555.62"><item android:offset="0.000" android:color="#73FFFFFF"/><item android:offset="0.250" android:color="#1DFFFFFF"/><item android:offset="0.500" android:color="#00FFFFFF"/><item android:offset="0.750" android:color="#1DFFFFFF"/><item android:offset="1.000" android:color="#73FFFFFF"/></gradient></aapt:attr>
+    </path>
+</vector>

@@ -1,45 +1,49 @@
 import { app } from 'electron'
 import { join } from 'node:path'
-import { readFile, writeFile, mkdir, rename } from 'node:fs/promises'
+import { mkdir } from 'node:fs/promises'
+import { parseJson, readDurable, sweepTemps, writeDurable } from './durableFile'
 
-/** Tiny key-value settings store persisted to settings.json. */
+/**
+ * Tiny key-value settings store persisted to settings.json.
+ *
+ * Settings used to vanish every so often (external editor, snippets, history…):
+ * closing the window saves `windowBounds` without awaiting it, the app quits,
+ * and the process died halfway through a plain truncating `writeFile`. The next
+ * launch couldn't parse the file, treated it as "no settings", and the first
+ * `set()` wrote a file holding only that one key. Reads and writes now go
+ * through [readDurable] / [writeDurable] (backup + atomic replace), writes join
+ * their queue synchronously, and the app waits for [flush] before quitting.
+ */
 export class SettingsStore {
-  private dir = app.getPath('userData')
-  private file = join(this.dir, 'settings.json')
+  private dir: string
+  private file: string
   private data: Record<string, unknown> = {}
   private loaded = false
   private writes: Promise<void> = Promise.resolve()
 
-  /** Reads and parses settings.json, retrying a few times. Instances run side by
-   *  side and share this file; a plain writeFile briefly truncates it, so a
-   *  concurrent reader can catch an empty/partial file. That window is a few ms,
-   *  so a short retry almost always lands on the complete file. Returns null
-   *  only if every attempt failed (so callers keep their existing data instead
-   *  of blanking it); returns {} when the file simply doesn't exist yet. */
+  /** [dir] is only for tests; the app uses its userData folder. */
+  constructor(dir?: string) {
+    this.dir = dir ?? app.getPath('userData')
+    this.file = join(this.dir, 'settings.json')
+  }
+
+  /** Settings on disk (main file, else its backup). {} on first run; null when
+   *  files exist but none parses — callers then keep what they already have. */
   private async readData(): Promise<Record<string, unknown> | null> {
-    for (let attempt = 0; attempt < 4; attempt++) {
-      let raw: string | undefined
-      try {
-        raw = await readFile(this.file, 'utf8')
-      } catch (e) {
-        if ((e as NodeJS.ErrnoException).code === 'ENOENT') return {}
-      }
-      if (raw !== undefined) {
-        try {
-          return JSON.parse(raw)
-        } catch {
-          /* torn read mid-write — fall through and retry */
-        }
-      }
-      await new Promise((r) => setTimeout(r, 15))
-    }
-    return null
+    const r = await readDurable(this.file, (buf) => {
+      const v = parseJson<unknown>(buf)
+      if (!v || typeof v !== 'object' || Array.isArray(v)) throw new Error('not an object')
+      return v as Record<string, unknown>
+    })
+    if (r.status === 'ok') return r.value
+    return r.status === 'missing' ? {} : null
   }
 
   private async ensure(): Promise<void> {
     if (this.loaded) return
     this.data = (await this.readData()) ?? {}
     this.loaded = true
+    void sweepTemps(this.file)
   }
 
   async get<T = unknown>(key: string): Promise<T | undefined> {
@@ -47,43 +51,36 @@ export class SettingsStore {
     return this.data[key] as T | undefined
   }
 
-  async set(key: string, value: unknown): Promise<void> {
-    await this.ensure()
+  set(key: string, value: unknown): Promise<void> {
     // Serialize writes so two concurrent set() calls can't interleave their
-    // read-modify-write and drop one of the two keys.
-    this.writes = this.writes.then(() => this.write(key, value)).catch(() => undefined)
+    // read-modify-write and drop one of the two keys. Join the queue
+    // *synchronously* (loading happens inside it): the window-close path calls
+    // set() without awaiting and quits right after — if set() awaited anything
+    // before queueing, flush() at quit time would not see this write yet.
+    this.writes = this.writes
+      .then(async () => {
+        await this.ensure()
+        await this.write(key, value)
+      })
+      .catch((e) => console.error('settings write failed:', key, (e as Error).message))
     return this.writes
   }
 
-  /** Wait for all queued writes to hit disk. Call on quit so a just-changed
-   *  setting (e.g. the theme toggle) isn't lost when the process exits. */
-  async flush(): Promise<void> {
-    await this.writes.catch(() => undefined)
+  /** Resolves once every write queued so far is on disk (call before quitting). */
+  flush(): Promise<void> {
+    return this.writes
   }
 
   private async write(key: string, value: unknown): Promise<void> {
     // Instances run side by side and share this file, so re-read it first: a
     // stale in-memory copy would silently revert whatever another instance
     // changed since we loaded. Keep our in-memory data if the re-read fails
-    // (rather than dropping keys). Our own earlier writes are already on disk,
-    // so a successful re-read keeps them too.
+    // (rather than dropping keys).
     const fresh = await this.readData()
     if (fresh) this.data = fresh
     if (value === undefined || value === null || value === '') delete this.data[key]
     else this.data[key] = value
     await mkdir(this.dir, { recursive: true })
-    const json = JSON.stringify(this.data, null, 2)
-    if (process.platform === 'win32') {
-      // Windows: rename-replace EPERMs under multi-instance contention and set()
-      // swallows errors, so write in place; readData()'s retry tolerates the
-      // brief truncation window a concurrent reader may see.
-      await writeFile(this.file, json, 'utf8')
-    } else {
-      // macOS/Linux: temp file + atomic rename, so a crash/quit mid-write can
-      // never leave settings.json empty/truncated (blanking every setting).
-      const tmp = `${this.file}.${process.pid}.tmp`
-      await writeFile(tmp, json, 'utf8')
-      await rename(tmp, this.file)
-    }
+    await writeDurable(this.file, JSON.stringify(this.data, null, 2))
   }
 }

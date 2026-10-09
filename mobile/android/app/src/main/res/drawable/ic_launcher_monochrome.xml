@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 由 build/icon-src/make_icons.py 生成,别手改(改那个脚本再跑一遍)。单色主题图标。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="1024"
+    android:viewportHeight="1024">
+    <path android:fillColor="#FFFFFF" android:fillAlpha="0.55" android:pathData="M610.23,329.26 A41.96,41.96 0 0,1 639.68,317.19 L694.60,317.19 A41.96,41.96 0 0,1 724.05,389.04 L413.77,694.74 A41.96,41.96 0 0,1 384.32,706.81 L329.40,706.81 A41.96,41.96 0 0,1 299.95,634.96Z"/>
+    <path android:fillColor="#FFFFFF" android:pathData="M299.95,389.04 A41.96,41.96 0 0,1 329.40,317.19 L384.32,317.19 A41.96,41.96 0 0,1 413.77,329.26 L724.05,634.96 A41.96,41.96 0 0,1 694.60,706.81 L639.68,706.81 A41.96,41.96 0 0,1 610.23,694.74Z"/>
+</vector>

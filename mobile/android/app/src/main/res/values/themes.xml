@@ -1,0 +1,6 @@
+<resources>
+    <!-- 冷启动第一帧的底色要和界面一致,否则浅色模式下会先闪一下黑。 -->
+    <style name="AppTheme" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@android:color/white</item>
+    </style>
+</resources>

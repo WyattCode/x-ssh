@@ -33,6 +33,35 @@ jobs:
       - name: Build
         run: npm run build
 
+  # The Rust core is platform-independent and its tests need no device, so they
+  # belong in CI. The Android UI itself is not built here: that needs the NDK and
+  # a cross-compiled .so, and the mobile work is verified on real hardware.
+  rust-core:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            mobile/core/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('mobile/core/**/Cargo.toml') }}
+
+      - name: Unit tests
+        run: cargo test --workspace
+        working-directory: mobile/core
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+        working-directory: mobile/core
+
   # Build a distributable Windows installer on every push to main and auto-publish
   # a GitHub Release when a version tag (v*) is pushed. The app is not code-signed,
   # so SmartScreen may warn — that's expected.

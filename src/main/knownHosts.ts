@@ -1,6 +1,7 @@
 import { app } from 'electron'
 import { join } from 'node:path'
-import { readFile, writeFile, mkdir } from 'node:fs/promises'
+import { mkdir } from 'node:fs/promises'
+import { parseJson, readDurable, writeDurable } from './durableFile'
 import type { KnownHostEntry } from '../shared/types'
 
 /**
@@ -13,11 +14,16 @@ export class KnownHosts {
   private file = join(this.dir, 'known_hosts.json')
   private map: Record<string, { fp: string; firstSeen?: number }> = {}
   private loaded = false
+  /** known_hosts.json exists but couldn't be read: don't overwrite it with an empty map. */
+  private loadFailed = false
 
   async load(): Promise<void> {
     if (this.loaded) return
     try {
-      const raw = JSON.parse(await readFile(this.file, 'utf8'))
+      // Crash-safe read (falls back to the .bak copy), see durableFile.ts.
+      const r = await readDurable(this.file, parseJson<Record<string, unknown>>)
+      if (r.status === 'bad') this.loadFailed = true
+      const raw = r.status === 'ok' ? r.value : {}
       // Migrate the legacy string form (`fingerprint`) to the record form and
       // record when each key was first trusted, so stale keys can be aged out.
       for (const [key, val] of Object.entries(raw)) {
@@ -34,8 +40,11 @@ export class KnownHosts {
   }
 
   private async persist(): Promise<void> {
+    // Unreadable file and nothing trusted this session: leave it for recovery.
+    if (this.loadFailed && Object.keys(this.map).length === 0) return
     await mkdir(this.dir, { recursive: true })
-    await writeFile(this.file, JSON.stringify(this.map, null, 2), 'utf8')
+    await writeDurable(this.file, JSON.stringify(this.map, null, 2))
+    this.loadFailed = false
   }
 
   static key(host: string, port: number): string {
@@ -49,7 +58,9 @@ export class KnownHosts {
   async set(host: string, port: number, fingerprint: string): Promise<void> {
     const k = KnownHosts.key(host, port)
     const existing = this.map[k]
-    this.map[k] = { fp: fingerprint, firstSeen: existing?.firstSeen ?? Date.now() }
+    // A replaced key is a new key: its age starts now (firstSeen drives the
+    // stale-key hint), only re-saving the same key keeps the original date.
+    this.map[k] = { fp: fingerprint, firstSeen: existing && existing.fp === fingerprint ? existing.firstSeen ?? Date.now() : Date.now() }
     await this.persist()
   }
 

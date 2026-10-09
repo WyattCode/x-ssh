@@ -76,14 +76,9 @@ export class MasterLock {
     await this.settings.set(KEY, { salt, hash: this.hash })
   }
 
-  /** Verifies the current passphrase, then disables the lock. */
+  /** Verifies the current passphrase, then removes the lock record. */
   async disable(passphrase: string): Promise<boolean> {
-    if (!this.verify(passphrase)) return false
-    this.hash = null
-    this.salt = ''
-    this.unlocked = true
-    await this.settings.set(KEY, undefined)
-    return true
+    return this.forget(passphrase)
   }
 
   /** Attempts to unlock with the passphrase. Returns true on success. */
@@ -98,11 +93,17 @@ export class MasterLock {
     if (this.enabled) this.unlocked = false
   }
 
-  /** Clears the gate, but only after the current passphrase is entered and
-   *  verified — a casual user at the desk can't wipe the lock with one click.
-   *  Passing the correct `passphrase` is required; returns false if wrong.
-   *  (The OS-level safeStorage encryption of the secrets file is unaffected.) */
+  /** The "I forgot it" escape hatch: same effect as [disable], kept as its own
+   *  entry point because the UI wording and intent differ. Passing the correct
+   *  passphrase is still required — a casual user at the desk can't wipe the
+   *  lock with one click. (The safeStorage encryption of the secrets file is
+   *  unaffected either way: the lock is a gate, not the encryption.) */
   async reset(passphrase: string): Promise<boolean> {
+    return this.forget(passphrase)
+  }
+
+  /** Drop the lock record after checking the passphrase. */
+  private async forget(passphrase: string): Promise<boolean> {
     if (!this.verify(passphrase)) return false
     this.hash = null
     this.salt = ''

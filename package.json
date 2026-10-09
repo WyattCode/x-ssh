@@ -1,6 +1,6 @@
 {
   "name": "x-ssh",
-  "version": "0.2.0",
+  "version": "0.4.0",
   "description": "A keyboard-first, command-palette-driven SSH client.",
   "main": "./out/main/index.js",
   "author": "X-SSH",
@@ -14,7 +14,7 @@
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "vue-tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
-    "lint:i18n": "node scripts/lint-i18n.mjs",
+    "lint:i18n": "node scripts/lint-i18n.mjs && node scripts/lint-i18n-mobile.mjs",
     "test": "vitest run",
     "package": "electron-vite build && electron-builder --dir",
     "dist": "electron-vite build && electron-builder"
@@ -47,7 +47,7 @@
       "allowToChangeInstallationDirectory": true
     },
     "mac": {
-      "icon": "build/icon.png",
+      "icon": "build/icon.icon",
       "extendInfo": {
         "NSLocalNetworkUsageDescription": "X-SSH 需要访问本地网络,以便连接局域网内的 SSH 服务器。"
       }
@@ -70,11 +70,10 @@
     "@xterm/addon-webgl": "^0.18.0",
     "@xterm/xterm": "^5.5.0",
     "electron": "^33.2.1",
-    "electron-builder": "^25.1.8",
+    "electron-builder": "^26.15.3",
     "electron-vite": "^2.3.0",
     "pinia": "^2.3.0",
-    "png-to-ico": "^3.0.2",
-    "sharp": "^0.35.3",
+    "simple-icons": "^16.33.0",
     "typescript": "^5.7.2",
     "vite": "^5.4.11",
     "vitest": "^2.1.9",

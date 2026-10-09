@@ -5,6 +5,7 @@ import { useI18n } from '../lib/i18n'
 import { useToast } from '../composables/toast'
 import { useConfirm } from '../composables/confirm'
 import Icon from './Icon.vue'
+import OsIcon from './OsIcon.vue'
 import { PRESETS } from '../lib/terminalThemes'
 import type { AuthMethod, ForwardMode, Host, ManagedKey } from '../../../shared/types'
 
@@ -40,6 +41,7 @@ const form = reactive({
   auth: 'password' as AuthMethod,
   keyPath: '' as string | undefined,
   group: '',
+  tags: [] as string[],
   jumpHostId: '',
   color: '',
   terminalTheme: '',
@@ -57,8 +59,16 @@ const form = reactive({
 })
 const password = ref('')
 const passphrase = ref('')
-const advanced = ref(false)
+/** Which 更多选项 rows are open (each opens in place under its row). */
+const sections = reactive({ keys: false, proxy: false, forwards: false, onConnect: false, appearance: false })
 const labelEl = ref<HTMLInputElement>()
+const panelEl = ref<HTMLElement>()
+const tagInputEl = ref<HTMLInputElement>()
+const keyNameEl = ref<HTMLInputElement>()
+function closeKeySheet(): void {
+  keyModal.open = false
+  nextTick(() => panelEl.value?.focus())
+}
 
 watch(
   () => props.open,
@@ -74,6 +84,7 @@ watch(
       auth: h?.auth ?? 'password',
       keyPath: h?.keyPath ?? '',
       group: h?.group ?? '',
+      tags: [...(h?.tags ?? [])],
       jumpHostId: h?.jumpHostId ?? '',
       color: h?.color ?? '',
       terminalTheme: h?.terminalTheme ?? '',
@@ -96,12 +107,46 @@ watch(
     })
     password.value = ''
     passphrase.value = ''
-    advanced.value = !!(h?.agentForward || h?.onConnect || h?.onConnectDelayMs)
+    Object.assign(sections, { keys: false, proxy: false, forwards: false, onConnect: false, appearance: false })
     nextTick(() => labelEl.value?.focus())
   }
 )
 
 const jumpCandidates = computed(() => store.hosts.filter((h) => h.id !== form.id))
+
+// Pasting "user@host:port" into 主机 fills all three. Only on an unambiguous
+// shape: a single colon (so IPv6 literals are left alone).
+// "user@host:port" in the host field is split into its three fields — on paste,
+// on leaving the field and before saving, never per keystroke (typing
+// "host:2222" digit by digit must not turn into host "host222" port 2).
+function splitHostInput(): void {
+  const m = /^\s*(?:([^@\s:]+)@)?([^@\s:]+)(?::(\d{1,5}))?\s*$/.exec(form.host)
+  if (!m || (!m[1] && !m[3])) return
+  const port = m[3] ? Number(m[3]) : 0
+  if (m[3] && (port < 1 || port > 65535)) return
+  form.host = m[2]
+  if (m[1]) form.username = m[1]
+  if (port) form.port = port
+}
+function onHostPaste(): void {
+  // The pasted text lands in the model on the next input event.
+  setTimeout(splitHostInput)
+}
+
+// One-line summaries shown on the closed 更多选项 rows.
+const proxySummary = computed(() =>
+  form.proxyOn && form.proxyHost.trim()
+    ? `${form.proxyType === 'http' ? 'HTTP' : 'SOCKS5'} ${form.proxyHost.trim()}:${form.proxyPort || ''}`
+    : t('host.none')
+)
+const onConnectSummary = computed(
+  () => form.onConnect.split(/\r?\n/).map((l) => l.trim()).find(Boolean) ?? t('host.none')
+)
+const appearanceSummary = computed(() => {
+  const theme = PRESETS.find((p) => p.id === form.terminalTheme)?.label ?? t('host.termThemeSystem')
+  const font = form.terminalFontFamily.trim()
+  return font ? `${theme} · ${font}` : theme
+})
 
 const COLORS = [
   '#6ea8fe', '#51cf66', '#ffd43b', '#ff6b6b', '#da77f2', '#3bc9db',
@@ -145,6 +190,7 @@ function useKey(path: string): void {
   form.keyPath = path
 }
 function openGenerate(): void {
+  nextTick(() => keyNameEl.value?.focus())
   keyModal.open = true
   keyModal.name = ''
   keyModal.type = 'ed25519'
@@ -193,12 +239,39 @@ async function deleteKey(k: ManagedKey): Promise<void> {
   } else if (r.error) {
     toast(r.error, 'error')
   }
+  panelEl.value?.focus()
 }
 
 const canSave = (): boolean => !!form.host && !!form.username
 
+// ---- Tags: type, Enter (or comma) adds; Backspace on an empty box removes the last ----
+const tagDraft = ref('')
+function commitTag(): boolean {
+  const added = tagDraft.value
+    .split(/[,，]/)
+    .map((x) => x.trim())
+    .filter((x) => x && !form.tags.includes(x))
+  tagDraft.value = ''
+  if (!added.length) return false
+  form.tags.push(...added)
+  return true
+}
+function onTagKey(e: KeyboardEvent): void {
+  if (e.isComposing || e.keyCode === 229) return
+  if ((e.key === 'Enter' || e.key === ',' || e.key === '，') && tagDraft.value.trim()) {
+    // Ours, not the editor's "Enter saves".
+    e.preventDefault()
+    e.stopPropagation()
+    commitTag()
+  } else if (e.key === 'Backspace' && !tagDraft.value && form.tags.length) {
+    form.tags.pop()
+  }
+}
+
 async function save(): Promise<void> {
+  splitHostInput()
   if (!canSave()) return
+  commitTag()
   const forwards = form.forwards
     .filter((f) => f.mode === 'dynamic' ? f.localPort > 0 : f.localPort > 0 && f.remotePort > 0)
     .map((f) => ({ localPort: f.localPort, remoteHost: f.host.trim(), remotePort: f.remotePort, mode: f.mode }))
@@ -211,6 +284,7 @@ async function save(): Promise<void> {
     auth: form.auth,
     keyPath: form.auth === 'key' ? form.keyPath : undefined,
     group: form.group.trim() || undefined,
+    tags: form.tags.length ? [...form.tags] : undefined,
     jumpHostId: form.jumpHostId || undefined,
     color: form.color.trim() || undefined,
     terminalTheme: form.terminalTheme || undefined,
@@ -227,7 +301,15 @@ async function save(): Promise<void> {
           ...(form.proxyUser ? { username: form.proxyUser.trim() } : {}),
           ...(form.proxyUser && form.proxyPass ? { password: form.proxyPass } : {})
         }
-      : undefined
+      : undefined,
+    // Not edited here, but part of the saved profile: without these an edit
+    // dropped the host to the bottom of 最近使用 and lost its OS icon. The OS
+    // is only kept while the address is the same machine.
+    lastUsedAt: props.host?.lastUsedAt,
+    os:
+      props.host && props.host.host === form.host.trim() && (props.host.port || 22) === (Number(form.port) || 22)
+        ? props.host.os
+        : undefined
   }
   // A typed password/passphrase is saved (encrypted); leaving it blank keeps any
   // previously saved secret untouched (empty → undefined, store won't overwrite).
@@ -253,722 +335,921 @@ function onEnter(e: KeyboardEvent): void {
 
 async function remove(): Promise<void> {
   if (!props.host) return
+  const ok = await confirm(t('hosts.deleteConfirm', { name: props.host.label }), {
+    title: t('hosts.delete'),
+    confirmText: t('hosts.delete'),
+    danger: true
+  })
+  if (!ok) return
   store.hosts = await window.api.hosts.delete(props.host.id)
   emit('close')
 }
 </script>
 
 <template>
-  <div v-if="open" class="overlay" @mousedown.self="emit('close')">
-    <div class="editor" @keydown.esc="emit('close')" @keydown.enter="onEnter">
-      <div class="head">{{ host ? t('host.titleEdit') : t('host.titleNew') }}</div>
-
-      <label class="field">
-        <span>{{ t('host.name') }}</span>
-        <input ref="labelEl" v-model="form.label" :placeholder="t('host.namePh')" />
-      </label>
-
-      <div class="grid">
-        <label class="field grow">
-          <span>{{ t('host.host') }}</span>
-          <input v-model="form.host" :placeholder="t('host.hostPh')" spellcheck="false" />
-        </label>
-        <label class="field port">
-          <span>{{ t('host.port') }}</span>
-          <input v-model.number="form.port" type="number" min="1" max="65535" />
-        </label>
-      </div>
-
-      <label class="field">
-        <span>{{ t('host.username') }}</span>
-        <input v-model="form.username" :placeholder="t('host.usernamePh')" spellcheck="false" />
-      </label>
-
-      <div class="grid">
-        <label class="field grow">
-          <span>{{ t('host.group') }}</span>
-          <input v-model="form.group" :placeholder="t('host.groupPh')" spellcheck="false" />
-        </label>
-      </div>
-
-      <div class="field">
-        <span>{{ t('host.color') }}</span>
-        <div class="color-row">
-          <button
-            class="swatch none"
-            :class="{ on: !form.color }"
-            :title="t('host.colorNone')"
-            @click="form.color = ''"
-          ></button>
-          <button
-            v-for="c in COLORS"
-            :key="c"
-            class="swatch"
-            :class="{ on: form.color === c }"
-            :style="{ background: c }"
-            @click="form.color = c"
-          ></button>
-          <label class="swatch custom" :style="{ background: form.color || 'transparent' }">
-            <input v-model="form.color" type="color" />
-          </label>
-        </div>
-      </div>
-
-      <div class="grid">
-        <label class="field grow">
-          <span>{{ t('host.termTheme') }}</span>
-          <div class="select-wrap">
-            <select v-model="form.terminalTheme">
-              <option value="">{{ t('host.termThemeSystem') }}</option>
-              <option v-for="p in PRESETS" :key="p.id" :value="p.id">{{ p.label }}</option>
-            </select>
-          </div>
-        </label>
-        <label class="field grow">
-          <span>{{ t('host.termFont') }}</span>
-          <input v-model="form.terminalFontFamily" :placeholder="t('host.termFontPh')" spellcheck="false" />
-        </label>
-      </div>
-
-      <div class="field">
-        <span>{{ t('host.jump') }}</span>
-        <div class="select-wrap">
-          <select v-model="form.jumpHostId" class="select-in">
-            <option value="">{{ t('host.jumpNone') }}</option>
-            <option v-for="j in jumpCandidates" :key="j.id" :value="j.id">
-              {{ j.label }} · {{ j.username }}@{{ j.host }}
-            </option>
-          </select>
-          <Icon name="chevron-down" :size="15" class="select-caret" />
-        </div>
-        <p class="hint">{{ t('host.jumpHint') }}</p>
-      </div>
-
-      <div class="field">
-        <span>{{ t('host.forwards') }} <button class="mini" @click="addForward">{{ t('set.gen.addForward') }}</button></span>
-        <div v-for="(f, i) in form.forwards" :key="i" class="fw-row">
-          <div class="select-wrap fw-mode">
-            <select v-model="f.mode" class="select-in">
-              <option value="local">{{ t('host.fwLocalMode') }}</option>
-              <option value="remote">{{ t('host.fwRemoteMode') }}</option>
-              <option value="dynamic">{{ t('host.fwDynamicMode') }}</option>
-            </select>
-            <Icon name="chevron-down" :size="13" class="select-caret" />
-          </div>
-          <input v-model.number="f.localPort" type="number" min="1" max="65535" :placeholder="t('host.fwListen')" />
-          <input v-if="f.mode !== 'dynamic'" v-model="f.host" :placeholder="f.mode === 'remote' ? t('host.fwLocalTarget') : t('host.fwRemoteHost')" spellcheck="false" />
-          <input v-if="f.mode !== 'dynamic'" v-model.number="f.remotePort" type="number" min="1" max="65535" :placeholder="t('host.fwTarget')" />
-          <button class="mini danger" @click="removeForward(i)"><Icon name="close" :size="13" /></button>
-        </div>
-        <p v-if="!form.forwards.length" class="hint">{{ t('host.fwHint') }}</p>
-      </div>
-
-      <div class="field">
-        <span>{{ t('host.proxy') }}</span>
-        <label class="check">
-          <input v-model="form.proxyOn" type="checkbox" />
-          <span class="check-label">{{ t('host.proxyOn') }}</span>
-        </label>
-        <template v-if="form.proxyOn">
-          <div class="proxy-row">
-            <div class="select-wrap fw-mode">
-              <select v-model="form.proxyType" class="select-in">
-                <option value="socks5">SOCKS5</option>
-                <option value="http">HTTP</option>
-              </select>
-              <Icon name="chevron-down" :size="13" class="select-caret" />
-            </div>
-            <input v-model="form.proxyHost" :placeholder="t('host.proxyHostPh')" spellcheck="false" />
-            <input v-model.number="form.proxyPort" type="number" min="1" max="65535" :placeholder="t('host.proxyPortPh')" />
-          </div>
-          <div class="proxy-row">
-            <input v-model="form.proxyUser" :placeholder="t('host.proxyUserPh')" autocomplete="off" />
-            <input v-model="form.proxyPass" type="password" :placeholder="t('host.proxyPassPh')" autocomplete="off" />
-          </div>
-        </template>
-        <p class="hint">{{ t('host.proxyHint') }}</p>
-      </div>
-
-      <div class="field">
-        <span>{{ t('host.auth') }}</span>
-        <div class="seg">
-          <button
-            v-for="a in (['password', 'key', 'agent'] as AuthMethod[])"
-            :key="a"
-            :class="{ on: form.auth === a }"
-            @click="form.auth = a"
-          >
-            {{ authLabels[a] }}
-          </button>
-        </div>
-      </div>
-
-      <button class="adv-toggle" type="button" @click="advanced = !advanced">
-        <Icon name="chevron-right" :size="13" class="chev" :class="{ open: advanced }" />
-        <span>{{ t('host.advanced') }}</span>
-      </button>
-      <template v-if="advanced">
-        <div class="adv-body">
-          <label class="field check">
-            <input v-model="form.agentForward" type="checkbox" />
-            <span class="check-label">{{ t('host.agentForward') }}</span>
-          </label>
-
-          <label class="field">
-            <span>{{ t('host.onConnect') }}</span>
-            <textarea
-              v-model="form.onConnect"
-              class="onconnect-ta"
-              :placeholder="t('host.onConnectPh')"
-              rows="3"
-              spellcheck="false"
-            ></textarea>
-          </label>
-          <label class="field">
-            <span>{{ t('host.onConnectDelay') }}</span>
+  <Transition name="sheet">
+    <div v-if="open" class="layer" @mousedown.self="emit('close')">
+      <aside ref="panelEl" class="panel" role="dialog" aria-modal="true" aria-labelledby="he-kicker" tabindex="-1" @keydown.esc="emit('close')" @keydown.enter="onEnter">
+        <!-- Header: the host as a card shows it — avatar, name, address. -->
+        <header class="p-head">
+          <OsIcon :os="host?.os" :color="form.color || undefined" :size="44" />
+          <div class="p-title">
+            <span id="he-kicker" class="p-kicker">{{ host ? t('host.titleEdit') : t('host.titleNew') }}</span>
             <input
-              v-model.number="form.onConnectDelayMs"
-              type="number"
-              min="0"
-              max="30000"
-              step="100"
-              class="onconnect-delay"
-              :placeholder="t('host.onConnectDelayPh')"
+              ref="labelEl"
+              v-model="form.label"
+              class="p-name"
+              :placeholder="form.host ? `${form.username || 'root'}@${form.host}` : t('host.name')"
+              spellcheck="false"
             />
-          </label>
-          <p class="hint">{{ t('host.onConnectHint') }}</p>
-        </div>
-      </template>
-
-      <label v-if="form.auth === 'password'" class="field">
-        <span>{{ t('host.password') }}</span>
-        <input
-          v-model="password"
-          type="password"
-          :placeholder="host?.hasSavedPassword ? t('host.passwordSaved') : t('host.passwordAsk')"
-        />
-      </label>
-
-      <template v-else-if="form.auth === 'key'">
-        <div class="field">
-          <span>{{ t('host.privateKey') }}</span>
-          <div v-if="managedKeys.length" class="keyrow">
-            <select class="keyselect" :value="form.keyPath || ''" @change="useKey(($event.target as HTMLSelectElement).value)">
-              <option value="">{{ t('host.noKey') }}</option>
-              <option v-for="k in managedKeys" :key="k.id" :value="k.path">{{ keyOptionLabel(k) }}</option>
-            </select>
-            <button class="ghost" @click="openGenerate">{{ t('host.generateKey') }}</button>
-            <button class="ghost" @click="importKey">{{ t('host.importKey') }}</button>
           </div>
-          <div v-else class="keyrow">
-            <input :value="form.keyPath" :placeholder="t('host.noKey')" readonly />
-            <button class="ghost" @click="pickKey">{{ t('host.browse') }}</button>
-            <button class="ghost" @click="openGenerate">{{ t('host.generateKey') }}</button>
-            <button class="ghost" @click="importKey">{{ t('host.importKey') }}</button>
-          </div>
+          <button class="p-close" :title="t('host.cancel')" @click="emit('close')"><Icon name="close" :size="15" /></button>
+        </header>
+
+        <div class="p-body">
+          <!-- ---- 连接 ---- -->
+          <section class="group">
+            <h3>{{ t('host.secConn') }}</h3>
+            <div class="card">
+              <div class="row">
+                <label class="r-label" for="he-host">{{ t('host.host') }}</label>
+                <input
+                  id="he-host"
+                  v-model="form.host"
+                  class="r-input mono"
+                  :placeholder="t('host.hostPh')"
+                  spellcheck="false"
+                  @paste="onHostPaste"
+                  @blur="splitHostInput"
+                />
+                <span class="port">
+                  <label class="colon" for="he-port">:</label>
+                  <input id="he-port" v-model.number="form.port" class="r-input mono port-in" type="number" min="1" max="65535" :aria-label="t('host.port')" />
+                </span>
+              </div>
+              <label class="row">
+                <span class="r-label">{{ t('host.username') }}</span>
+                <input v-model="form.username" class="r-input mono" :placeholder="t('host.usernamePh')" spellcheck="false" />
+              </label>
+              <div class="row">
+                <span class="r-label">{{ t('host.auth') }}</span>
+                <div class="seg">
+                  <button
+                    v-for="a in (['password', 'key', 'agent'] as AuthMethod[])"
+                    :key="a"
+                    type="button"
+                    :class="{ on: form.auth === a }"
+                    @click="form.auth = a"
+                  >
+                    {{ authLabels[a] }}
+                  </button>
+                </div>
+              </div>
+
+              <label v-if="form.auth === 'password'" class="row">
+                <span class="r-label">{{ t('host.password') }}</span>
+                <input
+                  v-model="password"
+                  class="r-input"
+                  type="password"
+                  :placeholder="host?.hasSavedPassword ? t('host.passwordSaved') : t('host.passwordAsk')"
+                />
+              </label>
+
+              <template v-else-if="form.auth === 'key'">
+                <div class="row">
+                  <span class="r-label">{{ t('host.privateKey') }}</span>
+                  <div v-if="managedKeys.length" class="r-select">
+                    <select :value="form.keyPath || ''" @change="useKey(($event.target as HTMLSelectElement).value)">
+                      <option value="">{{ t('host.noKey') }}</option>
+                      <option v-for="k in managedKeys" :key="k.id" :value="k.path">{{ keyOptionLabel(k) }}</option>
+                    </select>
+                    <Icon name="chevron-down" :size="14" class="caret" />
+                  </div>
+                  <button v-else type="button" class="r-pick" :title="form.keyPath || t('host.browse')" @click="pickKey">
+                    <span :class="{ dim: !form.keyPath }">{{ form.keyPath || t('host.noKey') }}</span>
+                  </button>
+                  <div class="r-actions">
+                    <button v-if="!managedKeys.length" type="button" class="link" @click="pickKey">{{ t('host.browse') }}</button>
+                    <button type="button" class="link" @click="openGenerate">{{ t('host.generateKey') }}</button>
+                    <button type="button" class="link" @click="importKey">{{ t('host.importKey') }}</button>
+                  </div>
+                </div>
+                <label class="row">
+                  <span class="r-label">{{ t('host.passphrase') }}</span>
+                  <input
+                    v-model="passphrase"
+                    class="r-input"
+                    type="password"
+                    :placeholder="host?.hasSavedPassphrase ? t('host.passphraseSaved') : t('host.passphraseAsk')"
+                  />
+                </label>
+                <template v-if="managedKeys.length">
+                  <button type="button" class="row disclosure" @click="sections.keys = !sections.keys">
+                    <span class="r-label wide">{{ t('host.manageKeys') }}</span>
+                    <span class="r-summary">{{ managedKeys.length }}</span>
+                    <Icon name="chevron-right" :size="14" class="chev" :class="{ open: sections.keys }" />
+                  </button>
+                  <div v-if="sections.keys" class="sub">
+                    <div v-for="k in managedKeys" :key="k.id" class="key-item">
+                      <span class="key-name" :title="k.fingerprint">{{ k.name }}</span>
+                      <span v-if="k.type" class="chip">{{ k.type }}</span>
+                      <button type="button" class="icon-x" :title="t('host.deleteKey')" @click="deleteKey(k)"><Icon name="trash" :size="13" /></button>
+                    </div>
+                  </div>
+                </template>
+              </template>
+
+              <div v-else class="row note">{{ t('host.agentNote') }}</div>
+            </div>
+          </section>
+
+          <!-- ---- 整理 ---- -->
+          <section class="group">
+            <h3>{{ t('host.secOrganize') }}</h3>
+            <div class="card">
+              <label class="row">
+                <span class="r-label">{{ t('host.group') }}</span>
+                <input v-model="form.group" class="r-input" :placeholder="t('host.groupPh')" spellcheck="false" />
+              </label>
+              <div class="row" @click.self="tagInputEl?.focus()">
+                <label class="r-label" for="he-tags">{{ t('host.tags') }}</label>
+                <span class="tag-box" @click.self="tagInputEl?.focus()">
+                  <span v-for="(tg, i) in form.tags" :key="tg" class="chip">
+                    {{ tg }}<button type="button" :title="t('fw.remove')" @click="form.tags.splice(i, 1)"><Icon name="close" :size="9" /></button>
+                  </span>
+                  <input
+                    id="he-tags"
+                    ref="tagInputEl"
+                    v-model="tagDraft"
+                    :placeholder="form.tags.length ? '' : t('host.tagsPh')"
+                    spellcheck="false"
+                    @keydown="onTagKey"
+                    @blur="commitTag"
+                  />
+                </span>
+              </div>
+              <div class="row">
+                <span class="r-label">{{ t('host.color') }}</span>
+                <div class="swatches">
+                  <button type="button" class="swatch none" :class="{ on: !form.color }" :title="t('host.colorNone')" @click="form.color = ''" />
+                  <button
+                    v-for="c in COLORS"
+                    :key="c"
+                    type="button"
+                    class="swatch"
+                    :class="{ on: form.color === c }"
+                    :style="{ '--c': c }"
+                    :title="c"
+                    :aria-label="c"
+                    @click="form.color = c"
+                  />
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- ---- 更多选项: one row each, opened in place ---- -->
+          <section class="group">
+            <h3>{{ t('host.secMore') }}</h3>
+            <div class="card">
+              <div class="row" :title="t('host.jumpHint')">
+                <span class="r-label wide">{{ t('host.jump') }}</span>
+                <div class="r-select end">
+                  <select v-model="form.jumpHostId">
+                    <option value="">{{ t('host.jumpNone') }}</option>
+                    <option v-for="j in jumpCandidates" :key="j.id" :value="j.id">{{ j.label }} · {{ j.username }}@{{ j.host }}</option>
+                  </select>
+                  <Icon name="chevron-down" :size="14" class="caret" />
+                </div>
+              </div>
+
+              <button type="button" class="row disclosure" @click="sections.proxy = !sections.proxy">
+                <span class="r-label wide">{{ t('host.proxy') }}</span>
+                <span class="r-summary">{{ proxySummary }}</span>
+                <Icon name="chevron-right" :size="14" class="chev" :class="{ open: sections.proxy }" />
+              </button>
+              <div v-if="sections.proxy" class="sub">
+                <p class="sub-hint">{{ t('host.proxyHint') }}</p>
+                <label class="toggle-line">
+                  <span>{{ t('host.proxyOn') }}</span>
+                  <input v-model="form.proxyOn" type="checkbox" class="switch" />
+                </label>
+                <template v-if="form.proxyOn">
+                  <div class="sub-grid">
+                    <div class="seg small">
+                      <button type="button" :class="{ on: form.proxyType === 'socks5' }" @click="form.proxyType = 'socks5'">SOCKS5</button>
+                      <button type="button" :class="{ on: form.proxyType === 'http' }" @click="form.proxyType = 'http'">HTTP</button>
+                    </div>
+                    <input v-model="form.proxyHost" class="box mono grow" :placeholder="t('host.proxyHostPh')" spellcheck="false" />
+                    <input v-model.number="form.proxyPort" class="box mono port-box" type="number" min="1" max="65535" :placeholder="t('host.proxyPortPh')" />
+                  </div>
+                  <div class="sub-grid">
+                    <input v-model="form.proxyUser" class="box grow" :placeholder="t('host.proxyUserPh')" autocomplete="off" />
+                    <input v-model="form.proxyPass" class="box grow" type="password" :placeholder="t('host.proxyPassPh')" autocomplete="off" />
+                  </div>
+                </template>
+              </div>
+
+              <button type="button" class="row disclosure" @click="sections.forwards = !sections.forwards">
+                <span class="r-label wide">{{ t('nav.forwards') }}</span>
+                <span class="r-summary">{{ form.forwards.length ? t('host.fwCount', { n: form.forwards.length }) : t('host.none') }}</span>
+                <Icon name="chevron-right" :size="14" class="chev" :class="{ open: sections.forwards }" />
+              </button>
+              <div v-if="sections.forwards" class="sub">
+                <p class="sub-hint">{{ t('host.fwHint') }}</p>
+                <div v-for="(f, i) in form.forwards" :key="i" class="sub-grid">
+                  <div class="r-select box-select">
+                    <select v-model="f.mode">
+                      <option value="local">{{ t('host.fwLocalMode') }}</option>
+                      <option value="remote">{{ t('host.fwRemoteMode') }}</option>
+                      <option value="dynamic">{{ t('host.fwDynamicMode') }}</option>
+                    </select>
+                    <Icon name="chevron-down" :size="13" class="caret" />
+                  </div>
+                  <input v-model.number="f.localPort" class="box mono port-box" type="number" min="1" max="65535" :placeholder="t('host.fwListen')" />
+                  <template v-if="f.mode !== 'dynamic'">
+                    <input v-model="f.host" class="box mono grow" :placeholder="f.mode === 'remote' ? t('host.fwLocalTarget') : t('host.fwRemoteHost')" spellcheck="false" />
+                    <input v-model.number="f.remotePort" class="box mono port-box" type="number" min="1" max="65535" :placeholder="t('host.fwTarget')" />
+                  </template>
+                  <span v-else class="grow" />
+                  <button type="button" class="icon-x" :title="t('fw.remove')" @click="removeForward(i)"><Icon name="close" :size="13" /></button>
+                </div>
+                <button type="button" class="add-line" @click="addForward">{{ t('set.gen.addForward') }}</button>
+              </div>
+
+              <button type="button" class="row disclosure" @click="sections.onConnect = !sections.onConnect">
+                <span class="r-label wide">{{ t('host.onConnect') }}</span>
+                <span class="r-summary mono">{{ onConnectSummary }}</span>
+                <Icon name="chevron-right" :size="14" class="chev" :class="{ open: sections.onConnect }" />
+              </button>
+              <div v-if="sections.onConnect" class="sub">
+                <p class="sub-hint">{{ t('host.onConnectHint') }}</p>
+                <textarea v-model="form.onConnect" class="box mono ta" :placeholder="t('host.onConnectPh')" rows="3" spellcheck="false" />
+                <label class="toggle-line">
+                  <span>{{ t('host.onConnectDelay') }}</span>
+                  <input v-model.number="form.onConnectDelayMs" class="box mono port-box" type="number" min="0" max="30000" step="100" :placeholder="t('host.onConnectDelayPh')" />
+                </label>
+              </div>
+
+              <button type="button" class="row disclosure" @click="sections.appearance = !sections.appearance">
+                <span class="r-label wide">{{ t('host.appearance') }}</span>
+                <span class="r-summary">{{ appearanceSummary }}</span>
+                <Icon name="chevron-right" :size="14" class="chev" :class="{ open: sections.appearance }" />
+              </button>
+              <div v-if="sections.appearance" class="sub">
+                <div class="sub-grid">
+                  <div class="r-select box-select grow">
+                    <select v-model="form.terminalTheme">
+                      <option value="">{{ t('host.termThemeSystem') }}</option>
+                      <option v-for="p in PRESETS" :key="p.id" :value="p.id">{{ p.label }}</option>
+                    </select>
+                    <Icon name="chevron-down" :size="13" class="caret" />
+                  </div>
+                  <input v-model="form.terminalFontFamily" class="box grow" :placeholder="t('host.termFontPh')" spellcheck="false" />
+                </div>
+              </div>
+
+              <label class="row">
+                <span class="r-label wide">{{ t('host.agentForward') }}</span>
+                <input v-model="form.agentForward" type="checkbox" class="switch" />
+              </label>
+            </div>
+          </section>
         </div>
-        <label class="field">
-          <span>{{ t('host.passphrase') }}</span>
-          <input
-            v-model="passphrase"
-            type="password"
-            :placeholder="host?.hasSavedPassphrase ? t('host.passphraseSaved') : t('host.passphraseAsk')"
-          />
-        </label>
-        <div v-if="managedKeys.length" class="keylist">
-          <div v-for="k in managedKeys" :key="k.id" class="keyitem">
-            <span class="keyname" :title="k.fingerprint">{{ k.name }}</span>
-            <span v-if="k.type" class="keytype">{{ k.type }}</span>
-            <button class="ghost del" :title="t('host.deleteKey')" @click="deleteKey(k)">{{ t('host.delete') }}</button>
-          </div>
-        </div>
-      </template>
 
-      <p v-else class="agent-note">{{ t('host.agentNote') }}</p>
+        <footer class="p-foot">
+          <button v-if="host" type="button" class="btn btn-danger" @click="remove">{{ t('host.delete') }}</button>
+          <span class="spacer" />
+          <button type="button" class="btn" @click="emit('close')">{{ t('host.cancel') }}</button>
+          <button type="button" class="btn btn-primary" :disabled="!canSave()" @click="save">{{ t('host.save') }}</button>
+        </footer>
 
-      <div class="actions">
-        <button v-if="host" class="danger" @click="remove">{{ t('host.delete') }}</button>
-        <div class="spacer" />
-        <button class="ghost" @click="emit('close')">{{ t('host.cancel') }}</button>
-        <button class="primary" :disabled="!canSave()" @click="save">{{ t('host.save') }}</button>
-      </div>
-
-      <div v-if="keyModal.open" class="overlay key-modal" @mousedown.self="keyModal.open = false">
-        <div class="editor keygen" @keydown.esc.stop="keyModal.open = false">
-          <div class="head">{{ t('host.generateKey') }}</div>
-          <label class="field">
-            <span>{{ t('host.keyName') }}</span>
-            <input v-model="keyModal.name" :placeholder="t('host.keyNamePh')" autofocus @keydown.enter.stop.prevent="generateKey" />
-          </label>
-          <div class="field">
-            <span>{{ t('host.keyType') }}</span>
-            <div class="authseg">
-              <button v-for="ty in ['ed25519', 'rsa', 'ecdsa']" :key="ty" :class="{ on: keyModal.type === ty }" @click="keyModal.type = ty">{{ ty }}</button>
+        <!-- Generate a key: a small sheet over the panel. -->
+        <div v-if="keyModal.open" class="key-layer" @mousedown.self="closeKeySheet">
+          <div class="key-sheet" @keydown.esc.stop="closeKeySheet">
+            <h3>{{ t('host.generateKey') }}</h3>
+            <div class="card">
+              <label class="row">
+                <span class="r-label">{{ t('host.keyName') }}</span>
+                <input ref="keyNameEl" v-model="keyModal.name" class="r-input" :placeholder="t('host.keyNamePh')" @keydown.enter.stop.prevent="generateKey" />
+              </label>
+              <div class="row">
+                <span class="r-label">{{ t('host.keyType') }}</span>
+                <div class="seg">
+                  <button v-for="ty in ['ed25519', 'rsa', 'ecdsa']" :key="ty" type="button" :class="{ on: keyModal.type === ty }" @click="keyModal.type = ty">{{ ty }}</button>
+                </div>
+              </div>
+              <label class="row">
+                <span class="r-label">{{ t('host.passphrase') }}</span>
+                <input v-model="keyModal.passphrase" class="r-input" type="password" :placeholder="t('host.passphraseAsk')" @keydown.enter.stop.prevent="generateKey" />
+              </label>
+            </div>
+            <p v-if="keyModal.error" class="err">{{ keyModal.error }}</p>
+            <div class="key-actions">
+              <button type="button" class="btn" @click="closeKeySheet">{{ t('host.cancel') }}</button>
+              <button type="button" class="btn btn-primary" @click="generateKey">{{ t('host.save') }}</button>
             </div>
           </div>
-          <label class="field">
-            <span>{{ t('host.passphrase') }}</span>
-            <input v-model="keyModal.passphrase" type="password" :placeholder="t('host.passphraseAsk')" @keydown.enter.stop.prevent="generateKey" />
-          </label>
-          <p v-if="keyModal.error" class="err">{{ keyModal.error }}</p>
-          <div class="actions">
-            <div class="spacer" />
-            <button class="ghost" @click="keyModal.open = false">{{ t('host.cancel') }}</button>
-            <button class="primary" @click="generateKey">{{ t('host.save') }}</button>
-          </div>
         </div>
-      </div>
+      </aside>
     </div>
-  </div>
+  </Transition>
 </template>
 
 <style scoped>
-.overlay {
+/* A sheet from the right: the host list stays in view behind it. Grouped
+   rows (label left, control right, hairline between) — the same card language
+   as the 连接 page. */
+.layer {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.4);
-  backdrop-filter: blur(2px);
-  display: flex;
-  justify-content: center;
-  align-items: flex-start;
-  padding-top: 10vh;
   z-index: 110;
+  display: flex;
+  justify-content: flex-end;
+  background: rgba(0, 0, 0, 0.32);
 }
-.editor {
-  width: min(460px, 92vw);
-  max-height: 82vh;  overflow-y: auto;
-  background-color: color-mix(in srgb, var(--bg-elev) 92%, transparent);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow), 0 0 0 1px rgba(255, 255, 255, 0.04) inset;
-  padding: 18px;
+.panel {
+  position: relative;
   display: flex;
   flex-direction: column;
-  gap: 13px;
-  animation: pop-in 0.16s cubic-bezier(0.2, 0.8, 0.3, 1);
+  width: min(520px, calc(100vw - 64px));
+  height: 100%;
+  background: var(--bg);
+  border-left: 1px solid var(--border);
+  box-shadow: -24px 0 60px -30px rgba(0, 0, 0, 0.55);
 }
-.head {
-  font-size: 15px;
+.sheet-enter-active,
+.sheet-leave-active {
+  transition: opacity 0.22s var(--ease);
+}
+.sheet-enter-active .panel,
+.sheet-leave-active .panel {
+  transition: transform 0.22s var(--ease);
+}
+.sheet-enter-from,
+.sheet-leave-to {
+  opacity: 0;
+}
+.sheet-enter-from .panel,
+.sheet-leave-to .panel {
+  transform: translateX(28px);
+}
+
+/* ---- Header ---- */
+.p-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 22px 24px 18px;
+}
+.p-title {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.p-kicker {
+  font-size: 12px;
+  color: var(--text-faint);
+}
+.p-name {
+  width: 100%;
+  padding: 0;
+  font-size: 20px;
+  font-weight: 650;
+  color: var(--text);
+  background: none;
+  border: none;
+  outline: none;
+}
+.p-name::placeholder {
+  color: var(--text-faint);
   font-weight: 600;
 }
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.field > span {
-  font-size: 11.5px;
-  color: var(--text-dim);
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-}
-.field input:not([type='checkbox']) {
-  height: 34px;
-  padding: 0 11px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  outline: none;
-  font-size: 13px;
-}
-.field input:not([type='checkbox']):focus {
-  border-color: var(--accent);
-}
-.onconnect-ta {
-  min-height: 68px;
-  padding: 9px 11px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  outline: none;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  line-height: 1.5;
-  resize: vertical;
-}
-.onconnect-ta:focus {
-  border-color: var(--accent);
-}
-.onconnect-delay {
-  width: 120px;
-}
-/* Custom checkbox — the native control would render as a stark box on the
-   dark surface; draw a small accent square with a white tick instead. */
-.field input[type='checkbox'] {
-  appearance: none;
-  -webkit-appearance: none;
-  width: 16px;
-  height: 16px;
+.p-close {
   flex: none;
-  margin: 0;
-  background: var(--bg);
-  border: 1px solid var(--border-strong);
-  border-radius: 4px;
-  cursor: pointer;
-  position: relative;
-  transition: background 0.12s, border-color 0.12s;
-}
-.field input[type='checkbox']:hover {
-  border-color: var(--text-dim);
-}
-.field input[type='checkbox']:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-.field input[type='checkbox']:checked {
-  background: var(--accent);
-  border-color: var(--accent);
-}
-.field input[type='checkbox']:checked::after {
-  content: '';
-  position: absolute;
-  left: 4px;
-  top: 1px;
-  width: 5px;
-  height: 9px;
-  border: solid #fff;
-  border-width: 0 2px 2px 0;
-  transform: rotate(45deg);
-}
-.field.check {
   display: flex;
-  flex-direction: row;
   align-items: center;
-  gap: 9px;
-}
-.field.check .check-label {
-  font-size: 13px;
-  color: var(--text);
-  text-transform: none;
-  letter-spacing: 0;
-}
-/* Advanced options are tucked behind a disclosure so the default form stays
-   minimal; the two add-ons (agent forwarding, startup command) only appear on
-   demand. */
-.adv-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  align-self: flex-start;
-  padding: 3px 6px 3px 2px;
-  font-size: 12px;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--r-pill);
   color: var(--text-dim);
-  border-radius: var(--radius-sm);
-  transition: color 0.12s, background 0.12s, transform 0.15s;
+  transition: background 0.16s var(--ease), color 0.16s var(--ease);
 }
-.adv-toggle:hover {
+.p-close:hover {
+  background: var(--hover);
   color: var(--text);
 }
-.adv-toggle .chev {
-  transition: transform 0.16s ease;
-}
-.adv-toggle .chev.open {
-  transform: rotate(90deg);
-}
-.adv-body {
+
+/* ---- Body ---- */
+.p-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 2px 24px 24px;
   display: flex;
   flex-direction: column;
-  gap: 13px;
+  gap: 24px;
 }
-/* Hide the native (light-colored) number spinner on the port field. */
-.field input[type='number'] {
-  -moz-appearance: textfield;
-  appearance: textfield;
-}.field input[type='number']::-webkit-inner-spin-button,
-.field input[type='number']::-webkit-outer-spin-button {
-  -webkit-appearance: none;
-  margin: 0;
+.group h3,
+.key-sheet h3 {
+  margin: 0 0 8px 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-faint);
 }
-.grid {
+.card {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  overflow: hidden;
+}
+.row {
   display: flex;
-  gap: 10px;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 46px;
+  padding: 6px 16px;
+  text-align: left;
+  font-size: 13px;
+  color: var(--text);
 }
-.grow {
+.row + .row,
+.sub + .row,
+.row + .sub {
+  border-top: 1px solid var(--border);
+}
+.r-label {
+  flex: none;
+  width: 84px;
+  color: var(--text-dim);
+}
+.r-label.wide {
   flex: 1;
+  width: auto;
+  color: var(--text);
+}
+/* Borderless field filling the rest of the row; the row is the frame. */
+.r-input {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  padding: 0;
+  font-size: 13px;
+  color: var(--text);
+  background: none;
+  border: none;
+  outline: none;
+}
+.mono {
+  font-family: var(--font-mono);
+}
+.row:focus-within:not(.disclosure) {
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
 }
 .port {
-  width: 84px;
-}
-.seg {
+  flex: none;
   display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-left: 10px;
+  border-left: 1px solid var(--border);
+}
+.colon {
+  color: var(--text-faint);
+}
+.port-in {
+  width: 56px;
+  flex: none;
+}
+input[type='number'] {
+  -moz-appearance: textfield;
+}
+input[type='number']::-webkit-outer-spin-button,
+input[type='number']::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* Segmented control (compact → rounded rectangle; thumb concentric 8 − 2). */
+.seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  margin-left: auto;
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: 3px;
-  gap: 3px;
 }
 .seg button {
-  flex: 1;
-  height: 28px;
-  border-radius: 5px;
+  height: 26px;
+  padding: 0 12px;
+  border-radius: 6px;
   font-size: 12.5px;
   color: var(--text-dim);
-  text-transform: capitalize;
+  transition: background 0.16s var(--ease), color 0.16s var(--ease);
+}
+.seg button:hover {
+  color: var(--text);
 }
 .seg button.on {
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-.keyrow {
-  display: flex;
-  gap: 8px;
-}
-.keyrow input {
-  flex: 1;
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-}
-.keyselect {
-  flex: 1;
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  background: var(--bg-2, #17191e);
   color: var(--text);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 6px;
-  padding: 6px 8px;
+  background: var(--thumb);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
 }
-.keylist {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-top: 6px;
-  max-height: 120px;
-  overflow: auto;
+.seg.small button {
+  height: 28px;
 }
-.keyitem {
+.row .seg {
+  margin-left: 0;
+}
+
+/* Inline select: borderless, caret on the right. */
+.r-select {
+  position: relative;
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 11px;
-  padding: 4px 6px;
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.03);
 }
-.keyname {
+.r-select select {
+  width: 100%;
+  height: 32px;
+  padding: 0 22px 0 0;
+  font-size: 13px;
+  color: var(--text);
+  background: none;
+  border: none;
+  outline: none;
+  appearance: none;
+  cursor: pointer;
+  text-overflow: ellipsis;
+}
+.r-select .caret {
+  position: absolute;
+  right: 0;
+  color: var(--text-faint);
+  pointer-events: none;
+}
+/* A select standing in for a row's value: right-aligned like the summaries. */
+.r-select.end {
+  flex: 0 1 auto;
+  max-width: 62%;
+}
+.r-select.end select {
+  text-align: right;
+  text-align-last: right;
+  color: var(--text-dim);
+}
+.r-pick {
   flex: 1;
+  min-width: 0;
+  height: 32px;
+  text-align: left;
+  font-size: 12.5px;
+  font-family: var(--font-mono);
+  color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--text);
 }
-.keytype {
-  color: var(--text-dim);
+.r-pick .dim,
+.dim {
+  color: var(--text-faint);
+  font-family: inherit;
 }
-.keyitem .del {
-  font-size: 11px;
-  padding: 2px 6px;
-}
-.key-modal {
-  align-items: center;
-  backdrop-filter: blur(3px);
-}
-.keygen .field {
-  margin-top: 8px;
-}
-.authseg {
+.r-actions {
+  flex: none;
   display: flex;
-  gap: 6px;
+  gap: 2px;
 }
-.authseg button {
-  flex: 1;
-  padding: 6px 4px;
-  font-family: var(--font-mono);
-  font-size: 12px;
-}
-.authseg button.on {
-  border-color: var(--accent);
+.link {
+  height: 26px;
+  padding: 0 8px;
+  border-radius: var(--r-pill);
+  font-size: 12.5px;
   color: var(--accent);
+  transition: background 0.16s var(--ease);
 }
-.err {
-  color: var(--danger, #ff6b6b);
-  font-size: 11px;
-  margin: 4px 0;
-}.agent-note {
-  font-size: 12px;
+.link:hover {
+  background: var(--accent-soft);
+}
+.note {
+  font-size: 12.5px;
   color: var(--text-dim);
 }
-.actions {
+
+/* Disclosure rows: summary + chevron, the detail opens underneath. */
+.disclosure {
+  cursor: pointer;
+  transition: background 0.16s var(--ease);
+}
+.disclosure:hover {
+  background: var(--hover);
+}
+.r-summary {
+  flex: none;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  color: var(--text-faint);
+}
+.chev {
+  flex: none;
+  color: var(--text-faint);
+  transition: transform 0.18s var(--ease);
+}
+.chev.open {
+  transform: rotate(90deg);
+}
+.sub {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 14px 12px 16px;
+  background: color-mix(in srgb, var(--bg) 55%, var(--bg-elev));
+}
+.sub-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+.panel:focus {
+  outline: none;
+}
+.sub-grid {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 4px;
+}
+.grow {
+  flex: 1;
+  min-width: 0;
+}
+/* Boxed fields for the denser editors inside a disclosure. */
+.box {
+  height: 32px;
+  padding: 0 10px;
+  font-size: 12.5px;
+  color: var(--text);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  outline: none;
+  transition: border-color 0.16s var(--ease);
+}
+.box:focus {
+  border-color: var(--accent);
+}
+.port-box {
+  width: 78px;
+  flex: none;
+}
+.ta {
+  width: 100%;
+  height: auto;
+  min-height: 68px;
+  padding: 8px 10px;
+  line-height: 1.5;
+  resize: vertical;
+}
+.box-select {
+  flex: none;
+  width: 108px;
+  height: 32px;
+  padding: 0 8px 0 10px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.box-select.grow {
+  flex: 1;
+  width: auto;
+}
+.box-select select {
+  font-size: 12.5px;
+}
+.box-select .caret {
+  right: 8px;
+}
+.toggle-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+}
+.add-line {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: var(--r-pill);
+  font-size: 12.5px;
+  color: var(--accent);
+  transition: background 0.16s var(--ease);
+}
+.add-line:hover {
+  background: var(--accent-soft);
+}
+.icon-x {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-pill);
+  color: var(--text-faint);
+  transition: background 0.16s var(--ease), color 0.16s var(--ease);
+}
+.icon-x:hover {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
+/* Tags */
+.tag-box {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 0;
+}
+.tag-box input {
+  flex: 1;
+  min-width: 80px;
+  height: 26px;
+  padding: 0;
+  font-size: 13px;
+  color: var(--text);
+  background: none;
+  border: none;
+  outline: none;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 4px 0 9px;
+  font-size: 12px;
+  line-height: 22px;
+  color: var(--text-dim);
+  background: var(--hover);
+  border-radius: var(--r-pill);
+}
+.chip button {
+  display: flex;
+  padding: 3px;
+  border-radius: var(--r-pill);
+  color: var(--text-faint);
+}
+.chip button:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+.key-item .chip {
+  padding: 0 9px;
+}
+
+/* Colour swatches */
+.swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 0;
+}
+.swatch {
+  width: 18px;
+  height: 18px;
+  border-radius: var(--r-pill);
+  background: var(--c);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15);
+  transition: transform 0.12s var(--ease), box-shadow 0.16s var(--ease);
+}
+.swatch:hover {
+  transform: scale(1.12);
+}
+.swatch.on {
+  box-shadow: 0 0 0 2px var(--bg-elev), 0 0 0 4px var(--c, var(--text-dim));
+}
+.swatch.none {
+  --c: var(--text-faint);
+  background:
+    linear-gradient(135deg, transparent 45%, var(--danger) 45%, var(--danger) 55%, transparent 55%),
+    var(--bg);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+.swatch.none.on {
+  box-shadow: inset 0 0 0 1px var(--border-strong), 0 0 0 2px var(--bg-elev), 0 0 0 4px var(--text-dim);
+}
+
+/* Switch (a styled checkbox) */
+.switch {
+  flex: none;
+  position: relative;
+  width: 36px;
+  height: 22px;
+  margin: 0;
+  border-radius: var(--r-pill);
+  background: var(--border-strong);
+  appearance: none;
+  cursor: pointer;
+  transition: background 0.18s var(--ease);
+}
+.switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  transition: transform 0.18s var(--ease);
+}
+.switch:checked {
+  background: var(--accent);
+}
+.switch:checked::after {
+  transform: translateX(14px);
+}
+.switch:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Managed keys */
+.key-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+}
+.key-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- Footer ---- */
+.p-foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 24px;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
 }
 .spacer {
   flex: 1;
 }
-button.ghost,
-button.primary,
-button.danger {
-  height: 32px;
-  padding: 0 14px;
-  border-radius: var(--radius-sm);
-  font-size: 13px;
-}
-button.ghost {
-  color: var(--text-dim);
-  border: 1px solid var(--border);
-}
-button.ghost:hover {
-  background: var(--bg-elev-2);
-}
-button.primary {
-  background: var(--accent);
-  color: #fff;
-  font-weight: 500;
-}
-button.primary:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-button.danger {
-  color: var(--danger);
-  border: 1px solid transparent;
-}
-button.danger:hover {
-  background: rgba(255, 107, 107, 0.12);
-}
-.hint {
-  font-size: 11px;
-  color: var(--text-faint);
-  line-height: 1.4;
-}
-.select-wrap {
-  position: relative;
-  flex: 1;
-  min-width: 0;
-}
-.select-in {
-  width: 100%;
-  height: 34px;
-  padding: 0 32px 0 11px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color: var(--text);
-  font-size: 12.5px;
-  outline: none;
-  appearance: none;
-  -webkit-appearance: none;
-  cursor: pointer;
-}
-.select-in:focus {
-  border-color: var(--accent);
-}
-.select-caret {
-  position: absolute;
-  right: 10px;
-  top: 50%;
-  transform: translateY(-50%);
-  color: var(--text-dim);
-  pointer-events: none;
-}
-.mini {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin-left: 8px;
-  padding: 1px 7px;
-  border-radius: 5px;
-  font-size: 11px;
-  color: var(--accent);
-  background: var(--accent-soft);
-}
-.mini:hover {
-  background: var(--accent);
-  color: #fff;
-}
-.mini.danger {
-  color: var(--danger);
-  background: transparent;
-}
-.mini.danger:hover {
-  background: rgba(255, 107, 107, 0.12);
-}
-.fw-row {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-}
-.fw-row .fw-mode {
-  flex: none;
-  width: 100px;
-}
-.fw-row .fw-mode .select-in {
-  height: 30px;
-}
-.fw-row input {
-  min-width: 0;
-  height: 30px;
-}
-.fw-row input[type='number'] {
-  width: 84px;
-  flex: none;
-}
-.proxy-row {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  margin-top: 6px;
-}
-.proxy-row .fw-mode {
-  flex: none;
-  width: 100px;
-}
-.proxy-row .fw-mode .select-in {
-  height: 30px;
-}
-.proxy-row input {
-  min-width: 0;
-  height: 30px;
-  flex: 1;
-}
-.proxy-row input[type='number'] {
-  width: 84px;
-  flex: none;
-}
-.color-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
-}
-.color-row .swatch {
-  width: 24px;
-  height: 24px;
-  border-radius: 6px;
-  border: 2px solid transparent;
-  cursor: pointer;
-  position: relative;
-}
-.color-row .swatch.on {
-  border-color: var(--text);
-}
-.color-row .swatch.none {
-  border: 1px solid var(--border-strong);
-  background: transparent;
-  color: var(--text-faint);
-}
-.color-row .swatch.none::after {
-  content: '×';
+
+/* ---- Generate-key sheet ---- */
+.key-layer {
   position: absolute;
   inset: 0;
+  z-index: 5;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 13px;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.35);
 }
-.color-row .swatch.custom {
-  width: 26px;
-  height: 26px;
-  overflow: hidden;
+.key-sheet {
+  width: 100%;
+  padding: 18px;
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
 }
-.color-row .swatch.custom input {
-  position: absolute;
-  inset: -4px;
-  width: 34px;
-  height: 34px;
-  opacity: 0;
-  cursor: pointer;
+.err {
+  margin: 10px 4px 0;
+  font-size: 12px;
+  color: var(--danger);
+}
+.key-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
 }
 </style>

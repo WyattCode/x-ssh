@@ -5,6 +5,7 @@ import { useToast } from '../composables/toast'
 import { useConfirm } from '../composables/confirm'
 import { useSnippetVars } from '../composables/snippetVars'
 import { clampConcurrency } from '../../../shared/fsUtils'
+import { decideStatusEvent, shouldReviveOnOnline } from '../lib/reconnect'
 import {
   buildFlatTree,
   buildGrid,
@@ -25,7 +26,9 @@ import type {
   Snippet,
   SftpProgress,
   TransferHistoryItem,
-  DownloadItem
+  DownloadItem,
+  Reachability,
+  ForwardErrorCode
 } from '../../../shared/types'
 
 const { t } = useI18n()
@@ -34,6 +37,46 @@ const { confirm } = useConfirm()
 
 let counter = 0
 const uid = (p: string): string => `${p}-${Date.now()}-${counter++}`
+
+/** A live port-forward failure, in the UI language. */
+function forwardError(r: { error?: string; code?: ForwardErrorCode }): string {
+  switch (r.code) {
+    case 'no-session':
+      return t('app.needLiveSession')
+    case 'bad-port':
+      return t('fw.badPort')
+    case 'already':
+      return t('fw.errAlready')
+    case 'in-use':
+      return t('fw.errInUse')
+    default:
+      return r.error || t('fw.fail')
+  }
+}
+
+// Background online probe: one full round at a time, and results from a round
+// that started before a newer probe of the same host are dropped.
+let probeRoundBusy = false
+let lastFullProbe = 0
+let probeSeq = 0
+const probeSeqOf = new Map<string, number>()
+
+export const forwardKey = (f: HostForward): string => `${f.mode ?? 'local'}:${f.localPort}`
+export interface ForwardRow {
+  rule: HostForward
+  saved: boolean
+  running: boolean
+}
+/** One host's (or one unsaved session's) port forwards on the 端口转发 page. */
+export interface ForwardGroup {
+  id: string
+  host?: Host
+  title: string
+  sub: string
+  /** A connected pane of this host, when there is one. */
+  pane?: Pane
+  rows: ForwardRow[]
+}
 
 /** Recursively unwraps Vue reactive proxies into a plain, cloneable object.
  *  Pinia wraps store arrays/objects (snapshots, transfer history, queues) in
@@ -53,6 +96,54 @@ function toPlain<T>(value: T): T {
 // (double-clicked "reconnect", a manual retry racing a scheduled one) which
 // would otherwise orphan a live SSH session by overwriting its id.
 const inFlight = new Set<string>()
+
+// Sessions the store has deliberately closed (a reconnect replacing a dead
+// session, a tab being torn down). Main still emits their final error/closed
+// event, which would otherwise be attributed to whatever pane now holds that
+// id — or, worse, read as a fresh drop and restart the reconnect loop.
+//
+// Bounded: an id is normally removed when its event arrives, but a session that
+// is gone without a word would accumulate forever. Only the most recent few
+// matter — an event later than that belongs to a session nothing is waiting on.
+const retiredSessions = new Set<string>()
+const RETIRED_KEEP = 64
+
+function retireSession(sessionId: string): void {
+  retiredSessions.add(sessionId)
+  while (retiredSessions.size > RETIRED_KEEP) {
+    const oldest = retiredSessions.values().next().value
+    if (oldest === undefined) break
+    retiredSessions.delete(oldest)
+  }
+}
+
+/**
+ * The current tabs as the persisted shape: layout tree + panes in depth-first
+ * order, with secrets stripped. Shared by `persistTabs` and `saveSnapshot`,
+ * which had grown two identical copies.
+ */
+function serializeTabs(tabs: { title: string; layout: LayoutNode; panes: Pane[]; activePaneId: string }[]): PersistedTab[] {
+  return tabs.map((t) => {
+    const byId = new Map(t.panes.map((p) => [p.id, p]))
+    // A predicate rather than `.filter(p => !!p)`: it drops the panes a stale
+    // layout still refers to and tells the compiler they are gone, so nothing
+    // below needs a non-null assertion.
+    const ordered = collectPaneIds(t.layout)
+      .map((id) => byId.get(id))
+      .filter((p): p is Pane => p !== undefined)
+    return {
+      title: t.title,
+      tree: plainLayout(t.layout),
+      activeIndex: Math.max(0, ordered.findIndex((p) => p.id === t.activePaneId)),
+      panes: ordered.map((p) => {
+        const params = { ...toRaw(p.params) }
+        delete params.password
+        delete params.passphrase
+        return { params, cwd: p.lastSftpPath }
+      })
+    }
+  })
+}
 
 /** A job whose transfer has been cancelled in the main process. */
 function isCancelled(t: Pick<SftpProgress, 'error'>): boolean {
@@ -75,6 +166,12 @@ export interface Pane {
   message?: string
   /** Machine-readable failure code from the last connect attempt. */
   errorCode?: string
+  /** Fingerprint the last host-key rejection reported (to trust on confirm). */
+  hostKey?: string
+  /** Which host a host-key rejection concerns (jump hop — the target's own
+   *  address is already in `params` and needs no copy). */
+  hostKeyHost?: string
+  hostKeyPort?: number
   /** Params used to open the session; retained in-memory for reconnect. */
   params: ConnectParams
   /** Auto-reconnect state (set while retrying after an unexpected drop). */
@@ -136,10 +233,42 @@ export interface DownloadQueueOp {
 
 export type SettingsTab = 'general' | 'terminal' | 'connection' | 'keys' | 'security'
 
+/** The page the left sidebar shows. */
+export type AppPage = 'hosts' | 'terminal' | 'sftp' | 'forwards' | 'settings'
+export type HostsView = 'grid' | 'list'
+export const SIDEBAR_DEFAULT_W = 224
+export const SIDEBAR_MIN_W = 180
+export const SIDEBAR_MAX_W = 360
+export const clampSidebarWidth = (w: number): number =>
+  Math.round(Math.min(SIDEBAR_MAX_W, Math.max(SIDEBAR_MIN_W, w)))
+export type HostsSort = 'recent' | 'name' | 'address'
+
+/** Startup layout from main's launch prefs (read synchronously by the preload),
+ *  so the first frame already has the saved sidebar / view — loading them
+ *  later from settings painted the defaults first and then jumped. */
+const bootPrefs = (typeof window !== 'undefined' ? window.api?.prefs : undefined) ?? {}
+const bootWidth = Number(bootPrefs.sidebarWidth)
+
 interface State {
   hosts: Host[]
   tabs: Tab[]
   activeId: string | null
+  /** Sidebar page. Terminals stay mounted (hidden) on every other page. */
+  page: AppPage
+  /** Where「设置」returns to when toggled off (Ctrl+, twice). */
+  prevPage: AppPage
+  sidebarCollapsed: boolean
+  /** On the 终端 page the sidebar can be hidden entirely (terminal full width);
+   *  remembered, so every session opens the way it was last left. */
+  termSidebarHidden: boolean
+  /** Sidebar width when expanded (dragged by its right edge). */
+  sidebarWidth: number
+  hostsView: HostsView
+  hostsSort: HostsSort
+  /** Background online probe results, by host id (see main/reachability.ts). */
+  reach: Record<string, Reachability>
+  /** Saved host being connected from 打开 SFTP (buttons show busy meanwhile). */
+  sftpConnecting: string
   paletteOpen: boolean
   sftpOpen: boolean
   settingsOpen: boolean
@@ -172,6 +301,8 @@ interface State {
   transferConcurrency: number
   /** Verify each downloaded file's SHA-256 against the remote copy. */
   verifyChecksums: boolean
+  /** Identify hosts' OS in the background (quiet read-only login). */
+  autoDetectOs: boolean
   shellIntegration: boolean
   terminalFontFamily: string
   terminalCursor: CursorStyle
@@ -203,6 +334,10 @@ interface State {
   restorePendingUnlock: boolean
   /** Pre-filled palette query (from a launch CLI/URL target), consumed on open. */
   paletteSeed: string | null
+  /** With paletteSeed: jump straight to the seeded quick connect's password step. */
+  paletteQuick: boolean
+  /** Open the palette on this saved host's password step (no password saved). */
+  palettePasswordFor: string | null
   confirmPaste: boolean
   /** Strip non-printing control characters from pasted text (default on). */
   sanitizePaste: boolean
@@ -245,6 +380,15 @@ export const useSessions = defineStore('sessions', {
     hosts: [],
     tabs: [],
     activeId: null,
+    page: 'hosts',
+    prevPage: 'hosts',
+    sidebarCollapsed: bootPrefs.sidebarCollapsed === true,
+    termSidebarHidden: bootPrefs.termSidebarHidden === true,
+    sidebarWidth: bootWidth > 0 ? clampSidebarWidth(bootWidth) : SIDEBAR_DEFAULT_W,
+    hostsView: bootPrefs.hostsView === 'list' ? 'list' : 'grid',
+    hostsSort: bootPrefs.hostsSort === 'name' || bootPrefs.hostsSort === 'address' ? bootPrefs.hostsSort : 'recent',
+    reach: {},
+    sftpConnecting: '',
     paletteOpen: false,
     sftpOpen: false,
     settingsOpen: false,
@@ -267,6 +411,7 @@ export const useSessions = defineStore('sessions', {
     connectRetries: 6,
     transferConcurrency: 4,
     verifyChecksums: false,
+    autoDetectOs: true,
     shellIntegration: true,
     terminalFontFamily: '',
     terminalCursor: 'bar',
@@ -287,6 +432,8 @@ export const useSessions = defineStore('sessions', {
     lockLocked: false,
     restorePendingUnlock: false,
     paletteSeed: null,
+    paletteQuick: false,
+    palettePasswordFor: null,
     confirmPaste: true,
     sanitizePaste: true,
     copyOnSelect: false,
@@ -307,6 +454,60 @@ export const useSessions = defineStore('sessions', {
   }),
 
   getters: {
+    /** Saved rules per host plus the temporary ones added to any of its live
+     *  sessions, then live sessions that aren't saved hosts. A saved rule is
+     *  "running" while its host has a connected session (main opens saved rules
+     *  on every connect). */
+    forwardGroups(s): ForwardGroup[] {
+      const panesByHost = new Map<string, Pane[]>()
+      const loose: { pane: Pane; title: string }[] = []
+      for (const tab of s.tabs) {
+        for (const p of tab.panes) {
+          if (p.status !== 'connected') continue
+          const hid = p.params.hostId
+          if (hid && s.hosts.some((h) => h.id === hid)) panesByHost.set(hid, [...(panesByHost.get(hid) ?? []), p])
+          else loose.push({ pane: p, title: tab.title })
+        }
+      }
+      const out: ForwardGroup[] = []
+      for (const h of s.hosts) {
+        const panes = panesByHost.get(h.id) ?? []
+        const saved = h.portForwards ?? []
+        const seen = new Set(saved.map(forwardKey))
+        const temp: HostForward[] = []
+        for (const p of panes) {
+          for (const f of p.params.portForwards ?? []) {
+            if (seen.has(forwardKey(f))) continue
+            seen.add(forwardKey(f))
+            temp.push(f)
+          }
+        }
+        if (!saved.length && !temp.length) continue
+        out.push({
+          id: h.id,
+          host: h,
+          title: h.label,
+          sub: `${h.username}@${h.host}${h.port && h.port !== 22 ? ':' + h.port : ''}`,
+          pane: panes[0],
+          rows: [
+            ...saved.map((rule) => ({ rule, saved: true, running: panes.length > 0 })),
+            ...temp.map((rule) => ({ rule, saved: false, running: true }))
+          ]
+        })
+      }
+      for (const { pane, title } of loose) {
+        const temp = pane.params.portForwards ?? []
+        if (!temp.length) continue
+        out.push({
+          id: pane.id,
+          title,
+          sub: `${pane.params.username}@${pane.params.host}`,
+          pane,
+          rows: temp.map((rule) => ({ rule, saved: false, running: true }))
+        })
+      }
+      return out
+    },
     active: (s): Tab | undefined => s.tabs.find((t) => t.id === s.activeId),
     activePane(s): Pane | undefined {
       const t = s.tabs.find((x) => x.id === s.activeId)
@@ -337,13 +538,14 @@ export const useSessions = defineStore('sessions', {
     },
 
     async loadSettings(): Promise<void> {
-      const [editor, ka, ct, cr, tc, vcs, si, ff, cur, thm, rt, ar, rcn, rcw, nt, ns, cp, sp, tq, dq, tfh, abk, abd, abh] = await Promise.all([
+      const [editor, ka, ct, cr, tc, vcs, ados, si, ff, cur, thm, rt, ar, rcn, rcw, nt, ns, cp, sp, tq, dq, tfh, abk, abd, abh] = await Promise.all([
         window.api.settings.get<string>('externalEditor'),
         window.api.settings.get<number>('keepaliveSec'),
         window.api.settings.get<number>('connectTimeoutSec'),
         window.api.settings.get<number>('connectRetries'),
         window.api.settings.get<number>('transferConcurrency'),
         window.api.settings.get<boolean>('verifyChecksums'),
+        window.api.settings.get<boolean>('autoDetectOs'),
         window.api.settings.get<boolean>('shellIntegration'),
         window.api.settings.get<string>('terminalFontFamily'),
         window.api.settings.get<CursorStyle>('terminalCursor'),
@@ -369,6 +571,7 @@ export const useSessions = defineStore('sessions', {
       this.connectRetries = typeof cr === 'number' && cr >= 0 ? cr : 6
       this.transferConcurrency = clampConcurrency(typeof tc === 'number' ? tc : 4, 4)
       this.verifyChecksums = vcs === true
+      this.autoDetectOs = ados !== false
       this.shellIntegration = si !== false
       this.transferQueue = tq ?? []
       this.downloadQueue = dq ?? []
@@ -394,6 +597,25 @@ export const useSessions = defineStore('sessions', {
       this.middleClickPaste = (await window.api.settings.get<boolean>('middleClickPaste')) !== false
       this.rightClickPaste = (await window.api.settings.get<boolean>('rightClickPaste')) === true
       this.confirmClose = (await window.api.settings.get<boolean>('confirmClose')) === true
+      // Sidebar collapsed / width / focus mode and the hosts view + sort start
+      // from the launch prefs in state(), so the first frame is already right.
+      // Re-read here only to catch up after a renderer reload (main reloads once
+      // after a crash, and the launch prefs are from window creation): applied
+      // only when the stored value exists and differs — on a normal launch they
+      // match and nothing moves.
+      const [sc, ts, swRaw, hv, hs] = await Promise.all([
+        window.api.settings.get<boolean>('sidebarCollapsed'),
+        window.api.settings.get<boolean>('termSidebarHidden'),
+        window.api.settings.get<number>('sidebarWidth'),
+        window.api.settings.get<string>('hostsView'),
+        window.api.settings.get<string>('hostsSort')
+      ])
+      if (typeof sc === 'boolean' && sc !== this.sidebarCollapsed) this.sidebarCollapsed = sc
+      if (typeof ts === 'boolean' && ts !== this.termSidebarHidden) this.termSidebarHidden = ts
+      const sw = Number(swRaw)
+      if (sw > 0 && clampSidebarWidth(sw) !== this.sidebarWidth) this.sidebarWidth = clampSidebarWidth(sw)
+      if ((hv === 'grid' || hv === 'list') && hv !== this.hostsView) this.hostsView = hv
+      if ((hs === 'recent' || hs === 'name' || hs === 'address') && hs !== this.hostsSort) this.hostsSort = hs
       this.transferRateKbps =
         (await window.api.settings.get<number>('transferRateKbps')) ?? 0
       this.minimizeToTray = (await window.api.settings.get<boolean>('minimizeToTray')) === true
@@ -417,6 +639,8 @@ export const useSessions = defineStore('sessions', {
     async sendSnippet(snippet: Snippet): Promise<void> {
       const sid = this.activePane?.sshSessionId
       if (!sid) return
+      // Never type into a terminal that isn't on screen.
+      this.setPage('terminal')
       if (snippet.confirm) {
         const ok = await confirm(
           t('snip.confirm', { title: snippet.title })
@@ -465,7 +689,13 @@ export const useSessions = defineStore('sessions', {
     },
 
     async saveSetting(key: string, value: unknown): Promise<void> {
-      await window.api.settings.set(key, toPlain(value))
+      // Main refuses keys outside its allowlist. Swallowing that would recreate
+      // the "interface said it saved but nothing was written" bug class, so log
+      // it loudly instead — a rejected key means the key list is out of date.
+      const r = await window.api.settings.set(key, toPlain(value))
+      if (r && r.ok === false) {
+        console.error(`settings: not saved — main refused key "${key}": ${r.error ?? ''}`)
+      }
     },
 
     /** Registers the global show/hide hotkey ('' = disable). Persists on success. */
@@ -493,11 +723,19 @@ export const useSessions = defineStore('sessions', {
       toast(t('app.networkOnline'), 'success')
       for (const tab of this.tabs) {
         for (const pane of tab.panes) {
-          // Only revive genuinely-dropped sessions (errorCode is unset for a
-          // drop; a never-connected host that failed auth/connect keeps it set),
-          // so a network blip doesn't hammer a host that can't authenticate.
-          const dropped = pane.status === 'error' && !pane.errorCode && !pane.sshSessionId
-          if (dropped && pane.params && this.autoReconnect) {
+          // Only revive genuinely-dropped sessions. A pane whose last attempt
+          // returned a code (bad credentials, changed host key, locked app) is
+          // skipped — but runConnect clears errorCode as a new attempt starts,
+          // so one that has since been retried is eligible again.
+          if (
+            shouldReviveOnOnline({
+              status: pane.status,
+              errorCode: pane.errorCode,
+              sessionId: pane.sshSessionId,
+              autoReconnect: this.autoReconnect
+            }) &&
+            pane.params
+          ) {
             this.cancelReconnect(pane)
             this.scheduleReconnect(pane.id)
           }
@@ -566,25 +804,7 @@ export const useSessions = defineStore('sessions', {
     /** Persists every tab (layout + panes, minus secrets) so it can be restored. */
     persistTabs(): void {
       if (!this.restoreTabs) return
-      const list = this.tabs.map((t) => {
-        // Persist panes in the layout's depth-first order so the tree's indices
-        // line up exactly with the panes column on restore.
-        const ids = collectPaneIds(t.layout)
-        const byId = new Map(t.panes.map((p) => [p.id, p]))
-        const ordered = ids.map((id) => byId.get(id)).filter((p) => !!p)
-        return {
-          title: t.title,
-          tree: plainLayout(t.layout),
-          activeIndex: Math.max(0, ordered.findIndex((p) => p!.id === t.activePaneId)),
-          panes: ordered.map((p) => {
-            const params = { ...toRaw(p!.params) }
-            delete params.password
-            delete params.passphrase
-            return { params, cwd: p!.lastSftpPath }
-          })
-        }
-      })
-      void window.api.settings.set('openTabs', list)
+      void window.api.settings.set('openTabs', serializeTabs(this.tabs))
     },
 
     /** Recreates last session's tabs (layout + splits). If `restoreConnect` is
@@ -823,23 +1043,12 @@ export const useSessions = defineStore('sessions', {
       this.transferPanelOpen = open ?? !this.transferPanelOpen
     },    /** Captures the current tab layout (minus secrets) as a named snapshot. */
     async saveSnapshot(name: string): Promise<void> {
-      const list = this.tabs.map((t) => {
-        const ids = collectPaneIds(t.layout)
-        const byId = new Map(t.panes.map((p) => [p.id, p]))
-        const ordered = ids.map((id) => byId.get(id)).filter((p) => !!p)
-        return {
-          title: t.title,
-          tree: plainLayout(t.layout),
-          activeIndex: Math.max(0, ordered.findIndex((p) => p!.id === t.activePaneId)),
-          panes: ordered.map((p) => {
-            const params = { ...toRaw(p!.params) }
-            delete params.password
-            delete params.passphrase
-            return { params, cwd: p!.lastSftpPath }
-          })
-        }
-      }) as PersistedTab[]
-      const snap: Snapshot = { id: uid('snap'), name, savedAt: Date.now(), tabs: list }
+      const snap: Snapshot = {
+        id: uid('snap'),
+        name,
+        savedAt: Date.now(),
+        tabs: serializeTabs(this.tabs)
+      }
       this.snapshots = [snap, ...this.snapshots].slice(0, 30)
       await window.api.settings.set('snapshots', toPlain(this.snapshots))
     },
@@ -875,12 +1084,121 @@ export const useSessions = defineStore('sessions', {
     togglePalette(open?: boolean): void {
       this.paletteOpen = open ?? !this.paletteOpen
     },
+    /** A saved host needs its password typed: the palette opens right on it,
+     *  instead of empty (where the host had to be found again). */
+    askPasswordFor(host: Host): void {
+      this.palettePasswordFor = host.id
+      this.togglePalette(true)
+    },
     toggleSftp(open?: boolean): void {
       this.sftpOpen = open ?? !this.sftpOpen
     },
+    /** Settings is a sidebar page now; toggling it off goes back to where you were. */
     toggleSettings(open?: boolean, tab?: SettingsTab): void {
       if (tab) this.settingsTab = tab
-      this.settingsOpen = open ?? !this.settingsOpen
+      const want = open ?? this.page !== 'settings'
+      if (want) this.setPage('settings')
+      else if (this.page === 'settings') this.setPage(this.prevPage === 'settings' ? 'hosts' : this.prevPage)
+    },
+    setPage(page: AppPage): void {
+      if (page === this.page) return
+      if (page === 'settings') this.prevPage = this.page
+      this.page = page
+      this.settingsOpen = page === 'settings'
+      this.paletteOpen = false
+    },
+    setSidebarCollapsed(v: boolean): void {
+      this.sidebarCollapsed = v
+      void this.saveSetting('sidebarCollapsed', v)
+    },
+    /** Live while dragging (`persist` false), saved on release. */
+    setSidebarWidth(w: number, persist = true): void {
+      this.sidebarWidth = clampSidebarWidth(w)
+      if (persist) void this.saveSetting('sidebarWidth', this.sidebarWidth)
+    },
+    /** 设置 → 常规 → 重置边栏: default width, expanded, out of 专注模式. */
+    resetSidebar(): void {
+      this.setSidebarWidth(SIDEBAR_DEFAULT_W)
+      this.setSidebarCollapsed(false)
+      this.setTermSidebarHidden(false)
+    },
+    setTermSidebarHidden(v: boolean): void {
+      this.termSidebarHidden = v
+      void this.saveSetting('termSidebarHidden', v)
+    },
+    setHostsView(v: HostsView): void {
+      this.hostsView = v
+      void this.saveSetting('hostsView', v)
+    },
+    setHostsSort(v: HostsSort): void {
+      this.hostsSort = v
+      void this.saveSetting('hostsSort', v)
+    },
+    /** Probes the given saved hosts (all when omitted) and merges the results. */
+    async probeReach(ids?: string[], opts: { maxAge?: number } = {}): Promise<void> {
+      const full = !ids
+      if (full) {
+        // Coming back to 连接 shouldn't knock on every server again.
+        if (probeRoundBusy || Date.now() - lastFullProbe < (opts.maxAge ?? 0)) return
+        probeRoundBusy = true
+        lastFullProbe = Date.now()
+      }
+      const seq = ++probeSeq
+      for (const id of ids ?? this.hosts.map((h) => h.id)) probeSeqOf.set(id, seq)
+      try {
+        const r = await window.api.hosts.probe(ids)
+        const fresh: Record<string, Reachability> = {}
+        for (const [id, v] of Object.entries(r)) if ((probeSeqOf.get(id) ?? 0) <= seq) fresh[id] = v
+        this.reach = { ...this.reach, ...fresh }
+      } catch {
+        /* keep what we had */
+      } finally {
+        if (full) probeRoundBusy = false
+      }
+    },
+    /** 打开 SFTP for a saved host: its live session if there is one, else
+     *  connect in the background and open the page only once it's up — a
+     *  failed connect stays put (its error is already toasted) instead of
+     *  showing some other host's files. */
+    async openSftpFor(host: Host): Promise<void> {
+      const live = this.tabs
+        .flatMap((tab) => tab.panes.map((pane) => ({ tab, pane })))
+        .find((x) => x.pane.status === 'connected' && x.pane.params.hostId === host.id)
+      if (live) {
+        this.setActive(live.tab.id)
+        this.setActivePane(live.tab.id, live.pane.id)
+        this.setPage('sftp')
+        return
+      }
+      if (this.sftpConnecting) return
+      this.sftpConnecting = host.id
+      try {
+        if ((await this.quickConnect(host, { stay: true })) === 'needs-password') {
+          this.askPasswordFor(host)
+          return
+        }
+      } finally {
+        this.sftpConnecting = ''
+      }
+      const tab = [...this.tabs].reverse().find((x) => x.hostId === host.id)
+      const pane = tab?.panes[0]
+      if (tab && pane?.status === 'connected') {
+        this.setActive(tab.id)
+        this.setPage('sftp')
+      }
+    },
+    /** Saves a host's profile fields (tags, forward rules…) without touching its secrets. */
+    async saveHost(host: Host): Promise<void> {
+      this.hosts = await window.api.hosts.save(toPlain(host) as Host)
+    },
+    async removeHost(id: string): Promise<void> {
+      this.hosts = await window.api.hosts.delete(id)
+    },
+    /** A copy under a fresh id. Saved passwords stay with the original (they're
+     *  keyed by id); the copy asks on first connect. */
+    async duplicateHost(host: Host): Promise<void> {
+      const { hasSavedPassword: _p, hasSavedPassphrase: _pp, lastUsedAt: _u, ...rest } = toPlain(host) as Host
+      await this.saveHost({ ...rest, id: uid('host'), label: t('hosts.copyOf', { name: host.label }) })
     },
     toggleHistory(open?: boolean): void {
       this.historyOpen = open ?? !this.historyOpen
@@ -904,22 +1222,31 @@ export const useSessions = defineStore('sessions', {
     /** Opens a port forward on the active session now, and records it on its
      *  pane so the status bar reflects it for the life of the session. */
     async addForward(rule: HostForward): Promise<{ ok: boolean; error?: string }> {
-      const sid = this.activePane?.sshSessionId
-      if (!sid) return { ok: false, error: t('app.needLiveSession') }
+      return this.addForwardTo(this.activePane, rule)
+    },
+    /** Same, on a given pane's session (the 端口转发 page works on any session). */
+    async addForwardTo(pane: Pane | undefined, rule: HostForward): Promise<{ ok: boolean; error?: string }> {
+      const sid = pane?.sshSessionId
+      if (!pane || !sid) return { ok: false, error: t('app.needLiveSession') }
       const r = await window.api.ssh.forwardAdd(sid, rule)
-      if (!r.ok) return r
-      const pane = this.activePane
-      if (pane) pane.params.portForwards = [...(pane.params.portForwards ?? []), rule]
+      if (!r.ok) return { ok: false, error: forwardError(r) }
+      pane.params.portForwards = [...(pane.params.portForwards ?? []), rule]
       this.auditForward(pane, rule)
       return { ok: true }
     },
     /** Stops a port forward on the active session and drops it from its pane. */
     async removeForward(mode: ForwardMode | undefined, localPort: number): Promise<{ ok: boolean; error?: string }> {
-      const sid = this.activePane?.sshSessionId
-      if (!sid) return { ok: false, error: t('app.needLiveSession') }
+      return this.removeForwardFrom(this.activePane, mode, localPort)
+    },
+    async removeForwardFrom(
+      pane: Pane | undefined,
+      mode: ForwardMode | undefined,
+      localPort: number
+    ): Promise<{ ok: boolean; error?: string }> {
+      const sid = pane?.sshSessionId
+      if (!pane || !sid) return { ok: false, error: t('app.needLiveSession') }
       const r = await window.api.ssh.forwardRemove(sid, { mode: mode ?? 'local', localPort })
-      if (!r.ok) return r
-      const pane = this.activePane
+      if (!r.ok) return { ok: false, error: forwardError(r) }
       const mm = mode ?? 'local'
       if (pane?.params.portForwards) {
         pane.params.portForwards = pane.params.portForwards.filter(
@@ -957,13 +1284,16 @@ export const useSessions = defineStore('sessions', {
         if (p) {
           this.activeId = tab.id
           tab.activePaneId = p.id
+          this.setPage('terminal')
           return
         }
       }
     },
 
-    /** Opens a tab (single pane) and connects it. Returns the new tab id. */
-    async openConnection(params: ConnectParams, title: string): Promise<string> {
+    /** Opens a tab (single pane) and connects it. Returns the new tab id.
+     *  Switches to the 终端 page unless `stay` (e.g. connecting from the SFTP page). */
+    async openConnection(params: ConnectParams, title: string, opts: { stay?: boolean } = {}): Promise<string> {
+      if (!opts.stay) this.setPage('terminal')
       const paneId = uid('pane')
       const tab: Tab = {
         id: uid('tab'),
@@ -1065,8 +1395,15 @@ export const useSessions = defineStore('sessions', {
       const found = this.findPane(paneId)
       if (!found) return
       this.cancelReconnect(found.pane)
-      if (found.pane.sshSessionId) {
-        void window.api.ssh.disconnect(found.pane.sshSessionId)
+      // Mark the session as deliberately retired *before* asking main to drop
+      // it. Disconnecting is asynchronous: its `error`/`closed` event can land
+      // after runConnect started, and if it were still attributed to a live
+      // session it would tear down the replacement we just opened. Recording
+      // the id here lets applyEvent recognise the stale event and ignore it.
+      const retiring = found.pane.sshSessionId
+      if (retiring) {
+        retireSession(retiring)
+        void window.api.ssh.disconnect(retiring)
         found.pane.sshSessionId = undefined
       }
       await this.runConnect(paneId)
@@ -1078,6 +1415,12 @@ export const useSessions = defineStore('sessions', {
       if (!found || inFlight.has(paneId)) return // ignore overlapping connects
       found.pane.status = 'connecting'
       found.pane.message = undefined
+      // Clear the previous failure's code as we start. Leaving it set kept
+      // handleNetworkOnline's `!errorCode` guard permanently false for a pane
+      // that had failed once (e.g. with 'locked'), so the automatic revivers
+      // went blind to it even after the cause was gone. The outcome of *this*
+      // attempt is what should decide the state, not the last one's.
+      found.pane.errorCode = undefined
 
       inFlight.add(paneId)
       let result: Awaited<ReturnType<typeof window.api.ssh.connect>>
@@ -1104,6 +1447,11 @@ export const useSessions = defineStore('sessions', {
         live.pane.sshSessionId = result.sessionId
         live.pane.status = 'connected'
         live.pane.errorCode = undefined
+        // A rejected first/changed key may have been confirmed since the error
+        // card was drawn: drop the stale trust payload.
+        live.pane.hostKey = undefined
+        live.pane.hostKeyHost = undefined
+        live.pane.hostKeyPort = undefined
         // A first-ever connection may have just recorded the host key.
         void this.loadKnownHosts()
         // Return to the directory the pane last browsed (on restore / reconnect /
@@ -1122,21 +1470,57 @@ export const useSessions = defineStore('sessions', {
         }
       } else {
         live.pane.status = 'error'
+        // Map the codes main uses to their own wording. Anything unmapped keeps
+        // main's message, which is already user-facing (friendlyError).
+        const keyCode = result.code === 'host_key_unknown' || result.code === 'host_key_changed'
+        // A refused key names the machine it came from: the target, or the
+        // jump host when keyHost differs from the pane's own address.
+        const keyHost = result.keyHost ?? found.pane.params.host
+        const keyPort = result.keyPort ?? (found.pane.params.port || 22)
+        const viaJump = keyCode && keyHost !== found.pane.params.host
+        const keyWhere = `${keyHost}${keyPort !== 22 ? ':' + keyPort : ''}`
         const msg =
           result.code === 'jump_needs_password'
             ? t('app.jumpNeedsPassword')
-            : (result.error ?? t('app.connectFail'))
+            : result.code === 'locked'
+              ? t('app.locked')
+              : result.code === 'host_key_unknown'
+                ? viaJump
+                  ? t('app.keyUnknownJumpMsg', { host: keyWhere })
+                  : t('app.keyUnknownMsg', { host: keyWhere })
+                : result.code === 'host_key_changed'
+                  ? viaJump
+                    ? t('app.keyChangedJumpMsg', { host: keyWhere })
+                    : t('app.keyChangedMsg', { host: keyWhere })
+                  : (result.error ?? t('app.connectFail'))
         live.pane.message = msg
         live.pane.errorCode = result.code
+        // Host-key rejection: stash what the user is being asked to trust —
+        // the presented fingerprint and which host it belongs to (a rejected
+        // jump hop reports itself via keyHost; the target does not need one,
+        // its address is the pane's own). trustAndReconnect uses these to
+        // write the key back to the right entry.
+        if (keyCode) {
+          // All three together, so a key can never be paired with another host.
+          live.pane.hostKey = result.key
+          live.pane.hostKeyHost = keyHost
+          live.pane.hostKeyPort = keyPort
+        }
+        // A locked app is not a connection failure — it needs the unlock screen.
+        // Re-read the lock status so LockScreen (gated on `lockLocked`) appears
+        // even if this pane was started before the app was locked.
+        if (result.code === 'locked') void this.loadLockStatus()
         // Avoid stacking toasts during an auto-reconnect storm (each attempt
         // re-enters runConnect); only shout for the first, user-initiated try.
-        if (!live.pane.reconnectAttempt) toast(msg, 'error')
+        // A refused host key already explains itself on the pane's card
+        // (with the fingerprint); a toast would only repeat it.
+        if (!live.pane.reconnectAttempt && !keyCode) toast(msg, 'error')
       }
     },
 
     /** Connects a saved host directly. Returns 'needs-password' when it must be
      *  finished in the palette (password auth with no stored secret). */
-    async quickConnect(host: Host): Promise<'connected' | 'needs-password'> {
+    async quickConnect(host: Host, opts: { stay?: boolean } = {}): Promise<'connected' | 'needs-password'> {
       if (host.auth === 'password' && !host.hasSavedPassword) return 'needs-password'
       await this.openConnection(
         {
@@ -1150,16 +1534,32 @@ export const useSessions = defineStore('sessions', {
           onConnect: host.onConnect,
           onConnectDelayMs: host.onConnectDelayMs
         },
-        host.label
+        host.label,
+        opts
       )
       return 'connected'
     },
 
-    /** Forgets the stored host key, then reconnects (server was re-installed). */
+    /** Registers the host key the user just confirmed, then reconnects.
+     *  Used for both an unrecognized key (first connect) and a changed one
+     *  (trust the new key, overwriting the stale record). The fingerprint comes
+     *  from the last rejection (result of connect), not from the saved host, so
+     *  it lands on the right entry even when a jump hop is the one rejected. */
     async trustAndReconnect(paneId: string): Promise<void> {
       const found = this.findPane(paneId)
       if (!found) return
-      await window.api.ssh.forgetHostKey(found.pane.params.host, found.pane.params.port || 22)
+      const { hostKey, hostKeyHost, hostKeyPort } = found.pane
+      // Main only accepts the key it just refused for that host:port; with no
+      // fingerprint captured there is nothing to trust — reconnecting shows the
+      // card again with the key the server presents.
+      if (hostKey) {
+        const host = hostKeyHost ?? found.pane.params.host
+        const r = await window.api.ssh.trustHostKey(host, hostKeyPort ?? (found.pane.params.port || 22), hostKey)
+        if (!r?.ok) {
+          await this.reconnect(paneId)
+          return
+        }
+      }
       await this.loadKnownHosts()
       await this.reconnect(paneId)
     },
@@ -1178,37 +1578,42 @@ export const useSessions = defineStore('sessions', {
 
     /** Applies a status event coming from the main process. */
     applyEvent(sessionId: string, status: SessionStatus, message?: string): void {
+      // A session this store retired on purpose (a reconnect replacing it, or its
+      // tab closing). Its trailing event says nothing about whatever pane now holds
+      // that id, and acting on it would cancel the replacement we just opened.
+      if (retiredSessions.delete(sessionId)) return
       const pane = this.paneBySession(sessionId)
       if (!pane) return
-      // The session was live iff its id is still set (only assigned on a
-      // successful connect). We key on this rather than the live `status`
-      // because a dropped session can emit `closed` before `error`, which would
-      // otherwise flip status to 'closed' and defeat the reconnect trigger.
-      const hadLiveSession = !!pane.sshSessionId
-      if (status === 'error' && hadLiveSession) {
-        // Drop the dead id so the terminal unmounts and the error / reconnect
-        // UI shows — regardless of whether auto-reconnect is enabled. Clearing
-        // it also makes any trailing `closed` for this session a no-op.
-        pane.sshSessionId = undefined
-        pane.status = 'error'
+      const action = decideStatusEvent({
+        paneSessionId: pane.sshSessionId,
+        status,
+        autoReconnect: this.autoReconnect
+      })
+      if (action.kind === 'ignore') return
+      if (action.kind === 'setStatus') {
+        // A clean `closed` (e.g. the user typed `exit`) keeps sshSessionId set
+        // so the "session closed · reconnect" banner shows; no auto-reconnect.
+        pane.status = status
         if (message) pane.message = message
-        // When auto-reconnect is on, the "reconnecting…" banner communicates the
-        // drop without us flooding a toast per attempt.
-        if (!this.autoReconnect) toast(message ?? t('app.sessionLost'), 'error')
-        if (this.notifications) {
-          window.api.notify(
-            t('app.sessionDisconnected'),
-            `${pane.params.username}@${pane.params.host}${pane.params.port !== 22 ? `:${pane.params.port}` : ''}\n${message ?? t('app.sessionLost')}`,
-            true
-          )
-        }
-        if (this.autoReconnect) this.scheduleReconnect(pane.id)
         return
       }
-      // A clean `closed` (e.g. the user typed `exit`) keeps sshSessionId set so
-      // the "session closed · reconnect" banner shows; no auto-reconnect.
-      pane.status = status
+      // Drop the dead id so the terminal unmounts and the error / reconnect UI
+      // shows — regardless of whether auto-reconnect is enabled. Clearing it
+      // also makes any trailing `closed` for this session a no-op.
+      pane.sshSessionId = undefined
+      pane.status = 'error'
       if (message) pane.message = message
+      // When auto-reconnect is on, the "reconnecting…" banner communicates the
+      // drop without us flooding a toast per attempt.
+      if (!this.autoReconnect) toast(message ?? t('app.sessionLost'), 'error')
+      if (this.notifications) {
+        window.api.notify(
+          t('app.sessionDisconnected'),
+          `${pane.params.username}@${pane.params.host}${pane.params.port !== 22 ? `:${pane.params.port}` : ''}\n${message ?? t('app.sessionLost')}`,
+          true
+        )
+      }
+      if (action.scheduleRetry) this.scheduleReconnect(pane.id)
     },
 
     cancelReconnect(pane: Pane): void {
@@ -1244,7 +1649,11 @@ export const useSessions = defineStore('sessions', {
         const after = this.findPane(paneId)
         if (!after) return
         if (after.pane.status === 'connected') after.pane.reconnectAttempt = undefined
-        else this.scheduleReconnect(paneId)
+        // A refused host key won't fix itself by retrying: stop, and leave the
+        // card (with its fingerprint) for the user to decide.
+        else if (after.pane.errorCode === 'host_key_unknown' || after.pane.errorCode === 'host_key_changed') {
+          after.pane.reconnectAttempt = undefined
+        } else this.scheduleReconnect(paneId)
       }, delay)
     },
 
@@ -1262,7 +1671,10 @@ export const useSessions = defineStore('sessions', {
         })
         if (!ok) return
         // Let the remote shell wind down gracefully before dropping the link.
-        void window.api.ssh.input(pane.sshSessionId!, 'exit\n')
+        // Re-read the id: `confirm` awaited, and the session may have dropped in
+        // the meantime — asserting it here would send `undefined` over IPC.
+        const live = pane.sshSessionId
+        if (live) void window.api.ssh.input(live, 'exit\n')
       }
       this.cancelReconnect(pane)
       if (pane.sshSessionId) void window.api.ssh.disconnect(pane.sshSessionId)

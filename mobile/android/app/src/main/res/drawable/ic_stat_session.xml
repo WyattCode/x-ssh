@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 由 build/icon-src/make_icons.py 生成,别手改(改那个脚本再跑一遍)。状态栏小图标:系统只认形状,自己上色。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="#FFFFFF">
+    <path android:fillColor="#FFFFFF" android:pathData="M15.40,5.68 A1.45,1.45 0 0,1 16.42,5.26 L18.32,5.26 A1.45,1.45 0 0,1 19.34,7.75 L8.60,18.32 A1.45,1.45 0 0,1 7.58,18.74 L5.68,18.74 A1.45,1.45 0 0,1 4.66,16.25Z"/>
+    <path android:fillColor="#FFFFFF" android:pathData="M4.66,7.75 A1.45,1.45 0 0,1 5.68,5.26 L7.58,5.26 A1.45,1.45 0 0,1 8.60,5.68 L19.34,16.25 A1.45,1.45 0 0,1 18.32,18.74 L16.42,18.74 A1.45,1.45 0 0,1 15.40,18.32Z"/>
+</vector>

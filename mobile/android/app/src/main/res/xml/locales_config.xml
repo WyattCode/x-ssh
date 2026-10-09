@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 系统「设置 → 应用 → 语言」里给这个应用列出的语言(Android 13 起)。和 values / values-zh / values-b+zh+Hant 对应。 -->
+<locale-config xmlns:android="http://schemas.android.com/apk/res/android">
+    <locale android:name="en" />
+    <locale android:name="zh-Hans" />
+    <locale android:name="zh-Hant" />
+</locale-config>

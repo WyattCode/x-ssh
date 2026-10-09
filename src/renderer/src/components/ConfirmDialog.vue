@@ -71,8 +71,8 @@ watch(
   margin-top: 20px;
 }
 .actions button {
-  height: 34px;
-  padding: 0 18px;
+  height: 32px;
+  padding: 0 16px;
   border-radius: var(--radius-sm);
   font-size: 13px;
 }
@@ -81,7 +81,9 @@ watch(
   border: 1px solid var(--border);
 }
 .ghost:hover {
-  background: var(--bg-elev-2);
+  background: var(--hover);
+  color: var(--text);
+  border-color: var(--border-strong);
 }
 .confirm {
   background: var(--accent);

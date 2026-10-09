@@ -14,6 +14,7 @@ import type {
   ConnectResult,
   HostForward,
   ForwardMode,
+  ForwardErrorCode,
   JumpConfig,
   ProxyConfig,
   SessionEvent,
@@ -23,7 +24,7 @@ import type {
 } from '../shared/types'
 import { KnownHosts } from './knownHosts'
 import { friendlyError } from './friendlyError'
-import { posixJoin, parentOf, clampConcurrency, buildPackCommand, buildExtractCommand } from '../shared/fsUtils'
+import { posixJoin, parentOf, clampConcurrency, buildPackCommand, buildExtractCommand, treeDirMode } from '../shared/fsUtils'
 
 /** Streams a local file through SHA-256 and resolves its lowercase hex digest. */
 function sha256File(p: string): Promise<string> {
@@ -84,6 +85,20 @@ interface WatchSyncState {
   baselineRemote: Map<string, { size: number; mtimeMs: number }>
   timer: ReturnType<typeof setTimeout> | null
   busy: boolean
+}
+
+/** A connect() failure caused by a host-key rejection. Carries the machine
+ *  code and fingerprint (plus which hop, for jumps) so connect() can pass
+ *  them on in ConnectResult. */
+export class KeyError extends Error {
+  code?: string
+  key?: string
+  keyHost?: string
+  keyPort?: number
+  constructor(message: string, opts?: { code?: string; key?: string; keyHost?: string; keyPort?: number }) {
+    super(message)
+    Object.assign(this, opts)
+  }
 }
 
 /**
@@ -348,7 +363,11 @@ export class SshManager {
   }
 
   /** Connects to a jump host, authenticates, and returns a tunneled `sock` for
-   *  the target ssh2 Client to connect through (ProxyJump). */
+   *  the target ssh2 Client to connect through (ProxyJump).
+   *  The jump's host key is verified the same way as the target's: an unknown
+   *  or changed key refuses to send the user's credential through a tunnel, and
+   *  the reason travels back as {@link KeyError} so connect() surfaces it with a
+   *  code + fingerprint. (The verifier here does not record a first key.) */
   private connectJump(
     jump: JumpConfig,
     targetHost: string,
@@ -357,26 +376,41 @@ export class SshManager {
     return new Promise((res, rej) => {
       const client = new Client()
       const config = SshManager.baseConfig(jump.host, jump.port, jump.username, undefined)
-      let keyChanged = false
+      let keyRejected = false
+      let keyUnknown = false
+      let lastKey = ''
+      // Same normalization as the target verifier.
       config.hostVerifier = (
-        hashedKey: string,
+        keyOrHash: string | Buffer,
         cb: (valid: boolean) => void
       ): void => {
+        // Same normalization as the target's verifier in connect().
+        const hashedKey = Buffer.isBuffer(keyOrHash)
+          ? createHash('sha256').update(keyOrHash).digest('hex')
+          : keyOrHash
         const known = this.knownHosts.get(jump.host, jump.port)
         if (!known) {
-          void this.knownHosts.set(jump.host, jump.port, hashedKey).catch(() => undefined)
-          return cb(true)
+          keyRejected = true
+          keyUnknown = true
+          lastKey = hashedKey
+          this.noteRejected(jump.host, jump.port, hashedKey)
+          return cb(false)
         }
         if (known === hashedKey) return cb(true)
-        keyChanged = true
+        this.noteRejected(jump.host, jump.port, hashedKey)
+        keyRejected = true
+        lastKey = hashedKey
         cb(false)
       }
       let settled = false
-      const fail = (msg: string): void => {
+      const fail = (
+        msg: string,
+        keyErr?: { code?: string; key?: string; keyHost?: string; keyPort?: number }
+      ): void => {
         if (settled) return
         settled = true
         client.end()
-        rej(new Error(msg))
+        rej(new KeyError(msg, keyErr))
       }
       this.authConfig(jump.auth, jump.keyPath, jump.passphrase, jump.password)
         .then((auth) => {
@@ -384,9 +418,15 @@ export class SshManager {
           client.connect(config)
         })
         .catch((e) => fail(friendlyError((e as Error).message)))
-      client.on('error', (err) =>
-        fail(keyChanged ? '跳板机主机密钥与记录不一致,已中止' : friendlyError(err.message))
-      )
+      client.on('error', (err) => {
+        if (!keyRejected) return fail(friendlyError(err.message))
+        fail('跳板机主机密钥未获信任,连接已中止', {
+          code: keyUnknown ? 'host_key_unknown' : 'host_key_changed',
+          key: lastKey,
+          keyHost: jump.host,
+          keyPort: jump.port || 22
+        })
+      })
       client.on('ready', () => {
         client.forwardOut(
           '127.0.0.1',
@@ -419,24 +459,37 @@ export class SshManager {
   private connectProxy(
     proxy: ProxyConfig,
     targetHost: string,
-    targetPort: number
+    targetPort: number,
+    /** Handed the socket at once, so a caller can close it mid-handshake. */
+    track?: (sock: Socket) => void
   ): Promise<Socket> {
     return new Promise((res, rej) => {
       const sock = createConnection({ host: proxy.host, port: proxy.port })
+      track?.(sock)
       let settled = false
+      // A proxy that accepts the connection but never answers the handshake
+      // must not hang the connect forever.
+      const handshakeTimer = setTimeout(() => fail('代理握手超时'), 15_000)
       const fail = (msg: string): void => {
         if (settled) return
         settled = true
+        clearTimeout(handshakeTimer)
         sock.destroy()
         rej(new Error(msg))
       }
       sock.on('error', (e) => fail(friendlyError(e.message)))
       sock.on('connect', () => {
+        const ok = (): void => {
+          if (settled) return
+          settled = true
+          clearTimeout(handshakeTimer)
+          res(sock)
+        }
         if (proxy.type === 'socks5') this.socks5Handshake(sock, proxy, targetHost, targetPort)
-          .then(() => { if (!settled) { settled = true; res(sock) } })
+          .then(ok)
           .catch((e) => fail((e as Error).message))
         else this.httpConnectHandshake(sock, proxy, targetHost, targetPort)
-          .then(() => { if (!settled) { settled = true; res(sock) } })
+          .then(ok)
           .catch((e) => fail((e as Error).message))
       })
     })
@@ -617,14 +670,14 @@ export class SshManager {
   /** Adds a port forward to a live session at runtime. Returns ok/error.
    *  Unlike connect-time forwards, the bind is awaited so a port already in use
    *  (EADDRINUSE) is reported instead of silently appearing to have succeeded. */
-  async addForward(sessionId: string, rule: HostForward): Promise<{ ok: boolean; error?: string }> {
+  async addForward(sessionId: string, rule: HostForward): Promise<{ ok: boolean; error?: string; code?: ForwardErrorCode }> {
     const session = this.sessions.get(sessionId)
-    if (!session) return { ok: false, error: '会话不存在' }
-    if (!rule.localPort) return { ok: false, error: '缺少本地端口' }
+    if (!session) return { ok: false, code: 'no-session', error: 'session not found' }
+    if (!rule.localPort) return { ok: false, code: 'bad-port', error: 'missing local port' }
     const mode = rule.mode ?? 'local'
-    if (mode !== 'dynamic' && !rule.remotePort) return { ok: false, error: '缺少远端端口' }
+    if (mode !== 'dynamic' && !rule.remotePort) return { ok: false, code: 'bad-port', error: 'missing remote port' }
     const key = `${mode}:${rule.localPort}`
-    if (session.runtimeRules?.has(key)) return { ok: false, error: '该端口已处于转发状态' }
+    if (session.runtimeRules?.has(key)) return { ok: false, code: 'already', error: 'already forwarding' }
     const servers = this.openRule(session, rule)
     if (servers.length) {
       // A failed bind surfaces as an async 'error' after listen(); wait for all
@@ -632,7 +685,7 @@ export class SshManager {
       const bound = await Promise.all(servers.map((s) => this.waitForListen(s)))
       if (bound.some((b) => !b)) {
         servers.forEach((s) => s.close())
-        return { ok: false, error: `本地端口 ${rule.localPort} 已被占用` }
+        return { ok: false, code: 'in-use', error: `local port ${rule.localPort} in use` }
       }
       session.forwardServers = (session.forwardServers ?? []).concat(servers)
     }
@@ -660,9 +713,9 @@ export class SshManager {
 
   /** Removes a port forward from a live session. Handles both runtime-added and
    *  host-configured rules by matching the local listener port. */
-  removeForward(sessionId: string, rule: { mode?: ForwardMode; localPort: number }): { ok: boolean; error?: string } {
+  removeForward(sessionId: string, rule: { mode?: ForwardMode; localPort: number }): { ok: boolean; error?: string; code?: ForwardErrorCode } {
     const session = this.sessions.get(sessionId)
-    if (!session) return { ok: false, error: '会话不存在' }
+    if (!session) return { ok: false, code: 'no-session', error: 'session not found' }
     const mode = rule.mode ?? 'local'
     const key = `${mode}:${rule.localPort}`
     // Close any local/dynamic listener bound to this port (static or runtime).
@@ -794,20 +847,36 @@ export class SshManager {
       `${params.username}@${params.host}${port !== 22 ? `:${port}` : ''}`
     const config = SshManager.baseConfig(params.host, port, params.username, params.keepaliveMs, params.readyTimeoutMs)
 
-    // Trust-on-first-use host-key verification.
+    // Host-key verification: an unrecognized key is never trusted silently —
+    // refuse the handshake and hand the fingerprint to the renderer, which asks
+    // the user before the user's credential goes anywhere. A changed key does
+    // the same with the 'host_key_changed' code.
     await this.knownHosts.load()
-    let keyChanged = false
+    let keyRejected = false
+    let keyUnknown = false
+    let lastKey = ''
     config.hostVerifier = (
-      hashedKey: string,
+      keyOrHash: string | Buffer,
       cb: (valid: boolean) => void
     ): void => {
+      // Should ssh2 ever hand over the raw wire-format key instead of the hash,
+      // normalize it so the verifier always reasons about the same sha256 hex
+      // it is asked to compare and later trust.
+      const hashedKey = Buffer.isBuffer(keyOrHash)
+        ? createHash('sha256').update(keyOrHash).digest('hex')
+        : keyOrHash
       const known = this.knownHosts.get(params.host, port)
       if (!known) {
-        void this.knownHosts.set(params.host, port, hashedKey).catch(() => undefined)
-        return cb(true)
+        keyRejected = true
+        keyUnknown = true
+        lastKey = hashedKey
+        this.noteRejected(params.host, port, hashedKey)
+        return cb(false)
       }
       if (known === hashedKey) return cb(true)
-      keyChanged = true
+      this.noteRejected(params.host, port, hashedKey)
+      keyRejected = true
+      lastKey = hashedKey
       cb(false)
     }
 
@@ -821,7 +890,8 @@ export class SshManager {
         jumpClient = jc
       } catch (err) {
         this.sessions.delete(id)
-        return { ok: false, error: (err as Error).message }
+        const e = err as Error & { code?: string; key?: string; keyHost?: string; keyPort?: number }
+        return { ok: false, error: e.message, code: e.code, key: e.key, keyHost: e.keyHost, keyPort: e.keyPort }
       }
     }
 
@@ -845,6 +915,7 @@ export class SshManager {
       )
     } catch (err) {
       jumpClient?.end()
+      ;(config.sock as Duplex | Socket | undefined)?.destroy()
       this.sessions.delete(id)
       return { ok: false, error: friendlyError((err as Error).message) }
     }
@@ -964,8 +1035,10 @@ export class SshManager {
       })
 
       client.on('error', (err) => {
-        const message = keyChanged
-          ? '主机密钥与首次连接时记录的不一致,连接已中止;这可能是中间人攻击,若你确认服务器已重装或更换,可选择“信任新密钥并重连”'
+        const message = keyRejected
+          ? keyUnknown
+            ? '主机密钥未获信任,连接已中止;若此服务器是你自己的,可确认其身份后信任'
+            : '主机密钥与首次连接时记录的不一致,连接已中止;这可能是中间人攻击,若你确认服务器已重装或更换,可选择“信任新密钥并重连”'
           : friendlyError(err.message)
         this.emit({ sessionId: id, status: 'error', message })
         this.stopLog(id)
@@ -974,7 +1047,10 @@ export class SshManager {
         settle({
           ok: false,
           error: message,
-          code: keyChanged ? 'host_key_changed' : undefined
+          code: keyRejected ? (keyUnknown ? 'host_key_unknown' : 'host_key_changed') : undefined,
+          key: keyRejected ? lastKey : undefined,
+          keyHost: keyRejected ? params.host : undefined,
+          keyPort: keyRejected ? port : undefined
         })
       })
 
@@ -1208,6 +1284,11 @@ export class SshManager {
   private lastProgressAt = new Map<string, number>()
   private static readonly PROGRESS_INTERVAL = 100
 
+  /** The `error` text used for a cancelled job. Kept as a constant so the
+   *  progress event can recognise it when stamping the `cancelled` flag; the
+   *  renderer must not depend on this string. */
+  private static readonly CANCELLED_TEXT = '已取消'
+
   private emitProgress(p: SftpProgress): void {
     // Continuous-sync jobs run silently: no per-file progress, no UI toasts.
     if (this.quietJobs.has(p.id)) return
@@ -1226,7 +1307,12 @@ export class SshManager {
     // pane. The mapping is torn down in each job's finally, not here, so a job
     // that throws before its terminal event still cleans up.
     const sessionId = this.jobSession.get(p.id)
-    if (!this.sender.isDestroyed()) this.sender.send(IPC.sftpProgress, { ...p, sessionId })
+    // Mark cancellation structurally rather than leaving the renderer to match
+    // on the message text. It used to compare against the Chinese literal, so
+    // an English UI read a cancelled transfer as a failure — and moving the
+    // wording into i18n would have broken it for every language at once.
+    const cancelled = this.cancelledJobs.has(p.id) && p.error === SshManager.CANCELLED_TEXT
+    if (!this.sender.isDestroyed()) this.sender.send(IPC.sftpProgress, { ...p, sessionId, cancelled })
   }
 
   private readdirFull(
@@ -1461,7 +1547,7 @@ export class SshManager {
       }
     }
 
-    if (this.cancelledJobs.has(jobId)) emit('', 'up', false, '已取消')
+    if (this.cancelledJobs.has(jobId)) emit('', 'up', false, SshManager.CANCELLED_TEXT)
     else if (errors) emit('', 'up', false, `${errors} 项失败`)
     else {
       const t = bytesDone || 1
@@ -1639,13 +1725,13 @@ export class SshManager {
         if (err) rej(err)
         else res()
       }
-      const abort = (): void => finish(new Error('已取消'))
+      const abort = (): void => finish(new Error(SshManager.CANCELLED_TEXT))
       set.add(abort)
 
       // Waits (with cancellation) until the job is no longer paused.
       const waitUnpaused = async (): Promise<void> => {
         while (!settled && this.isPaused(jobId)) await new Promise((r) => setTimeout(r, 150))
-        if (settled) throw new Error('已取消')
+        if (settled) throw new Error(SshManager.CANCELLED_TEXT)
       }
       // Leaky-bucket rate budget: allow `rate` bytes/sec with a small burst.
       const rate = this.jobRate.get(jobId) ?? 0
@@ -1843,7 +1929,7 @@ export class SshManager {
       await walkP
       await workers
       if (this.cancelledJobs.has(jobId)) {
-        emit(label, false, '已取消')
+        emit(label, false, SshManager.CANCELLED_TEXT)
       } else if (walkError) {
         emit(label, false, friendlyError((walkError as Error).message), true)
       } else if (failures.length) {
@@ -2085,7 +2171,7 @@ export class SshManager {
         await walkP
         await workers
         if (this.cancelledJobs.has(jobId)) {
-          emit(label, false, '已取消')
+          emit(label, false, SshManager.CANCELLED_TEXT)
         } else if (walkError) {
           emit(label, false, friendlyError((walkError as Error).message), true)
         } else if (failures) {
@@ -2208,7 +2294,13 @@ export class SshManager {
     }
   }
 
-  /** Changes permissions on a path; when recursive, applies the same mode to every descendant. */
+  /**
+   * Changes permissions on a path. When recursive, files get `mode` exactly and
+   * directories get [treeDirMode] of it: one mode fanned out over files and
+   * folders alike used to strip the search bit from every folder (644 applied to
+   * a tree), leaving them impossible to enter. A single, non-recursive change is
+   * applied exactly as asked, whatever the entry is.
+   */
   async chmod(
     sessionId: string,
     path: string,
@@ -2221,7 +2313,7 @@ export class SshManager {
     // never strip a directory's own r/x before we've finished reading it, which
     // would otherwise abort the walk and leave the tree half-changed.
     if (recursive && isDir) await this.chmodChildren(sftp, path, mode)
-    await this.chmodOne(sftp, path, mode)
+    await this.chmodOne(sftp, path, recursive && isDir ? treeDirMode(mode) : mode)
   }
 
   private chmodOne(sftp: SFTPWrapper, path: string, mode: number): Promise<void> {
@@ -2234,8 +2326,9 @@ export class SshManager {
     >((res, rej) => sftp.readdir(dir, (e, l) => (e ? rej(e) : res(l as never))))
     for (const it of list) {
       const child = this.posixJoin(dir, it.filename)
-      if (it.attrs.isDirectory()) await this.chmodChildren(sftp, child, mode)
-      await this.chmodOne(sftp, child, mode)
+      const isFolder = it.attrs.isDirectory()
+      if (isFolder) await this.chmodChildren(sftp, child, mode)
+      await this.chmodOne(sftp, child, isFolder ? treeDirMode(mode) : mode)
     }
   }
 
@@ -2475,6 +2568,107 @@ export class SshManager {
         )
         stream.on('error', (e: Error) => settle(e))
       })
+    })
+  }
+
+  /** Keys this manager refused, by host:port: the only ones the user can then
+   *  trust (ssh:trustHostKey) — a renderer can't plant an arbitrary key. */
+  private readonly rejectedKeys = new Map<string, string>()
+
+  private noteRejected(host: string, port: number | undefined, fp: string): void {
+    this.rejectedKeys.set(`${host}:${port || 22}`, String(fp).toLowerCase())
+  }
+
+  /** True (and forgotten) when `fp` is the key last refused for host:port. */
+  takeRejectedKey(host: string, port: number | undefined, fp: string): boolean {
+    const k = `${host}:${port || 22}`
+    if (this.rejectedKeys.get(k) !== String(fp).toLowerCase()) return false
+    this.rejectedKeys.delete(k)
+    return true
+  }
+
+  /** Background, read-only: logs in without a terminal, runs one command on an
+   *  exec channel, returns its stdout and disconnects. Nothing is emitted to the
+   *  renderer and no session is registered. Only for a server whose host key is
+   *  already on record — an unknown key is never trusted here (that decision
+   *  belongs to the user, on a real connect), a changed one aborts. */
+  async quietExec(params: ConnectParams, cmd: string, timeoutMs = 20_000): Promise<string> {
+    const port = params.port || 22
+    await this.knownHosts.load()
+    if (!this.knownHosts.get(params.host, port)) throw new Error('host key not on record')
+    // The hop too: an unknown jump host would get the saved credential through
+    // its tunnel with nobody watching, and connectJump does not record first keys.
+    if (params.jump && !this.knownHosts.get(params.jump.host, params.jump.port || 22)) {
+      throw new Error('jump host key not on record')
+    }
+    const config = SshManager.baseConfig(params.host, port, params.username, undefined, 12_000)
+    config.hostVerifier = (hashedKey: string, cb: (valid: boolean) => void): void => {
+      cb(this.knownHosts.get(params.host, port) === hashedKey)
+    }
+    const client = new Client()
+    let jumpClient: Client | null = null
+    let sock: Duplex | Socket | undefined
+    return new Promise<string>((resolve, reject) => {
+      let done = false
+      // One exit for every path — timeout, errors, a throw from connect() —
+      // and it always releases the hop, the proxy socket and the client.
+      const finish = (err: Error | null, out = ''): void => {
+        if (done) return
+        done = true
+        clearTimeout(timer)
+        client.removeAllListeners('close')
+        try {
+          client.end()
+        } catch {
+          /* never connected */
+        }
+        sock?.destroy()
+        jumpClient?.end()
+        if (err) reject(err)
+        else resolve(out)
+      }
+      // Covers the whole thing, including a proxy or hop that never answers.
+      const timer = setTimeout(() => finish(new Error('timeout')), timeoutMs)
+      const run = async (): Promise<void> => {
+        if (params.jump) {
+          const hop = await this.connectJump(params.jump, params.host, port)
+          jumpClient = hop.client
+          sock = hop.sock
+        } else if (params.proxy) {
+          sock = await this.connectProxy(params.proxy, params.host, port, (s) => (sock = s))
+        }
+        if (done) {
+          // Timed out while the hop / proxy was still coming up.
+          sock?.destroy()
+          jumpClient?.end()
+          return
+        }
+        if (sock) {
+          sock.on('error', () => undefined)
+          config.sock = sock
+        }
+        Object.assign(config, await this.authConfig(params.auth, params.keyPath, params.passphrase, params.password))
+        if (done) return finish(new Error('timeout'))
+        client.on('error', (e) => finish(e))
+        client.on('close', () => finish(new Error('closed')))
+        client.on('ready', () => {
+          client.exec(cmd, (err, stream) => {
+            if (err) return finish(err)
+            let out = ''
+            stream.on('data', (d: Buffer) => {
+              out += d.toString()
+              if (out.length > 64_000) finish(null, out)
+            })
+            stream.stderr.on('data', () => undefined)
+            stream.on('close', () => finish(null, out))
+            stream.on('error', (e: Error) => finish(e))
+          })
+        })
+        // ssh2 throws synchronously for an unreadable key (encrypted, no
+        // passphrase saved) — that lands in the catch below like any error.
+        client.connect(config)
+      }
+      run().catch((e: Error) => finish(e))
     })
   }
 

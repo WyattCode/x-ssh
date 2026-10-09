@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain, dialog, nativeImage, screen, Menu, Notification, Tray, globalShortcut, powerMonitor } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, dialog, nativeImage, nativeTheme, screen, Menu, Notification, Tray, globalShortcut, powerMonitor } from 'electron'
 import { join, dirname, basename, isAbsolute } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { tmpdir, homedir } from 'node:os'
@@ -6,11 +6,17 @@ import { mkdtemp, rm, readFile, stat, readdir, mkdir, unlink, rename, writeFile 
 import { watchFile, unwatchFile } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { IPC, PREFS_ARG } from '../shared/ipc'
-import type { ConnectParams, Host, HostForward, ForwardMode, JumpConfig, LocalEntry, Snippet, UiPrefs, UploadOverwrite } from '../shared/types'
+import type { ConnectParams, Host, HostForward, ForwardMode, JumpConfig, LocalEntry, Snippet, ThemePref, UiPrefs, UploadOverwrite } from '../shared/types'
 import { readLaunchTarget, targetFromUrl, PROTOCOL, compareVersions } from '../shared/launchTarget'
+import { isRendererSettableKey } from '../shared/settingsKeys'
+import { resolveLang, type LangPref, type UiLang } from '../shared/lang'
+import { resolveDir, resolveInside } from '../shared/localPaths'
 import { SshManager } from './ssh'
+import { probeHosts } from './reachability'
+import { OS_PROBE_COMMAND, parseOsProbe } from '../shared/hostOs'
 import { HostStore } from './store'
 import { KnownHosts } from './knownHosts'
+import { isFingerprintHex } from '../shared/hostKey'
 import { SettingsStore } from './settings'
 import { friendlyError } from './friendlyError'
 import { KeyManager } from './keyManager'
@@ -27,6 +33,19 @@ const activeEdits = new Set<string>()
 const dragCache = new Map<string, Promise<{ dir: string; local: string }>>()
 let sshManager: SshManager | null = null
 
+/**
+ * The window's SSH manager, for handlers that cannot run before it exists.
+ *
+ * Handlers that can be reached before the window is up (a stray IPC from a
+ * reloading renderer, a fire-and-forget `send`) must check `sshManager`
+ * themselves rather than using this — otherwise they would throw inside the
+ * handler instead of failing cleanly.
+ */
+function requireSshManager(): SshManager {
+  if (!sshManager) throw new Error('窗口尚未就绪')
+  return sshManager
+}
+
 // ---- System tray ----
 // A minimized/closed window can be tucked into the tray instead of quitting, so
 // long-running transfers keep running. Controlled by the `minimizeToTray`
@@ -42,24 +61,39 @@ if (process.platform === 'win32') app.setAppUserModelId('com.x-ssh.app')
 let mainWindow: BrowserWindow | null = null
 /** Cached copy of the `minimizeToTray` setting, kept in sync by the setter. */
 let minimizeToTray = false
+/** The OS's preferred locales, most preferred first, for the "follow system" language. */
+function systemLocales(): string[] {
+  let preferred: string[] = []
+  try {
+    preferred = app.getPreferredSystemLanguages()
+  } catch {
+    // Older platforms may not report a list; getLocale() below still works.
+  }
+  return [...preferred, app.getLocale()].filter(Boolean)
+}
+const TRAY_LABELS: Record<UiLang, { show: string; hide: string; palette: string; quit: string }> = {
+  zh: { show: '显示 X-SSH', hide: '隐藏', palette: '打开命令栏', quit: '退出' },
+  'zh-TW': { show: '顯示 X-SSH', hide: '隱藏', palette: '開啟命令面板', quit: '結束' },
+  en: { show: 'Show X-SSH', hide: 'Hide', palette: 'Open command palette', quit: 'Quit' }
+}
 async function buildTrayMenu(win: BrowserWindow): Promise<Electron.Menu> {
-  const lang = await settings.get<'zh' | 'en'>('lang')
-  const en = lang === 'en'
+  const lang = resolveLang(await settings.get<LangPref>('lang'), systemLocales())
+  const L = TRAY_LABELS[lang]
   return Menu.buildFromTemplate([
     {
-      label: en ? 'Show X-SSH' : '显示 X-SSH',
+      label: L.show,
       click: () => {
         win.show()
         win.focus()
       }
     },
     {
-      label: en ? 'Hide' : '隐藏',
+      label: L.hide,
       click: () => win.hide()
     },
     { type: 'separator' },
     {
-      label: en ? 'Open command palette' : '打开命令栏',
+      label: L.palette,
       click: () => {
         if (win.isMinimized()) win.restore()
         win.show()
@@ -69,7 +103,7 @@ async function buildTrayMenu(win: BrowserWindow): Promise<Electron.Menu> {
     },
     { type: 'separator' },
     {
-      label: en ? 'Quit' : '退出',
+      label: L.quit,
       click: () => {
         quitting = true
         app.quit()
@@ -77,9 +111,27 @@ async function buildTrayMenu(win: BrowserWindow): Promise<Electron.Menu> {
     }
   ])
 }
+// Tray icon at the size each platform actually shows. Windows: the .ico, so the shell
+// picks the frame rendered for the current DPI (Electron's own recommendation) instead
+// of shrinking the 1024px PNG. macOS / Linux: 16pt (menu bar) / 24px (indicators) with
+// an @2x representation — handing them the raw 1024px image shows it oversized or
+// coarsely scaled.
+function trayImage(): Electron.NativeImage {
+  const dir = join(__dirname, '../../build')
+  if (process.platform === 'win32') return nativeImage.createFromPath(join(dir, 'icon.ico'))
+  const big = nativeImage.createFromPath(join(dir, 'icon.png'))
+  if (big.isEmpty()) return big
+  const pt = process.platform === 'darwin' ? 16 : 24
+  const img = nativeImage.createEmpty()
+  for (const scaleFactor of [1, 2]) {
+    const px = pt * scaleFactor
+    img.addRepresentation({ scaleFactor, buffer: big.resize({ width: px, height: px, quality: 'best' }).toPNG() })
+  }
+  return img
+}
 async function setupTray(win: BrowserWindow): Promise<void> {
   if (tray) return
-  let image = nativeImage.createFromPath(join(__dirname, '../../build/icon.png'))
+  let image = trayImage()
   if (image.isEmpty()) image = nativeImage.createFromDataURL(DRAG_ICON.toDataURL())
   tray = new Tray(image)
   tray.setToolTip('X-SSH')
@@ -105,8 +157,6 @@ const pendingTargets: string[] = []
 let launchTargetFetchDone = false
 /** The active window's webContents, used to push late-arriving targets. */
 let targetSender: Electron.WebContents | null = null
-
-/** Name of the CLI switch that carries a launch target (repeatable). */
 
 /** Hand a resolved target to the renderer (queued until the window is up). */
 function pushLaunchTarget(target: string): void {
@@ -139,7 +189,7 @@ function prefetchDrag(sessionId: string, items: DragItem[]): Promise<{ dir: stri
     p = (async () => {
       const dir = await mkdtemp(join(tmpdir(), 'xssh-drag-'))
       for (const it of items) {
-        await sshManager!.downloadTree(sessionId, it.remotePath, dir, it.name, it.isDir)
+        await requireSshManager().downloadTree(sessionId, it.remotePath, dir, it.name, it.isDir)
       }
       // A single file drags out as that file; multiple items (or a folder)
       // land in a temporary directory, which Explorer accepts as a drop.
@@ -243,7 +293,7 @@ async function resolveUploadOverwrite(
 ): Promise<UploadOverwrite | 'cancel'> {
   if (overwrite) return overwrite
   if (!names.length) return 'overwrite'
-  const conflicts = await sshManager!.remoteConflicts(sessionId, remoteDir, names)
+  const conflicts = await requireSshManager().remoteConflicts(sessionId, remoteDir, names)
   if (!conflicts.length) return 'overwrite'
   const { response } = await dialog.showMessageBox({
     type: 'warning',
@@ -426,7 +476,7 @@ async function withTempHosts(
           params.jump = jump
         }
       }
-      const r = await sshManager!.connect(params)
+      const r = await requireSshManager().connect(params)
       if (!r.ok || !r.sessionId) {
         results.push({ host: hostLabel, ok: false, error: r.error ?? '连接失败' })
         continue
@@ -437,7 +487,7 @@ async function withTempHosts(
         results.push({ host: hostLabel, ok: true })
       } finally {
         try {
-          sshManager!.disconnect(sid)
+          requireSshManager().disconnect(sid)
         } catch {
           /* ignore */
         }
@@ -631,17 +681,170 @@ async function importSshConfig(): Promise<{ ok: boolean; count: number; error?: 
   return { ok: true, count }
 }
 
+/** Reads the connected host's OS (read-only, own exec channel — never the
+ *  user's shell) and stores it for the host card's icon. Best effort: a
+ *  non-POSIX shell or a slow server just leaves the card icon as it was. */
+async function detectHostOs(hostId: string, sessionId: string | undefined, at?: { host: string; port?: number }): Promise<void> {
+  if (!sessionId || !sshManager) return
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    const out = await Promise.race([
+      sshManager.execCommand(sessionId, OS_PROBE_COMMAND),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('timeout')), 8000)
+      })
+    ])
+    const os = parseOsProbe(out)
+    if (os && (await store.setOs(hostId, os, at))) notifyHostsChanged()
+  } catch {
+    /* leave the icon as it was */
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+function notifyHostsChanged(): void {
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (!w.isDestroyed()) w.webContents.send(IPC.hostsChanged)
+  }
+}
+
+/** A saved host's jump hop, with its saved secret; null when it can't be used
+ *  unattended (missing, or a password hop with no saved password). */
+async function quietJumpConfig(jumpId: string): Promise<JumpConfig | null> {
+  const jh = (await store.list()).find((x) => x.id === jumpId)
+  if (!jh) return null
+  const jump: JumpConfig = { host: jh.host, port: jh.port, username: jh.username, auth: jh.auth, keyPath: jh.keyPath }
+  if (jh.auth === 'password') {
+    jump.password = await store.getPassword(jh.id)
+    if (!jump.password) return null
+  }
+  if (jh.auth === 'key') jump.passphrase = await store.getPassphrase(jh.id)
+  return jump
+}
+
+/** Connect params for an unattended login with the host's saved credentials;
+ *  null when there's nothing to log in with (password auth, none saved). */
+async function quietParams(h: Host): Promise<ConnectParams | null> {
+  const p: ConnectParams = { host: h.host, port: h.port, username: h.username, auth: h.auth, keyPath: h.keyPath, hostId: h.id }
+  if (h.auth === 'password') {
+    p.password = await store.getPassword(h.id)
+    if (!p.password) return null
+  }
+  if (h.auth === 'key') {
+    if (!h.keyPath) return null
+    p.passphrase = await store.getPassphrase(h.id)
+  }
+  if (h.jumpHostId) {
+    const jump = await quietJumpConfig(h.jumpHostId)
+    if (!jump) return null
+    p.jump = jump
+  } else if (h.proxy) {
+    p.proxy = h.proxy
+  }
+  return p
+}
+
+/** Hosts that were connected before the OS icons existed (or never since)
+ *  have no OS on record, so their cards showed the generic glyph while the
+ *  rest had logos. Fill them in with a quiet read-only login using the saved
+ *  credentials (SshManager.quietExec: no terminal, host key must already be on
+ *  record). Two at a time, each address at most once per run; skipped while
+ *  locked or when turned off in 设置 → 连接. */
+const osTried = new Set<string>()
+let osDetectBusy = false
+/** Addresses whose background login was refused (wrong saved password) or
+ *  whose shell couldn't answer: not retried for a week, so a stale password
+ *  doesn't cost one failed login per launch. Kept in settings (main only). */
+const OS_BACKOFF_MS = 7 * 24 * 3600_000
+async function detectMissingOs(onlineIds: string[]): Promise<void> {
+  if (!sshManager || store.isLocked || osDetectBusy || !onlineIds.length) return
+  // Claimed before the first await: a second probe finishing meanwhile must
+  // not start a parallel run over the same hosts.
+  osDetectBusy = true
+  try {
+    if ((await settings.get<boolean>('autoDetectOs')) === false) return
+    const failed = (await settings.get<Record<string, number>>('osDetectFailed')) ?? {}
+    const online = new Set(onlineIds)
+    const addr = (h: Host): string => `${h.host}:${h.port || 22}`
+    const key = (h: Host): string => `${h.id}|${addr(h)}`
+    const now = Date.now()
+    const todo = (await store.list()).filter(
+      (h) => !h.os && online.has(h.id) && !osTried.has(key(h)) && !(now - (failed[addr(h)] ?? 0) < OS_BACKOFF_MS)
+    )
+    let next = 0
+    const markFailed = async (h: Host): Promise<void> => {
+      failed[addr(h)] = Date.now()
+      await settings.set('osDetectFailed', failed).catch(() => undefined)
+    }
+    const worker = async (): Promise<void> => {
+      while (next < todo.length) {
+        if (store.isLocked || !sshManager) return
+        if ((await settings.get<boolean>('autoDetectOs')) === false) return
+        const h = todo[next++]
+        const log = (event: 'connect' | 'error'): void => {
+          void pushConnLog({ at: Date.now(), event, host: h.host, port: h.port, username: h.username, detail: 'os-detect' }).catch(() => undefined)
+        }
+        try {
+          const params = await quietParams(h)
+          if (!params) continue // nothing to log in with (yet): try again once there is
+          osTried.add(key(h))
+          const out = await sshManager.quietExec(params, OS_PROBE_COMMAND)
+          log('connect')
+          const os = parseOsProbe(out)
+          if (!os) await markFailed(h)
+          else if (await store.setOs(h.id, os, { host: h.host, port: h.port })) notifyHostsChanged()
+        } catch (e) {
+          if (!osTried.has(key(h))) continue // failed before any login (params)
+          log('error')
+          // A refused login backs off; timeouts / drops just wait for the next run.
+          if ((e as { level?: string })?.level === 'client-authentication') await markFailed(h)
+        }
+      }
+    }
+    await Promise.all([worker(), worker()])
+  } finally {
+    osDetectBusy = false
+  }
+}
+
+/** Pins Chromium's native theme to the user's appearance choice: the Windows
+ *  title bar, native menus and scrollbars follow it (a light app under a dark
+ *  OS no longer keeps a black title bar). 'system' / unset tracks the OS. */
+function applyThemeSource(pref: unknown): void {
+  nativeTheme.themeSource = pref === 'light' || pref === 'dark' ? pref : 'system'
+}
+
 /** Reads the handful of preferences the renderer needs before its first paint. */
 async function readUiPrefs(): Promise<UiPrefs> {
-  const [theme, fontSize, zoom, sftpShowHidden, sftpWidth, lang] = await Promise.all([
-    settings.get<'light' | 'dark'>('theme'),
-    settings.get<number>('fontSize'),
-    settings.get<number>('zoom'),
-    settings.get<boolean>('sftpShowHidden'),
-    settings.get<number>('sftpWidth'),
-    settings.get<'zh' | 'en'>('lang')
-  ])
-  return { theme, fontSize, zoom, sftpShowHidden, sftpWidth, lang }
+  const [theme, fontSize, zoom, sftpShowHidden, sftpWidth, lang, sidebarCollapsed, sidebarWidth, termSidebarHidden, hostsView, hostsSort] =
+    await Promise.all([
+      settings.get<ThemePref>('theme'),
+      settings.get<number>('fontSize'),
+      settings.get<number>('zoom'),
+      settings.get<boolean>('sftpShowHidden'),
+      settings.get<number>('sftpWidth'),
+      settings.get<UiPrefs['lang']>('lang'),
+      settings.get<boolean>('sidebarCollapsed'),
+      settings.get<number>('sidebarWidth'),
+      settings.get<boolean>('termSidebarHidden'),
+      settings.get<string>('hostsView'),
+      settings.get<string>('hostsSort')
+    ])
+  return {
+    theme,
+    fontSize,
+    zoom,
+    sftpShowHidden,
+    sftpWidth,
+    lang,
+    systemLocales: systemLocales(),
+    sidebarCollapsed,
+    sidebarWidth,
+    termSidebarHidden,
+    hostsView,
+    hostsSort
+  }
 }
 
 function createWindow(saved?: SavedBounds, prefs: UiPrefs = {}): void {
@@ -651,15 +854,18 @@ function createWindow(saved?: SavedBounds, prefs: UiPrefs = {}): void {
   const { x: dx, y: dy, width: sw, height: sh } = screen.getDisplayNearestPoint(
     screen.getCursorScreenPoint()
   ).workArea
-  const useSaved = !!saved && saved.width >= 680 && saved.height >= 440
+  // A saved size is only used when it is large enough to be usable; below that
+  // it is as if there were none. Narrowed here so the rest of the function can
+  // use `restore` directly instead of asserting the same thing three times.
+  const restore = saved && saved.width >= 680 && saved.height >= 440 ? saved : undefined
   // Whatever the source, the size is clamped to that display's work area: one
   // saved on a larger monitor (or before a scaling change) would otherwise
   // centre half off-screen, putting the title bar out of reach above the top
   // edge. The 1440/920 cap shapes only the first-run default — a size the user
   // picked themselves comes back as-is.
   // reqW/reqH: what we asked the OS for, kept for persistBounds() below.
-  const reqW = Math.min(useSaved ? saved!.width : Math.min(1440, Math.round(sw * 0.66)), sw)
-  const reqH = Math.min(useSaved ? saved!.height : Math.min(920, Math.round(sh * 0.8)), sh)
+  const reqW = Math.min(restore ? restore.width : Math.min(1440, Math.round(sw * 0.66)), sw)
+  const reqH = Math.min(restore ? restore.height : Math.min(920, Math.round(sh * 0.8)), sh)
   const win = new BrowserWindow({
     width: reqW,
     height: reqH,
@@ -673,7 +879,10 @@ function createWindow(saved?: SavedBounds, prefs: UiPrefs = {}): void {
     show: false,
     autoHideMenuBar: true,
     icon: join(__dirname, '../../build/icon.ico'),
-    backgroundColor: '#0e0f12',
+    // The first frame, before the renderer paints: match the theme it will use
+    // (themeSource is already pinned to the saved choice) so a light-theme
+    // launch doesn't flash dark. Same colors as --bg in styles/global.css.
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#0e0f12' : '#f7f8fa',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     webPreferences: {
       preload: join(__dirname, '../preload/index.mjs'),
@@ -686,13 +895,16 @@ function createWindow(saved?: SavedBounds, prefs: UiPrefs = {}): void {
     }
   })
 
-  if (useSaved && saved!.maximized) win.maximize()
+  if (restore?.maximized) win.maximize()
   mainWindow = win
 
   // Remember the size (debounced) so it restores next launch. Position is
   // deliberately not saved: the window always opens centered.
   let saveTimer: NodeJS.Timeout | null = null
   const persistBounds = (): void => {
+    // 退出时会等设置写完(见 will-quit)才真正结束进程 —— 这段时间里窗口已经销毁,
+    // 迟到的缩放防抖回调再读 bounds 会抛「Object has been destroyed」,主进程弹错误框。
+    if (win.isDestroyed()) return
     const b = win.getNormalBounds()
     // On a fractional-scale display the OS hands back a slightly larger rect
     // than we asked for (measured +3w/+2h at 175%). Storing that verbatim grew
@@ -708,7 +920,12 @@ function createWindow(saved?: SavedBounds, prefs: UiPrefs = {}): void {
     saveTimer = setTimeout(persistBounds, 400)
   }
   win.on('resize', schedulePersist)
-  win.on('close', persistBounds)
+  win.on('close', () => {
+    // 关窗时立刻存一次,别让还没到点的防抖回调在窗口销毁后再跑。
+    if (saveTimer) clearTimeout(saveTimer)
+    saveTimer = null
+    persistBounds()
+  })
 
   win.on('ready-to-show', () => win.show())
 
@@ -934,12 +1151,20 @@ function registerIpc(): void {
   })
 
   // ---- Local FS browsing for the dual-panel SFTP drawer ----
+  // Every handler below takes its paths from the renderer. `resolveDir` /
+  // `resolveInside` are what keep a name from walking out of the directory it
+  // was meant for — see shared/localPaths.ts for why `join()` alone is not
+  // enough.
   ipcMain.handle(IPC.localHome, () => homedir())
   ipcMain.handle(
     IPC.localList,
     async (_e, dir: string): Promise<{ path: string; entries: LocalEntry[] }> => {
+      const resolved = resolveDir(dir)
+      // Echo the caller's own path back rather than an empty one: the drawer
+      // assigns `r.path` to its current directory, so returning '' would blank
+      // the pane and make every later navigation a no-op with no explanation.
+      if (!resolved) return { path: dir, entries: [] }
       try {
-        const resolved = join(dir)
         const st = await stat(resolved)
         if (!st.isDirectory()) return { path: resolved, entries: [] }
         const names = await readdir(resolved, { withFileTypes: true })
@@ -965,14 +1190,18 @@ function registerIpc(): void {
         const entries = dirs.sort(sort).concat(files.sort(sort))
         return { path: resolved, entries }
       } catch {
-        return { path: dir, entries: [] }
+        return { path: resolved, entries: [] }
       }
     }
   )
   // Read a local file's text (for comparing against a remote file).
   ipcMain.handle(IPC.localReadText, async (_e, p: string) => {
     try {
-      const content = await readFile(p, 'utf8')
+      // A path the user picked via `localPickFile`, or one already inside a
+      // listed directory. Normalize, and refuse embedded NULs.
+      const target = resolveDir(p)
+      if (!target) return { ok: false, error: '路径无效' }
+      const content = await readFile(target, 'utf8')
       return { ok: true, content }
     } catch (e) {
       return { ok: false, error: friendlyError((e as Error).message) }
@@ -988,8 +1217,9 @@ function registerIpc(): void {
   ipcMain.handle(
     IPC.localCreate,
     async (_e, dir: string, name: string, kind: 'file' | 'folder') => {
+      const target = resolveInside(dir, name)
+      if (!target) return { ok: false, error: '文件名不能用' }
       try {
-        const target = join(dir, name)
         if (kind === 'folder') await mkdir(target)
         else await writeFile(target, '')
         return { ok: true }
@@ -1001,8 +1231,11 @@ function registerIpc(): void {
   ipcMain.handle(
     IPC.localRename,
     async (_e, dir: string, oldName: string, newName: string) => {
+      const from = resolveInside(dir, oldName)
+      const to = resolveInside(dir, newName)
+      if (!from || !to) return { ok: false, error: '文件名不能用' }
       try {
-        await rename(join(dir, oldName), join(dir, newName))
+        await rename(from, to)
         return { ok: true }
       } catch (e) {
         return { ok: false, error: friendlyError((e as Error).message) }
@@ -1012,8 +1245,12 @@ function registerIpc(): void {
   ipcMain.handle(
     IPC.localDelete,
     async (_e, dir: string, name: string, isDir: boolean) => {
+      const target = resolveInside(dir, name)
+      // Without this, `name` of "../.." plus recursive removal is a way to wipe
+      // an arbitrary directory from the renderer.
+      if (!target) return { ok: false, error: '文件名不能用' }
       try {
-        await rm(join(dir, name), { recursive: isDir, force: isDir })
+        await rm(target, { recursive: isDir, force: isDir })
         return { ok: true }
       } catch (e) {
         return { ok: false, error: friendlyError((e as Error).message) }
@@ -1046,7 +1283,11 @@ function registerIpc(): void {
     if (params.hostId) {
       const h = (await store.list()).find((x) => x.id === params.hostId)
       if (h) {
-        if (!params.portForwards && h.portForwards?.length) params.portForwards = h.portForwards
+        if (h.portForwards?.length) {
+          const fk = (f: { mode?: string; localPort: number }): string => `${f.mode ?? 'local'}:${f.localPort}`
+          const extra = (params.portForwards ?? []).filter((f) => !h.portForwards!.some((s) => fk(s) === fk(f)))
+          params.portForwards = [...h.portForwards, ...extra]
+        }
         if (params.agentForward === undefined) params.agentForward = h.agentForward
         if (params.onConnect === undefined) params.onConnect = h.onConnect
         if (params.onConnectDelayMs === undefined) params.onConnectDelayMs = h.onConnectDelayMs
@@ -1082,7 +1323,11 @@ function registerIpc(): void {
     }
     if (params.multiplex === undefined) params.multiplex = (await settings.get<boolean>('connectionMultiplex')) === true
     const result = await sshManager.connect(params)
-    if (result.ok && params.hostId) await store.touch(params.hostId)    // Audit the connection attempt (success or failure) for the security log.
+    if (result.ok && params.hostId) {
+      await store.touch(params.hostId)
+      void detectHostOs(params.hostId, result.sessionId, { host: params.host, port: params.port })
+    }
+    // Audit the connection attempt (success or failure) for the security log.
     void pushConnLog({
       at: Date.now(),
       event: result.ok ? 'connect' : 'error',
@@ -1113,6 +1358,21 @@ function registerIpc(): void {
       await knownHosts.forget(host, port)
     }
   )
+  ipcMain.handle(
+    IPC.sshTrustHostKey,
+    async (_e, host: unknown, port: unknown, fingerprint: unknown): Promise<{ ok: boolean }> => {
+      // Only a key a connection actually presented and we refused — and only
+      // for the host:port it came from. Anything else is refused, so a buggy
+      // or hostile renderer can't write keys into known_hosts.
+      if (typeof host !== 'string' || !host || !isFingerprintHex(fingerprint)) return { ok: false }
+      const p = typeof port === 'number' && Number.isInteger(port) && port > 0 && port < 65536 ? port : 22
+      if (!sshManager?.takeRejectedKey(host, p, fingerprint)) return { ok: false }
+      await knownHosts.load()
+      await knownHosts.set(host, p, fingerprint.toLowerCase())
+      void pushConnLog({ at: Date.now(), event: 'connect', host, port: p, username: '', detail: 'trust-host-key' }).catch(() => undefined)
+      return { ok: true }
+    }
+  )
 
   // ---- Session log-to-file ----
   // Start capturing a live session's output to a user-chosen log file.
@@ -1125,12 +1385,15 @@ function registerIpc(): void {
         filters: [{ name: 'Log', extensions: ['log', 'txt'] }]
       })
       if (res.canceled || !res.filePath) return { ok: false, canceled: true }
-      const ok = sshManager!.startLog(sessionId, res.filePath)
+      // `sshManager` is null until the window is created; a non-null assertion
+      // here would throw inside the IPC handler instead of failing cleanly.
+      if (!sshManager) return { ok: false, error: '窗口尚未就绪' }
+      const ok = sshManager.startLog(sessionId, res.filePath)
       return { ok, canceled: false, path: res.filePath }
     }
   )
   ipcMain.on(IPC.sessionLogStop, (_e, sessionId: string) => {
-    sshManager!.stopLog(sessionId)
+    sshManager?.stopLog(sessionId)
   })
 
   // ---- SSH stream (fire-and-forget) ----
@@ -1173,7 +1436,7 @@ function registerIpc(): void {
       if (res.canceled || !res.filePath) return { ok: false, canceled: true }
       try {
         // Save-As: one file into the chosen path (dir + chosen basename).
-        await sshManager!.downloadJob(
+        await requireSshManager().downloadJob(
           sessionId,
           [{ path: remotePath, name: basename(res.filePath), isDir: false }],
           dirname(res.filePath),
@@ -1379,7 +1642,7 @@ function registerIpc(): void {
     IPC.sftpExtract,
     async (_e, sessionId: string, remoteDir: string, archiveFileName: string) => {
       try {
-        const r = await sshManager!.extractArchive(sessionId, remoteDir, archiveFileName)
+        const r = await requireSshManager().extractArchive(sessionId, remoteDir, archiveFileName)
         return r
       } catch (e) {
         return { ok: false, error: friendlyError((e as Error).message) }
@@ -1412,7 +1675,7 @@ function registerIpc(): void {
   )
   ipcMain.handle(IPC.sftpMkdir, async (_e, sessionId: string, path: string) => {
     try {
-      await sshManager!.mkdir(sessionId, path)
+      await requireSshManager().mkdir(sessionId, path)
       return { ok: true }
     } catch (e) {
       return { ok: false, error: friendlyError((e as Error).message) }
@@ -1420,7 +1683,7 @@ function registerIpc(): void {
   })
   ipcMain.handle(IPC.sftpCreateFile, async (_e, sessionId: string, path: string) => {
     try {
-      await sshManager!.createFile(sessionId, path)
+      await requireSshManager().createFile(sessionId, path)
       return { ok: true }
     } catch (e) {
       return { ok: false, error: friendlyError((e as Error).message) }
@@ -1430,7 +1693,7 @@ function registerIpc(): void {
     IPC.sftpRename,
     async (_e, sessionId: string, oldPath: string, newPath: string) => {
       try {
-        await sshManager!.rename(sessionId, oldPath, newPath)
+        await requireSshManager().rename(sessionId, oldPath, newPath)
         return { ok: true }
       } catch (e) {
         return { ok: false, error: friendlyError((e as Error).message) }
@@ -1441,7 +1704,7 @@ function registerIpc(): void {
     IPC.sftpDelete,
     async (_e, sessionId: string, path: string, isDir: boolean) => {
       try {
-        await sshManager!.deletePath(sessionId, path, isDir)
+        await requireSshManager().deletePath(sessionId, path, isDir)
         return { ok: true }
       } catch (e) {
         return { ok: false, error: friendlyError((e as Error).message) }
@@ -1459,7 +1722,7 @@ function registerIpc(): void {
       isDir: boolean
     ) => {
       try {
-        await sshManager!.chmod(sessionId, path, mode, recursive, isDir)
+        await requireSshManager().chmod(sessionId, path, mode, recursive, isDir)
         return { ok: true }
       } catch (e) {
         return { ok: false, error: friendlyError((e as Error).message) }
@@ -1480,14 +1743,14 @@ function registerIpc(): void {
   })
   ipcMain.handle(IPC.sftpReadText, async (_e, sessionId: string, path: string) => {
     try {
-      return { ok: true, content: await sshManager!.readTextFile(sessionId, path) }
+      return { ok: true, content: await requireSshManager().readTextFile(sessionId, path) }
     } catch (e) {
       return { ok: false, error: friendlyError((e as Error).message) }
     }
   })
   ipcMain.handle(IPC.sftpReadBinary, async (_e, sessionId: string, path: string) => {
     try {
-      const base64 = await sshManager!.readBinaryFile(sessionId, path)
+      const base64 = await requireSshManager().readBinaryFile(sessionId, path)
       return { ok: true, base64 }
     } catch (e) {
       return { ok: false, error: friendlyError((e as Error).message) }
@@ -1497,7 +1760,7 @@ function registerIpc(): void {
     IPC.sftpWriteText,
     async (_e, sessionId: string, path: string, content: string) => {
       try {
-        await sshManager!.writeTextFile(sessionId, path, content)
+        await requireSshManager().writeTextFile(sessionId, path, content)
         return { ok: true }
       } catch (e) {
         return { ok: false, error: friendlyError((e as Error).message) }
@@ -1512,7 +1775,7 @@ function registerIpc(): void {
       try {
         const dir = await mkdtemp(join(tmpdir(), 'xssh-edit-'))
         const local = join(dir, name)
-        await sshManager!.downloadTree(sessionId, remotePath, dir, name, false)
+        await requireSshManager().downloadTree(sessionId, remotePath, dir, name, false)
 
         const editor = await settings.get<string>('externalEditor')
         if (editor) spawn(editor, [local], { detached: true, stdio: 'ignore' }).unref()
@@ -1550,7 +1813,7 @@ function registerIpc(): void {
       const remotePath = path
       const dir = await mkdtemp(join(tmpdir(), 'xssh-open-'))
       const local = join(dir, name)
-      await sshManager!.downloadTree(sessionId, remotePath, dir, name, false)
+      await requireSshManager().downloadTree(sessionId, remotePath, dir, name, false)
       if (program) spawn(program, [local], { detached: true, stdio: 'ignore' }).unref()
       else await shell.openPath(local)
       setTimeout(() => void rm(dir, { recursive: true, force: true }).catch(() => undefined), 30 * 60 * 1000)
@@ -1597,8 +1860,31 @@ function registerIpc(): void {
   // ---- Settings ----
   ipcMain.handle(IPC.settingsGet, (_e, key: string) => settings.get(key))
   ipcMain.handle(IPC.settingsSet, async (_e, key: string, value: unknown) => {
+    // The settings map also holds the master-lock record, the connection audit
+    // log and the persisted session history. Without this check the renderer
+    // could overwrite any of them by key name.
+    if (!isRendererSettableKey(key)) {
+      return { ok: false, error: `refusing to write settings key: ${String(key)}` }
+    }
     if (key === 'minimizeToTray') minimizeToTray = Boolean(value)
-    return settings.set(key, value)
+    await settings.set(key, value)
+    return { ok: true }
+  })
+  ipcMain.handle(IPC.hostsProbe, async (_e, ids?: unknown) => {
+    const all = await store.list()
+    const want = Array.isArray(ids) ? new Set(ids.filter((x): x is string => typeof x === 'string')) : null
+    const result = await probeHosts(want ? all.filter((h) => want.has(h.id)) : all)
+    // Online hosts with no OS on record get identified in the background
+    // (jump / proxy hosts aren't probed, so they're simply tried).
+    const viaHop = new Set(all.filter((h) => h.jumpHostId || h.proxy).map((h) => h.id))
+    void detectMissingOs(Object.keys(result).filter((id) => result[id] === 'online' || viaHop.has(id))).catch(() => undefined)
+    return result
+  })
+  ipcMain.handle(IPC.themeSet, async (_e, pref: unknown) => {
+    const value: ThemePref = pref === 'light' || pref === 'dark' ? pref : 'system'
+    applyThemeSource(value)
+    await settings.set('theme', value)
+    return { dark: nativeTheme.shouldUseDarkColors }
   })
   ipcMain.handle(IPC.connLogList, async () => (await settings.get<ConnLogEntry[]>('connectionLog')) ?? [])
   ipcMain.handle(IPC.connLogPush, async (_e, entry: ConnLogEntry) => {
@@ -1746,7 +2032,7 @@ function registerIpc(): void {
     if (!sshManager) return { ok: false, error: '窗口未就绪' }
     const results = await withTempHosts(hostIds, async (sid) => {
       const cmd = `umask 077; mkdir -p ~/.ssh && chmod 700 ~/.ssh\ncat >> ~/.ssh/authorized_keys <<'XSSH'\n${pub}\nXSSH\ntouch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys`
-      await sshManager!.execCommand(sid, cmd)
+      await requireSshManager().execCommand(sid, cmd)
     })
     return { ok: true, results }
   })
@@ -1769,7 +2055,7 @@ function registerIpc(): void {
       // if/fi (not a bare &&-chain) so a host without authorized_keys exits 0
       // ("nothing to do") while a real failure (permissions, disk) exits non-zero.
       const cmd = `k=${JSON.stringify(keyPart)}; if [ -f "$HOME/.ssh/authorized_keys" ]; then awk -v k="$k" 'index($0,k)==0' "$HOME/.ssh/authorized_keys" > "$HOME/.ssh/authorized_keys.xssh" && cat "$HOME/.ssh/authorized_keys.xssh" > "$HOME/.ssh/authorized_keys" && rm -f "$HOME/.ssh/authorized_keys.xssh"; fi`
-      await sshManager!.execCommand(sid, cmd)
+      await requireSshManager().execCommand(sid, cmd)
     })
     return { ok: true, results }
   })
@@ -1900,6 +2186,7 @@ app.whenReady().then(async () => {
     settings.get<SavedBounds>('windowBounds'),
     readUiPrefs()
   ])
+  applyThemeSource(prefs.theme)
   createWindow(saved, prefs)
 
   // Finer network-health trigger: when the machine wakes from sleep the network
@@ -1918,29 +2205,30 @@ app.whenReady().then(async () => {
   })
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow(saved, prefs)
+    // Re-read: the theme / language may have changed since launch (macOS keeps
+    // the app alive with no window).
+    if (BrowserWindow.getAllWindows().length === 0) void readUiPrefs().then((p) => createWindow(saved, p))
   })
 })
 
+// 退出前等设置写完。关窗时会存 windowBounds(不 await),紧接着 app 退出 —— 进程在写
+// settings.json 的半路被结束,文件只剩半截,下次启动所有设置都读不出来(外部编辑器、片段……
+// 「过一阵就丢」就是这么来的)。这里拦一下,最多等 3 秒再真正退出。
+// 拦在 will-quit:它在所有窗口都关掉之后才来,关窗时排进去的那次写已经在队列里了
+// (托盘「退出」也是先关窗再到这里)。
 app.on('before-quit', () => {
   quitting = true
 })
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit()
-})
-
-// Flush pending settings writes (theme toggle, window bounds, …) before the
-// process exits, so a setting changed right before quit isn't lost to an
-// in-flight async write. Capped so a stuck write can never block quit.
 let settingsFlushed = false
 app.on('will-quit', (e) => {
   if (settingsFlushed) return
-  settingsFlushed = true
   e.preventDefault()
-  setTimeout(() => {
-    Promise.race([settings.flush(), new Promise((r) => setTimeout(r, 800))]).finally(() =>
-      app.quit()
-    )
-  }, 50)
+  settingsFlushed = true
+  const timeout = new Promise<void>((r) => setTimeout(r, 3000))
+  void Promise.race([settings.flush(), timeout]).finally(() => app.quit())
+})
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') app.quit()
 })

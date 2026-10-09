@@ -78,3 +78,70 @@ export function shouldSkipKeyFile(name: string): boolean {
   if (name.startsWith('.')) return true
   return name.startsWith('id_') && !/-[0-9a-f]{8}$/.test(name)
 }
+
+/**
+ * Windows counterpart of [posixJoin], for the local pane of the file drawer.
+ *
+ * The two are separate on purpose: the remote side is always POSIX, while the
+ * local side is whatever this machine uses. `posixJoin('/C:/Users', 'x')` would
+ * produce a forward-slash path, which Windows accepts but the drawer's breadcrumb
+ * parsing then splits differently — so the local pane keeps its own backslashes.
+ * Accepts either separator on input and always emits `\`.
+ */
+export function windowsJoin(dir: string, name: string): string {
+  return dir.replace(/[\\/]+$/, '') + '\\' + name
+}
+
+/**
+ * Windows counterpart of [parentOf]: the containing directory, or `p` itself
+ * when there is nothing above it (a bare drive root such as `C:\`).
+ */
+export function windowsParent(p: string): string {
+  const norm = p.replace(/[\\/]+$/, '')
+  if (!norm) return p
+  // A drive keeps its separator: to Windows a bare `C:` means "the current
+  // directory on drive C", not its root — `path.normalize('C:')` is `C:.` — so
+  // going up from `C:\Users` must land on `C:\`, and `C:\` has nothing above it.
+  if (DRIVE.test(norm)) return norm + '\\'
+  const idx = Math.max(norm.lastIndexOf('\\'), norm.lastIndexOf('/'))
+  if (idx <= 0) return norm
+  const parent = norm.slice(0, idx)
+  return DRIVE.test(parent) ? parent + '\\' : parent
+}
+
+/** A bare drive letter with its colon, e.g. `C:`. */
+const DRIVE = /^[A-Za-z]:$/
+
+/**
+ * True when `p` is a Windows path: a drive (`C:\…`, `C:/…`, `C:`) or UNC (`\\server\…`).
+ *
+ * The local pane follows the shape of the path it is showing rather than a
+ * platform flag: the path came from this machine (`local:home`, a folder the user
+ * picked), so its own form says which rules apply. On macOS / Linux the local side
+ * is POSIX, and joining with `\` there produced names like `/Users/me\notes.txt`.
+ */
+export function isWindowsPath(p: string): boolean {
+  return /^[A-Za-z]:([\\/]|$)/.test(p) || p.startsWith('\\\\')
+}
+
+/** Join a name onto a local directory, with this machine's separator. */
+export function localJoin(dir: string, name: string): string {
+  return isWindowsPath(dir) ? windowsJoin(dir, name) : posixJoin(dir, name)
+}
+
+/** The containing local directory (see [windowsParent] / [parentOf]). */
+export function localParent(p: string): string {
+  return isWindowsPath(p) ? windowsParent(p) : parentOf(p)
+}
+
+/**
+ * The mode a **directory** gets when one mode is applied to a whole tree.
+ *
+ * A directory without execute ("search") permission cannot be entered — applying
+ * 644 to a tree used to leave every folder in it unreachable. So wherever the
+ * chosen mode grants read, grant execute too: chmod's `X`, for directories.
+ * Files keep the chosen mode exactly; setuid / setgid / sticky bits pass through.
+ */
+export function treeDirMode(mode: number): number {
+  return mode | ((mode & 0o444) >> 2)
+}
