@@ -27,6 +27,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.ui.layout.layout
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.customActions
@@ -79,6 +80,10 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.Canvas
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -130,11 +135,18 @@ fun HomeScreen(
     onNew: () -> Unit,
     onEdit: (Host) -> Unit,
     onDelete: (Host) -> Unit,
+    /** 置顶 / 取消置顶(双栏右栏详情里的开关)。 */
+    onPin: (Host) -> Unit,
 ) {
     val adaptive = LocalAdaptive.current
     val p = LocalXssh.current
     // 哪些主机后台还连着 —— 卡片上要看得出来,不然用户不知道有会话在跑。
     val running by SessionRegistry.sessions.collectAsState()
+    // 会话区:活着的会话排在主机区上面(和平板侧栏同一套两段模型),按最后输出新→旧。
+    // 不查主机表:会话自己带着建连那一刻的 Host,主机被删了(dev 跳转根本没存过也一样)行还在。
+    val sessions = remember(running) {
+        running.values.sortedByDescending { it.lastOutputAt }
+    }
     var query by remember { mutableStateOf("") }
     val filtered = remember(hosts, query) {
         if (query.isBlank()) {
@@ -286,6 +298,8 @@ fun HomeScreen(
                     searching = searching,
                     onSearching = { searching = it },
                     running = running.keys,
+                    sessions = sessions,
+                    onOpenSession = onConnect,
                     columns = 1,
                     large = false,
                     // 见上面 creaseGap 的算法:收到和右栏一样宽。
@@ -322,9 +336,11 @@ fun HomeScreen(
                         modifier = Modifier.fillMaxSize(),
                         host = host,
                         running = host != null && host.id in running,
+                        session = host?.let { running[it.id] },
                         onConnect = onConnect,
                         onEdit = onEdit,
                         onDelete = onDelete,
+                        onPin = onPin,
                     )
                 }
             }
@@ -350,6 +366,8 @@ fun HomeScreen(
                 searching = searching,
                 onSearching = { searching = it },
                 running = running.keys,
+                sessions = sessions,
+                onOpenSession = onConnect,
                 // 单栏(外屏、内屏竖屏)一律单列、大号的行。
                 // 原来按 264dp 自适应,竖屏排成两列,每张卡片只有 280dp 宽、57dp 高,
                 // 在 860dp 高的屏幕上缩在左上角,七成空着。
@@ -432,6 +450,10 @@ private fun HostListPane(
     searching: Boolean,
     onSearching: (Boolean) -> Unit,
     running: Set<String>,
+    /** 活着的会话(会话区),已按最后输出排序。 */
+    sessions: List<TerminalSession>,
+    /** 会话行的点击:接管那条会话(双栏里这不是"选中",是直接进终端)。 */
+    onOpenSession: (Host) -> Unit,
     columns: Int,
     /** 单栏用大号的行:外屏和竖屏上一行就是一个手指目标,不该是一行小字。 */
     large: Boolean,
@@ -447,6 +469,11 @@ private fun HostListPane(
     val p = LocalXssh.current
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
+    // 会话区只在没搜索时出现:搜索找的是"我要连哪台",活会话是"我正在干什么",两回事别搅在一起。
+    val showSessions = sessions.isNotEmpty() && query.isBlank()
+    // 卡片前面排了几项非主机条目(标题 + 会话区标题 + 会话行 + 主机区标题),
+    // "把它滚进视野"的算式要用(原来固定 +1,加了会话区就会算错行)。
+    val hostsPrelude = 1 + if (showSessions) sessions.size + 2 else 0
     // 同一时刻只开一张:开一张,别的自动合上。
     var openId by remember { mutableStateOf<String?>(null) }
     var autoScrolling by remember { mutableStateOf(false) }
@@ -463,8 +490,8 @@ private fun HostListPane(
     LaunchedEffect(selectedId) {
         val id = selectedId ?: return@LaunchedEffect
         val index = hosts.indexOfFirst { it.id == id }.takeIf { it >= 0 } ?: return@LaunchedEffect
-        // 第 0 项是标题,卡片从 1 开始。
-        val item = index + 1
+        // 第 0 项是标题,卡片从 1 开始;会话区插在中间,偏移量见 hostsPrelude。
+        val item = index + hostsPrelude
         // 刚换成这一栏时列表还没排过版,等它排出第一屏再量。
         val info = snapshotFlow { grid.layoutInfo }.first { it.visibleItemsInfo.isNotEmpty() }
         val shown = info.visibleItemsInfo.firstOrNull { it.index == item }
@@ -549,6 +576,24 @@ private fun HostListPane(
                 // 只可能是"搜了但没匹配上" —— 一台主机都没有时走的是整屏的 FirstRun。
                 item(key = "none", span = { GridItemSpan(maxLineSpan) }) {
                     NoMatches(Modifier.fillMaxWidth().padding(top = 48.dp).animateItem())
+                }
+            }
+            // 会话区:活着的会话在最上面,点一行 = 接管(和平板侧栏同一个模型)。
+            if (showSessions) {
+                item(key = "sec-sessions", span = { GridItemSpan(maxLineSpan) }) {
+                    SectionHeader(stringResource(R.string.tab_sessions))
+                }
+                items(sessions, key = { "s:" + it.hostId }) { session ->
+                    Box(Modifier.animateItem()) {
+                        SessionRow(
+                            session = session,
+                            large = large,
+                            onOpen = { onOpenSession(session.host) },
+                        )
+                    }
+                }
+                item(key = "sec-hosts", span = { GridItemSpan(maxLineSpan) }) {
+                    SectionHeader(stringResource(R.string.tab_hosts))
                 }
             }
             itemsIndexed(hosts, key = { _, it -> it.id }) { _, host ->
@@ -670,6 +715,137 @@ private fun NoMatches(modifier: Modifier) {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(stringResource(R.string.host_no_matches), color = p.textDim, fontSize = 16.sp)
+    }
+}
+
+/**
+ * 双栏右栏的会话实时预览:只读的一小块终端画面。
+ *
+ * 这里订阅 [TerminalSession.frame] 是安全的 —— 轮询循环的"有人看"还要前台门控
+ * (见 Sessions.kt 的 watched),切到后台自动回到省电节奏;换选主机 / 离开这一屏,
+ * 这个组合消失,订阅也就断了。
+ *
+ * 字号按会话列宽缩到刚好放得下(下限 7.5sp):80 列的会话在右栏里也能看个轮廓,
+ * 缩到下限还放不下就横向裁,预览是"扫一眼在干什么",不是第二个终端。
+ */
+@Composable
+private fun SessionPreview(session: TerminalSession, modifier: Modifier = Modifier) {
+    val p = LocalXssh.current
+    val frame by session.frame.collectAsState()
+    val font = TerminalFontChoice.current
+    val density = LocalDensity.current
+    var boxW by remember { mutableIntStateOf(0) }
+    val cols = session.cols.coerceAtLeast(1)
+    val probe = rememberTermPaints(font, 13f)
+    val fitSp = remember(boxW, cols, probe) {
+        if (boxW <= 0) 13f
+        else (13f * boxW / (cols * probe.cellWidth)).coerceIn(7.5f, 13f)
+    }
+    val paints = rememberTermPaints(font, fitSp)
+    // 行数跟着**帧**走(响应式):会话行数变化时盒子高度跟着变,不用等别的重组;
+    // 还没发过帧时退回会话当前的行数。cols 只在终端界面会变,进预览必经重组,读一次足够。
+    val rowsCount = maxOf(frame.rows.size, session.rows).coerceAtLeast(1)
+    val height = with(density) { (rowsCount * paints.cellHeight).toDp() }
+        .coerceAtMost(220.dp)
+    Box(
+        modifier
+            .fillMaxWidth()
+            .height(height)
+            .clip(RoundedCornerShape(RadiusBox))
+            .background(p.termBg)
+            .onSizeChanged { boxW = it.width },
+    ) {
+        Canvas(Modifier.fillMaxSize()) {
+            val cw = paints.cellWidth
+            val ch = paints.cellHeight
+            val rows = frame.rows
+            for (r in rows.indices) {
+                val y = r * ch
+                if (y > size.height) break
+                val runs = rows[r].runs
+                for (i in runs.indices) drawRun(runs[i], y, paints, p.termFg, p.termBg)
+            }
+            val cur = frame.cursor
+            if (cur.visible) {
+                val t = 2.dp.toPx()
+                val cy = (cur.row.toInt() + 1) * ch - t
+                if (cy >= 0f && cy < size.height) {
+                    drawRect(color = p.termCursor, topLeft = Offset(cur.col.toFloat() * cw, cy), size = Size(cw, t))
+                }
+            }
+        }
+    }
+}
+
+/** 分组标题(会话 / 主机):和平板侧栏同一套字号,左缘落在标题线上。 */
+@Composable
+private fun SectionHeader(text: String) {
+    Text(
+        text,
+        color = LocalXssh.current.textDim,
+        fontSize = 13.sp,
+        fontWeight = FontWeight.Medium,
+        modifier = Modifier.padding(start = TitlePad, top = 10.dp, bottom = 2.dp),
+    )
+}
+
+/**
+ * 会话行:状态点(绿=连着,橙=正在自动重连)+ 主机名 + 地址 + 最后一次输出的相对时间。
+ * 点一行 = 接管那条会话(不重连、不再问密钥)。
+ */
+@Composable
+private fun SessionRow(session: TerminalSession, large: Boolean, onOpen: () -> Unit) {
+    val p = LocalXssh.current
+    // 订阅的是 linkState(只在重连状态变化时发射),不是 frame —— 见 TerminalSession.linkState 的注释。
+    val link by session.linkState.collectAsState()
+    val host = session.host
+    // 相对时间要"走":闲着的会话不产生任何重组,不在这里自己走针的话,
+    // 十分钟后那一行还停在「刚刚」。一分钟重算一次文案,一行字的重排,可忽略。
+    var tick by remember { mutableIntStateOf(0) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(60_000)
+            tick++
+        }
+    }
+    val time = remember(tick) {
+        android.text.format.DateUtils.getRelativeTimeSpanString(session.lastOutputAt).toString()
+    }
+    XsshCard(
+        modifier = Modifier.fillMaxWidth(),
+        onClick = onOpen,
+        paddingVertical = if (large) 12.dp else 10.dp,
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            StatusDot(if (link > 0) p.warn else p.ok)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    host.label,
+                    color = p.text,
+                    fontSize = if (large) 17.sp else 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    host.subtitle,
+                    color = p.textDim,
+                    fontFamily = XsshFonts.monoUi,
+                    fontSize = if (large) 14.sp else 13.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Spacer(Modifier.width(10.dp))
+            Text(
+                time,
+                color = p.textFaint,
+                fontSize = 12.sp,
+                maxLines = 1,
+            )
+        }
     }
 }
 
@@ -927,9 +1103,12 @@ private fun HostDetailPane(
     modifier: Modifier,
     host: Host?,
     running: Boolean,
+    /** 这台主机活着的会话(双栏右栏实时预览);没有就 null。 */
+    session: TerminalSession?,
     onConnect: (Host) -> Unit,
     onEdit: (Host) -> Unit,
     onDelete: (Host) -> Unit,
+    onPin: (Host) -> Unit,
 ) {
     val p = LocalXssh.current
     if (host == null) {
@@ -975,13 +1154,20 @@ private fun HostDetailPane(
                 onEdit = onEdit,
                 onDelete = onDelete,
                 actionsPinned = true,
+                onPin = onPin,
                 header = {
-                    PaneTitle(
-                        Modifier.fillMaxWidth().padding(start = TitlePad),
-                        host.label,
-                        host.subtitle,
-                        monoSubtitle = true,
-                    )
+                    Column {
+                        PaneTitle(
+                            Modifier.fillMaxWidth().padding(start = TitlePad),
+                            host.label,
+                            host.subtitle,
+                            monoSubtitle = true,
+                        )
+                        if (session != null) {
+                            Spacer(Modifier.height(12.dp))
+                            SessionPreview(session, Modifier.padding(start = TitlePad))
+                        }
+                    }
                 },
             )
         }

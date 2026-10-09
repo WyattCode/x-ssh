@@ -211,7 +211,7 @@ val LocalHosts = compositionLocalOf<List<Host>> { emptyList() }
 fun App(devTarget: DevTarget? = null) {
     val context = LocalContext.current
     val store = remember { HostStore(context) }
-    var hosts by remember { mutableStateOf(store.load()) }
+    var hosts by remember { mutableStateOf(orderHosts(store.load())) }
 
     // 正开着的是哪条会话 —— 这一项要活过 Activity 重建。
     //
@@ -257,8 +257,20 @@ fun App(devTarget: DevTarget? = null) {
     }
 
     fun persist(list: List<Host>) {
-        hosts = list
-        store.save(list)
+        // 存和显示都走同一个顺序(置顶 → 最近使用 → 添加顺序);
+        // 存排序后的列表,插入顺序作为并列时的兜底也一并固化下来。
+        val sorted = orderHosts(list)
+        // 数据安全护栏:内存里一台主机都没有、磁盘上却还有主机时,唯一可能的来路是
+        // Activity 重建后 load 失败(密钥没就绪 → getOrDefault(空) —— 见 HostStore.load)。
+        // 此时绝不能把空表落盘:2026-10-10 真机上发生过一次,一次普通的"确认删除"
+        // 就把用户全部主机抹掉了(靠会话开头的备份才恢复)。正常删掉最后一台主机
+        // 不走这里 —— 那时内存里还有 1 台,不会命中这个条件。
+        if (sorted.isEmpty() && hosts.isEmpty() && store.diskCount() > 0) {
+            android.util.Log.e("XsshData", "refusing to persist an empty host list over existing data")
+            return
+        }
+        hosts = sorted
+        store.save(sorted)
     }
 
     // 平板:窗口够宽(≥ 600dp)就是平板那一整套交互;小窗、窄分屏缩到手机宽度时退回手机的页面,
@@ -290,6 +302,10 @@ fun App(devTarget: DevTarget? = null) {
                     // 换一个 Host 实例 → 终端的 remember(host) 失效 → 带着新指纹重连。
                     persist(hosts.map { if (it.id == host.id) it.copy(keyFingerprint = fingerprint) else it })
                 },
+                onPin = { pinned -> persist(hosts.map { if (it.id == pinned.id) pinned else it }) },
+                onConnected = { id ->
+                    persist(hosts.map { if (it.id == id) it.copy(lastUsed = System.currentTimeMillis()) else it })
+                },
             )
         } else {
             CompositionLocalProvider(
@@ -297,6 +313,9 @@ fun App(devTarget: DevTarget? = null) {
             ) {
                 // 从平板布局缩进来:右栏开着终端就接着显示它,否则回主机页。
                 LaunchedEffect(Unit) {
+                    // dev 跳转刚把 screen 推到终端,会话此刻还没登记 —— 这道"没有活会话就退回
+                    // 首页"的守卫会把 dev 跳转本身踢掉(真机外屏宽度才踩到,平板分支没有这道守卫)。
+                    if (devTarget != null) return@LaunchedEffect
                     // **会话还活着才接着显示**。只看 `termHostId` 的话,进程被系统杀掉之后
                     // 重新打开(saved state 还在、SessionRegistry 已经空了),会一闪主机页
                     // 然后自己钻进终端、重新拨号 —— 加锁的主机还会平白弹一次指纹框。
@@ -456,6 +475,7 @@ private fun PhoneFlow(
                 persist(hosts.filterNot { it.id == host.id })
                 if (selectedId == host.id) onSelect(null)
             },
+            onPin = { pinned -> persist(hosts.map { if (it.id == pinned.id) pinned else it }) },
         )
 
         is Screen.HostInfo -> {
@@ -476,6 +496,7 @@ private fun PhoneFlow(
                         if (selectedId == gone.id) onSelect(null)
                         onScreen(land(Screen.Home))
                     },
+                    onPin = { pinned -> persist(hosts.map { if (it.id == pinned.id) pinned else it }) },
                 )
             }
         }
@@ -519,6 +540,10 @@ private fun PhoneFlow(
                 persist(hosts.map { if (it.id == jump.id) it.copy(keyFingerprint = fingerprint) else it })
             },
             onFiles = { onScreen(Screen.Files(current)) },
+            // 连上 / 接管的那一刻记一笔"最近使用"(失败和自动重连不算)。
+            onConnected = { id ->
+                persist(hosts.map { if (it.id == id) it.copy(lastUsed = System.currentTimeMillis()) else it })
+            },
             onEditHost = {
                 onTerminalHost(null)
                 // 填完回到进终端之前的那一页(详情页或主机页),再点连接就是用新密码连。

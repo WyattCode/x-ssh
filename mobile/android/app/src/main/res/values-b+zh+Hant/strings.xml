@@ -134,6 +134,7 @@
     <string name="host_deleted">已刪除</string>
     <string name="host_disconnect">中斷</string>
     <string name="host_edit">編輯</string>
+    <string name="host_pin">釘選</string>
     <string name="host_enter_tmux">進入 tmux</string>
     <string name="host_fingerprint">指紋</string>
     <string name="host_gate_changed_note">和上次記錄的不一致。可能是伺服器重新安裝過，也可能是連線遭人攔截。</string>

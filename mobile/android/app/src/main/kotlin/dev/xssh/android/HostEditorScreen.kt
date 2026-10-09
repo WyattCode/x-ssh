@@ -527,6 +527,9 @@ class HostDraft(private val initial: Host?) {
             lockedPassword = kept.lockedPassword,
             lockedKeyData = kept.lockedKeyData,
             lockedKeyPassphrase = kept.lockedKeyPassphrase,
+            // 排序字段不是本页的编辑项:改个备注存一下,置顶和最近使用不能被冲回默认。
+            pinned = initial?.pinned ?: false,
+            lastUsed = initial?.lastUsed ?: 0,
         )
     }
 

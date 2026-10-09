@@ -174,6 +174,8 @@ fun TerminalScreen(
     onFiles: (() -> Unit)? = null,
     /** 手机 / 折叠屏:打开这台主机的编辑页(连接失败时「填写密码」这类就地修复用;平板走 [tablet])。 */
     onEditHost: (() -> Unit)? = null,
+    /** 连上 / 接管到活会话的那一刻回调(主机 id):首页按"最近使用"排序就靠它。 */
+    onConnected: (String) -> Unit = {},
 ) {
     val context = LocalContext.current
     // 跳板机从主机表里现查:信任了它的密钥、改了它的密码,这里拿到的就是新的那份,随之重连。
@@ -183,6 +185,9 @@ fun TerminalScreen(
     val jumpGone = host.jumpHostId.isNotEmpty() && jumpHost == null
     // 已经连着就直接接管,不重连、也不再问一次主机密钥。
     var live by remember(host, jumpHost) { mutableStateOf(SessionRegistry[host.id]) }
+    // 连上 / 接管的那一刻记一笔"最近使用"。失败不记;自动重连不换 `live` 这个对象,也不记 ——
+    // "最近使用"回答的是"用户最近主动去干哪台",不是"哪台最近还活着"(那是会话区的事)。
+    LaunchedEffect(live) { if (live != null) onConnected(host.id) }
     // 错误页那句话**存成「怎么说」而不是说好的字**:换界面语言时界面不重建(见 Manifest 的 configChanges),
     // 存成字的话平板上开着错误页去设置里换语言,别处都变了,就这句还是旧语言。显示时再按当前语言取。
     var error by remember(host, jumpHost) { mutableStateOf<((android.content.Context) -> String)?>(null) }

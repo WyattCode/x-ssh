@@ -94,6 +94,12 @@ class TerminalSession(
     val subtitle: String = host.subtitle
 
     /**
+     * 建会话那一刻的主机。首页会话区直接用它 —— 不查主机表:
+     * 主机被删了(或 dev 跳转根本没存过)会话还活着,那一行照样该显示、照样能接管。
+     */
+    val host: Host = host
+
+    /**
      * 断线自动重连要用的**已解锁**凭据。
      *
      * 加了生物识别锁的主机,连接那一刻验过一次指纹;之后的自动重连是**同一次连接的延续**,
@@ -111,8 +117,30 @@ class TerminalSession(
     /** 同一条连接上的文件(SFTP),第一次打开文件面板时才开通道。 */
     val files = RemoteFiles(live.session, scope)
 
+    /** 会话当前的网格尺寸(首页右栏预览按列宽缩放用)。 */
+    val cols: Int get() = live.cols
+    val rows: Int get() = live.rows
+
     private val _frame = MutableStateFlow(TerminalFrame())
     val frame: StateFlow<TerminalFrame> = _frame
+
+    /**
+     * 链路状态:0 = 连着,>0 = 正在自动重连(第几次)。
+     *
+     * 首页会话区要显示这个,但**不能去订阅 [frame]** —— 那会把 `_frame.subscriptionCount`
+     * 加一,会话的轮询循环就以为"有人在盯着画面",后台也按 16ms 搬整屏文字(见上面 watched)。
+     * 这个流只在状态**变化**时发射;首页订阅它便宜且不误事。
+     */
+    private val _linkState = MutableStateFlow(0)
+    val linkState: StateFlow<Int> = _linkState
+
+    /**
+     * 最后一次屏幕有变化的时刻(毫秒)。首页会话行的"几分钟前"用它。
+     * volatile:轮询线程写,主线程读,不需要锁,也不会读到撕裂的 long。
+     */
+    @Volatile
+    var lastOutputAt: Long = System.currentTimeMillis()
+        private set
 
     private val job: Job = scope.launch {
         var idle = 0
@@ -157,6 +185,7 @@ class TerminalSession(
                 break
             }
             idle = if (pumped.changed) 0 else idle + 1
+            if (pumped.changed) lastOutputAt = System.currentTimeMillis()
             // 有人看且有输出:16ms 跟手。安静下来:96ms。没人看(切走了):250ms ——
             // 只要还能把数据收下来不让它堆着就够了,没人等这一帧。
             delay(
@@ -201,6 +230,7 @@ class TerminalSession(
         Log.i(TAG, "link dropped ($label), reconnecting")
         for (attempt in 1..ReconnectPolicy.MAX_ATTEMPTS) {
             _frame.value = _frame.value.copy(reconnecting = attempt)
+            _linkState.value = attempt
             SessionRegistry.awaitRetry(ReconnectPolicy.delayMillis(attempt))
             val result = withContext(Dispatchers.IO) {
                 runCatching { openTransport(host, jump, live.cols, live.rows) }
@@ -214,6 +244,7 @@ class TerminalSession(
                 withContext(Dispatchers.IO) { live.reattach(transport.first, transport.second, marker) }
                 files.rebind(live.session)
                 _frame.value = _frame.value.copy(reconnecting = 0)
+                _linkState.value = 0
                 Log.i(TAG, "reconnected ($label) on attempt $attempt")
                 return true
             }
@@ -222,6 +253,7 @@ class TerminalSession(
             if (ReconnectPolicy.isPermanent(error)) break
         }
         _frame.value = _frame.value.copy(reconnecting = 0)
+        _linkState.value = 0
         return false
     }
 

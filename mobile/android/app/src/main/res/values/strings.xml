@@ -135,6 +135,7 @@
     <string name="host_deleted">Deleted</string>
     <string name="host_disconnect">Disconnect</string>
     <string name="host_edit">Edit</string>
+    <string name="host_pin">Pin to top</string>
     <string name="host_enter_tmux">Enter tmux</string>
     <string name="host_fingerprint">Fingerprint</string>
     <string name="host_gate_changed_note">It doesn\'t match the key recorded last time. The server may have been reinstalled, or the connection may have been intercepted.</string>

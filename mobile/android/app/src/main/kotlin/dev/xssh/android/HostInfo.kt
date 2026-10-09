@@ -54,9 +54,9 @@ import com.kyant.backdrop.backdrops.rememberLayerBackdrop
    不写说明文字;需要注意的取值(密码未保存、私钥未导入、主机密钥未确认)标成橙色。
 */
 
-/** 「连接」「主机密钥」两组。 */
+/** 「连接」「主机密钥」两组;给了 [onPin] 就多一组「置顶」开关(列表组织,不是主机配置)。 */
 @Composable
-fun HostInfoGroups(host: Host) {
+fun HostInfoGroups(host: Host, onPin: ((Host) -> Unit)? = null) {
     val p = LocalXssh.current
     FormGroup(title = stringResource(R.string.host_group_connection)) {
         InfoRow(stringResource(R.string.host_address), host.address, mono = true)
@@ -141,6 +141,19 @@ fun HostInfoGroups(host: Host) {
                         }
                     }
                 }
+            }
+        }
+    }
+    if (onPin != null) {
+        // 置顶:列表组织开关,放在详情最下面(和编辑页的开关同款排法,不写脚注)。
+        Spacer(Modifier.height(24.dp))
+        FormGroup {
+            Row(
+                Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(horizontal = BoxPad),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(stringResource(R.string.host_pin), color = p.text, fontSize = 16.sp, modifier = Modifier.weight(1f))
+                XsshSwitch(host.pinned) { onPin(host.copy(pinned = it)) }
             }
         }
     }
@@ -383,11 +396,12 @@ fun HostInfoScreen(
     onConnect: (Host) -> Unit,
     onEdit: (Host) -> Unit,
     onDelete: (Host) -> Unit,
+    onPin: (Host) -> Unit,
 ) {
     val running = host.id in SessionRegistry.sessions.collectAsState().value
     // 「连接 / 编辑 / 删除」钉在页底,和展开的折叠屏一个规矩:手在下半截,按钮就在下半截。
     ReadingPage(onBack, actions = { HostActions(host, running, onConnect, onEdit, onDelete) }) {
-        HostInfoBody(host, running, onConnect, onEdit, onDelete, actionsPinned = true)
+        HostInfoBody(host, running, onConnect, onEdit, onDelete, actionsPinned = true, onPin = onPin)
     }
 }
 
@@ -411,6 +425,7 @@ fun HostInfoBody(
      * 按钮跟在身份块后面才是常规位置。
      */
     actionsPinned: Boolean = false,
+    onPin: ((Host) -> Unit)? = null,
 ) {
     Column(Modifier.widthIn(max = PageMaxWidth)) {
         header?.invoke() ?: HostIdentity(host, running)
@@ -419,6 +434,6 @@ fun HostInfoBody(
             HostActions(host, running, onConnect, onEdit, onDelete)
             Spacer(Modifier.height(32.dp))
         }
-        HostInfoGroups(host)
+        HostInfoGroups(host, onPin)
     }
 }

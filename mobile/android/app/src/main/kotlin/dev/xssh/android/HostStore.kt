@@ -54,6 +54,13 @@ data class Host(
      */
     val jumpHostId: String = "",
     /**
+     * 最近一次**连上**的时刻(毫秒,0 = 从没连过)。首页按"置顶 → 最近使用 → 添加顺序"排,
+     * 遥控器的第一需求是"点我最常连的那台"。只在连接成功时写,失败和自动重连不写。
+     */
+    val lastUsed: Long = 0,
+    /** 置顶:永远排在列表最前(组内仍按最近使用)。老数据没有这个字段,默认不置顶。 */
+    val pinned: Boolean = false,
+    /**
      * 还没解锁时,磁盘上那几条**读不出来**的密文原样带着。
      *
      * 没有它们的话,「解锁之前保存一次主机」(改个端口、换个名字)就会把密码
@@ -117,19 +124,45 @@ internal fun unreadableSecrets(sealed: List<String>, plain: List<String>): List<
         sealed[i].isNotEmpty() && !Secrets.isLocked(sealed[i]) && plain[i].isEmpty()
     }
 
+/**
+ * 首页 / 侧栏的显示顺序:**置顶在前,然后按最近使用,都没用过的保持添加顺序**。
+ *
+ * `sortedWith` 是稳定排序 —— pinned 和 lastUsed 都相同时保持原样,
+ * 所以老数据(两个字段都缺)不会被打乱,升级前后列表一模一样。
+ */
+fun orderHosts(hosts: List<Host>): List<Host> =
+    hosts.sortedWith(
+        compareByDescending<Host> { it.pinned }.thenByDescending { it.lastUsed },
+    )
+
 class HostStore(context: Context) {
     private val prefs = context.getSharedPreferences("xssh_hosts", Context.MODE_PRIVATE)
+
+    /**
+     * 磁盘上有几条主机记录。**只数 JSON 长度,不碰任何凭据** —— persist 的数据安全护栏
+     * 在主线程高频调用,这里走一遍解密的话每次连接 / 置顶 / 删除都要过一遍 Keystore。
+     */
+    fun diskCount(): Int = runCatching {
+        JSONArray(prefs.getString(KEY_LIST, "[]")).length()
+    }.getOrDefault(0)
 
     fun load(): List<Host> {
         val raw = prefs.getString(KEY_LIST, null) ?: return emptyList()
         return runCatching {
             val array = JSONArray(raw)
-            (0 until array.length()).map { index ->
-                val item = array.getJSONObject(index)
-                // 三条凭据只解一次:解出来的明文进 Host,顺带记下哪条"有密文却解不开"。
-                val sealed = SecretFields.map { item.optString(it) }
-                val plain = sealed.map(::readSecret)
-                Host(
+            // 每条记录单独兜:一条记录坏了(字段缺失、类型不对)只丢它自己,
+            // 不许把整张表拖下水 —— 原来整表一个 runCatching,一条坏记录
+            // 就 getOrDefault(空),首页直接变"还没有主机"。
+            (0 until array.length()).mapNotNull { index ->
+                runCatching {
+                    val item = array.getJSONObject(index)
+                    // 三条凭据只解一次:解出来的明文进 Host,顺带记下哪条"有密文却解不开"。
+                    val sealed = SecretFields.map { item.optString(it) }
+                    // 单条凭据解不开(密钥没就绪、密文坏了)也不许炸整条加载:
+                    // 明文落空 + unreadableSecrets 标记,界面说"读不出来",密文原样在盘上。
+                    // (2026-10-10 真机:整表兜底 + 一次普通删除,曾把用户全部主机抹成空表。)
+                    val plain = sealed.map { runCatching { readSecret(it) }.getOrDefault("") }
+                    Host(
                     id = item.optString("id", UUID.randomUUID().toString()),
                     name = item.optString("name"),
                     address = item.optString("address"),
@@ -146,6 +179,8 @@ class HostStore(context: Context) {
                     keyPublicFingerprint = item.optString("keyPublicFingerprint"),
                     tmux = item.optBoolean("tmux", false),
                     jumpHostId = item.optString("jumpHostId"),
+                    lastUsed = item.optLong("lastUsed", 0L),
+                    pinned = item.optBoolean("pinned", false),
                     // **这一条不能漏**:漏了每次加载都是 false —— 编辑页的开关显示成"关"
                     // (磁盘上明明锁着),而且保存时 `writeSecret` 会按"没加锁"用普通密钥
                     // 重新加密,用户没碰过开关,锁就被悄悄去掉了。
@@ -159,7 +194,8 @@ class HostStore(context: Context) {
                     lockedKeyData = item.optString("keyData").takeIf { Secrets.isLocked(it) },
                     lockedKeyPassphrase = item.optString("keyPassphrase").takeIf { Secrets.isLocked(it) },
                     unreadableSecrets = unreadableSecrets(sealed, plain),
-                )
+                    )
+                }.getOrNull()
             }
         }.getOrDefault(emptyList())
     }
@@ -199,6 +235,8 @@ class HostStore(context: Context) {
             item.put("keyPublicFingerprint", host.keyPublicFingerprint)
             item.put("tmux", host.tmux)
             item.put("jumpHostId", host.jumpHostId)
+            item.put("lastUsed", host.lastUsed)
+            item.put("pinned", host.pinned)
             array.put(item)
         }
         prefs.edit().putString(KEY_LIST, array.toString()).apply()

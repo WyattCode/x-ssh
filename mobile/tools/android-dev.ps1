@@ -40,7 +40,8 @@ function Get-ActiveDisplayId {
 function Get-UniqueId([string]$displayId) {
     $d = Join-Path $dir "disp-active.txt"
     & $adb shell dumpsys display *> $d
-    $m = Select-String -Path $d -Pattern ("Viewport INTERNAL: displayId=" + $displayId + ", uniqueId=local:(\d+)")
+    $pattern = "displayId=$displayId, uniqueId=.{0,2}local:(\d+)"
+    $m = Select-String -Path $d -Pattern $pattern
     if ($m -and $m.Matches.Count -gt 0) { return $m.Matches[0].Groups[1].Value }
     return ""
 }

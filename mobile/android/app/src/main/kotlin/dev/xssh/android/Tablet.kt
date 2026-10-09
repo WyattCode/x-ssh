@@ -240,6 +240,8 @@ fun TabletApp(
     onSave: (Host) -> Unit,
     onDelete: (Host) -> Unit,
     onTrustKey: (Host, String) -> Unit,
+    onPin: (Host) -> Unit,
+    onConnected: (String) -> Unit,
 ) {
     val p = LocalXssh.current
     val context = LocalContext.current
@@ -529,6 +531,7 @@ fun TabletApp(
                                         onExit = onCloseTerminal,
                                         onTrustKey = { onTrustKey(host, it) },
                                         onTrustJumpKey = { jump, fingerprint -> onTrustKey(jump, fingerprint) },
+                                        onConnected = onConnected,
                                         tablet = TabletTerminalChrome(
                                             sidebarVisible = sidebarVisible,
                                             onToggleSidebar = ::toggleSidebar,
@@ -575,6 +578,7 @@ fun TabletApp(
                                     onDisconnect = { disconnect(host) },
                                     onEdit = { sheet = SheetTarget.Edit(host) },
                                     onDelete = { deleting = host },
+                                    onPin = onPin,
                                 )
                             }
                         }
@@ -1163,6 +1167,7 @@ private fun TabletHostDetail(
     onDisconnect: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
+    onPin: (Host) -> Unit,
 ) {
     val p = LocalXssh.current
     Column(Modifier.fillMaxSize()) {
@@ -1220,7 +1225,7 @@ private fun TabletHostDetail(
                     }
                 }
                 Spacer(Modifier.height(32.dp))
-                HostInfoGroups(host)
+                HostInfoGroups(host, onPin)
             }
         }
     }
