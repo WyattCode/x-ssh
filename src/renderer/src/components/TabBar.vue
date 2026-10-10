@@ -2,11 +2,21 @@
 import { reactive, ref, computed, nextTick } from 'vue'
 import { useSessions, type Tab } from '../stores/sessions'
 import { useI18n } from '../lib/i18n'
+import { isMac } from '../composables/platform'
+import { useZoom } from '../composables/zoom'
 import Icon from './Icon.vue'
 
 const store = useSessions()
 const { t } = useI18n()
-const modKey = /mac|iphone|ipad/i.test(navigator.platform || navigator.userAgent) ? '⌘' : 'Ctrl'
+const { factor } = useZoom()
+const modKey = isMac ? '⌘' : 'Ctrl'
+
+// The traffic lights sit over the sidebar, and only land on this bar when the
+// sidebar is hidden (focus mode). Then they need room, and since the OS draws
+// them at a fixed size the bar is counter-scaled so its row stays glued to
+// them whatever the app zoom is.
+const underLights = computed(() => isMac && store.termSidebarHidden)
+const barStyle = computed(() => (underLights.value ? { zoom: 1 / factor.value } : {}))
 /** Layout/split operations need a connected active tab. */
 const canLayout = computed(() => store.activePane?.status === 'connected')
 
@@ -130,7 +140,7 @@ function cancelRename(): void {
 </script>
 
 <template>
-  <div class="tabbar">
+  <div class="tabbar" :class="{ mac: underLights }" :style="barStyle">
     <div class="tabs">
       <div
         v-for="tab in visibleTabs"
@@ -255,6 +265,14 @@ function cancelRename(): void {
   background: var(--bg-elev);
   border-bottom: 1px solid var(--border);
   -webkit-app-region: drag;
+}
+/* Reserve room for the native macOS traffic lights (hiddenInset title bar). */
+.tabbar.mac {
+  padding-left: 72px;
+}
+.tabbar.mac > * {
+  position: relative;
+  top: 1px;
 }
 .tabs {
   display: flex;

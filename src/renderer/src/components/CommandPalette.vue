@@ -371,7 +371,13 @@ function onKey(e: KeyboardEvent): void {
     return
   }
   if (pending.value) {
-    if (e.key === 'Escape') {
+    // Handle Enter at the palette level (not just on the password <input>): the
+    // prompt also has a "remember password" checkbox, and if focus lands there
+    // (or anywhere but the field) Enter must still submit and connect.
+    if (e.key === 'Enter' && !e.isComposing) {
+      e.preventDefault()
+      void submitPassword()
+    } else if (e.key === 'Escape') {
       pending.value = null
       nextTick(() => inputEl.value?.focus())
     }
@@ -427,7 +433,6 @@ function onKey(e: KeyboardEvent): void {
           type="password"
           class="search"
           :placeholder="t('pal.pwPlaceholder')"
-          @keydown.enter.prevent="submitPassword"
         />
         <label v-if="pending.params.hostId" class="pw-remember">
           <input v-model="remember" type="checkbox" />

@@ -10,6 +10,7 @@ import {
   defineAsyncComponent
 } from 'vue'
 import { useSessions } from './stores/sessions'
+import { appMod, isMac } from './composables/platform'
 import TabBar from './components/TabBar.vue'
 import CommandPalette from './components/CommandPalette.vue'
 import HostEditor from './components/HostEditor.vue'
@@ -55,8 +56,7 @@ const SftpDrawer = defineAsyncComponent(() => import('./components/SftpDrawer.vu
 const store = useSessions()
 const { t } = useI18n()
 
-// Show the platform's real modifier key in hints (⌘ on macOS, Ctrl elsewhere).
-const isMac = /mac|iphone|ipad/i.test(navigator.platform || navigator.userAgent)
+// Modifier symbol shown in hints (⌘ on macOS, Ctrl elsewhere).
 const modKey = isMac ? '⌘' : 'Ctrl'
 
 // ---- SFTP page: which live session it browses ----
@@ -187,8 +187,9 @@ function openEditHost(h: Host): void {
 const zoom = useZoom()
 
 function onWheel(e: WheelEvent): void {
-  if (!(e.ctrlKey || e.metaKey)) return
-  // Ctrl + wheel zooms the whole UI; intercept before the terminal scrolls.
+  // ⌘ (macOS) / Ctrl (elsewhere) + wheel zooms the whole UI. On macOS we require
+  // ⌘ specifically so Ctrl+wheel stays free for macOS's system screen zoom.
+  if (!appMod(e)) return
   e.preventDefault()
   e.stopPropagation()
   zoom.bump(e.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP)
@@ -211,7 +212,8 @@ function onGlobalKey(e: KeyboardEvent): void {
   if (inEditable) return
 
   // Number-jump and terminal copy/paste are hard-wired (not rebindable).
-  const mod = e.ctrlKey || e.metaKey
+  // ⌘ on macOS, Ctrl elsewhere — leaves Ctrl+1..9 free for the shell on macOS.
+  const mod = appMod(e)
   if (mod && !e.shiftKey && e.key >= '1' && e.key <= '9') {
     e.preventDefault()
     const n = Number(e.key)

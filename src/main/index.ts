@@ -1823,7 +1823,7 @@ function registerIpc(): void {
     }
   })
 
-  // Drag out (dragstart): download to a temp dir, then startDrag.
+  // Drag out (dragstart): start the native drag with the (pre)downloaded file.
   ipcMain.on(
     IPC.sftpStartDrag,
     async (e, sessionId: string, items: DragItem[]) => {
@@ -2119,7 +2119,9 @@ function setGlobalShowHide(accel: string): { ok: boolean; error?: string } {
   if (!acc) return { ok: true }
   try {
     const okReg = globalShortcut.register(acc, toggleMainWindow)
-    if (!okReg) return { ok: false, error: '快捷键已被其他程序占用' }
+    // No message: the renderer has a translated one for exactly this case, and
+    // a hard-coded Chinese string here would override it for English users.
+    if (!okReg) return { ok: false }
     globalAccel = acc
     return { ok: true }
   } catch (e) {

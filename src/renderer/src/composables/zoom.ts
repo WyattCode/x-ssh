@@ -58,6 +58,8 @@ function setHover(on: boolean): void {
 export function useZoom(): {
   level: typeof level
   percent: import('vue').ComputedRef<number>
+  /** Zoom factor (1.2^level); the macOS tab bar counter-scales by it to stay glued to the native traffic lights. */
+  factor: import('vue').ComputedRef<number>
   hudOpen: typeof hudOpen
   setZoom: (next: number) => void
   bump: (delta: number) => void
@@ -68,6 +70,7 @@ export function useZoom(): {
   return {
     level,
     percent: computed(() => zoomPercent(level.value)),
+    factor: computed(() => zoomFactor(level.value)),
     hudOpen,
     setZoom,
     bump: (delta) => setZoom(level.value + delta),

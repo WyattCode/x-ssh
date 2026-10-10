@@ -3,6 +3,8 @@ import { computed, ref } from 'vue'
 import { useSessions, type AppPage } from '../stores/sessions'
 import { useTheme } from '../composables/theme'
 import { useI18n } from '../lib/i18n'
+import { isMac } from '../composables/platform'
+import { useZoom } from '../composables/zoom'
 import Icon from './Icon.vue'
 import logoLight from '../assets/logo-light.png'
 import logoDark from '../assets/logo-dark.png'
@@ -14,6 +16,7 @@ defineProps<{ hidden?: boolean }>()
 const store = useSessions()
 const { pref, setPref } = useTheme()
 const { t } = useI18n()
+const { factor } = useZoom()
 
 // Same number as the 端口转发 page's title: saved rules plus live temporary ones.
 const forwardCount = computed(() => store.forwardGroups.reduce((n, g) => n + g.rows.length, 0))
@@ -63,8 +66,8 @@ const themeName = computed(
 <template>
   <aside
     class="sidebar"
-    :class="{ collapsed: store.sidebarCollapsed, hidden, dragging, instant: store.page === 'terminal' }"
-    :style="store.sidebarCollapsed ? undefined : { width: store.sidebarWidth + 'px' }"
+    :class="{ collapsed: store.sidebarCollapsed, mac: isMac, hidden, dragging, instant: store.page === 'terminal' }"
+    :style="[store.sidebarCollapsed ? undefined : { width: store.sidebarWidth + 'px' }, isMac ? { '--zf': factor } : undefined]"
   >
     <div v-if="!store.sidebarCollapsed" class="edge" @pointerdown.prevent="onEdgeDown" />
     <div class="brand">
@@ -133,6 +136,15 @@ const themeName = computed(
 }
 .sidebar.collapsed {
   width: 64px;
+}
+/* macOS: the traffic lights are drawn by the OS at a fixed size (~65px wide,
+   ~20px tall), so the rail and the header must clear them at any app zoom
+   (--zf = zoom factor): 80px / --zf keeps 80 real pixels when zoomed out. */
+.sidebar.collapsed.mac {
+  width: calc(80px / var(--zf));
+}
+.sidebar.mac {
+  padding-top: max(18px, calc(23px / var(--zf) - 5px));
 }
 .sidebar.dragging {
   transition: none;

@@ -4,6 +4,7 @@ import { useConfirm } from '../composables/confirm'
 import { useI18n } from '../lib/i18n'
 import { highlight, langFromName } from '../lib/highlight'
 import Icon from './Icon.vue'
+import { isMac } from '../composables/platform'
 
 const { confirm } = useConfirm()
 const { t } = useI18n()
@@ -17,7 +18,7 @@ const props = defineProps<{
 const emit = defineEmits<{ (e: 'close'): void; (e: 'saved'): void }>()
 
 // Platform modifier key for the save hint (⌘ on macOS, Ctrl elsewhere).
-const modKey = /mac|iphone|ipad/i.test(navigator.platform || navigator.userAgent) ? '⌘' : 'Ctrl'
+const modKey = isMac ? '⌘' : 'Ctrl'
 
 const content = ref('')
 const original = ref('')

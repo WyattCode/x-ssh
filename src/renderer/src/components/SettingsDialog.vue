@@ -8,6 +8,7 @@ import {
   DEFAULT_BINDINGS,
   REBINDABLE_ACTIONS,
   canonicalChord,
+  basePhysicalKey,
   type RebindableAction
 } from '../lib/shortcuts'
 import { splitShortcutChips } from '../lib/shortcutChips'
@@ -18,6 +19,7 @@ import { useConfirm } from '../composables/confirm'
 import { useTheme } from '../composables/theme'
 import type { SettingsTab } from '../stores/sessions'
 import type { KnownHostEntry } from '../../../shared/types'
+import { isMac } from '../composables/platform'
 
 const store = useSessions()
 const { langPref, setLang, t } = useI18n()
@@ -33,9 +35,27 @@ const TABS: { id: SettingsTab; label: string; icon: string }[] = [
   { id: 'keys', label: '', icon: 'keyboard' }
 ]
 
-const isMac = /mac|iphone|ipad/i.test(navigator.platform || navigator.userAgent)
 const modKey = isMac ? '⌘' : 'Ctrl'
 const withMod = (t: string): string => t.split('Mod').join(modKey)
+
+// Chip labels. macOS spells its modifiers as symbols, and DOM key names
+// (ArrowRight…) would otherwise be shown to the user verbatim.
+const MAC_MOD_SYMBOL: Record<string, string> = { Shift: '⇧', Alt: '⌥', Ctrl: '⌃' }
+const KEY_LABEL: Record<string, string> = {
+  ArrowRight: '→',
+  ArrowLeft: '←',
+  ArrowUp: '↑',
+  ArrowDown: '↓'
+}
+function chipLabel(part: string): string {
+  if (part === 'Mod') return modKey
+  // Pointer "keys" are words, not glyphs, so they go through i18n. Spelled out
+  // as literals so the i18n linter can see them.
+  if (part === 'MouseRight') return t('kbd.mouseRight')
+  if (part === 'MouseWheel') return t('kbd.mouseWheel')
+  if (isMac && MAC_MOD_SYMBOL[part]) return MAC_MOD_SYMBOL[part]
+  return KEY_LABEL[part] ?? part
+}
 
 /** Splits a spec into chip groups and the separators between them:
  *  "Mod+1 … Mod+8" renders as [Ctrl][1] … [Ctrl][8]. */
@@ -43,7 +63,7 @@ function parts(keys: string): { chord?: string[]; sep?: string }[] {
   return splitShortcutChips(keys).map((piece) =>
     'sep' in piece
       ? { sep: piece.sep === 'or' ? t('kbd.or') : '…' }
-      : { chord: piece.chord.map(withMod) }
+      : { chord: piece.chord.map(chipLabel) }
   )
 }
 
@@ -99,12 +119,22 @@ function recordChord(e: KeyboardEvent, id: RebindableAction): void {
     return
   }
   const mods = []
-  if (e.ctrlKey || e.metaKey) mods.push('Mod')
+  // Mod is ⌘ on macOS and Ctrl elsewhere. On a Mac the two must stay distinct:
+  // folding Ctrl into Mod stored a Ctrl chord as a ⌘ one, so the keys the user
+  // had just pressed then did nothing. Off macOS the old reading is kept, where
+  // Mod already matches either.
+  if (isMac ? e.metaKey : e.ctrlKey || e.metaKey) mods.push('Mod')
+  if (isMac && e.ctrlKey) mods.push('Ctrl')
   if (e.shiftKey) mods.push('Shift')
   if (e.altKey) mods.push('Alt')
   if (!mods.length) return // require at least one modifier to avoid eating typing
   let key = e.key
   if (key === ' ') key = 'Space'
+  // macOS composes Option+letter into a glyph — ⌥D arrives as "∂" — which would
+  // be stored and shown to the user in place of the letter. Take the physical
+  // key instead; chordMatches knows to fall back to it the same way.
+  const physical = basePhysicalKey(e)
+  if (isMac && e.altKey && physical) key = physical
   const chord = [...mods, key].join('+')
   // Reject a collision with another action's effective binding (a user override
   // on another action, or a default we haven't overridden). Same action is fine.
@@ -344,6 +374,15 @@ function onTmuxSessionName(e: Event): void {
   void store.saveSetting('tmuxSessionName', v)
 }
 const globalHotkey = reactive({ error: '' })
+// The example has to be an Electron accelerator, and macOS spells it
+// differently — a Mac user shown "Ctrl+Alt+X" would reasonably type "⌘⌥X",
+// which Electron does not accept.
+const globalShowHidePh = computed(() =>
+  isMac ? t('set.gen.globalShowHidePhMac') : t('set.gen.globalShowHidePh')
+)
+const globalShowHideDesc = computed(() =>
+  isMac ? t('set.gen.globalShowHideDescMac') : t('set.gen.globalShowHideDesc')
+)
 async function onGlobalShowHide(e: Event): Promise<void> {
   const v = (e.target as HTMLInputElement).value
   const r = await store.setGlobalShowHide(v)
@@ -638,7 +677,6 @@ async function resetMasterLock(): Promise<void> {
   }
 }
 
-
 </script>
 
 <template>
@@ -791,12 +829,12 @@ async function resetMasterLock(): Promise<void> {
                   <div class="r-text">
                     <span class="r-title">{{ t('set.gen.globalShowHide') }}</span>
                     <span v-if="globalHotkey.error" class="r-desc err">{{ globalHotkey.error }}</span>
-                    <span v-else class="r-desc">{{ t('set.gen.globalShowHideDesc') }}</span>
+                    <span v-else class="r-desc">{{ globalShowHideDesc }}</span>
                   </div>
                   <input
                     class="box text-in mono"
                     :value="store.globalShowHide"
-                    :placeholder="t('set.gen.globalShowHidePh')"
+                    :placeholder="globalShowHidePh"
                     spellcheck="false"
                     @change="onGlobalShowHide"
                     @keyup.enter="onGlobalShowHide"

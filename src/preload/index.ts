@@ -350,6 +350,8 @@ const api = {
   },
   /** Resolve a dropped File's absolute path (File.path was removed in Electron 32+). */
   getPathForFile: (file: File): string => webUtils.getPathForFile(file),
+  /** Host OS, so the renderer can pick the right modifier (⌘ on macOS, Ctrl elsewhere). */
+  platform: process.platform,
   zoom: {
     get: (): number => webFrame.getZoomLevel(),
     set: (level: number): void => webFrame.setZoomLevel(level)
