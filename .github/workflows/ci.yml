@@ -69,6 +69,9 @@ jobs:
     if: github.event_name == 'push'
     runs-on: windows-latest
     needs: test-build
+    # softprops/action-gh-release creates the Release with GITHUB_TOKEN.
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -81,7 +84,9 @@ jobs:
         run: npm ci
 
       - name: Build installer
-        run: npm run dist
+        # --publish never: electron-builder would otherwise publish on its own for
+        # a tag build (and 403 without a write token); the step below does that.
+        run: npm run dist -- --publish never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
