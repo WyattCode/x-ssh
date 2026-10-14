@@ -41,6 +41,46 @@ object ReconnectPolicy {
 }
 
 /**
+ * 首次连接的自动重试。
+ *
+ * 自动重连([ReconnectPolicy])只管"连上之后掉线";而**第一次连就失败**(握手被中间的
+ * 转发 / NAT 掐了、SYN 丢了一个、DNS 抖一下)过去直接弹「连接失败」,用户点一下重试就 100% 连上 ——
+ * 服务器明明是好的。这类失败多半是一次性的,所以先自己再试一两次,真连不上才让人看见。
+ *
+ * 不重试的:主机密钥 / 认证 / 口令这类"再试也没用"([ReconnectPolicy.isPermanent]),
+ * 以及用户喊了「全部断开」([SessionRegistry.Cancelled])和协程取消。
+ */
+const val INITIAL_CONNECT_ATTEMPTS = 3
+
+/** 第 [attempt] 次失败之后、下一次之前等多久:1 秒、2 秒。 */
+fun initialRetryDelayMillis(attempt: Int): Long = 1000L * attempt
+
+fun isRetryableInitialFailure(error: Throwable): Boolean =
+    error !is kotlinx.coroutines.CancellationException &&
+        error !is SessionRegistry.Cancelled &&
+        !ReconnectPolicy.isPermanent(error)
+
+/** 跑 [block],遇到可重试的失败就按 [delayMillis] 等一下再来,最多 [attempts] 次;最后一次的异常原样抛出。 */
+suspend fun <T> retryInitialConnect(
+    attempts: Int = INITIAL_CONNECT_ATTEMPTS,
+    delayMillis: (Int) -> Long = ::initialRetryDelayMillis,
+    onRetry: (attempt: Int, error: Throwable) -> Unit = { _, _ -> },
+    block: () -> T,
+): T {
+    var attempt = 1
+    while (true) {
+        try {
+            return block()
+        } catch (e: Throwable) {
+            if (attempt >= attempts || !isRetryableInitialFailure(e)) throw e
+            onRetry(attempt, e)
+            kotlinx.coroutines.delay(delayMillis(attempt))
+            attempt++
+        }
+    }
+}
+
+/**
  * 一批服务端事件说明了什么:连接还在,还是**传输断了**(该自动重连),还是**正常结束**(不该)。
  *
  * 区分这两种结束是整件事的关键:用户敲了 `exit`、在 tmux 里 detach,远端会发 `Close`

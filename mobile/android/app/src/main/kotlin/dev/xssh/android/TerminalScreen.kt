@@ -284,7 +284,14 @@ fun TerminalScreen(
         // onSuccess 就不跑了 —— 会话已经登记在册,却没有任何东西托着进程,
         // 系统一冻结连接就悄悄没了,而主机页还写着「运行中」。
         val result = withContext(Dispatchers.IO) {
-            runCatching { SessionRegistry.open(ready, readyJump, 80, 24) }
+            runCatching {
+                // 第一次就连不上多半是一次性的(中转 / NAT 掐了握手),先自己再试两次,别让用户去点重试。
+                retryInitialConnect(
+                    onRetry = { n, err ->
+                        Log.w(TAG, "first connect attempt $n failed, retrying: [${err.javaClass.simpleName}] ${err.message}")
+                    },
+                ) { SessionRegistry.open(ready, readyJump, 80, 24) }
+            }
                 .onSuccess {
                     // **服务起不来不算连接失败。** 它和登记要在同一个不可取消的步骤里
                     // (上面那段注释),但异常必须分开接:Android 12 起,应用退到后台时
