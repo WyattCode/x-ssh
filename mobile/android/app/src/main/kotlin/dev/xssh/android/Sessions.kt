@@ -369,6 +369,9 @@ object SessionRegistry {
      */
     private var closedGeneration = 0
 
+    /** 当前「全部断开」的代数。首次连接重试的间隙里用它判断用户是不是喊过停。 */
+    val generation: Int get() = synchronized(lock) { closedGeneration }
+
     private val _sessions = MutableStateFlow<Map<String, TerminalSession>>(emptyMap())
     val sessions: StateFlow<Map<String, TerminalSession>> = _sessions
 

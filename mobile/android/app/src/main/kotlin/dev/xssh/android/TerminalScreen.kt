@@ -286,11 +286,16 @@ fun TerminalScreen(
         val result = withContext(Dispatchers.IO) {
             runCatching {
                 // 第一次就连不上多半是一次性的(中转 / NAT 掐了握手),先自己再试两次,别让用户去点重试。
+                // 重试的间隙里用户点了「全部断开」:不能再连(open 只管握手那几秒)。
+                val generation = SessionRegistry.generation
                 retryInitialConnect(
                     onRetry = { n, err ->
                         Log.w(TAG, "first connect attempt $n failed, retrying: [${err.javaClass.simpleName}] ${err.message}")
                     },
-                ) { SessionRegistry.open(ready, readyJump, 80, 24) }
+                ) {
+                    if (SessionRegistry.generation != generation) throw SessionRegistry.Cancelled()
+                    SessionRegistry.open(ready, readyJump, 80, 24)
+                }
             }
                 .onSuccess {
                     // **服务起不来不算连接失败。** 它和登记要在同一个不可取消的步骤里
@@ -1468,6 +1473,24 @@ private fun WideKeys(k: KeyActions, keyWidth: Dp) {
 }
 
 /**
+ * 语音输入(长按空格)的结果,输入法会在最前面补一个逗号 —— 真机日志里组字一开始就是
+ * `哨兵 + "，" + 文字`,组字起点正好贴着哨兵。它看到光标前有个(零宽的)字符,就当成"接着上一句"。
+ * 输入框里必须留着哨兵(清空会被当成退格),所以在提交时认出来丢掉。
+ *
+ * 只认:组字起点紧贴哨兵、第一个字符是逗号、后面还有内容。单独敲一个逗号(只有一个字符)不受影响。
+ */
+internal fun startsWithVoiceComma(text: String, compositionStart: Int?, sentinelLength: Int): Boolean =
+    compositionStart == sentinelLength &&
+        text.length > sentinelLength + 1 &&
+        text[sentinelLength] in VOICE_COMMAS
+
+/** 提交的文字以输入法补的逗号开头(且后面还有字)时,去掉它。 */
+internal fun dropVoiceComma(committed: String, voiceComma: Boolean): String =
+    if (voiceComma && committed.length > 1 && committed[0] in VOICE_COMMAS) committed.substring(1) else committed
+
+private const val VOICE_COMMAS = "，,"
+
+/**
  * 输入法用的隐藏输入框。哨兵逻辑是修输入法竞态的成果,别动:重置输入框是异步
  * 生效的,输入法同帧连发时后一个事件带的仍是旧内容。
  */
@@ -1482,6 +1505,8 @@ private fun HiddenImeField(
     var sentinel by remember { mutableStateOf(0) }
     /** 本轮(输入框还没重置成功)已经发出去的文字,用来剔除陈旧事件里的重复部分。 */
     var sentInBurst by remember { mutableStateOf("") }
+    /** 当前这段组字是不是输入法自己在最前面补了个逗号(语音输入),见 [startsWithVoiceComma]。 */
+    var voiceComma by remember { mutableStateOf(false) }
     var field by remember {
         mutableStateOf(TextFieldValue(SENTINELS[0], TextRange(SENTINELS[0].length)))
     }
@@ -1504,7 +1529,10 @@ private fun HiddenImeField(
                 // 带当前哨兵 = 重置已生效,后面全是新输入;带上一个哨兵 = 陈旧事件,
                 // 只发本轮还没发过的尾巴。
                 val fresh = text.startsWith(SENTINELS[sentinel])
-                val committed = SENTINELS.fold(text) { acc, mark -> acc.removePrefix(mark) }
+                val committed = dropVoiceComma(
+                    SENTINELS.fold(text) { acc, mark -> acc.removePrefix(mark) },
+                    voiceComma,
+                )
                 val pending = when {
                     fresh -> committed
                     committed.startsWith(sentInBurst) -> committed.removePrefix(sentInBurst)
@@ -1518,6 +1546,7 @@ private fun HiddenImeField(
                 resetField(flip = fresh)
                 return@BasicTextField
             }
+            voiceComma = startsWithVoiceComma(text, value.composition?.start, SENTINELS[sentinel].length)
             field = value
         },
         modifier = Modifier
