@@ -135,8 +135,31 @@ fun orderHosts(hosts: List<Host>): List<Host> =
         compareByDescending<Host> { it.pinned }.thenByDescending { it.lastUsed },
     )
 
+/**
+ * 这条凭据落盘时的"旧密文"。加锁的用 [locked];没加锁却解不开的([unreadable]),
+ * 内存里明文是空的,只能把磁盘上那条 [disk] 原样带回去 —— 否则任何一次保存
+ * (连接写 lastUsed、置顶、删别的主机)都会把它覆盖成空串,瞬时的密钥库故障就变成永久丢失。
+ */
+internal fun fallbackSealed(locked: String?, unreadable: Boolean, disk: String?): String? =
+    locked ?: disk?.takeIf { unreadable && it.isNotEmpty() }
+
 class HostStore(context: Context) {
     private val prefs = context.getSharedPreferences("xssh_hosts", Context.MODE_PRIVATE)
+
+    /** 磁盘上现有的记录,按 id 索引(只读 JSON,不碰密钥库)。读不出来就当没有。 */
+    private fun diskRecords(): Map<String, JSONObject> = runCatching {
+        val array = JSONArray(prefs.getString(KEY_LIST, "[]"))
+        (0 until array.length()).mapNotNull { i ->
+            array.optJSONObject(i)?.let { it.optString("id") to it }
+        }.toMap()
+    }.getOrDefault(emptyMap())
+
+    /** 加载时丢了记录(或整段解析失败)就把原文另存一份,只存第一次,免得被后面的坏状态盖掉。 */
+    private fun keepCorruptCopy(raw: String) {
+        if (prefs.getString(KEY_CORRUPT, null) == null) {
+            prefs.edit().putString(KEY_CORRUPT, raw).apply()
+        }
+    }
 
     /**
      * 磁盘上有几条主机记录。**只数 JSON 长度,不碰任何凭据** —— persist 的数据安全护栏
@@ -153,7 +176,7 @@ class HostStore(context: Context) {
             // 每条记录单独兜:一条记录坏了(字段缺失、类型不对)只丢它自己,
             // 不许把整张表拖下水 —— 原来整表一个 runCatching,一条坏记录
             // 就 getOrDefault(空),首页直接变"还没有主机"。
-            (0 until array.length()).mapNotNull { index ->
+            val loaded = (0 until array.length()).mapNotNull { index ->
                 runCatching {
                     val item = array.getJSONObject(index)
                     // 三条凭据只解一次:解出来的明文进 Host,顺带记下哪条"有密文却解不开"。
@@ -163,41 +186,46 @@ class HostStore(context: Context) {
                     // (2026-10-10 真机:整表兜底 + 一次普通删除,曾把用户全部主机抹成空表。)
                     val plain = sealed.map { runCatching { readSecret(it) }.getOrDefault("") }
                     Host(
-                    id = item.optString("id", UUID.randomUUID().toString()),
-                    name = item.optString("name"),
-                    address = item.optString("address"),
-                    port = item.optInt("port", 22),
-                    username = item.optString("username"),
-                    // 默认跟数据类一致(密码);只有明确存了 "key" 才是私钥。
-                    auth = if (item.optString("auth") == "key") AuthKind.KEY else AuthKind.PASSWORD,
-                    keyPath = item.optString("keyPath"),
-                    keyFingerprint = item.optString("keyFingerprint"),
-                    password = plain[0],
-                    keyData = plain[1],
-                    keyPassphrase = plain[2],
-                    keyName = item.optString("keyName"),
-                    keyPublicFingerprint = item.optString("keyPublicFingerprint"),
-                    tmux = item.optBoolean("tmux", false),
-                    jumpHostId = item.optString("jumpHostId"),
-                    lastUsed = item.optLong("lastUsed", 0L),
-                    pinned = item.optBoolean("pinned", false),
-                    // **这一条不能漏**:漏了每次加载都是 false —— 编辑页的开关显示成"关"
-                    // (磁盘上明明锁着),而且保存时 `writeSecret` 会按"没加锁"用普通密钥
-                    // 重新加密,用户没碰过开关,锁就被悄悄去掉了。
-                    // 兜底看密文本身:老记录没有这个字段,但 `L:` 前缀就说明它是锁着的。
-                    lockSecrets = item.optBoolean("lockSecrets", false) ||
-                        Secrets.isLocked(item.optString("password")) ||
-                        Secrets.isLocked(item.optString("keyData")) ||
-                        Secrets.isLocked(item.optString("keyPassphrase")),
-                    /** 加锁的密文读不出来(还没解锁),原样带着走,别在保存时把它覆盖成空。 */
-                    lockedPassword = item.optString("password").takeIf { Secrets.isLocked(it) },
-                    lockedKeyData = item.optString("keyData").takeIf { Secrets.isLocked(it) },
-                    lockedKeyPassphrase = item.optString("keyPassphrase").takeIf { Secrets.isLocked(it) },
-                    unreadableSecrets = unreadableSecrets(sealed, plain),
+                        id = item.optString("id", UUID.randomUUID().toString()),
+                        name = item.optString("name"),
+                        address = item.optString("address"),
+                        port = item.optInt("port", 22),
+                        username = item.optString("username"),
+                        // 默认跟数据类一致(密码);只有明确存了 "key" 才是私钥。
+                        auth = if (item.optString("auth") == "key") AuthKind.KEY else AuthKind.PASSWORD,
+                        keyPath = item.optString("keyPath"),
+                        keyFingerprint = item.optString("keyFingerprint"),
+                        password = plain[0],
+                        keyData = plain[1],
+                        keyPassphrase = plain[2],
+                        keyName = item.optString("keyName"),
+                        keyPublicFingerprint = item.optString("keyPublicFingerprint"),
+                        tmux = item.optBoolean("tmux", false),
+                        jumpHostId = item.optString("jumpHostId"),
+                        lastUsed = item.optLong("lastUsed", 0L),
+                        pinned = item.optBoolean("pinned", false),
+                        // **这一条不能漏**:漏了每次加载都是 false —— 编辑页的开关显示成"关"
+                        // (磁盘上明明锁着),而且保存时 `writeSecret` 会按"没加锁"用普通密钥
+                        // 重新加密,用户没碰过开关,锁就被悄悄去掉了。
+                        // 兜底看密文本身:老记录没有这个字段,但 `L:` 前缀就说明它是锁着的。
+                        lockSecrets = item.optBoolean("lockSecrets", false) ||
+                            Secrets.isLocked(item.optString("password")) ||
+                            Secrets.isLocked(item.optString("keyData")) ||
+                            Secrets.isLocked(item.optString("keyPassphrase")),
+                        /** 加锁的密文读不出来(还没解锁),原样带着走,别在保存时把它覆盖成空。 */
+                        lockedPassword = item.optString("password").takeIf { Secrets.isLocked(it) },
+                        lockedKeyData = item.optString("keyData").takeIf { Secrets.isLocked(it) },
+                        lockedKeyPassphrase = item.optString("keyPassphrase").takeIf { Secrets.isLocked(it) },
+                        unreadableSecrets = unreadableSecrets(sealed, plain),
                     )
                 }.getOrNull()
             }
-        }.getOrDefault(emptyList())
+            if (loaded.size < array.length()) keepCorruptCopy(raw)
+            loaded
+        }.getOrElse {
+            keepCorruptCopy(raw)
+            emptyList()
+        }
     }
 
     /**
@@ -209,7 +237,10 @@ class HostStore(context: Context) {
 
     fun save(hosts: List<Host>) {
         val array = JSONArray()
+        val disk = diskRecords()
         hosts.forEach { host ->
+            fun carry(field: SecretField, key: String, locked: String?) =
+                fallbackSealed(locked, field in host.unreadableSecrets, disk[host.id]?.optString(key))
             val item = JSONObject()
             item.put("id", host.id)
             item.put("name", host.name)
@@ -224,11 +255,21 @@ class HostStore(context: Context) {
             //   拿它写就等于把锁悄悄去掉了,而 `lockSecrets` 还写着 true)。
             // - 没加锁的:明文直接加密;明文为空而手里还攥着一条老密文时原样写回,
             //   免得"没解锁就保存"把密码覆盖成空。
-            item.put("password", writeSecret(host.password, host.lockedPassword, host.lockSecrets))
-            item.put("keyData", writeSecret(host.keyData, host.lockedKeyData, host.lockSecrets))
+            item.put(
+                "password",
+                writeSecret(host.password, carry(SecretField.Password, "password", host.lockedPassword), host.lockSecrets),
+            )
+            item.put(
+                "keyData",
+                writeSecret(host.keyData, carry(SecretField.PrivateKey, "keyData", host.lockedKeyData), host.lockSecrets),
+            )
             item.put(
                 "keyPassphrase",
-                writeSecret(host.keyPassphrase, host.lockedKeyPassphrase, host.lockSecrets),
+                writeSecret(
+                    host.keyPassphrase,
+                    carry(SecretField.Passphrase, "keyPassphrase", host.lockedKeyPassphrase),
+                    host.lockSecrets,
+                ),
             )
             item.put("lockSecrets", host.lockSecrets)
             item.put("keyName", host.keyName)
@@ -271,6 +312,7 @@ class HostStore(context: Context) {
 
     private companion object {
         const val KEY_LIST = "list"
+        const val KEY_CORRUPT = "list.corrupt"
     }
 }
 /** 界面偏好(与主机无关的小设置)。 */

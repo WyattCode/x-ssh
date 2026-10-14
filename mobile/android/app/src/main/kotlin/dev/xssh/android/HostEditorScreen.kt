@@ -530,6 +530,14 @@ class HostDraft(private val initial: Host?) {
             // 排序字段不是本页的编辑项:改个备注存一下,置顶和最近使用不能被冲回默认。
             pinned = initial?.pinned ?: false,
             lastUsed = initial?.lastUsed ?: 0,
+            // 解不开的旧密文:这次没重新输入的就继续带着,保存时才会写回磁盘上那条而不是空串。
+            unreadableSecrets = initial?.unreadableSecrets.orEmpty().filter {
+                when (it) {
+                    SecretField.Password -> !key && password.isEmpty()
+                    SecretField.PrivateKey -> key && keyData.isEmpty()
+                    SecretField.Passphrase -> key && keyLocked && keyPassphrase.isEmpty()
+                }
+            },
         )
     }
 
