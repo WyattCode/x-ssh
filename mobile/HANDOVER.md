@@ -2161,9 +2161,40 @@ adb shell input swipe 2134 113 2134 113 80   # 80ms 的零长度 swipe
 测试主机 TEST212 已删,`stayon`/`user_rotation` 已还原。**教训:动真机用户数据前必须先 `run-as cat`
 备份到 PC;本会话的备份习惯救了这一次。**
 
-**未提交**:步骤②③与两处数据安全修复、步骤①的编辑器字段保留修复一起在工作区
-(修 fix 与 feat 在同几个文件里交织,拆分反而造历史),按一个 commit 提交:
-`feat(android): workbench home — pin, recency, sessions section, live preview`。
+**已提交**:`93b7f02` `feat(android): workbench home - pin, recency, sessions section, live preview`。
+
+### M3.67 二次复核(2026-10-14)
+
+对 `93b7f02`(工作台首页那批)通读复核,结论:**核心逻辑全部成立,修掉 1 处,记 3 条不动的。**
+
+- **钉住的性质都验过是真的**:`HostStore.load` 单条兜底后,「密钥没就绪 → 整表变空」这条事故链条
+  在代码里已经不存在(单条解密失败只落 `unreadableSecrets` 标记,记录本身保留);`persist` 的护栏
+  按「sorted 空 + 内存空 + 盘上非空」三条件判,正常删最后一台不受影响。`linkState` 确实不碰
+  `subscriptionCount`;`lastUsed` 只在连接成功/接管时写(自动重连不换 `live` 对象);
+  编辑器 `build()` 保留了 `pinned`/`lastUsed`;`hostsPrelude` 的算式与网格项序一致
+  (header=1、会话区=sessions.size+2、无搜索时会话区不出现,两处引用点都成立);
+  `getRelativeTimeSpanString(long)` 是 API 3 就有的方法(minSdk 26 安全,曾疑 29,查证过)。
+- **修掉**:`HostStore.load` 里 `Host(…)` 构造参数缩进整体少一级(diff 排版残留,`runCatching`
+  块内的字段体没跟块走)。纯格式,行为不变;`compileDebugKotlin` + 61 条单测重跑全绿。
+- **记录、不改**:
+  1. `App()` 的 `store.load()` 只在首次组合跑(`remember` 无 key),Activity 重建不重载 ——
+     这是**有意的**:重建时若重新 load,加锁主机会以「解不开」的面目出现,反而危险。护栏 + 单条
+     兜底已把最坏情况兜住,现状更安全,别"顺手"改成每次重建都 load。
+  2. `SessionPreview` 的 `probe`(13sp 试算画笔)在 `fitSp` 的 remember 依赖里,但它每次组合都是
+     新实例,该 remember key 恒失效 —— 无害(`fitSp` 重算很便宜),真要清理是给 `rememberTermPaints`
+     传字号进 key、probe 本身 remember 住。
+  3. `LaunchedEffect(live){ if (live != null) onConnected(...) }` 在「终端屏还开着时另一路径把这条
+     会话关掉、再开回来」的极端时序下 `onConnected` 可能多写一次 `lastUsed`(时间戳更新,排序结果
+     一致)。判据本身(「最近主动去的排最前」)不受影响,不值得为它加去重。
+- **本提交带出的一个存量问题(未动)**:`lintDebug` 红,根因是 uniffi 生成绑定
+  (`app/src/main/kotlin/uniffi/xssh_ffi/xssh_ffi.kt`)用了 `java.lang.ref.Cleaner`(API 33,
+  minSdk 26)——生成代码里已有 `Class.forName` 运行时探测 + JNA 回退,**实际不会崩**,是 lint
+  看不见反射的误报;另有 Files.kt 一批 `LocalContextGetResourceValueCall` 也是存量。
+  CI 现在没有 lint 作业所以不炸。要治就在 `lint.xml` / `baseline` 里豁免生成的 uniffi 目录,
+  别去改生成的 `.kt`(下次 codegen 全冲掉)。
+- 桌面侧顺带核了 `e7587d7`(状态栏圆点):`SessionStatus` 四个取值全覆盖、`idle` 只是"还没有
+  pane"的兜底;`--text-dim` / `--ok` / `--warn` / `--danger` 两套主题都有定义;五个 `status.link*`
+  键三字典对称(桌面 733/733/733)。**通过,无改动。**
 
 ## 5. 关键坑(踩过,别再踩)
 
