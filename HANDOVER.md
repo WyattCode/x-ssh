@@ -6,14 +6,16 @@
 - 极简、键盘优先的 SSH 客户端。Electron + Vue 3 (Vite) + TypeScript。
 - 平台: Windows (`win32`)。目录: `D:\Documents\Claude Code\X-SSH`。
 - **git 仓库**(`main` 分支),远程: `https://github.com/WyattCode/x-ssh`(私有)。
-- 版本: `package.json` 当前为 **0.3.0**;有 `CHANGELOG.md`(Keep a Changelog + 语义化)。
+- 版本: `package.json` 当前为 **0.4.1**(2026-10-15 发;**桌面代码与 0.4.0 完全相同**,0.4.1 只是把移动端修复记入版本;`v0.4.0` tag 已含远程上的 macOS 改动);有 `CHANGELOG.md`(Keep a Changelog + 语义化)。
 
 ## 常用命令(Windows/PowerShell)
 - 必须用 `npm.cmd`(直接 `npm` 会因执行策略失败)。
 - 校验: `npm.cmd run typecheck`、`npm.cmd run build`
 - **单元测试**: `npm.cmd run test`(Vitest 2;共 **295** 用例:纯逻辑在 `src/shared/*` / `src/renderer/src/lib/*`,外加 `src/main/*.test.ts` 的集成测试(起真 ssh2 服务器)。**没有任何组件测试**,界面交互只能人工验。
 - **i18n 键对称校验**: `npm.cmd run lint:i18n`(现在串跑两个脚本:桌面端 `scripts/lint-i18n.mjs` + 移动端 `scripts/lint-i18n-mobile.mjs`;桌面端 zh / zh-TW / en 722/722/722 全对称,移动端三份资源对称且代码里 0 条内联中文)。
-- 打包: `npm.cmd run dist` → `release\X-SSH Setup 0.3.0.exe`(NSIS)+ `release\win-unpacked\X-SSH.exe` + `.blockmap`。electron-builder 已是 **26.x**。
+- **发版流程**:升 `package.json`/lock(`npm.cmd version x.y.z --no-git-tag-version`,会把 `schemes` 那行重排,手动还原)+ CHANGELOG → 提交推 `main` → `git tag vx.y.z` 并推 tag;CI(`ci.yml` 的 `release` 作业,windows-latest,约 8 分钟)自动建 GitHub Release 并挂 `X-SSH.Setup.x.y.z.exe` + `.blockmap`。**安卓不在这条流水线里**,APK 只能本机 `installDebug`。
+- **本机部署**:`npm.cmd run package` → 关掉 `D:\Apps\X-SSH` 里的进程(按精确路径 `Path -eq 'D:\Apps\X-SSH\X-SSH.exe'` 筛,别按窗口标题;用户授权过可代关)→ `robocopy release\win-unpacked D:\Apps\X-SSH /E` → 对比 `X-SSH.exe` / `resources\app.asar` 哈希。2026-10-15 已装 0.4.1。
+- 打包: `npm.cmd run dist` → `release\X-SSH Setup 0.4.1.exe`(NSIS)+ `release\win-unpacked\X-SSH.exe` + `.blockmap`。electron-builder 已是 **26.x**。
 - **图标**:全部由 `python build/icon-src/make_icons.py` 生成(Pillow + numpy),别手改产物。几何是从 `build/icon-src/reference/` 里用户给的三张参考图拟合的
   (两根镜像的平行四边形条、水平切口、倾角约 45.4°、圆角 63/1024,形状 IoU 0.97)。产物:`build/icon.icon`(macOS 26/27 Icon Composer 文档:
   四个 SVG 图层,白天 / 夜间两套条靠 `hidden-specializations` 切换,背景 `fill-specializations`;按 HIG 图层是**不带圆角的方形**、不自己画阴影高光)、
@@ -115,6 +117,15 @@
 - 按用户截图式 UI 反馈继续修复。
 - 如版本号增加,改 `package.json` + 更新 `CHANGELOG.md` 后 `npm.cmd run dist` 重打包。
 - 大规模改动前先跑 `npm.cmd run typecheck && npm.cmd run build` 与 `npm.cmd run lint:i18n` 保证通过。
+
+# 会话记录:第十七次会话(2026-10-15,移动端复核修复 + 0.4.1 发版)
+
+细节在 `mobile/HANDOVER.md` M3.68。桌面侧只有发版:
+
+- 0.4.1 已推 `main`(`668d81e`)+ tag `v0.4.1`,CI 两条都绿,Release 里有安装包。随后 `e609645` 改正 CHANGELOG(我最初把 macOS 条目误记在 0.4.1 下,其实在 0.4.0 tag 里)。
+- 发版前跑过:`typecheck`、`lint:i18n`、`vitest` 311、`build`,安卓单测 JVM 全绿。
+- 这台 PC 的 `D:\Apps\X-SSH` 已更新到 0.4.1(用户授权代关进程,优雅关闭 4 个进程,哈希核对一致);**之前装的是比 0.4.0 更早的构建**,具体哪一版没核。装完没启动、没点界面。
+- 工作区只剩未跟踪的 `.workbuddy/`(不是我们的,没动)。
 
 # 会话记录:二次复核(2026-10-03,启动闪跳 + 主机密钥确认)
 
