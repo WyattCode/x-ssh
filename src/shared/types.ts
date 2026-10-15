@@ -312,6 +312,13 @@ export interface ConnectResult {
    *  for 'jump_*' codes the jump host). Needed to write back the right entry. */
   keyHost?: string
   keyPort?: number
+  /** A transient network failure (reset, timeout, unreachable, rate-limited):
+   *  safe to retry as-is. Auth and host-key failures are deliberately not. */
+  transient?: boolean
+  /** Minimum wait before the automatic first retry — set when the server
+   *  refused the connection by rate limiting (OpenSSH PerSourcePenalties),
+   *  where retrying within the penalty window only feeds the penalty. */
+  retryDelayMs?: number
 }
 
 /**

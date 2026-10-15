@@ -5,7 +5,7 @@ import { useToast } from '../composables/toast'
 import { useConfirm } from '../composables/confirm'
 import { useSnippetVars } from '../composables/snippetVars'
 import { clampConcurrency } from '../../../shared/fsUtils'
-import { decideStatusEvent, shouldReviveOnOnline } from '../lib/reconnect'
+import { decideStatusEvent, retryDelayMs, shouldReviveOnOnline } from '../lib/reconnect'
 import {
   buildFlatTree,
   buildGrid,
@@ -1514,7 +1514,18 @@ export const useSessions = defineStore('sessions', {
         // re-enters runConnect); only shout for the first, user-initiated try.
         // A refused host key already explains itself on the pane's card
         // (with the fingerprint); a toast would only repeat it.
-        if (!live.pane.reconnectAttempt && !keyCode) toast(msg, 'error')
+        if (!live.pane.reconnectAttempt && !keyCode) {
+          toast(msg, 'error')
+          // A transient failure (reset / timeout / the server's rate limiting)
+          // is worth riding out automatically even for the first, user-initiated
+          // attempt — the reconnect loop only existed for established sessions.
+          // The reconnectAttempt guard keeps the loop's own failures scheduling
+          // themselves exactly once; a manual reconnect cancels the timer.
+          if (result.transient && this.autoReconnect) {
+            live.pane.message = msg + ' — ' + t('app.autoRetrySoon')
+            this.scheduleReconnect(paneId, { minDelayMs: result.retryDelayMs, keepError: !!result.retryDelayMs })
+          }
+        }
       }
     },
 
@@ -1622,8 +1633,14 @@ export const useSessions = defineStore('sessions', {
       pane.reconnectAttempt = undefined
     },
 
-    /** Retries a dropped connection with exponential backoff (1,2,4,8,16,20s). */
-    scheduleReconnect(paneId: string): void {
+    /**
+     * Retries a dropped connection with exponential backoff (1,2,4,8,16,20s).
+     * `minDelayMs` raises the first wait — the rate-limit refusal needs ~30s
+     * so the server's penalty decays (retrying sooner feeds it); `keepError`
+     * keeps the failure card up during that wait instead of flashing
+     * "reconnecting" over a wait the user cannot shorten.
+     */
+    scheduleReconnect(paneId: string, opts: { minDelayMs?: number; keepError?: boolean } = {}): void {
       const found = this.findPane(paneId)
       if (!found || !this.autoReconnect) return
       const { pane } = found
@@ -1635,12 +1652,14 @@ export const useSessions = defineStore('sessions', {
         return
       }
       pane.reconnectAttempt = attempt
-      pane.status = 'connecting'
-      pane.message = t('app.reconnecting', { attempt })
+      if (!opts.keepError) {
+        pane.status = 'connecting'
+        pane.message = t('app.reconnecting', { attempt })
+      }
       const base = Math.min(20000, 1000 * 2 ** (attempt - 1))
       // Add ~±20% jitter so simultaneous dropped sessions don't reconnect in
       // lockstep (which can hammer the network and stack server-side timeouts).
-      const delay = Math.round(base * (0.8 + Math.random() * 0.4))
+      const delay = retryDelayMs(attempt, Math.random, opts.minDelayMs ?? 0)
       pane.reconnectTimer = window.setTimeout(async () => {
         const cur = this.findPane(paneId)
         if (!cur) return
@@ -1653,7 +1672,7 @@ export const useSessions = defineStore('sessions', {
         // card (with its fingerprint) for the user to decide.
         else if (after.pane.errorCode === 'host_key_unknown' || after.pane.errorCode === 'host_key_changed') {
           after.pane.reconnectAttempt = undefined
-        } else this.scheduleReconnect(paneId)
+        } else this.scheduleReconnect(paneId, { minDelayMs: opts.minDelayMs })
       }, delay)
     },
 

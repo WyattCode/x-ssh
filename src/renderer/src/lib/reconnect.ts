@@ -60,6 +60,17 @@ export function backoffMs(attempt: number, random: () => number = Math.random): 
 }
 
 /**
+ * Delay for a reconnect attempt: the exponential backoff, but never below a
+ * floor the caller asks for. The floor matters when the last refusal came from
+ * the server's connection-rate limiting — retrying inside the penalty window
+ * is itself a pre-auth connect and keeps the penalty alive, so the floor has
+ * to outlast the decay instead.
+ */
+export function retryDelayMs(attempt: number, random: () => number = Math.random, minDelayMs = 0): number {
+  return Math.max(backoffMs(attempt, random), minDelayMs)
+}
+
+/**
  * Whether a pane should be revived when the network comes back.
  *
  * A pane whose last connect returned a `code` (bad credentials, changed host

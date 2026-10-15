@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest'
-import { isFakeIp, isProbeableHost, pingArgs, pingVerdict } from './reachability'
+import {
+  isFakeIp,
+  isProbeableHost,
+  pingArgs,
+  pingVerdict,
+  SSH_PROBE_COOLDOWN_MS,
+  sshProbeCoolingDown,
+  sshProbeOutcome,
+} from './reachability'
 
 describe('isProbeableHost', () => {
   it('accepts hostnames and IP literals', () => {
@@ -55,5 +63,30 @@ describe('isFakeIp', () => {
     expect(isFakeIp('198.17.0.1')).toBe(false)
     expect(isFakeIp('198.20.0.1')).toBe(false)
     expect(isFakeIp('10.198.18.1')).toBe(false)
+  })
+})
+
+describe('sshProbeOutcome', () => {
+  it('counts any far-end data as sshd being up, refusal as a closed port, the rest as down', () => {
+    expect(sshProbeOutcome('data')).toBe('open')
+    expect(sshProbeOutcome('refused')).toBe('closed')
+    expect(sshProbeOutcome('down')).toBe('down')
+  })
+})
+
+describe('sshProbeCoolingDown', () => {
+  const now = 1_000_000
+  it('cools a host whose probe saw sshd, within the window', () => {
+    expect(sshProbeCoolingDown({ at: now - 60_000, outcome: 'open' }, now)).toBe(true)
+  })
+  it('does not cool refused / timed-out probes — nothing answered, nothing to feed', () => {
+    expect(sshProbeCoolingDown({ at: now - 1_000, outcome: 'closed' }, now)).toBe(false)
+    expect(sshProbeCoolingDown({ at: now - 1_000, outcome: 'down' }, now)).toBe(false)
+  })
+  it('lets the cooldown expire', () => {
+    expect(sshProbeCoolingDown({ at: now - SSH_PROBE_COOLDOWN_MS - 1, outcome: 'open' }, now)).toBe(false)
+  })
+  it('never cools a host that has not been probed on the SSH port', () => {
+    expect(sshProbeCoolingDown(undefined, now)).toBe(false)
   })
 })

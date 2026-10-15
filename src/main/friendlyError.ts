@@ -15,6 +15,8 @@ export function friendlyError(msg: string | undefined): string {
     return '私钥无法解析,或密钥的密码短语不正确'
 
   // ---- connection / network ----
+  if (has('not allowed at this time'))
+    return '服务器暂时拒绝连接:该地址触发了连接频率限制(PerSourcePenalties),通常几十秒后自动恢复'
   if (has('timed out while waiting for handshake') || has('handshake'))
     return '握手超时:服务器无响应,请检查地址、端口或网络'
   if (has('etimedout') || has('timed out')) return '连接超时:请检查地址、端口或网络'
@@ -38,4 +40,36 @@ export function friendlyError(msg: string | undefined): string {
   if (m === 'failure' || has('sftp error') || has('sftp failure')) return '操作失败'
 
   return raw
+}
+
+/**
+ * Whether a raw connect error is a transient network condition worth retrying
+ * as-is (reset, timeout, unreachable): the auto-retry rides these out. Auth
+ * failures and refused host keys are deliberately not transient — retrying
+ * those either hammers accounts or keeps the fingerprint card from showing.
+ */
+export function isTransientConnectError(raw: string | undefined): boolean {
+  const m = (raw ?? '').toLowerCase()
+  const has = (s: string): boolean => m.includes(s)
+  return (
+    has('econnreset') ||
+    has('etimedout') ||
+    has('timed out') ||
+    has('handshake') ||
+    has('econnaborted') ||
+    has('epipe') ||
+    has('enetunreach') ||
+    has('ehostunreach') ||
+    has('not allowed at this time')
+  )
+}
+
+/**
+ * How long to wait before the automatic first retry when the refusal came from
+ * the server's connection-rate limiting: each refused attempt is itself a
+ * pre-auth connection, so retrying within the penalty window only feeds it —
+ * the delay has to outlast the penalty decay instead.
+ */
+export function penaltyRetryDelayMs(raw: string | undefined): number | undefined {
+  return (raw ?? '').toLowerCase().includes('not allowed at this time') ? 30_000 : undefined
 }

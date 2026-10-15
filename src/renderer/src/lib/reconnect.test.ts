@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { decideStatusEvent, mayRetry, backoffMs, shouldReviveOnOnline } from './reconnect'
+import { decideStatusEvent, mayRetry, backoffMs, retryDelayMs, shouldReviveOnOnline } from './reconnect'
 
 const base = {
   paneSessionId: 's1',
@@ -111,5 +111,18 @@ describe('shouldReviveOnOnline', () => {
 
   it('respects the autoReconnect setting', () => {
     expect(shouldReviveOnOnline({ ...dropped, autoReconnect: false })).toBe(false)
+  })
+})
+describe('retryDelayMs', () => {
+  it('keeps the exponential backoff when no floor is asked for', () => {
+    expect(retryDelayMs(3, () => 0.5)).toBe(backoffMs(3, () => 0.5))
+  })
+  it('raises the wait to the floor when the server is rate-limiting us', () => {
+    // attempt 1 backs off ~1s, but the penalty window outlives that by far.
+    expect(retryDelayMs(1, () => 0.5, 30_000)).toBe(30_000)
+    expect(retryDelayMs(6, () => 0.5, 30_000)).toBe(30_000)
+  })
+  it('keeps the jitter inside the floored wait', () => {
+    expect(retryDelayMs(5, () => 0, 0)).toBe(Math.round(backoffMs(5, () => 0)))
   })
 })

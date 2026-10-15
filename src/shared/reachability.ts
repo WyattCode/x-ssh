@@ -48,3 +48,35 @@ export function pingVerdict(platform: string, exitCode: number | null, stdout: s
   const ip = replyLine ? /(\d{1,3}(?:\.\d{1,3}){3})/.exec(replyLine)?.[1] : undefined
   return ip && isFakeIp(ip) ? 'proxied' : 'reply'
 }
+
+/** How a probe connection to the SSH port ended:
+ *  - 'open'   the far end sent data — an SSH banner, or sshd's refusal text
+ *             ("Not allowed at this time"); either way *something* answered
+ *  - 'closed' the host answered but refused the port (ECONNREFUSED)
+ *  - 'down'   timed out, or the host / path was unreachable */
+export type SshProbeOutcome = 'open' | 'closed' | 'down'
+
+export function sshProbeOutcome(kind: 'data' | 'refused' | 'down'): SshProbeOutcome {
+  return kind === 'data' ? 'open' : kind === 'refused' ? 'closed' : 'down'
+}
+
+/**
+ * OpenSSH ≥ 9.8 keeps score of clients that make connections without
+ * authenticating (PerSourcePenalties, on by default — Ubuntu ships it enabled);
+ * enough pre-auth connects and new ones from that address are refused outright
+ * ("Not allowed at this time"). Every pre-auth probe feeds that score, so a
+ * probe that *saw* sshd puts the host on a cooldown instead of knocking again
+ * next round. Hosts that refused or timed out have nothing answering — no
+ * penalty can accrue — and stay on the fast path so a returning server is
+ * noticed within one round.
+ */
+export const SSH_PROBE_COOLDOWN_MS = 10 * 60_000
+
+export interface SshProbeMemo {
+  at: number
+  outcome: SshProbeOutcome
+}
+
+export function sshProbeCoolingDown(memo: SshProbeMemo | undefined, now: number): boolean {
+  return !!memo && memo.outcome === 'open' && now - memo.at < SSH_PROBE_COOLDOWN_MS
+}

@@ -118,6 +118,26 @@
 - 如版本号增加,改 `package.json` + 更新 `CHANGELOG.md` 后 `npm.cmd run dist` 重打包。
 - 大规模改动前先跑 `npm.cmd run typecheck && npm.cmd run build` 与 `npm.cmd run lint:i18n` 保证通过。
 
+# 会话记录:第十八次会话(2026-10-16 凌晨,"连接被服务器重置"排查与修复)
+
+用户报:服务器百分百正常,但关程序一段时间后回来连接经常失败("连接被服务器重置"),手动重试几次才连上;任何第三方 SSH 都没有这个问题。截图:Ubuntu 26.04 5090(user@192.168.1.101,**端口是 22**,标签里的 5090 是主机名的一部分)。
+
+**根因(现场实测钉死,不是猜的)**:该服务器是 **OpenSSH 10.2p1**,`PerSourcePenalties` **默认开启**——它给"做了连接却不认证"的客户端地址记分(noauth),累计超过 min(15s) 后直接拒绝该地址的新连接,拒绝时发送明文 **"Not allowed at this time"** 后断开(客户端表现为 ECONNRESET)。从这台 PC 实测:连续 8 条预认证连接后,ssh2 连接在该地址上**拒绝/放行交替**——罚分就在阈值附近摆。喂罚分的两个来源都是 X-SSH 自己:① **在线探测**(ping 偶发 4s 超时 → `sshPortOpen` 的预认证连接;每 3 分钟 + 窗口可见都探);② **失败后的自动重连**(每次被拒的连接本身就是一条 noauth,重试在给罚分续命——滚雪球)。停止重试后罚分衰减 → "重试几次就连上"。第三方 SSH 不做探测、不自动重试,所以没有这个问题。连接日志(`connectionLog`)证实 10-10 18:37–18:39 有 6 连败,之后 18:46 才 connect 成功。验证命令:`journalctl -u ssh --since -1h | grep -i "penal"`(服务器侧可见拒绝记录)。
+
+**修复(桌面端,4 文件 + 测试)**:
+- `src/shared/reachability.ts`:`SshProbeOutcome`('open'/'closed'/'down')、`sshProbeOutcome()`、`SSH_PROBE_COOLDOWN_MS`(10 分钟)、`sshProbeCoolingDown()`。**探测过 sshd 的主机进入冷却**:ping 失败的那一轮不再每 3 分钟敲一次 SSH 端口,10 分钟内直接沿用 'online';拒绝/超时的主机不冷却(没有罚分可喂,且要尽快发现恢复)。**冷却的代价**:主机真下线时圆点最多晚 10 分钟变灰。
+- `src/main/reachability.ts`:`sshPortOpen` 改返三态(任何对端数据=‘open’,含罚分拒绝文本;ECONNREFUSED='closed';其余='down'),模块级 `sshProbeMemo` 按 `host:port` 记忆。注意老版 sshd(9.8/9.9)静默拒绝时客户端只看到 RST,归 'down' 仍会重试——用户这台 10.2 发文本,已覆盖。
+- `src/main/friendlyError.ts`:'not allowed at this time' → 专用文案("服务器暂时拒绝连接:该地址触发了连接频率限制…");导出 `isTransientConnectError()`(reset/超时/unreachable/罚分=瞬态;**认证失败/主机密钥绝不瞬态**)与 `penaltyRetryDelayMs()`(罚分拒绝 → 30s,让衰减跑完再试)。
+- `src/shared/types.ts`:`ConnectResult` 加 `transient` / `retryDelayMs`;`src/main/ssh.ts` 的 `client.on('error')` 出口在 friendlyError **之前**用原始错误标注。
+- `src/renderer/src/lib/reconnect.ts`:`retryDelayMs(attempt, random, minDelayMs)` = 退避但不低于下限(罚分场景 30s 起步,重试不再喂罚分)。
+- `src/renderer/src/stores/sessions.ts`:`scheduleReconnect(paneId, { minDelayMs, keepError })`(keepError 时延迟期保持失败卡 + 文案尾缀"将自动重试",不闪"正在重连");**`runConnect` 失败且 `result.transient` 时自动进入重连循环**(以前只有已建立会话掉线才重试,初始失败全靠手点);守卫 `!pane.reconnectAttempt` 防循环内双重调度;`reconnect()` 的 `cancelReconnect` 保证用户手动重连接管定时器。
+- i18n:+1 键 `app.autoRetrySoon`(三字典);`npm run lint:i18n` 桌面 734×3 / 移动端对称。
+- 测试 311 → **324** 全绿:`friendlyError.test.ts` 新建(含阴性对照:认证失败绝不瞬态),`shared/reachability.test.ts` +4(冷却的阳性/阴性/过期/未探测),`reconnect.test.ts` +3(retryDelayMs 的下限/抖动)。typecheck、build 通过。
+
+**没做的(下次可做)**:手机端同样会被罚分滚雪球(M3.60 自动重连 12 次、M3.68 首连重试 3 次都没有对"被拒"拉长间隔)——把 `penaltyRetryDelayMs` 的思路移植过去;服务器侧一劳永逸的办法是 `sshd_config` 加 `PerSourcePenaltyExemptList 192.168.1.0/24`(内网全豁免),已在回复里给用户。
+
+**二次复核(同日)**:diff 全读,逐点验证——`finish` 幂等(data 后 end/close 竞态安全;移除的 'end' 处理由 'close' 兜底,行为等价);`locked`/`jump_needs_password` 在进入连接前返回(不经过 error 出口,无 transient 字段,绝不会自动重试);`transient: !keyRejected && …` 保证指纹卡不被自动重试顶掉;循环内失败由回调自己调度(`reconnectAttempt` 守卫防双重),用户手点 `reconnect()` 的 `cancelReconnect` 接管定时器,pane 关闭后 `findPane` 为 null 安全返回;罚分下限全程透传,`keepError` 只作用于首次等待;冷却只对 'open'(见过 sshd)生效。**修掉 1 处认知**:原以为 `client.on('close')` 的掉线 error 也会带 transient——实际 settled 标志挡住,不影响。记录不改:老版 sshd(<9.9)静默 RST 归 'down' 仍每轮重试(用户 10.2 发文本已覆盖);冷却中真下线晚 10 分钟变灰;已建立会话掉线的重连没接 30s 下限(掉线前连接认证过,不是罚分主体)。验证:324 全绿 ×2、typecheck、build。
+
 # 会话记录:第十七次会话(2026-10-15,移动端复核修复 + 0.4.1 发版)
 
 细节在 `mobile/HANDOVER.md` M3.68。桌面侧只有发版:

@@ -23,7 +23,7 @@ import type {
   UploadOverwrite
 } from '../shared/types'
 import { KnownHosts } from './knownHosts'
-import { friendlyError } from './friendlyError'
+import { friendlyError, isTransientConnectError, penaltyRetryDelayMs } from './friendlyError'
 import { posixJoin, parentOf, clampConcurrency, buildPackCommand, buildExtractCommand, treeDirMode } from '../shared/fsUtils'
 
 /** Streams a local file through SHA-256 and resolves its lowercase hex digest. */
@@ -1035,11 +1035,12 @@ export class SshManager {
       })
 
       client.on('error', (err) => {
+        const raw = err.message
         const message = keyRejected
           ? keyUnknown
             ? '主机密钥未获信任,连接已中止;若此服务器是你自己的,可确认其身份后信任'
             : '主机密钥与首次连接时记录的不一致,连接已中止;这可能是中间人攻击,若你确认服务器已重装或更换,可选择“信任新密钥并重连”'
-          : friendlyError(err.message)
+          : friendlyError(raw)
         this.emit({ sessionId: id, status: 'error', message })
         this.stopLog(id)
         if (jumpClient) jumpClient.end()
@@ -1047,6 +1048,8 @@ export class SshManager {
         settle({
           ok: false,
           error: message,
+          transient: !keyRejected && isTransientConnectError(raw),
+          retryDelayMs: penaltyRetryDelayMs(raw),
           code: keyRejected ? (keyUnknown ? 'host_key_unknown' : 'host_key_changed') : undefined,
           key: keyRejected ? lastKey : undefined,
           keyHost: keyRejected ? params.host : undefined,
