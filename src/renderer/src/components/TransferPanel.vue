@@ -164,7 +164,7 @@ function fmtSpeed(id: string): string {
   max-height: 70vh;
   display: flex;
   flex-direction: column;
-  background: var(--bg2);
+  background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: 8px;
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
@@ -186,7 +186,7 @@ function fmtSpeed(id: string): string {
   height: 24px;
   border: none;
   background: transparent;
-  color: var(--muted);
+  color: var(--text-dim);
   border-radius: 4px;
   cursor: pointer;
 }
@@ -198,13 +198,13 @@ function fmtSpeed(id: string): string {
   padding: 2px 8px;
   border: none;
   background: transparent;
-  color: var(--muted);
+  color: var(--text-dim);
   border-radius: 4px;
   font-size: 11px;
   cursor: pointer;
 }
-.tp-pauseall:hover { background: var(--bg3); color: var(--text); }
-.tp-x:hover, .tp-cancel:hover { background: var(--bg3); color: var(--text); }
+.tp-pauseall:hover { background: var(--bg-elev-2); color: var(--text); }
+.tp-x:hover, .tp-cancel:hover { background: var(--bg-elev-2); color: var(--text); }
 .tp-body { overflow-y: auto; }
 .tp-sec { padding: 8px 12px 12px; }
 .tp-sec + .tp-sec { border-top: 1px solid var(--border); }
@@ -212,20 +212,20 @@ function fmtSpeed(id: string): string {
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--muted);
+  color: var(--text-dim);
   margin: 6px 0;
 }
 .tp-list { display: flex; flex-direction: column; gap: 6px; }
-.tp-none { color: var(--muted); font-size: 12px; padding: 8px 0; }
+.tp-none { color: var(--text-dim); font-size: 12px; padding: 8px 0; }
 .tp-row {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 8px;
   border-radius: 6px;
-  background: var(--bg3);
+  background: var(--bg-elev-2);
 }
-.tp-dir { color: var(--muted); flex: none; }
+.tp-dir { color: var(--text-dim); flex: none; }
 .tp-main { flex: 1; min-width: 0; }
 .tp-name {
   font-size: 12px;
@@ -246,12 +246,12 @@ function fmtSpeed(id: string): string {
   gap: 8px;
   align-items: center;
   font-size: 11px;
-  color: var(--muted);
+  color: var(--text-dim);
   margin-top: 3px;
 }
 .tp-ago { margin-left: auto; }
 .tp-badge { font-weight: 600; }
 .tp-badge.done { color: var(--ok, #3fb950); }
 .tp-badge.error { color: var(--err, #f85149); }
-.tp-badge.cancelled { color: var(--muted); }
+.tp-badge.cancelled { color: var(--text-dim); }
 </style>

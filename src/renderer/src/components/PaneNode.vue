@@ -257,6 +257,19 @@ const splitEl = ref<HTMLElement>()
   height: 1px;
   cursor: row-resize;
 }
+/* The visible line is 1px; hit-testing 1px exactly is miserable. An invisible
+   ::before widens the grab area without moving the line. */
+.pane-divider::before {
+  content: '';
+  position: absolute;
+  inset: -5px;
+}
+.pane-divider.row::before {
+  inset: 0 -5px;
+}
+.pane-divider.col::before {
+  inset: -5px 0;
+}
 .pane-divider:hover .pane-divider-grip {
   opacity: 1;
 }
@@ -332,7 +345,12 @@ const splitEl = ref<HTMLElement>()
   display: flex;
   flex-direction: column;
   align-items: center;
-  width: min(300px, 86vw);
+  /* min() against the pane (not the viewport) + auto margins: in a pane
+     narrower than the card, flex centering clips the start edge — the
+     reconnect button — and overflow:auto can't reach it. Auto margins keep
+     the card centered when it fits and start-aligned (scrollable) when not. */
+  width: min(300px, 100%);
+  margin: auto;
 }
 .idle-icon {
   display: inline-flex;

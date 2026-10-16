@@ -149,12 +149,20 @@ const activeTransfers = computed(() => store.transfers.filter((x) => !x.done && 
   align-items: center;
   gap: 5px;
   white-space: nowrap;
+  min-width: 0;
 }
 .seg.dim {
   color: var(--text-faint);
 }
 .seg.host {
   font-family: var(--font-mono);
+  /* Long hostnames must not push the trailing badges out of the bar. */
+  min-width: 0;
+  overflow: hidden;
+}
+.host-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 /* The host's own colour, kept as a thin bar so the identity marker is not
    mistaken for the link state (the dot beside it is the link state). */

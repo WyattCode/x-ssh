@@ -622,11 +622,11 @@ defineExpose({ focusSearch: () => searchEl.value?.focus() })
   margin-right: -4px;
   border-radius: var(--r-pill);
   color: var(--bg);
-  background: var(--text-faint);
+  background: var(--text-dim);
   transition: background 0.16s var(--ease);
 }
 .search .clear:hover {
-  background: var(--text-dim);
+  background: var(--text);
 }
 /* Prominent action = accent circle, same height as the field; a hairline
    highlight instead of a coloured glow. */

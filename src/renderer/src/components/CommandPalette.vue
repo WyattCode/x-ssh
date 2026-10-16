@@ -29,6 +29,16 @@ type Item =
 const query = ref('')
 const selected = ref(0)
 const inputEl = ref<HTMLInputElement>()
+const listEl = ref<HTMLDivElement>()
+
+// Keyboard navigation must keep the selected row visible: with enough hosts
+// the list scrolls (46vh cap) and Enter would otherwise activate an item the
+// user can't see.
+watch(selected, () => {
+  nextTick(() => {
+    listEl.value?.querySelector('.row.sel')?.scrollIntoView({ block: 'nearest' })
+  })
+})
 
 // Inline password prompt state.
 const pending = ref<{ params: ConnectParams; title: string } | null>(null)
@@ -415,7 +425,7 @@ function onKey(e: KeyboardEvent): void {
           :placeholder="t('pal.broadcastPlaceholder')"
           spellcheck="false"
           autocomplete="off"
-          @keydown.enter.prevent="submitBroadcast"
+          @keydown.enter.stop.prevent="submitBroadcast"
         />
         <div class="hint">
           <span><span class="kbd">Enter</span> {{ t('pal.broadcastSend') }}</span>
@@ -454,7 +464,7 @@ function onKey(e: KeyboardEvent): void {
           spellcheck="false"
           autocomplete="off"
         />
-        <div class="list">
+        <div ref="listEl" class="list">
           <template v-for="(sec, si) in sections" :key="si">
             <div v-if="sec.items.length" class="group">{{ sec.title }}</div>
             <button
@@ -497,7 +507,10 @@ function onKey(e: KeyboardEvent): void {
               ><Icon name="edit" :size="14" /></span>
             </button>
           </template>
-          <div v-if="!items.length" class="empty">{{ t('pal.empty') }}</div>
+          <div v-if="!items.length" class="empty">
+            <span class="empty-icon"><Icon name="search" :size="18" /></span>
+            {{ t('pal.empty') }}
+          </div>
         </div>
         <div class="hint">
           <span><span class="kbd">↑</span><span class="kbd">↓</span> {{ t('pal.nav') }}</span>
@@ -618,6 +631,9 @@ function onKey(e: KeyboardEvent): void {
   font-size: 11.5px;
   color: var(--text-faint);
   font-family: var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .match {
   background: transparent;
@@ -644,6 +660,12 @@ function onKey(e: KeyboardEvent): void {
 .empty {
   padding: 24px;
   text-align: center;
+  color: var(--text-faint);
+}
+.empty-icon {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 8px;
   color: var(--text-faint);
 }
 .hint {

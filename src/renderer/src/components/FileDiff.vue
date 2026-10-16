@@ -1,5 +1,8 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
+
+const dialogEl = ref<HTMLDivElement>()
+onMounted(() => nextTick(() => dialogEl.value?.focus()))
 import { useI18n } from '../lib/i18n'
 import { diffLines } from '../lib/diff'
 import Icon from './Icon.vue'
@@ -18,7 +21,7 @@ const result = computed(() => diffLines(props.remoteContent, props.localContent)
 
 <template>
   <div class="fd-overlay" @mousedown.self="emit('close')">
-    <div class="fd-dialog" @keydown.esc="emit('close')">
+    <div ref="dialogEl" tabindex="-1" class="fd-dialog" @keydown.esc="emit('close')">
       <div class="fd-head">
         <span class="fd-title" :title="`${t('fileDiff.remote')}: ${remoteName} · ${t('fileDiff.local')}: ${localName}`">
           {{ remoteName }} ↔ {{ localName }}

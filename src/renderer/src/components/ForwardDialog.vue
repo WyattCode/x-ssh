@@ -1,5 +1,8 @@
 <script setup lang="ts">
-import { reactive, computed, ref } from 'vue'
+import { nextTick, onMounted, reactive, computed, ref } from 'vue'
+
+const dialogEl = ref<HTMLDivElement>()
+onMounted(() => nextTick(() => dialogEl.value?.focus()))
 import { useSessions } from '../stores/sessions'
 import { useI18n } from '../lib/i18n'
 import type { ForwardMode } from '../../../shared/types'
@@ -28,11 +31,11 @@ function ruleText(m: ForwardMode, lp: number, host: string, rp: number): string 
 async function add(): Promise<void> {
   const lp = Number(form.localPort)
   const rp = Number(form.remotePort)
-  if (!lp || lp < 1 || lp > 65535) {
+  if (!Number.isInteger(lp) || lp < 1 || lp > 65535) {
     err.value = t('fw.badPort')
     return
   }
-  if (form.mode !== 'dynamic' && (!rp || rp < 1 || rp > 65535)) {
+  if (form.mode !== 'dynamic' && (!Number.isInteger(rp) || rp < 1 || rp > 65535)) {
     err.value = t('fw.badPort')
     return
   }
@@ -59,7 +62,7 @@ function remove(mode: ForwardMode | undefined, localPort: number): void {
 
 <template>
   <div v-if="store.forwardOpen" class="fw-overlay" @mousedown.self="store.toggleForwards(false)">
-    <div class="fw-dialog" @keydown.esc="store.toggleForwards(false)">
+    <div ref="dialogEl" tabindex="-1" class="fw-dialog" @keydown.esc="store.toggleForwards(false)">
       <div class="fw-head">
         <Icon name="split" :size="15" />
         <span class="fw-title">{{ t('fw.title') }}</span>

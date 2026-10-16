@@ -1,5 +1,8 @@
 <script setup lang="ts">
-import { ref, reactive, computed, watch } from 'vue'
+import { nextTick, onMounted, ref, reactive, computed, watch } from 'vue'
+
+const dialogEl = ref<HTMLDivElement>()
+onMounted(() => nextTick(() => dialogEl.value?.focus()))
 import { useSessions } from '../stores/sessions'
 import { useI18n } from '../lib/i18n'
 import type { ManagedKey, Host } from '../../../shared/types'
@@ -69,7 +72,7 @@ watch(
 
 <template>
   <div v-if="store.publishOpen" class="kp-overlay" @mousedown.self="store.togglePublish(false)">
-    <div class="kp-dialog" @keydown.esc="store.togglePublish(false)">
+    <div ref="dialogEl" tabindex="-1" class="kp-dialog" @keydown.esc="store.togglePublish(false)">
       <div class="kp-head">
         <Icon name="keyboard" :size="15" />
         <span class="kp-title">{{ t('keyPub.title') }}</span>

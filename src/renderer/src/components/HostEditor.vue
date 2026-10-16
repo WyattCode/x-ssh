@@ -349,7 +349,7 @@ async function remove(): Promise<void> {
 <template>
   <Transition name="sheet">
     <div v-if="open" class="layer" @mousedown.self="emit('close')">
-      <aside ref="panelEl" class="panel" role="dialog" aria-modal="true" aria-labelledby="he-kicker" tabindex="-1" @keydown.esc="emit('close')" @keydown.enter="onEnter">
+      <aside ref="panelEl" class="panel" role="dialog" aria-modal="true" aria-labelledby="he-kicker" tabindex="-1" @keydown.esc="keyModal.open ? closeKeySheet() : emit('close')" @keydown.enter="onEnter">
         <!-- Header: the host as a card shows it — avatar, name, address. -->
         <header class="p-head">
           <OsIcon :os="host?.os" :color="form.color || undefined" :size="44" />
@@ -423,6 +423,11 @@ async function remove(): Promise<void> {
                     <select :value="form.keyPath || ''" @change="useKey(($event.target as HTMLSelectElement).value)">
                       <option value="">{{ t('host.noKey') }}</option>
                       <option v-for="k in managedKeys" :key="k.id" :value="k.path">{{ keyOptionLabel(k) }}</option>
+                      <!-- Hosts imported from ssh config / older data point at an
+                           external path: keep it visible instead of a blank select. -->
+                      <option v-if="form.keyPath && !managedKeys.some((k) => k.path === form.keyPath)" :value="form.keyPath">
+                        {{ form.keyPath }}
+                      </option>
                     </select>
                     <Icon name="chevron-down" :size="14" class="caret" />
                   </div>
@@ -430,7 +435,7 @@ async function remove(): Promise<void> {
                     <span :class="{ dim: !form.keyPath }">{{ form.keyPath || t('host.noKey') }}</span>
                   </button>
                   <div class="r-actions">
-                    <button v-if="!managedKeys.length" type="button" class="link" @click="pickKey">{{ t('host.browse') }}</button>
+                    <button type="button" class="link" @click="pickKey">{{ t('host.browse') }}</button>
                     <button type="button" class="link" @click="openGenerate">{{ t('host.generateKey') }}</button>
                     <button type="button" class="link" @click="importKey">{{ t('host.importKey') }}</button>
                   </div>
@@ -622,7 +627,7 @@ async function remove(): Promise<void> {
           <button v-if="host" type="button" class="btn btn-danger" @click="remove">{{ t('host.delete') }}</button>
           <span class="spacer" />
           <button type="button" class="btn" @click="emit('close')">{{ t('host.cancel') }}</button>
-          <button type="button" class="btn btn-primary" :disabled="!canSave()" @click="save">{{ t('host.save') }}</button>
+          <button type="button" class="btn btn-primary" :disabled="!canSave()" :title="canSave() ? undefined : t('host.saveDisabled')" @click="save">{{ t('host.save') }}</button>
         </footer>
 
         <!-- Generate a key: a small sheet over the panel. -->

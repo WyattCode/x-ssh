@@ -19,6 +19,8 @@ import {
 } from '../lib/shortcuts'
 import { sanitizePasteText } from '../../../shared/fsUtils'
 import { isMac } from '../composables/platform'
+
+const modKey = isMac ? '⌘' : 'Ctrl'
 import { createImeMirror, isPlainText } from '../lib/imeSync'
 import Icon from './Icon.vue'
 
@@ -707,14 +709,14 @@ onBeforeUnmount(() => {
     <div v-if="menu.open" class="ctx-overlay" @mousedown="menu.open = false" @contextmenu.prevent="menu.open = false">
       <div ref="menuEl" class="ctx" :style="{ left: menu.x + 'px', top: menu.y + 'px' }" @mousedown.stop>
         <button :disabled="!menu.hasSel && !menu.appCopy" @click="runMenu(copyFromMenu)">
-          <span>{{ t('term.copy') }}</span><span class="k">Ctrl+C</span>
+          <span>{{ t('term.copy') }}</span><span class="k">{{ modKey }}+C</span>
         </button>
         <div v-if="!menu.hasSel && !menu.appCopy && menu.mouseApp" class="hint">{{ t('term.shiftSelectHint') }}</div>
         <button @click="runMenu(pasteClipboard)">
-          <span>{{ t('term.paste') }}</span><span class="k">Ctrl+V</span>
+          <span>{{ t('term.paste') }}</span><span class="k">{{ modKey }}+V</span>
         </button>
         <div class="sep" />
-        <button @click="runMenu(openSearch)"><span>{{ t('term.find') }}</span><span class="k">Ctrl+F</span></button>
+        <button @click="runMenu(openSearch)"><span>{{ t('term.find') }}</span><span class="k">{{ modKey }}+F</span></button>
         <button @click="runMenu(selectAll)"><span>{{ t('term.selectAll') }}</span></button>
         <button @click="runMenu(scrollToBottom)"><span>{{ t('term.scrollBottom') }}</span></button>
         <button @click="runMenu(toggleFollow)">

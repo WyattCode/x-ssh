@@ -4,7 +4,10 @@
  * which differ in size. Extracted from SftpDrawer's drawer template; it owns
  * its own scan so the drawer only has to decide when to open it.
  */
-import { computed, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
+
+const dialogEl = ref<HTMLDivElement>()
+onMounted(() => nextTick(() => dialogEl.value?.focus()))
 import { useI18n } from '../lib/i18n'
 import Icon from './Icon.vue'
 
@@ -69,7 +72,7 @@ async function run(): Promise<void> {
 
 <template>
   <div class="pm-overlay" @mousedown.self="emit('close')">
-    <div class="pm-dialog sync-dialog" @keydown.esc="emit('close')">
+    <div ref="dialogEl" tabindex="-1" class="pm-dialog sync-dialog" @keydown.esc="emit('close')">
       <div class="pm-head">
         <span>{{ tt('sfp.dirDiff') }}</span>
         <button class="pm-x" :title="tt('sfp.close')" @click="emit('close')"><Icon name="close" /></button>

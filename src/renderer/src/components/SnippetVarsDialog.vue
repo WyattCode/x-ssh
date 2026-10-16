@@ -28,7 +28,7 @@ function onKey(e: KeyboardEvent): void {
       <header class="sv-head">
         <Icon name="zap" :size="16" class="sv-ico" />
         <span class="sv-title">{{ t('snip.vars') }}</span>
-        <button class="sv-x" title="Close" @click="cancel"><Icon name="close" :size="15" /></button>
+        <button class="sv-x" :title="t('snip.cancel')" @click="cancel"><Icon name="close" :size="15" /></button>
       </header>
       <div class="sv-body">
         <p class="sv-name">{{ state.snippet?.title }}</p>
@@ -37,9 +37,11 @@ function onKey(e: KeyboardEvent): void {
           <input
             v-model="v.value"
             class="sv-input"
+            :class="{ bad: state.error === v.name }"
             :placeholder="v.name"
           />
         </label>
+        <p v-if="state.error" class="sv-error">{{ t('snip.varsRequired', { name: state.error }) }}</p>
       </div>
       <footer class="sv-foot">
         <button class="sv-btn ghost" @click="cancel">{{ t('snip.cancel') }}</button>
@@ -61,7 +63,7 @@ function onKey(e: KeyboardEvent): void {
 }
 .sv {
   width: 380px;
-  background: var(--bg2);
+  background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: 10px;
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
@@ -79,17 +81,25 @@ function onKey(e: KeyboardEvent): void {
 .sv-x {
   width: 24px; height: 24px;
   display: inline-flex; align-items: center; justify-content: center;
-  border: none; background: transparent; color: var(--muted); border-radius: 4px; cursor: pointer;
+  border: none; background: transparent; color: var(--text-dim); border-radius: 4px; cursor: pointer;
 }
-.sv-x:hover { background: var(--bg3); color: var(--text); }
+.sv-error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--danger);
+}
+.sv-x:hover { background: var(--bg-elev-2); color: var(--text); }
 .sv-body { padding: 12px; display: flex; flex-direction: column; gap: 10px; }
 .sv-name {
-  margin: 0; font-size: 12px; color: var(--muted);
+  margin: 0; font-size: 12px; color: var(--text-dim);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .sv-field { display: flex; flex-direction: column; gap: 4px; }
 .sv-label {
   font-family: var(--font-mono); font-size: 11px; color: var(--text-dim);
+}
+.sv-input.bad {
+  border-color: var(--danger);
 }
 .sv-input {
   font-family: var(--font-mono); font-size: 12px;
@@ -103,7 +113,7 @@ function onKey(e: KeyboardEvent): void {
 }
 .sv-btn {
   padding: 6px 14px; border-radius: 6px; font-size: 13px; cursor: pointer;
-  border: 1px solid var(--border); background: var(--bg2); color: var(--text);
+  border: 1px solid var(--border); background: var(--bg-elev); color: var(--text);
 }
 .sv-btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
 </style>

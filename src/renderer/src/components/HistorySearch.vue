@@ -80,6 +80,13 @@ const results = computed<Hit[]>(() => {
   return out
 })
 
+// Refining the query can shrink the result set under the highlighted row:
+// Enter then lands on nothing (silently). Keep the selection pinned to a
+// real row.
+watch(results, (r) => {
+  if (active.value >= r.length) active.value = Math.max(0, r.length - 1)
+})
+
 /** Writes the current (filtered) results to a plaintext log via the main process. */
 function exportLog(): void {
   const text = results.value.map((h) => `[${h.label}] ${h.line}`).join('\n')
@@ -125,7 +132,9 @@ function onKey(e: KeyboardEvent): void {
           <option value="">{{ t('hist.allHosts') }}</option>
           <option v-for="h in hostLabels" :key="h" :value="h">{{ h }}</option>
         </select>
-        <span class="count">{{ results.length }}</span>
+        <span class="count" :title="results.length >= MAX_RESULTS ? t('hist.truncated') : undefined">
+          {{ results.length >= MAX_RESULTS ? MAX_RESULTS + '+' : results.length }}
+        </span>
         <button class="iconbtn" :title="t('hist.export')" @click="exportLog"><Icon name="download" :size="14" /></button>
         <button class="close" :title="t('hist.close')" @click="store.toggleHistory(false)"><Icon name="close" :size="15" /></button>
       </div>

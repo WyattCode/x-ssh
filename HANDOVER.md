@@ -118,6 +118,25 @@
 - 如版本号增加,改 `package.json` + 更新 `CHANGELOG.md` 后 `npm.cmd run dist` 重打包。
 - 大规模改动前先跑 `npm.cmd run typecheck && npm.cmd run build` 与 `npm.cmd run lint:i18n` 保证通过。
 
+# 会话记录:第二十次会话(2026-10-16 晚,界面细节专项走查:3 个并行审查代理 + 逐条亲自验证)
+
+用户要求"全面审核代码,检查所有界面细节"。三个并行代理按 HANDOVER 沉淀的界面规范(圆角变量/交互状态/节奏/三语言/空态)分块深读全部 29 个组件 + global.css + i18n,报 31 条;核实后**修掉 19 条**,其余记录。验证:typecheck、vitest 324、build、lint:i18n(新增 4 键三字典)全过。
+
+**已修(按组件)**:
+- **TransferPanel / SnippetVarsDialog:11+5 处引用从未定义的 CSS 变量**(`--bg2/--bg3/--muted`)——面板背景透明、文字直接叠在终端上。映射到 --bg-elev/--bg-elev-2/--text-dim。(代理多报了一个 --err,实际不存在。)
+- **CommandPalette**:① 广播框回车**双触发**——submitBroadcast 同步关面板后事件继续冒泡到 onKey,落入通用 Enter 分支误激活选中项(输入框加 `.stop`);② 键盘 ↑↓ **从不滚动选中项进视野**,长列表下盲选(加 listEl + watch(selected) → scrollIntoView nearest);③ 空态只有一行字(补 search 图标);④ `.sub` 无 ellipsis(长 IPv6 撑行)。
+- **PaneNode**:错误/关闭卡 `width: min(300px, 86vw)` 基于视口,极窄窗格中溢出且**重连按钮滚动不可达**(flex center 的经典裁切)。改 `min(300px, 100%)` + `margin: auto`。分割条命中区 1px 难以起步,加 ::before 隐形热区。
+- **HostEditor**:① 有托管密钥后「浏览」入口消失,外部路径旧主机在 select 里显示空白(保留浏览 + 动态补当前路径项);② 生成密钥弹层开着时焦点漂到背景,Esc 直接关整个编辑器**丢未保存表单**(面板 Esc 先判弹层);③ 保存按钮禁用无原因(title 三语言 `host.saveDisabled`)。
+- **SettingsDialog**:① 数字框清空瞬间把默认值写盘(保活被静默清 0)且框被强制写回——空输入不再提交;② 备份间隔无上限(5000h 直接入库,与 max=720 矛盾)——钳 1..720;③ 清空连接日志无二次确认(全页唯一裸奔的破坏性操作)——加确认框;④ 强调色板默认 '#6ea8fe' 硬编码暗色值(**未修**,记录)。
+- **ForwardsPage/ForwardDialog**:端口校验缺 `Number.isInteger`(80.5 可通过,与 ForwardsPage 不一致);对话框无焦点 Esc 失效(已 focus)。
+- **StatusBar**:长主机名把右侧徽章推出窗外(seg.host min-width:0 + host-text ellipsis)。
+- **TerminalView**:右键菜单快捷键硬编码 Ctrl,macOS 实际是 ⌘(用 TabBar 同款 modKey)。
+- **HistorySearch**:精确化关键词后高亮索引越界、回车静默失效(watch results 钳位);500 条截断时计数撒谎(MAX_RESULTS+ 提示)。
+- **SftpDrawer**:连续同步不随抽屉卸载停止(deleteExtras 场景 UI 不可见仍删文件)——onBeforeUnmount 补 watchStop。
+- **snippetVars**:变量留空回车直接把残缺命令发进终端——必填校验 + 高亮 + `snip.varsRequired` 三字典。
+
+**记录未修**(低危/改动大):HostEditor 生成弹层的 Tab 圈禁(Esc 已修,焦点圈禁要 inert);颜色色板 title 是原始色值(要 12 色×3 语言的键);按下缩小反馈在侧栏 nav / 分组 tab 缺失(纯打磨);CommandPalette pending 态遮罩点击直接关面板(与 Esc 的"返回搜索"不一致);TransferPanel 失败行不留原因展示且无 ETA;SettingsDialog 数字框未做草稿态(空输入守卫已覆盖主要危害)。
+
 # 会话记录:第十九次会话(2026-10-16 下午,全代码审查:4 个并行审查代理 + 逐条亲自验证)
 
 用户要求"审查所有代码"。分四块并行深读(桌面主进程+shared / 桌面渲染层 / 移动 Kotlin / 移动 Rust),共报 24 条;**每条都亲自读上下文核实后才动手**,修掉 18 条,其余记录。验证:桌面 typecheck + vitest 324、build;Rust cargo test 36 + clippy 干净;Kotlin testDebugUnitTest BUILD SUCCESSFUL。

@@ -1,5 +1,8 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { nextTick, onMounted, ref, watch } from 'vue'
+
+const dialogEl = ref<HTMLDivElement>()
+onMounted(() => nextTick(() => dialogEl.value?.focus()))
 import { useSessions } from '../stores/sessions'
 import { useI18n } from '../lib/i18n'
 import Icon from './Icon.vue'
@@ -43,7 +46,7 @@ watch(
 
 <template>
   <div v-if="store.replayOpen" class="rp-overlay" @mousedown.self="store.toggleReplay(false)">
-    <div class="rp-dialog" @keydown.esc="store.toggleReplay(false)">
+    <div ref="dialogEl" tabindex="-1" class="rp-dialog" @keydown.esc="store.toggleReplay(false)">
       <div class="rp-head">
         <Icon name="file" :size="15" />
         <span class="rp-title">{{ t('replay.title') }}</span>

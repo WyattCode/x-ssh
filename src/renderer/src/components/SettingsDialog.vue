@@ -292,22 +292,32 @@ function toggleRightClickPaste(): void {
   void store.saveSetting('rightClickPaste', store.rightClickPaste)
 }
 function onKeepalive(e: Event): void {
-  const n = Math.max(0, Math.min(600, parseInt((e.target as HTMLInputElement).value, 10) || 0))
+  // Clearing mid-edit must not persist a default (0 = keepalive off) and must
+  // not get the box forced back to the stored value before retyping.
+  const raw = (e.target as HTMLInputElement).value
+  if (raw.trim() === '') return
+  const n = Math.max(0, Math.min(600, parseInt(raw, 10) || 0))
   store.keepaliveSec = n
   void store.saveSetting('keepaliveSec', n)
 }
 function onTimeout(e: Event): void {
-  const n = Math.max(1, Math.min(300, parseInt((e.target as HTMLInputElement).value, 10) || 20))
+  const raw = (e.target as HTMLInputElement).value
+  if (raw.trim() === '') return
+  const n = Math.max(1, Math.min(300, parseInt(raw, 10) || 20))
   store.connectTimeoutSec = n
   void store.saveSetting('connectTimeoutSec', n)
 }
 function onRetries(e: Event): void {
-  const n = Math.max(0, Math.min(30, parseInt((e.target as HTMLInputElement).value, 10) || 0))
+  const raw = (e.target as HTMLInputElement).value
+  if (raw.trim() === '') return
+  const n = Math.max(0, Math.min(30, parseInt(raw, 10) || 0))
   store.connectRetries = n
   void store.saveSetting('connectRetries', n)
 }
 function onConcurrency(e: Event): void {
-  const n = Math.max(1, Math.min(32, parseInt((e.target as HTMLInputElement).value, 10) || 4))
+  const raw = (e.target as HTMLInputElement).value
+  if (raw.trim() === '') return
+  const n = Math.max(1, Math.min(32, parseInt(raw, 10) || 4))
   store.transferConcurrency = n
   void store.saveSetting('transferConcurrency', n)
 }
@@ -320,7 +330,9 @@ function toggleVerifyChecksums(): void {
   void store.saveSetting('verifyChecksums', store.verifyChecksums)
 }
 function onRate(e: Event): void {
-  const n = Math.max(0, Math.min(131072, parseInt((e.target as HTMLInputElement).value, 10) || 0))
+  const raw = (e.target as HTMLInputElement).value
+  if (raw.trim() === '') return
+  const n = Math.max(0, Math.min(131072, parseInt(raw, 10) || 0))
   store.transferRateKbps = n
   void store.saveSetting('transferRateKbps', n)
 }
@@ -517,6 +529,10 @@ async function loadConnLog(): Promise<void> {
   connLog.value = await window.api.connLog.list()
 }
 async function clearConnLog(): Promise<void> {
+  // One-way wipe of the audit trail; everything else destructive here confirms
+  // first, and a misclick on a danger button shouldn't erase the record.
+  const ok = await confirm(t('set.sec.connLogClearConfirm'))
+  if (!ok) return
   await window.api.connLog.clear()
   connLog.value = []
 }
@@ -594,8 +610,13 @@ async function pickBackupDir(): Promise<void> {
   }
 }
 function onBackupHours(e: Event): void {
-  const v = Number((e.target as HTMLInputElement).value)
-  store.autoBackupEveryHours = v > 0 ? v : 24
+  // Clearing must not snap back to 24h; values beyond the box's max were
+  // persisted verbatim before (5000h ran the backup… never).
+  const raw = (e.target as HTMLInputElement).value
+  if (raw.trim() === '') return
+  const n = Math.round(Number(raw))
+  if (!Number.isFinite(n) || n <= 0) return
+  store.autoBackupEveryHours = Math.min(720, Math.max(1, n))
   void store.saveSetting('autoBackupEveryHours', store.autoBackupEveryHours)
   void store.rescheduleBackup()
 }

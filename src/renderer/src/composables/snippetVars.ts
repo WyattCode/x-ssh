@@ -11,6 +11,8 @@ interface VarsState {
   snippet: Snippet | null
   vars: SnipVarField[]
   resolve: ((text: string | null) => void) | null
+  /** Name of the first variable left empty — the dialog highlights it. */
+  error: string | null
 }
 
 // Shared, app-wide state driving a single SnippetVarsDialog host. A snippet
@@ -20,7 +22,8 @@ const state = reactive<VarsState>({
   open: false,
   snippet: null,
   vars: [],
-  resolve: null
+  resolve: null,
+  error: null
 })
 
 /** Extracts the ordered, de-duplicated `{name}` placeholders from a snippet. */
@@ -44,6 +47,7 @@ export function useSnippetVars(): {
     const names = snippetVars(snippet)
     if (!names.length) return Promise.resolve(snippet.text)
     return new Promise<string | null>((res) => {
+      state.error = null
       state.snippet = snippet
       const defaults = snippet.defaultVars ?? {}
       state.vars = names.map((name) => ({ name, value: defaults[name] ?? '' }))
@@ -54,17 +58,26 @@ export function useSnippetVars(): {
   function submit(): void {
     const r = state.resolve
     const snip = state.snippet
+    if (!snip || !r) {
+      state.open = false
+      r?.(null)
+      return
+    }
+    // An empty variable is almost always an unfinished form, and the filled-in
+    // rest of the command still goes straight to the shell — block until the
+    // user fills it in or cancels, instead of sending a mangled command.
+    const missing = state.vars.find((v) => !v.value.trim())
+    if (missing) {
+      state.error = missing.name
+      return
+    }
     state.resolve = null
     state.open = false
-    if (r && snip) {
-      let text = snip.text
-      for (const v of state.vars) {
-        text = text.replace(new RegExp(`\\{${v.name}\\}`, 'g'), v.value)
-      }
-      r(text)
-    } else {
-      r?.(null)
+    let text = snip.text
+    for (const v of state.vars) {
+      text = text.replace(new RegExp(`\\{${v.name}\\}`, 'g'), v.value)
     }
+    r(text)
     state.snippet = null
     state.vars = []
   }
