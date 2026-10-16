@@ -118,6 +118,29 @@
 - 如版本号增加,改 `package.json` + 更新 `CHANGELOG.md` 后 `npm.cmd run dist` 重打包。
 - 大规模改动前先跑 `npm.cmd run typecheck && npm.cmd run build` 与 `npm.cmd run lint:i18n` 保证通过。
 
+# 会话记录:第十九次会话(2026-10-16 下午,全代码审查:4 个并行审查代理 + 逐条亲自验证)
+
+用户要求"审查所有代码"。分四块并行深读(桌面主进程+shared / 桌面渲染层 / 移动 Kotlin / 移动 Rust),共报 24 条;**每条都亲自读上下文核实后才动手**,修掉 18 条,其余记录。验证:桌面 typecheck + vitest 324、build;Rust cargo test 36 + clippy 干净;Kotlin testDebugUnitTest BUILD SUCCESSFUL。
+
+**已修(确认级缺陷,按危害排)**:
+1. **【高·桌面】`data:exportAll` 与自动备份的 `allowLocked` 正好写反**(index.ts:1070/376):锁定状态下手动导出把**全部明文密码**写进用户选的文件(主锁形同虚设),而计划自动备份反而被锁卡死、异常被吞、静默停摆 —— 与 store.ts 注释"allowLocked 供 scheduled auto-backup 使用"完全相反。已对调。
+2. **【高·桌面】同步的目录枚举失败被静默吞掉,`deleteExtras` 据此批量删除真实文件**(ssh.ts walkLocalTree/walkRemoteTree):readdir/stat 任一失败 → 部分 map → "读不到"被当成"不存在" → 1543 行起逐个 `unlink`。现在 walk 返回 `boolean`(任何读失败 = false 且传播),四个调用点全部处理:syncJob 直接中止(抛"目录枚举失败,本次同步已中止")、refreshWatchBaseline 保留旧基线、runWatchPass 跳过本轮、diffDirs 抛错不再显示错误 diff。
+3. **【高·移动】通知点开会压入第二个 MainActivity**:Manifest 无 `launchMode`、PendingIntent 无 flags → 双实例各自持有 hosts 状态,`persist` 互相覆盖(空表护栏防不了"非空但陈旧")。已加 `launchMode="singleTask"` + Intent flags。**注意**:devAutoConnect 只在 onCreate 读,singleTask 下重复 start 走 onNewIntent,行为不变。
+4. **【高·桌面】下载恢复队列按**失败的旧会话 id**执行,重连后全部失败还被整队清空**(sessions.ts queueDownload / SftpDrawer.resumeDownloads)。`DownloadQueueOp` 加 `hostId`(入队时从 paneBySession 取,progress 事件先于掉线事件到达,所以通常拿得到),resume 时按 hostId 映射到该主机现在的活会话;映射不到或仍失败的 op **保留在队列**(新增 `setDownloadQueue`),不再丢记录。顺带修了 showResume 误看 `transferQueue` 的笔误。
+5. **【中·桌面】锁定状态下 `lock:setPassphrase` 不验证旧口令即可换新口令并解锁**(lock.ts)——与 `reset` 特意防"桌边的人"的注释矛盾。已加 `enabled && !unlocked → 拒绝`。
+6. **【中·桌面】`disposeAll` 不关转发监听和 master 的跳板隧道**(ssh.ts):macOS 关窗(进程存活)后端口被旧转发占死、跳板连接泄漏。已补 `closeForwards(session)` 与 masters 的 jumpClient/sock 收尾。
+7. **【中·移动】自动重连握手进行中会话被关闭 → 刚建成的 transport 整条泄漏**(Sessions.kt reconnect):`withContext(IO)` 里 openTransport 完成后协程已取消,结果被丢弃。已在取回后用 `NonCancellable` 检查 `!job.isActive`,先 `close()` 再放弃。
+8. **【中·桌面】连续同步(尤其 + 删除多余文件)不随抽屉卸载停止**(SftpDrawer onBeforeUnmount):关抽屉后 main 里的 watcher 继续轮询删除,UI 无入口停止。卸载时已补 `watchStop`。
+9. **【中·桌面】SFTP 目录读取无乱序守卫**(SftpDrawer.load):快速导航时旧响应后到会回填错误目录。已加 `loadSeq` + sessionId 双守卫。
+10. **【中·Rust】通道打开失败后 `events` 被 take 走不归还**(ssh.rs open_channel):这条连接从此永久 `ChannelInUse`。失败分支已归还;已打开的 channel 留给服务端按超时收尾。
+11. **【中·桌面】快照恢复永不落盘**(openSnapshot):closeTab 逐个 persist 空列表,restoreTabsFrom 后没有 persist → 重启全部消失。已补。
+12. **【中·Rust,潜在】`Shell::eof/close` 是仅有的两个没有 STEP_TIMEOUT 的写路径**(ssh.rs:660+):死连接 + 写缓冲塞满会话循环卡死。已与 write/resize 同一套超时。当前 FFI 未导出它们,属预防。
+13. **【低】杂项**:Rust `Term::new/resize` 无尺寸上限(u32 巨值 → 分配失败 abort,已钳 1000);桌面恢复/解锁重连预置的 `reconnectAttempt` 成功后不清(下次掉线跳过 1s 档,runConnect 成功已清);glob 转义漏 `\` 和 `]`(Windows 文件名匹配失败);OpenSSH config 导出把代理明文密码嵌进 ProxyCommand(已改为注释占位);移动端 SFTP progress 回调抛异常会在 Rust 侧 panic 并绕过上传临时文件清理(Kotlin 侧已 try/catch);安卓前台服务在"最后会话刚清 + 新 startForegroundService"窗口内不调 startForeground 会 5 秒崩(onStartCommand 已无条件调)。
+
+**记录未修**(低危/改动大/已知设计):settings 跨进程 read-modify-write 的丢失更新窗口(durableFile 队列是 per-process 的);`keyManager` 生成密钥时 passphrase 经 argv 明文可见于进程列表(ssh-keygen 无 stdin 选项,askpass 方案太绕);Rust Handler 的 unbounded 队列无背压(与 HANDOVER 已知的"没人收就堆"同源,是会话轮询存在的理由);移动端编辑页保存协程挂在 rememberCoroutineScope 上、离开页面静默丢弃。
+
+**⚠️ 下次打安卓 APK 前**:本轮改了 Rust(ssh.rs/terminal.rs),必须先 `cargo ndk` 重编 .so(HANDOVER 坑 5),否则 APK 里是旧核心。桌面 `D:\Apps\X-SSH` 未更新到本批(仍是 0.4.2)——重新 package + robocopy 即可。
+
 # 会话记录:第十八次会话(2026-10-16 凌晨,"连接被服务器重置"排查与修复)
 
 用户报:服务器百分百正常,但关程序一段时间后回来连接经常失败("连接被服务器重置"),手动重试几次才连上;任何第三方 SSH 都没有这个问题。截图:Ubuntu 26.04 5090(user@192.168.1.101,**端口是 22**,标签里的 5090 是主机名的一部分)。

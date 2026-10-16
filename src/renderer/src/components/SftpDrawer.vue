@@ -12,6 +12,7 @@ import {
   transferStatusText
 } from '../lib/transferFormat'
 import { globMatch } from '../lib/glob'
+import type { DownloadQueueOp } from '../stores/sessions'
 import { useConfirm } from '../composables/confirm'
 import { useI18n } from '../lib/i18n'
 import { useToast } from '../composables/toast'
@@ -331,15 +332,40 @@ async function resumePending(): Promise<void> {
 async function resumeDownloads(): Promise<void> {
   if (!props.sessionId) return
   const ops = [...store.downloadQueue]
+  const keep: DownloadQueueOp[] = []
   let failed = 0
+  // A reconnect gives the pane a new session id, so ops map through hostId to
+  // whichever session that host has live now; ops whose host is still offline
+  // stay queued instead of being silently dropped.
+  const liveSidFor = (hostId?: string): string | undefined => {
+    if (!hostId) return undefined
+    for (const t of store.tabs) {
+      const pane = t.panes.find((x) => x.params.hostId === hostId && x.sshSessionId)
+      if (pane) return pane.sshSessionId
+    }
+    return undefined
+  }
   for (const op of ops) {
+    let sid = op.sessionId
+    if (!store.paneBySession(sid)) {
+      const mapped = liveSidFor(op.hostId)
+      if (!mapped) {
+        keep.push(op)
+        continue
+      }
+      sid = mapped
+    }
     // Resumes into the recorded local directory; partial files are picked up by
     // downloadJob. A per-op failure is skipped, not fatal to the rest.
-    const r = await window.api.sftp.downloadTo(op.sessionId, op.items, op.localDir, store.transferConcurrency)
-    if (!r.ok && !r.canceled) failed++
+    const r = await window.api.sftp.downloadTo(sid, op.items, op.localDir, store.transferConcurrency)
+    if (!r.ok && !r.canceled) {
+      failed++
+      keep.push(op)
+    }
   }
-  await store.clearDownloadQueue()
-  showResume.value = store.transferQueue.length > 0
+  if (keep.length) await store.setDownloadQueue(keep)
+  else await store.clearDownloadQueue()
+  showResume.value = store.downloadQueue.length > 0
   if (failed > 0) toast(tt('sfp.resumeDownloadPartial', { n: failed }), 'error')
 }
 // dragenter/leave bubble from child rows; count depth so the drop highlight
@@ -487,8 +513,15 @@ watch(doneUploadSig, (sig) => {
   uploadReloadTimer = window.setTimeout(() => load(path.value), 500)
 })
 
+// Directory reads have no ordering guarantee once several are in flight
+// (fast navigation, pane switching): a stale response landing last would
+// rewrite path/entries to where the user just left. Each load takes a token
+// and only the newest one may touch state.
+let loadSeq = 0
 async function load(p?: string): Promise<void> {
   if (!props.sessionId) return
+  const sidAtCall = props.sessionId
+  const seq = ++loadSeq
   loading.value = true
   error.value = ''
   creatingKind.value = null
@@ -497,6 +530,7 @@ async function load(p?: string): Promise<void> {
   anchor.value = null
   try {
     const res = await window.api.sftp.list(props.sessionId, p)
+    if (seq !== loadSeq || sidAtCall !== props.sessionId) return
     if (res.path !== path.value) filterText.value = ''
     path.value = res.path
     if (!homePath.value) homePath.value = res.path
@@ -504,9 +538,10 @@ async function load(p?: string): Promise<void> {
     entries.value = res.entries
     if (res.path !== '/') void store.addSftpRecent(res.path)
   } catch (e) {
+    if (seq !== loadSeq || sidAtCall !== props.sessionId) return
     error.value = (e as Error).message || tt('sfp.readDirFail')
   } finally {
-    loading.value = false
+    if (seq === loadSeq && sidAtCall === props.sessionId) loading.value = false
   }
 }
 
@@ -563,6 +598,10 @@ onMounted(() => {
 })
 onBeforeUnmount(() => {
   if (uploadReloadTimer) clearTimeout(uploadReloadTimer)
+  // A continuous sync (esp. with delete-extra-files) must not keep running
+  // with the drawer gone — the watch state lives in main and would otherwise
+  // poll and sync invisibly, with no UI left to stop it.
+  if (props.sessionId && watchActive.value) void window.api.sftp.watchStop(props.sessionId)
   window.removeEventListener('mousemove', onMarqueeMove)
   window.removeEventListener('mouseup', onMarqueeUp)
   window.removeEventListener('mousemove', onResizeMove)

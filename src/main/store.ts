@@ -225,8 +225,11 @@ export class HostStore {
         if (j) lines.push(`\tProxyJump ${this.configAlias(j)}`)
       }
       if (h.proxy && h.proxy.type === 'http') {
-        const auth = h.proxy.username ? `${encodeURIComponent(h.proxy.username)}:${encodeURIComponent(h.proxy.password ?? '')}@` : ''
-        lines.push(`\tProxyCommand connect-proxy -H ${auth}${h.proxy.host}:${h.proxy.port} %h %p`)
+        // Proxy credentials are NOT exported either — the config file gets
+        // shared/committed far more casually than the secrets store, and the
+        // comment above promises no secrets in here.
+        lines.push(`\t# ProxyCommand needs the proxy's credentials: fill in user:password yourself`)
+        lines.push(`\t# ProxyCommand connect-proxy -H user:password@${h.proxy.host}:${h.proxy.port} %h %p`)
       }
       if (h.onConnect) lines.push(`\tRemoteCommand ${h.onConnect.split('\n').join(' && ')}`)
       if (h.group) lines.push(`\t# group: ${h.group}`)

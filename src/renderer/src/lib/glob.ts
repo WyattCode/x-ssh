@@ -48,7 +48,9 @@ function simpleToRegExp(glob: string): string {
         i = j
       }
     } else {
-      re += ch.replace(/[.+^${}()|]/g, '\\$&')
+      // `]` and `\` included: Windows filenames are full of backslashes, and a
+      // bare `\` would act as an escape instead of matching itself.
+      re += ch.replace(/[\\\].+^${}()|]/g, '\\$&')
     }
   }
   return re

@@ -200,9 +200,23 @@ pub struct Terminal {
 }
 
 impl Terminal {
+    /// Host-supplied grid sizes are clamped to something the grid can actually
+    /// allocate: a u32-sized width reaching here (buggy host, truncated int)
+    /// would otherwise ask alacritty for a ~hundred-GB grid, and an
+    /// allocation failure aborts the process — uncatchable through FFI.
+    const MAX_COLS: usize = 1000;
+    const MAX_ROWS: usize = 1000;
+
+    fn clamp_size(cols: usize, rows: usize) -> Size {
+        Size::new(
+            cols.clamp(1, Self::MAX_COLS),
+            rows.clamp(1, Self::MAX_ROWS),
+        )
+    }
+
     /// 新建终端(含回滚缓冲)。
     pub fn new(cols: usize, rows: usize) -> Self {
-        let size = Size::new(cols.max(1), rows.max(1));
+        let size = Self::clamp_size(cols, rows);
         let config = Config {
             scrolling_history: DEFAULT_SCROLLBACK,
             semantic_escape_chars: WORD_DELIMITERS.to_owned(),
@@ -269,7 +283,7 @@ impl Terminal {
     pub fn resize(&mut self, cols: usize, rows: usize) {
         // 和 `new` 一样夹住:0 行 / 0 列会让下面 `size.rows - 1` 这类减法在 usize 上溢,
         // 进程直接 abort。构造函数夹了,这里原来漏了(界面那边碰巧也夹了,所以还没炸过)。
-        self.size = Size::new(cols.max(1), rows.max(1));
+        self.size = Self::clamp_size(cols, rows);
         self.term.resize(self.size);
     }
 

@@ -74,6 +74,11 @@ class SessionService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // startForegroundService() demands a startForeground() within 5s even
+        // when this instance is on its way out (last session just cleared but
+        // onDestroy hasn't run): a new connection arriving in that window
+        // would otherwise crash with ForegroundServiceDidNotStartInTime.
+        startForeground(NOTIFICATION_ID, buildNotification(SessionRegistry.sessions.value.size))
         if (intent?.action == ACTION_DISCONNECT_ALL) {
             SessionRegistry.closeAll()
         }
@@ -93,7 +98,13 @@ class SessionService : Service() {
         val open = PendingIntent.getActivity(
             this,
             0,
-            Intent(this, MainActivity::class.java),
+            // SINGLE_TOP|CLEAR_TOP: the activity is singleTask already — the
+            // flags keep the intent from stacking a second instance anyway
+            // (e.g. a cold-start edge), which would fork the host state and
+            // let the two copies overwrite each other's persisted lists.
+            Intent(this, MainActivity::class.java).setFlags(
+                Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP,
+            ),
             PendingIntent.FLAG_IMMUTABLE,
         )
         val disconnect = PendingIntent.getService(

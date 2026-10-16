@@ -577,7 +577,20 @@ impl Ssh {
             })
             .await
         });
-        let channel = channel.map_err(|_| SshError::Timeout)??;
+        let channel = match channel {
+            // 失败路径必须把 events 放回去:连接本身还活着,丢了它之后每次
+            // open_channel 都是 ChannelInUse,这条连接就废了。(已打开的
+            // channel 随 drop 留给服务端按通道超时收尾。)
+            Ok(Ok(c)) => c,
+            Ok(Err(e)) => {
+                self.events = Some(events);
+                return Err(e.into());
+            }
+            Err(_) => {
+                self.events = Some(events);
+                return Err(SshError::Timeout);
+            }
+        };
 
 
         // russh 收到通道数据时,先 `send().await` 塞进通道**自己的**消息队列(容量
@@ -658,13 +671,19 @@ impl Shell {
 
     /// 半关闭(发送 EOF)。
     pub fn eof(&self) -> Result<(), SshError> {
-        self.runtime.block_on(self.channel.eof())?;
+        // 与 write/resize 同一套纪律:死连接上 socket 写缓冲塞满时,russh 的
+        // 会话循环会卡在 flush_into 上,不加超时这里就永久等下去。
+        self.runtime
+            .block_on(async { tokio::time::timeout(STEP_TIMEOUT, self.channel.eof()).await })
+            .map_err(|_| SshError::Timeout)??;
         Ok(())
     }
 
     /// 关闭通道。
     pub fn close(&self) -> Result<(), SshError> {
-        self.runtime.block_on(self.channel.close())?;
+        self.runtime
+            .block_on(async { tokio::time::timeout(STEP_TIMEOUT, self.channel.close()).await })
+            .map_err(|_| SshError::Timeout)??;
         Ok(())
     }
 }

@@ -1372,46 +1372,56 @@ export class SshManager {
     )
   }
 
-  /** Recursively enumerates a local directory into rel-path → {size, mtime}. */
-  private async walkLocalTree(dir: string, base: string, map: Map<string, { size: number; mtimeMs: number }>): Promise<void> {
+  /** Recursively enumerates a local directory into rel-path → {size, mtime}.
+   *  Returns false when the directory can't be read (or a file can't be
+   *  stat'ed) — the caller must then treat the map as unusable: a partial
+   *  snapshot makes "absent on this side" mean "unreadable", which would turn
+   *  `deleteExtras` into mass deletion of real files. */
+  private async walkLocalTree(dir: string, base: string, map: Map<string, { size: number; mtimeMs: number }>): Promise<boolean> {
     let items: import('node:fs').Dirent[]
     try {
       items = await readdir(this.longPath(dir), { withFileTypes: true })
     } catch {
-      return
+      return false
     }
     for (const it of items) {
       const abs = join(dir, it.name)
       const rel = this.posixJoin(base, it.name)
-      if (it.isDirectory()) await this.walkLocalTree(abs, rel, map)
-      else if (it.isFile()) {
+      if (it.isDirectory()) {
+        if (!(await this.walkLocalTree(abs, rel, map))) return false
+      } else if (it.isFile()) {
         try {
           const st = await stat(this.longPath(abs))
           map.set(rel, { size: st.size, mtimeMs: st.mtimeMs })
         } catch {
-          /* skip */
+          return false
         }
       }
     }
+    return true
   }
 
-  /** Recursively enumerates a remote directory into rel-path → {size, mtime}. */
-  private async walkRemoteTree(sftp: SFTPWrapper, dir: string, base: string, map: Map<string, { size: number; mtimeMs: number }>): Promise<void> {
+  /** Recursively enumerates a remote directory into rel-path → {size, mtime}.
+   *  Returns false when anything can't be read — see walkLocalTree for why a
+   *  partial snapshot must never be trusted. */
+  private async walkRemoteTree(sftp: SFTPWrapper, dir: string, base: string, map: Map<string, { size: number; mtimeMs: number }>): Promise<boolean> {
     let list: { filename: string; attrs: { size: number; isDirectory(): boolean } }[]
     try {
       list = await this.readdirFull(sftp, dir)
     } catch {
-      return
+      return false
     }
     for (const it of list) {
       const rel = this.posixJoin(base, it.filename)
       if (it.attrs.isDirectory()) {
-        await this.walkRemoteTree(sftp, this.posixJoin(dir, it.filename), rel, map)
+        if (!(await this.walkRemoteTree(sftp, this.posixJoin(dir, it.filename), rel, map))) return false
       } else {
         const st = await this.statFull(sftp, this.posixJoin(dir, it.filename))
-        if (st) map.set(rel, st)
+        if (!st) return false
+        map.set(rel, st)
       }
     }
+    return true
   }
 
   /** Mirrors a local <-> remote directory tree, transferring only the files
@@ -1443,11 +1453,17 @@ export class SshManager {
 
     const localMap = new Map<string, { size: number; mtimeMs: number }>()
     const remoteMap = new Map<string, { size: number; mtimeMs: number }>()
-    await Promise.all([
+    const [localOk, remoteOk] = await Promise.all([
       this.walkLocalTree(localDir, '', localMap),
       this.walkRemoteTree(sftp, remoteDir, '', remoteMap)
     ])
-
+    // A partial snapshot (unreadable dir / file) would turn "absent on this
+    // side" into a deletion — refuse to run the sync off one at all.
+    if (!localOk || !remoteOk) {
+      this.cancelledJobs.delete(jobId)
+      this.pausedJobs.delete(jobId)
+      throw new Error('目录枚举失败，本次同步已中止（源目录可能暂时不可读）')
+    }
     // Plan: each entry is a transfer (dir up/down) or a deletion.
     interface FilePlan { dir: 'up' | 'down'; local: string; remote: string; rel: string; size: number }
     const plan: FilePlan[] = []
@@ -1584,15 +1600,18 @@ export class SshManager {
     const remote = new Map<string, { size: number; mtimeMs: number }>()
     try {
       const sftp = await this.getSftp(state.sessionId)
-      await Promise.all([
+      const [localOk, remoteOk] = await Promise.all([
         this.walkLocalTree(state.localDir, '', local),
         this.walkRemoteTree(sftp, state.remoteDir, '', remote)
       ])
+      // A partial snapshot would make the next pass think everything missing
+      // from it "changed" — keep the previous baseline and retry instead.
+      if (!localOk || !remoteOk) return
+      state.baselineLocal = local
+      state.baselineRemote = remote
     } catch {
-      /* leave partial maps; a later pass will retry */
+      /* link down or dir missing; a later pass will retry */
     }
-    state.baselineLocal = local
-    state.baselineRemote = remote
   }
 
   /** Starts a background watcher that auto-syncs a local↔remote dir pair
@@ -1654,10 +1673,13 @@ export class SshManager {
       const remote = new Map<string, { size: number; mtimeMs: number }>()
       try {
         const sftp = await this.getSftp(state.sessionId)
-        await Promise.all([
+        const [localOk, remoteOk] = await Promise.all([
           this.walkLocalTree(state.localDir, '', local),
           this.walkRemoteTree(sftp, state.remoteDir, '', remote)
         ])
+        // A partial snapshot makes mapsDiffer see phantom changes; skip the
+        // pass (and never run a sync from one) instead.
+        if (!localOk || !remoteOk) return
       } catch {
         return // link down or dir missing; retry next pass
       }
@@ -1982,10 +2004,13 @@ export class SshManager {
     const sftp = await this.getSftp(sessionId)
     const localMap = new Map<string, { size: number; mtimeMs: number }>()
     const remoteMap = new Map<string, { size: number; mtimeMs: number }>()
-    await Promise.all([
+    const [localOk, remoteOk] = await Promise.all([
       this.walkLocalTree(localDir, '', localMap),
       this.walkRemoteTree(sftp, remoteDir, '', remoteMap)
     ])
+    // A partial snapshot would report files as "only on one side"; say so
+    // instead of showing a wrong diff.
+    if (!localOk || !remoteOk) throw new Error('目录枚举失败（源目录可能暂时不可读）')
     const onlyLocal: string[] = []
     const onlyRemote: string[] = []
     const sizeDiff: string[] = []
@@ -2520,11 +2545,19 @@ export class SshManager {
       if (session.suppressTimer) clearTimeout(session.suppressTimer)
       this.stopLog(session.id)
       this.stopWatchSyncsForSession(session.id)
+      // macOS keeps the process alive after the window closes: without this,
+      // local/dynamic forwards keep their listeners bound and the jump
+      // tunnels keep their sockets until the app fully quits.
+      this.closeForwards(session)
       // Mark a clean close so a late client 'close' isn't misread as a drop.
       session.shellExit = true
       session.client.end()
     }
     this.sessions.clear()
+    for (const m of this.masters.values()) {
+      m.jumpClient?.end()
+      ;(m.sock as Socket | Duplex | undefined)?.destroy()
+    }
     this.masters.clear()
     for (const w of this.watchSyncs.values()) if (w.timer) clearInterval(w.timer)
     this.watchSyncs.clear()

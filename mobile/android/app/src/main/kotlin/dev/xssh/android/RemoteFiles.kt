@@ -13,6 +13,7 @@ import android.os.SystemClock
 import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.provider.OpenableColumns
+import android.util.Log
 import android.webkit.MimeTypeMap
 import androidx.annotation.PluralsRes
 import androidx.annotation.StringRes
@@ -205,9 +206,15 @@ class RemoteFiles(session: Session, private val scope: CoroutineScope) {
                     val at = Transfer(step.name, upload, base, total, index, steps.size)
                     _transfer.value = at
                     val listener = object : TransferListener {
-                        override fun progress(done: ULong, total: ULong): Boolean {
+                        // A throw here becomes a Rust-side panic (uniffi turns
+                        // callback failures into panic!) that unwinds *past*
+                        // upload's temp-file cleanup — keep it impossible.
+                        override fun progress(done: ULong, total: ULong): Boolean = try {
                             _transfer.value = at.copy(done = base + done.toLong())
-                            return !cancelled.get()
+                            !cancelled.get()
+                        } catch (t: Throwable) {
+                            Log.w(TAG, "progress callback failed: ${t.message}")
+                            !cancelled.get()
                         }
                     }
                     val result = runCatching { step.run(listener) }

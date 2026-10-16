@@ -236,6 +236,15 @@ class TerminalSession(
                 runCatching { openTransport(host, jump, live.cols, live.rows) }
             }
             val transport = result.getOrNull()
+            if (transport != null && !job.isActive) {
+                // Shutdown (user disconnect / disconnect-all) cancelled this
+                // job while the handshake was in flight: the withContext above
+                // throws CancellationException after the block completes, and
+                // without closing it here the fresh transport — its SSH
+                // connection and tokio runtime — would just leak.
+                withContext(NonCancellable) { runCatching { transport.first.close() } }
+                return false
+            }
             if (transport != null) {
                 // 分隔行按当前界面语言写;会话层没有 Activity,用应用的 Context(Android 13 起跟着应用语言走)。
                 val marker = reconnectedMarker(

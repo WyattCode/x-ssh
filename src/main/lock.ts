@@ -66,9 +66,14 @@ export class MasterLock {
   }
 
   /** Enables (or changes) the master passphrase. The caller just succeeded in
-   *  setting it, so the app stays unlocked for this session. */
+   *  setting it, so the app stays unlocked for this session.
+   *  While the lock is on but the app is locked, refuse: changing the
+   *  passphrase from a locked state would let anyone at the desk replace it
+   *  with their own and walk straight in — the same threat `reset()` guards
+   *  against, which is why that one requires the passphrase too. */
   async setPassphrase(passphrase: string): Promise<void> {
     if (!passphrase) throw new Error('口令不能为空')
+    if (this.enabled && !this.unlocked) throw new Error('已锁定，请先解锁')
     const salt = randomBytes(16).toString('hex')
     this.salt = salt
     this.hash = this.derive(passphrase, salt)

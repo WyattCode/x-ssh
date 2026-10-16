@@ -226,6 +226,10 @@ export interface TransferOp {
 export interface DownloadQueueOp {
   id: string
   sessionId: string
+  /** The host the download ran against. A reconnect replaces the session id,
+   *  so resume maps through this instead — ops whose session is gone and that
+   *  carry no hostId are kept (never dropped) until their host connects. */
+  hostId?: string
   items: DownloadItem[]
   localDir: string
   at: number
@@ -915,12 +919,18 @@ export const useSessions = defineStore('sessions', {
       await window.api.settings.set('transferQueue', toPlain(this.transferQueue))
     },
     /** Records an interrupted download so it can be resumed into its local dir. */
-    async queueDownload(sessionId: string, items: DownloadItem[], localDir: string): Promise<void> {
+    async queueDownload(sessionId: string, items: DownloadItem[], localDir: string, hostId?: string): Promise<void> {
       if (!items.length || !localDir) return
       this.downloadQueue = [
-        { id: uid('xfer'), sessionId, items, localDir, at: Date.now() },
+        { id: uid('xfer'), sessionId, hostId, items, localDir, at: Date.now() },
         ...this.downloadQueue
       ].slice(0, 20)
+      await window.api.settings.set('downloadQueue', toPlain(this.downloadQueue))
+    },
+    /** Rewrites the queue minus the ops a resume consumed; failed / unmapped
+     *  ops stay so a later resume (after the host reconnects) can take them. */
+    async setDownloadQueue(ops: DownloadQueueOp[]): Promise<void> {
+      this.downloadQueue = ops.slice(0, 20)
       await window.api.settings.set('downloadQueue', toPlain(this.downloadQueue))
     },
     async clearDownloadQueue(): Promise<void> {
@@ -977,7 +987,12 @@ export const useSessions = defineStore('sessions', {
         // A failed download is queued so it can be batch-resumed into the same
         // local destination once the link returns.
         if (p.error && !cancelled && p.direction === 'down' && p.items?.length) {
-          void this.queueDownload(p.sessionId ?? '', p.items, p.localDir ?? '')
+          void this.queueDownload(
+            p.sessionId ?? '',
+            p.items,
+            p.localDir ?? '',
+            this.paneBySession(p.sessionId ?? '')?.params.hostId
+          )
         }
         // Audit the transfer for the security log (who moved what, if the pane
         // maps back to a host). Only terminal events (done/error) are recorded.
@@ -1063,6 +1078,10 @@ export const useSessions = defineStore('sessions', {
       const ids = this.tabs.map((t) => t.id)
       ids.forEach((tid) => this.closeTab(tid))
       this.restoreTabsFrom(s.tabs)
+      // closeTab persisted the emptied list along the way; without this the
+      // snapshot workspace lives in memory only and the next start comes back
+      // to zero tabs.
+      this.persistTabs()
     },
 
     /** Records the SFTP drawer's current dir so a reconnect can reopen there.
@@ -1447,6 +1466,9 @@ export const useSessions = defineStore('sessions', {
         live.pane.sshSessionId = result.sessionId
         live.pane.status = 'connected'
         live.pane.errorCode = undefined
+        // A restore/unlock retry pre-set the attempt counter; leaving it set
+        // would make the next real drop skip the 1s backoff tier.
+        live.pane.reconnectAttempt = undefined
         // A rejected first/changed key may have been confirmed since the error
         // card was drawn: drop the stale trust payload.
         live.pane.hostKey = undefined

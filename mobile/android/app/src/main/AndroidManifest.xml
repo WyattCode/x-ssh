@@ -30,6 +30,7 @@
              Compose 收到新配置后原地换文字。 -->
         <activity
             android:name=".MainActivity"
+            android:launchMode="singleTask"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density|uiMode|locale|layoutDirection"
             android:exported="true"
             android:windowSoftInputMode="adjustResize">
