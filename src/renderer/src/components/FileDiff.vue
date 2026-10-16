@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref } from 'vue'
+import { useFocusTrap } from '../composables/focusTrap'
 
-const dialogEl = ref<HTMLDivElement>()
+const dialogEl = ref<HTMLElement>()
+useFocusTrap(dialogEl, () => true) // mounted only while the parent shows it
 onMounted(() => nextTick(() => dialogEl.value?.focus()))
 import { useI18n } from '../lib/i18n'
 import { diffLines } from '../lib/diff'

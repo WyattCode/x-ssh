@@ -118,6 +118,35 @@
 - 如版本号增加,改 `package.json` + 更新 `CHANGELOG.md` 后 `npm.cmd run dist` 重打包。
 - 大规模改动前先跑 `npm.cmd run typecheck && npm.cmd run build` 与 `npm.cmd run lint:i18n` 保证通过。
 
+# 会话记录:第二十二次会话(2026-10-17 凌晨,"全面修复":收掉第三轮记录的低危项)
+
+用户"全面修复"。把第二十一轮记录未修的 4 条低危 + 安卓触控尺寸全部做掉,随后发 0.4.5。验证:桌面 typecheck(node+web)、vitest 324、build、lint:i18n 全绿;安卓 BUILD SUCCESSFUL。
+
+1. **模态焦点陷阱**(新 `src/renderer/src/composables/focusTrap.ts`):此前**所有**对话框 Tab 都能跑到背景元素上——键盘用户会往(视觉上被遮住的)背景里打字,而且焦点一离开子树,Esc 就失效(`aria-modal="true"` 的声明一直是空头支票)。实现要点:监听绑在 **document 的捕获阶段**而不是元素上(陷阱安装时焦点可能已经跑出去了);可选元素列表刻意贴近规范(用 `[tabindex]` 会把对话框根自己也圈进去、破坏循环);焦点在对话框外或停在根上时按 Tab 先拉回第一个/最后一个;对话框内无任何可聚焦元素时 `preventDefault` 并聚焦根,绝不放它逃逸。已接 12 处:CommandPalette、ConfirmDialog、HostEditor(复用已有 panelEl)、LockScreen、TmuxDialog、HistorySearch、PermDialog、ForwardDialog、PublishKeyDialog、SessionReplayDialog、FileDiff、DirDiffDialog。**注**:`PermDialog/FileDiff/DirDiffDialog` 由父级 `v-if` 挂载、无 `open` prop,故传 `() => true`。
+2. **主机编辑器关闭脏检查**:Esc / X / 点遮罩 / 页脚"取消"统一走新的 `requestClose()`——与打开时快照(`formSnapshot()` 含 password/passphrase,因为输了口令又关掉同样是丢数据)比较,有改动先弹确认(三语言新键 `host.discardConfirm`/`host.discard`);生成密钥弹层开着时仍先关弹层。保存成功/删除成功后的关闭**不走**该检查。
+3. **遮罩触发统一**:TransferPanel、SnippetVarsDialog 的 `@click.self` → `@mousedown.self`(与其余 13 处一致,避免拖选文本时误关)。
+4. **安卓硬编码颜色收进调色板**:6 处 `Color(0xFF...)` 之前每处都带 `if (p.dark)` 双分支(显示正确),现收进 `XsshPalette` 的 4 个新语义字段:`switchThumb`(分段/开关滑块)、`keyFace`/`keyFacePressed`(按键面板)、`barBg`(终端工具条)。深浅两套都填好。
+5. **安卓触控尺寸**:改用 `Modifier.minimumInteractiveComponentSize()` 而不是直接放大尺寸——**只扩触摸热区到平台最小值(48dp),可见视觉尺寸一点不变**。应用于 `ToolbarIcon`(40dp)、`SidebarRow` 关闭键(28dp)、`SidebarSearch` 清除键(24dp)、`Segmented` 分段项、`XsshSwitch` 开关。(先前误用 `heightIn(TouchMin)` 会把可见轨道也撑大,已改正。)
+
+**仍未做**(有意搁置,理由:收益低/风险高):安卓 `HostEditorScreen` 的 `remember` 无 key(当前导航流不可达);平板 HoverTip 在触摸设备上的表现;桌面 `--row-sel` 已删。
+
+# 会话记录:第二十一次会话(2026-10-17 凌晨,第三轮走查:安卓 Compose 首次界面走查 + 全局一致性 + 覆层契约)
+
+用户要求"再走查一遍所有代码,特别是 UI 细节"。这轮刻意选**前两轮没覆盖的面**:① 安卓 Compose 界面(此前从未做过界面专项走查)、② 桌面外壳/主题/全局样式一致性、③ 所有覆层的交互契约一致性。三个并行代理报 30 余条,核实后**修 22 条**。验证:桌面 typecheck(node+web)、vitest 324、build、lint:i18n;安卓 BUILD SUCCESSFUL。
+
+**最高危(DirDiffDialog 整个外壳无样式)**:`DirDiffDialog.vue` 用的 `.pm-overlay/.pm-dialog/.pm-head/.pm-x/.pm-foot/.pm-btn` 只在 **PermDialog 的 scoped 样式**里定义(scoped 不跨组件生效),`sync-field`/`sync-dialog` 更是全库无定义 → 目录对比对话框**没有遮罩定位、不居中、无背景**,点遮罩关闭也几乎点不中。修:把这套外壳(12 条规则)提到 `global.css` 作为共享对话框壳,PermDialog 改为消费全局;DirDiffDialog 的 `sync-*` 改为通用 `dialog-field`;`pm-err` 同样提全局。**这是可复用的教训:任何被两个组件共用的类名都不能只写在其中一个的 scoped 里。**
+
+**已修其余项**:
+- 桌面外壳:`--accent-contrast` 从未定义(4 个对话框靠 `#fff` 兜底,浅强调色下按钮文字不可读)——在 global.css 三处主题定义,并由 App.vue 按强调色**亮度**自动算黑白(复用 `accentSoft` 的位置);`--row-sel/--row-sel-ring` 定义了却零消费(含 App.vue 的 setProperty)→ 删除;App.vue 的横幅抢焦点守卫只查 `.overlay`,漏掉 HostEditor 的 `.layer` → 补;StatusBar 一整套 `.fw-*` 死样式 → 删除。
+- 覆层契约:`DirDiffDialog/ForwardDialog/LockScreen/SessionReplayDialog/PublishKeyDialog/FileDiff` 6 个对话框**打开时无焦点**(Esc 完全失效)——全部补 `onMounted` 聚焦 + `tabindex="-1"`;LockScreen 是**全屏拦截层**却要手动点击才能输入 → 自动聚焦;**ConfirmDialog 的 danger 确认默认聚焦破坏性按钮**(回车即删)→ danger 时聚焦取消;ForwardDialog 删除转发**无确认**(转发页同操作有)→ 补 confirm+danger;HostEditor 生成密钥弹层开着时 Esc 只关弹层、点遮罩却关整个编辑器(丢表单)→ 遮罩也先关弹层;SnippetVarsDialog 的 Enter 未过滤 IME 组字 → 中文输入法选词的回车会误提交命令。
+- 快捷键:终端聚焦时 **Mod+Shift+F 双触发**(终端的 "mod+F 也开搜索" 分支没排除 Shift,同时又冒泡到全局 history)——分支加 `!e.shiftKey`。
+- 原生界面:主进程 **19 处原生对话框文案硬编码简体中文**(覆盖确认、导出/导入、选目录等),语言设为 en/zh-TW 的用户会看到中文弹窗,而托盘菜单早已本地化 → 建 `NL` 字典 + `dl(key)` 异步查询(与 `TRAY_LABELS`/`resolveLang` 同源)。
+- 安卓(首次界面走查):**首次进文件页列表区整块空白**(loading 时渲染空串)——加 `CenterBusy` 转圈 + 列表占位 spinner;`Segmented` 分段控件触控高仅 ~32dp、`XsshSwitch` 开关 32dp——补到 48dp 热区(视觉尺寸不变)。
+
+**记录未修**(低危,理由充分):12 处 `Color(0xFF...)` 硬编码但**均带 `if (p.dark)` 双分支**、深浅都对,属可接受的现状;安卓开关图标 40dp / 侧栏清除键 24dp(鼠标场景为主);全体模态无焦点陷阱(Tab 可逃逸到背景,系统性改动,单开一轮更合适);HostEditor 关闭无脏检查(需设计"是否保存"三选);遮罩触发方式 `click.self`(2 处)与 `mousedown.self`(13 处)不统一(低危);`HostEditorScreen` 的 `remember` 无 key(当前导航流下不可达)。
+
+**⚠️ 下次打安卓 APK 前**:本轮又改了 Rust 无关但改了 Kotlin,`.so` 不受影响(未动 Rust),但需正常 `installDebug`。
+
 # 会话记录:第二十次会话(2026-10-16 晚,界面细节专项走查:3 个并行审查代理 + 逐条亲自验证)
 
 用户要求"全面审核代码,检查所有界面细节"。三个并行代理按 HANDOVER 沉淀的界面规范(圆角变量/交互状态/节奏/三语言/空态)分块深读全部 29 个组件 + global.css + i18n,报 31 条;核实后**修掉 19 条**,其余记录。验证:typecheck、vitest 324、build、lint:i18n(新增 4 键三字典)全过。

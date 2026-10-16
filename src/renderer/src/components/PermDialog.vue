@@ -10,6 +10,7 @@ import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import type { FileEntry } from '../../../shared/types'
 import { posixJoin } from '../../../shared/fsUtils'
 import { useI18n } from '../lib/i18n'
+import { useFocusTrap } from '../composables/focusTrap'
 import { BIT_GROUPS, clampMode, parseOctal, sanitizeOctalText, toOctal, toSymbolic } from '../lib/fileMode'
 import Icon from './Icon.vue'
 
@@ -35,6 +36,9 @@ const busy = ref(false)
 const error = ref('')
 const octalText = ref(toOctal(bits.value))
 const dialogEl = ref<HTMLElement>()
+// Mounted only while the parent shows this dialog (v-if in SftpDrawer), so
+// the trap is active for the component's whole lifetime.
+useFocusTrap(dialogEl, () => true)
 
 const groups = computed(() =>
   BIT_GROUPS.map((g) => ({
@@ -155,46 +159,6 @@ onMounted(() => nextTick(() => dialogEl.value?.focus()))
 
 <style scoped>
 /* ---- permission (chmod) dialog ---- */
-.pm-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.4);
-  backdrop-filter: blur(2px);
-  display: flex;
-  justify-content: center;
-  align-items: flex-start;
-  padding-top: 16vh;
-  z-index: 120;
-}
-.pm-dialog {
-  width: min(380px, 92vw);
-  background-color: color-mix(in srgb, var(--bg-elev) 92%, transparent);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow), 0 0 0 1px rgba(255, 255, 255, 0.04) inset;
-  padding: 16px 18px 18px;
-  outline: none;
-}
-.pm-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 15px;
-  font-weight: 600;
-}
-.pm-x {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  border-radius: 5px;
-  color: var(--text-dim);
-}
-.pm-x:hover {
-  background: var(--bg-elev-2);
-  color: var(--text);
-}
 .pm-target {
   margin-top: 4px;
   font-size: 12px;
@@ -204,23 +168,27 @@ onMounted(() => nextTick(() => dialogEl.value?.focus()))
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
 .pm-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 8px;
   margin-top: 14px;
 }
+
 .pm-col {
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 9px 10px;
 }
+
 .pm-col-h {
   font-size: 11px;
   color: var(--text-dim);
   margin-bottom: 7px;
 }
+
 .pm-check {
   display: flex;
   align-items: center;
@@ -230,6 +198,7 @@ onMounted(() => nextTick(() => dialogEl.value?.focus()))
   color: var(--text);
   cursor: pointer;
 }
+
 .pm-check input,
 .pm-recur input {
   accent-color: var(--accent);
@@ -237,16 +206,19 @@ onMounted(() => nextTick(() => dialogEl.value?.focus()))
   height: 14px;
   cursor: pointer;
 }
+
 .pm-oct {
   display: flex;
   align-items: center;
   gap: 10px;
   margin-top: 14px;
 }
+
 .pm-oct-l {
   font-size: 12.5px;
   color: var(--text-dim);
 }
+
 .pm-oct-i {
   width: 84px;
   height: 32px;
@@ -260,9 +232,11 @@ onMounted(() => nextTick(() => dialogEl.value?.focus()))
   letter-spacing: 0.14em;
   outline: none;
 }
+
 .pm-oct-i:focus {
   border-color: var(--accent);
 }
+
 .pm-sym {
   flex: 1;
   text-align: right;
@@ -271,6 +245,7 @@ onMounted(() => nextTick(() => dialogEl.value?.focus()))
   letter-spacing: 0.08em;
   color: var(--text-faint);
 }
+
 .pm-recur {
   display: flex;
   align-items: center;
@@ -281,40 +256,5 @@ onMounted(() => nextTick(() => dialogEl.value?.focus()))
   color: var(--text-dim);
   cursor: pointer;
 }
-.pm-err {
-  margin-top: 12px;
-  font-size: 12px;
-  color: var(--danger);
-}
-.pm-foot {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 18px;
-}
-.pm-btn {
-  height: 32px;
-  padding: 0 16px;
-  border-radius: var(--radius-sm);
-  font-size: 13px;
-}
-.pm-btn.ghost {
-  color: var(--text-dim);
-  border: 1px solid var(--border);
-}
-.pm-btn.ghost:hover {
-  background: var(--bg-elev-2);
-  color: var(--text);
-}
-.pm-btn.primary {
-  background: var(--accent);
-  color: #fff;
-  font-weight: 500;
-}
-.pm-btn.primary:hover {
-  filter: brightness(1.08);
-}
-.pm-btn.primary:disabled {
-  opacity: 0.55;
-}
+
 </style>

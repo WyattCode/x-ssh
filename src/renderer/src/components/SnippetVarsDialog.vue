@@ -17,13 +17,16 @@ watch(
 )
 
 function onKey(e: KeyboardEvent): void {
+  // While an IME is composing, Enter picks a candidate, not "run" — this box
+  // exists precisely to type variable values (often Chinese).
+  if (e.isComposing || e.keyCode === 229) return
   if (e.key === 'Enter') submit()
   else if (e.key === 'Escape') cancel()
 }
 </script>
 
 <template>
-  <div v-if="state.open" class="sv-backdrop" @click.self="cancel">
+  <div v-if="state.open" class="sv-backdrop" @mousedown.self="cancel">
     <section class="sv" @keydown="onKey">
       <header class="sv-head">
         <Icon name="zap" :size="16" class="sv-ico" />

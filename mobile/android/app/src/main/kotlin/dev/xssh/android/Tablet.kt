@@ -53,6 +53,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -779,6 +780,8 @@ private fun SidebarSearch(
             val clearLabel = stringResource(R.string.tab_clear_search)
             Box(
                 Modifier
+                    // 24dp 太小;热区扩到平台最小值,圆块本身仍是 24dp。
+                    .minimumInteractiveComponentSize()
                     .size(24.dp)
                     .clip(RoundedCornerShape(12.dp))
                     .clickable { onQuery("") }
@@ -908,6 +911,8 @@ private fun SidebarRow(
                 val closeLabel = stringResource(R.string.tab_disconnect_host, host.label)
                 Box(
                     Modifier
+                        // 28dp 的方块太小;热区扩到平台最小值,方块本身仍是 28dp。
+                        .minimumInteractiveComponentSize()
                         .size(28.dp)
                         .clip(RoundedCornerShape(8.dp))
                         .background(if (closeHovered) p.bgElev2 else Color.Transparent)
@@ -1062,6 +1067,9 @@ fun ToolbarIcon(
     Box {
         Box(
             Modifier
+                // 触摸平板上 40dp 偏小。minimumInteractiveComponentSize 只把
+                // **触摸热区**扩到平台最小值(48dp),可见方块与图标尺寸不变。
+                .minimumInteractiveComponentSize()
                 .size(40.dp)
                 .clip(RoundedCornerShape(10.dp))
                 .background(

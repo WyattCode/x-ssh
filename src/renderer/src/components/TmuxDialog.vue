@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { ref, watch, nextTick } from 'vue'
+import { useFocusTrap } from '../composables/focusTrap'
+const trapEl = ref<HTMLElement>()
+useFocusTrap(trapEl, () => store.tmuxOpen)
 import { useSessions } from '../stores/sessions'
 import { useI18n } from '../lib/i18n'
 import Icon from './Icon.vue'
@@ -54,7 +57,7 @@ watch(
 
 <template>
   <div v-if="store.tmuxOpen" class="tm-overlay" @mousedown.self="store.toggleTmux(false)">
-    <div class="tm-dialog" @keydown.esc="store.toggleTmux(false)">
+    <div ref="trapEl" tabindex="-1" class="tm-dialog" @keydown.esc="store.toggleTmux(false)">
       <div class="tm-head">
         <Icon name="terminal" :size="15" />
         <span class="tm-title">{{ t('pal.tmux') }}</span>
@@ -170,7 +173,7 @@ watch(
   border: none;
   border-radius: 6px;
   background: var(--accent);
-  color: var(--accent-contrast, #fff);
+  color: var(--accent-contrast);
   cursor: pointer;
   font-size: 13px;
 }

@@ -1,15 +1,19 @@
 <script setup lang="ts">
 import { nextTick, onMounted, reactive, computed, ref } from 'vue'
+import { useFocusTrap } from '../composables/focusTrap'
 
-const dialogEl = ref<HTMLDivElement>()
+const dialogEl = ref<HTMLElement>()
+useFocusTrap(dialogEl, () => store.forwardOpen)
 onMounted(() => nextTick(() => dialogEl.value?.focus()))
 import { useSessions } from '../stores/sessions'
 import { useI18n } from '../lib/i18n'
+import { useConfirm } from '../composables/confirm'
 import type { ForwardMode } from '../../../shared/types'
 import Icon from './Icon.vue'
 
 const store = useSessions()
 const { t } = useI18n()
+const { confirm } = useConfirm()
 
 const list = computed(() => store.activePane?.params.portForwards ?? [])
 const modeLabel = (m?: ForwardMode): string =>
@@ -55,7 +59,11 @@ async function add(): Promise<void> {
   }
 }
 
-function remove(mode: ForwardMode | undefined, localPort: number): void {
+async function remove(mode: ForwardMode | undefined, localPort: number): Promise<void> {
+  // Same destructive action as the forwards page, which confirms first.
+  const rule = list.value.find((f) => f.mode === mode && f.localPort === localPort)
+  const label = rule ? ruleText(rule.mode ?? 'local', rule.localPort, rule.remoteHost, rule.remotePort) : ''
+  if (!(await confirm(t('fwp.removeConfirm', { rule: label }), { danger: true, confirmText: t('fw.remove') }))) return
   void store.removeForward(mode, localPort)
 }
 </script>
@@ -73,7 +81,7 @@ function remove(mode: ForwardMode | undefined, localPort: number): void {
         <div v-for="(f, i) in list" :key="i" class="fw-row">
           <span class="fw-mode">{{ modeLabel(f.mode) }}</span>
           <span class="fw-rule">{{ ruleText(f.mode ?? 'local', f.localPort!, f.remoteHost || '127.0.0.1', f.remotePort!) }}</span>
-          <button class="fw-del" :title="t('fw.remove')" @click="remove(f.mode, f.localPort!)"><Icon name="close" :size="13" /></button>
+          <button class="fw-del" :title="t('fw.remove')" @click="void remove(f.mode, f.localPort!)"><Icon name="close" :size="13" /></button>
         </div>
         <div class="fw-form">
           <select v-model="form.mode" class="fw-in">
@@ -203,7 +211,7 @@ function remove(mode: ForwardMode | undefined, localPort: number): void {
   border: none;
   border-radius: 6px;
   background: var(--accent);
-  color: var(--accent-contrast, #fff);
+  color: var(--accent-contrast);
   font-size: 12px;
   cursor: pointer;
 }

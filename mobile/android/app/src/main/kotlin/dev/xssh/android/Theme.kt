@@ -59,6 +59,13 @@ data class XsshPalette(
      */
     val rowSel: Color,
     val danger: Color,
+    /** 分段控件 / 开关的滑块:深色下是一块中灰，浅色下是白。 */
+    val switchThumb: Color,
+    /** 按键面板的键面，以及按下时的加深色。 */
+    val keyFace: Color,
+    val keyFacePressed: Color,
+    /** 终端页工具条 / 键盘上方的功能条底色。 */
+    val barBg: Color,
     val ok: Color,
     val warn: Color,
     /** Liquid Glass 的亮度层:叠在模糊背景上,保证上面的图标在任何底色上都读得出。 */
@@ -91,6 +98,10 @@ val DarkPalette = XsshPalette(
     cardBg = Color(0xFF161618),
     rowSel = Color(0xFF2C2C2E),
     danger = Color(0xFFFF453A),
+    switchThumb = Color(0xFF636366),
+    keyFace = Color(0xFF3A3A3C),
+    keyFacePressed = Color(0xFF545456),
+    barBg = Color(0xFF1C1C1E),
     ok = Color(0xFF30D158),
     warn = Color(0xFFFF9F0A),
     glassTint = Color(0x5C121214),
@@ -128,6 +139,10 @@ val LightPalette = XsshPalette(
     cardBg = Color(0xFFF2F2F7),
     rowSel = Color(0xFFE3E3E8),
     danger = Color(0xFFFF3B30),
+    switchThumb = Color(0xFFFFFFFF),
+    keyFace = Color(0xFFFFFFFF),
+    keyFacePressed = Color(0xFFD1D1D6),
+    barBg = Color(0xFFD5D7DD),
     ok = Color(0xFF34C759),
     warn = Color(0xFFFF9500),
     // 浅色玻璃:白色亮度层 + 投影;轮廓靠 Liquid Glass 的边缘折射和高光勾出来。

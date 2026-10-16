@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
+import { useFocusTrap } from '../composables/focusTrap'
+const trapEl = ref<HTMLElement>()
+useFocusTrap(trapEl, () => store.historyOpen)
 import { useSessions } from '../stores/sessions'
 import { useI18n } from '../lib/i18n'
 import Icon from './Icon.vue'
@@ -117,7 +120,7 @@ function onKey(e: KeyboardEvent): void {
 
 <template>
   <div v-if="store.historyOpen" class="overlay" @mousedown.self="store.toggleHistory(false)">
-    <div class="panel" @keydown="onKey" @keydown.enter.prevent>
+    <div ref="trapEl" tabindex="-1" class="panel" @keydown="onKey" @keydown.enter.prevent>
       <div class="bar">
         <Icon name="search" :size="15" />
         <input

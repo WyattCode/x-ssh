@@ -59,6 +59,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -188,7 +189,7 @@ fun PaneSwitch(files: Boolean, onChange: (Boolean) -> Unit) {
                     .clip(RoundedCornerShape(7.dp))
                     .background(
                         when {
-                            on -> if (p.dark) Color(0xFF636366) else Color.White
+                            on -> p.switchThumb
                             hovered -> p.bgElev2
                             else -> Color.Transparent
                         },
@@ -787,7 +788,7 @@ fun FilesPane(
                     failure != null && list == null -> CenterNote(failure!!.text()) {
                         XsshButton(stringResource(R.string.files_retry)) { retry() }
                     }
-                    list == null -> CenterNote(if (loading) "" else "…")
+                    list == null -> if (loading) CenterBusy() else CenterNote("…")
                     list.isEmpty() -> CenterNote(stringResource(R.string.files_empty_folder))
                     else -> LazyColumn(Modifier.fillMaxSize().bounce(), state = listState) {
                         itemsIndexed(list, key = { _, it -> it.path }) { index, entry ->
@@ -1037,7 +1038,13 @@ private fun PhoneFiles(
                         }
                     }
                     items == null -> item(key = "loading") {
-                        Text(if (loading) "" else "…", color = p.textDim, modifier = Modifier.padding(start = rowStart, top = 24.dp))
+                        if (loading) {
+                            Row(Modifier.fillMaxWidth().padding(start = rowStart, top = 20.dp), horizontalArrangement = Arrangement.Start) {
+                                CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                            }
+                        } else {
+                            Text("…", color = p.textDim, modifier = Modifier.padding(start = rowStart, top = 24.dp))
+                        }
                     }
                     else -> {
                         if (path != null && path != "/") {
@@ -1653,6 +1660,14 @@ private fun CheckCircle(checked: Boolean) {
         contentAlignment = Alignment.Center,
     ) {
         if (checked) Icon(XIcons.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+    }
+}
+
+@Composable
+/** 首次加载中的居中转圈:列表区此前是一片空白,看着像面板坏了。 */
+private fun CenterBusy() {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
     }
 }
 

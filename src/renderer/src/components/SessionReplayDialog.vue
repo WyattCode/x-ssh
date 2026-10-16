@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { nextTick, onMounted, ref, watch } from 'vue'
+import { useFocusTrap } from '../composables/focusTrap'
 
-const dialogEl = ref<HTMLDivElement>()
+const dialogEl = ref<HTMLElement>()
+useFocusTrap(dialogEl, () => store.replayOpen)
 onMounted(() => nextTick(() => dialogEl.value?.focus()))
 import { useSessions } from '../stores/sessions'
 import { useI18n } from '../lib/i18n'
@@ -131,7 +133,7 @@ watch(
   border: none;
   border-radius: 6px;
   background: var(--accent);
-  color: var(--accent-contrast, #fff);
+  color: var(--accent-contrast);
   font-size: 12.5px;
   cursor: pointer;
 }

@@ -1243,7 +1243,7 @@ private fun FloatingKeys(columns: Int, content: @Composable (keyWidth: Dp) -> Un
                 // 圆角和里面的按键同一个量级(按键 12dp,面板 16dp)。
                 .clip(RoundedCornerShape(RadiusBox + 4.dp))
                 // 照系统键盘:浅色是浅灰底上的白键,深色是深灰底上的灰键。
-                .background(if (p.dark) Color(0xFF1C1C1E) else Color(0xFFD5D7DD))
+                .background(p.barBg)
                 .border(0.8.dp, p.glassBorder, RoundedCornerShape(RadiusBox + 4.dp)),
         ) {
             content(keyWidth)

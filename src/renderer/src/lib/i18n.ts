@@ -701,6 +701,8 @@ const zh: Dict = {
   'host.cancel': '取消',
   'host.save': '保存',
   'host.saveDisabled': '请填写主机地址和用户名',
+  'host.discardConfirm': '放弃未保存的修改?',
+  'host.discard': '放弃修改',
   'host.pickKey': '选择私钥',
 
   // tab bar
@@ -1471,6 +1473,8 @@ const en: Dict = {
   'host.cancel': 'Cancel',
   'host.save': 'Save',
   'host.saveDisabled': 'Fill in the host address and username',
+  'host.discardConfirm': 'Discard unsaved changes?',
+  'host.discard': 'Discard',
   'host.pickKey': 'Choose private key',
 
   'tabbar.close': 'Close',
@@ -2253,6 +2257,8 @@ const zhTW: Dict = {
   'host.cancel': '取消',
   'host.save': '儲存',
   'host.saveDisabled': '請填寫主機位址和使用者名稱',
+  'host.discardConfirm': '放棄未儲存的變更?',
+  'host.discard': '放棄變更',
   'host.pickKey': '選擇私鑰',
 
   // tab bar

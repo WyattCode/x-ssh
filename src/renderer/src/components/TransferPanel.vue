@@ -75,7 +75,7 @@ function fmtSpeed(id: string): string {
 </script>
 
 <template>
-  <div v-if="store.transferPanelOpen" class="tpanel-backdrop" @click.self="store.toggleTransferPanel(false)">
+  <div v-if="store.transferPanelOpen" class="tpanel-backdrop" @mousedown.self="store.toggleTransferPanel(false)">
     <section class="tpanel">
       <header class="tp-head">
         <span class="tp-title">{{ t('tpanel.title') }}</span>
@@ -252,6 +252,6 @@ function fmtSpeed(id: string): string {
 .tp-ago { margin-left: auto; }
 .tp-badge { font-weight: 600; }
 .tp-badge.done { color: var(--ok, #3fb950); }
-.tp-badge.error { color: var(--err, #f85149); }
+.tp-badge.error { color: var(--danger); }
 .tp-badge.cancelled { color: var(--text-dim); }
 </style>

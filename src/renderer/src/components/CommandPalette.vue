@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, toRaw, watch } from 'vue'
+import { useFocusTrap } from '../composables/focusTrap'
+const trapEl = ref<HTMLElement>()
+useFocusTrap(trapEl, () => store.paletteOpen)
 import { useSessions } from '../stores/sessions'
 import { fuzzyScore, fuzzyMatch } from '../lib/fuzzy'
 import { parseTarget } from '../lib/target'
@@ -412,7 +415,7 @@ function onKey(e: KeyboardEvent): void {
 
 <template>
   <div v-if="store.paletteOpen" class="overlay" @mousedown.self="store.togglePalette(false)">
-    <div class="palette" @keydown="onKey">
+    <div ref="trapEl" tabindex="-1" class="palette" @keydown="onKey">
       <!-- Broadcast command prompt -->
       <template v-if="broadcastOpen">
         <div class="pw-head">

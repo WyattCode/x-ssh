@@ -1,25 +1,33 @@
 <script setup lang="ts">
 import { watch, nextTick, ref } from 'vue'
+import { useFocusTrap } from '../composables/focusTrap'
+const trapEl = ref<HTMLElement>()
+useFocusTrap(trapEl, () => state.open)
 import { useConfirm } from '../composables/confirm'
 
 const { state, answer } = useConfirm()
 const okEl = ref<HTMLButtonElement>()
+const cancelEl = ref<HTMLButtonElement>()
 
 watch(
   () => state.open,
   (o) => {
-    if (o) nextTick(() => okEl.value?.focus())
+    // A destructive confirm must not have Enter land on the destructive
+    // button: focus Cancel instead (matching how the host editor keeps its
+    // delete action off the primary slot).
+    if (!o) return
+    nextTick(() => (state.danger ? cancelEl.value : okEl.value)?.focus())
   }
 )
 </script>
 
 <template>
   <div v-if="state.open" class="overlay" @mousedown.self="answer(false)">
-    <div class="dialog" @keydown.esc="answer(false)">
+    <div ref="trapEl" tabindex="-1" class="dialog" @keydown.esc="answer(false)">
       <div v-if="state.title" class="title">{{ state.title }}</div>
       <p class="message">{{ state.message }}</p>
       <div class="actions">
-        <button class="ghost" @click="answer(false)">{{ state.cancelText }}</button>
+        <button ref="cancelEl" class="ghost" @click="answer(false)">{{ state.cancelText }}</button>
         <button
           ref="okEl"
           class="confirm"

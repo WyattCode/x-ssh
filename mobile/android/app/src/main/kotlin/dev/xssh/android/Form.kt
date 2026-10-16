@@ -5,6 +5,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.material3.Icon
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.size
 import androidx.compose.animation.AnimatedVisibility
@@ -365,8 +366,11 @@ fun Segmented(options: List<String>, selected: Int, onSelect: (Int) -> Unit) {
             val on = index == selected
             Box(
                 Modifier
+                    // 触控目标至少 48dp:分段开关是高频操作,32dp 容易点偏到相邻项。
+                    // 只扩触摸热区,轨道的视觉高度不变。
+                    .minimumInteractiveComponentSize()
                     .clip(RoundedCornerShape(7.dp))
-                    .background(if (on) (if (p.dark) Color(0xFF636366) else Color.White) else Color.Transparent)
+                    .background(if (on) p.switchThumb else Color.Transparent)
                     .clickable(role = Role.Tab) { onSelect(index) }
                     .padding(horizontal = 16.dp, vertical = 7.dp),
                 contentAlignment = Alignment.Center,

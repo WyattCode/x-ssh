@@ -5,8 +5,10 @@
  * its own scan so the drawer only has to decide when to open it.
  */
 import { computed, nextTick, onMounted, ref } from 'vue'
+import { useFocusTrap } from '../composables/focusTrap'
 
-const dialogEl = ref<HTMLDivElement>()
+const dialogEl = ref<HTMLElement>()
+useFocusTrap(dialogEl, () => true) // mounted only while the parent shows it
 onMounted(() => nextTick(() => dialogEl.value?.focus()))
 import { useI18n } from '../lib/i18n'
 import Icon from './Icon.vue'
@@ -72,16 +74,16 @@ async function run(): Promise<void> {
 
 <template>
   <div class="pm-overlay" @mousedown.self="emit('close')">
-    <div ref="dialogEl" tabindex="-1" class="pm-dialog sync-dialog" @keydown.esc="emit('close')">
+    <div ref="dialogEl" tabindex="-1" class="pm-dialog" @keydown.esc="emit('close')">
       <div class="pm-head">
         <span>{{ tt('sfp.dirDiff') }}</span>
         <button class="pm-x" :title="tt('sfp.close')" @click="emit('close')"><Icon name="close" /></button>
       </div>
-      <label class="sync-field">
+      <label class="dialog-field">
         <span>{{ tt('sfp.syncLocal') }}</span>
         <input v-model="local" spellcheck="false" />
       </label>
-      <label class="sync-field">
+      <label class="dialog-field">
         <span>{{ tt('sfp.syncRemote') }}</span>
         <input v-model="remote" spellcheck="false" />
       </label>

@@ -10,8 +10,10 @@
   --text-faint: #656b78;
   --accent: #6ea8fe;
   --accent-soft: rgba(110, 168, 254, 0.14);
-  --row-sel: rgba(110, 168, 254, 0.2);
-  --row-sel-ring: rgba(110, 168, 254, 0.32);
+  /* Text on an accent-filled surface. White suits both default accents; when
+     a custom (possibly light) accent is set, App.vue recomputes this from the
+     accent's luminance so the label stays readable. */
+  --accent-contrast: #fff;
   --danger: #ff6b6b;
   --ok: #51cf66;
   --warn: #ffd43b;
@@ -55,8 +57,7 @@
   --text-faint: #98a0ab;
   --accent: #2f6fed;
   --accent-soft: rgba(47, 111, 237, 0.1);
-  --row-sel: rgba(47, 111, 237, 0.13);
-  --row-sel-ring: rgba(47, 111, 237, 0.26);
+  --accent-contrast: #fff;
   --shadow: 0 18px 50px -12px rgba(20, 30, 60, 0.18);
   --scrim: rgba(20, 24, 32, 0.055);
   --thumb: #ffffff;
@@ -77,8 +78,7 @@
     --text-faint: #98a0ab;
     --accent: #2f6fed;
     --accent-soft: rgba(47, 111, 237, 0.1);
-    --row-sel: rgba(47, 111, 237, 0.13);
-    --row-sel-ring: rgba(47, 111, 237, 0.26);
+  --accent-contrast: #fff;
     --shadow: 0 18px 50px -12px rgba(20, 30, 60, 0.18);
     --scrim: rgba(20, 24, 32, 0.055);
     --thumb: #ffffff;
@@ -356,4 +356,111 @@ select:focus-visible {
 /* 专注模式 hides the sidebar: the tab bar makes room for the buttons instead. */
 :root.mac .no-sidebar .tabbar {
   padding-left: 78px;
+}
+
+/* ---- shared modal shell ----
+   PermDialog owned these once, which left every other dialog that
+   borrowed the class names unstyled (scoped styles do not cross
+   components). They live here so any dialog can use them. */
+.pm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(2px);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 16vh;
+  z-index: 120;
+}
+.pm-dialog {
+  width: min(380px, 92vw);
+  background-color: color-mix(in srgb, var(--bg-elev) 92%, transparent);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow), 0 0 0 1px rgba(255, 255, 255, 0.04) inset;
+  padding: 16px 18px 18px;
+  outline: none;
+}
+.pm-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 15px;
+  font-weight: 600;
+}
+.pm-x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 5px;
+  color: var(--text-dim);
+}
+.pm-x:hover {
+  background: var(--bg-elev-2);
+  color: var(--text);
+}
+.pm-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
+}
+.pm-btn {
+  height: 32px;
+  padding: 0 16px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+}
+.pm-btn.ghost {
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+}
+.pm-btn.ghost:hover {
+  background: var(--bg-elev-2);
+  color: var(--text);
+}
+.pm-btn.primary {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 500;
+}
+.pm-btn.primary:hover {
+  filter: brightness(1.08);
+}
+.pm-btn.primary:disabled {
+  opacity: 0.55;
+}
+
+.dialog-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+}
+.dialog-field > span {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.dialog-field input {
+  height: 32px;
+  padding: 0 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-elev-2);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  outline: none;
+}
+.dialog-field input:focus {
+  border-color: var(--accent);
+}
+.pm-err {
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--danger);
 }

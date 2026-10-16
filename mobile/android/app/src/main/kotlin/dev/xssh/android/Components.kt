@@ -44,6 +44,7 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.draw.shadow
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.material3.Icon
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -417,11 +418,11 @@ fun KeyCap(
     // 粘滞修饰键和回车用浅蓝底 + 蓝字,一眼能认出来,但不是一块实心蓝。
     // 浅蓝要先叠到普通键色上变成不透明:半透明的键底会透出浅色模式下那道投影,键面发灰发脏。
     val filled = active || emphasis
-    val plainKey = if (p.dark) Color(0xFF3A3A3C) else Color.White
+    val plainKey = p.keyFace
     val keyBg = when {
         filled && pressed -> p.accent.copy(alpha = 0.34f).compositeOver(plainKey)
         filled -> p.accentSoft.compositeOver(plainKey)
-        pressed -> if (p.dark) Color(0xFF545456) else Color(0xFFD1D1D6)
+        pressed -> p.keyFacePressed
         else -> plainKey
     }
     val fg = if (filled) p.accent else p.text
@@ -668,6 +669,18 @@ fun XsshSwitch(checked: Boolean, onChange: (Boolean) -> Unit) {
     val haptic = LocalHapticFeedback.current
     // 轨道 52×32、滑块 28,两边留 2 —— 和 Material 的比例一致。
     val knob by animateFloatAsState(if (checked) 20f else 0f, label = "switchKnob")
+    // 触摸屏上 32dp 高的轨道太难点中。只在**外层**扩触摸热区到平台最小值
+    // (48dp),轨道本身仍是 52×32 的视觉尺寸。
+    Box(
+        Modifier
+            .minimumInteractiveComponentSize()
+            .width(52.dp)
+            .clickable(role = Role.Switch) {
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                onChange(!checked)
+            },
+        contentAlignment = Alignment.Center,
+    ) {
     Box(
         Modifier
             .size(52.dp, 32.dp)
@@ -679,10 +692,6 @@ fun XsshSwitch(checked: Boolean, onChange: (Boolean) -> Unit) {
                 role = Role.Switch
                 this.toggleableState = if (checked) ToggleableState.On else ToggleableState.Off
                 onClick { onChange(!checked); true }
-            }
-            .clickable(role = Role.Switch) {
-                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                onChange(!checked)
             },
     ) {
         Box(
@@ -696,11 +705,12 @@ fun XsshSwitch(checked: Boolean, onChange: (Boolean) -> Unit) {
                 .background(
                     when {
                         checked -> Color.White
-                        p.dark -> Color(0xFF636366)
+                        p.dark -> p.switchThumb
                         else -> Color.White
                     },
                 ),
         )
+    }
     }
 }
 

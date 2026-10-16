@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { reactive, ref, watch, nextTick, computed } from 'vue'
+import { useFocusTrap } from '../composables/focusTrap'
+
 import { useSessions } from '../stores/sessions'
 import { useI18n } from '../lib/i18n'
 import { useToast } from '../composables/toast'
@@ -63,11 +65,38 @@ const passphrase = ref('')
 const sections = reactive({ keys: false, proxy: false, forwards: false, onConnect: false, appearance: false })
 const labelEl = ref<HTMLInputElement>()
 const panelEl = ref<HTMLElement>()
+useFocusTrap(panelEl, () => props.open)
 const tagInputEl = ref<HTMLInputElement>()
 const keyNameEl = ref<HTMLInputElement>()
 function closeKeySheet(): void {
   keyModal.open = false
   nextTick(() => panelEl.value?.focus())
+}
+
+/** JSON of the fields a save would write — the baseline for the unsaved-changes
+ *  check below. `password`/`passphrase` are included because typing one and
+ *  closing without saving loses it too. */
+function formSnapshot(): string {
+  return JSON.stringify({
+    f: form,
+    password: password.value,
+    passphrase: passphrase.value
+  })
+}
+let cleanSnapshot = ''
+// Closing (Esc / X / backdrop) with edits must not silently discard them —
+// the in-app text editor already asks, and losing a typed password or a
+// half-filled forward here is the same kind of loss.
+async function requestClose(): Promise<void> {
+  if (keyModal.open) {
+    closeKeySheet()
+    return
+  }
+  if (formSnapshot() !== cleanSnapshot) {
+    const ok = await confirm(t('host.discardConfirm'), { danger: true, confirmText: t('host.discard') })
+    if (!ok) return
+  }
+  emit('close')
 }
 
 watch(
@@ -109,6 +138,11 @@ watch(
     passphrase.value = ''
     Object.assign(sections, { keys: false, proxy: false, forwards: false, onConnect: false, appearance: false })
     nextTick(() => labelEl.value?.focus())
+    // Baseline for the unsaved-changes guard: capture after the form is
+    // filled and focus moved (some fields normalize on blur).
+    nextTick(() => {
+      cleanSnapshot = formSnapshot()
+    })
   }
 )
 
@@ -348,8 +382,8 @@ async function remove(): Promise<void> {
 
 <template>
   <Transition name="sheet">
-    <div v-if="open" class="layer" @mousedown.self="emit('close')">
-      <aside ref="panelEl" class="panel" role="dialog" aria-modal="true" aria-labelledby="he-kicker" tabindex="-1" @keydown.esc="keyModal.open ? closeKeySheet() : emit('close')" @keydown.enter="onEnter">
+    <div v-if="open" class="layer" @mousedown.self="void requestClose()">
+      <aside ref="panelEl" class="panel" role="dialog" aria-modal="true" aria-labelledby="he-kicker" tabindex="-1" @keydown.esc="void requestClose()" @keydown.enter="onEnter">
         <!-- Header: the host as a card shows it — avatar, name, address. -->
         <header class="p-head">
           <OsIcon :os="host?.os" :color="form.color || undefined" :size="44" />
@@ -363,7 +397,7 @@ async function remove(): Promise<void> {
               spellcheck="false"
             />
           </div>
-          <button class="p-close" :title="t('host.cancel')" @click="emit('close')"><Icon name="close" :size="15" /></button>
+          <button class="p-close" :title="t('host.cancel')" @click="void requestClose()"><Icon name="close" :size="15" /></button>
         </header>
 
         <div class="p-body">
@@ -626,7 +660,7 @@ async function remove(): Promise<void> {
         <footer class="p-foot">
           <button v-if="host" type="button" class="btn btn-danger" @click="remove">{{ t('host.delete') }}</button>
           <span class="spacer" />
-          <button type="button" class="btn" @click="emit('close')">{{ t('host.cancel') }}</button>
+          <button type="button" class="btn" @click="void requestClose()">{{ t('host.cancel') }}</button>
           <button type="button" class="btn btn-primary" :disabled="!canSave()" :title="canSave() ? undefined : t('host.saveDisabled')" @click="save">{{ t('host.save') }}</button>
         </footer>
 

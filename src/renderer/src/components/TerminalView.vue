@@ -410,8 +410,9 @@ onMounted(() => {
       pasteClipboard()
       return false
     }
-    // Find (mod+F and mod+Shift+F both open the search bar).
-    if (mod && !otherMod && !e.altKey && c === 'KeyF') {
+    // Find opens the search bar; Mod+Shift+F is the global history search, so
+    // only the bare chord belongs to the terminal.
+    if (mod && !otherMod && !e.altKey && !e.shiftKey && c === 'KeyF') {
       openSearch()
       return false
     }

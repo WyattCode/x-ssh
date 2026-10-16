@@ -1,5 +1,8 @@
 <script setup lang="ts">
-import { ref, nextTick } from 'vue'
+import { ref, nextTick, onMounted } from 'vue'
+import { useFocusTrap } from '../composables/focusTrap'
+const trapEl = ref<HTMLElement>()
+useFocusTrap(trapEl, () => true)
 import { useSessions } from '../stores/sessions'
 import { useI18n } from '../lib/i18n'
 import Icon from './Icon.vue'
@@ -15,6 +18,10 @@ const inputEl = ref<HTMLInputElement>()
 function focus(): void {
   nextTick(() => inputEl.value?.focus())
 }
+
+// This screen is a full-window gate: the passphrase field has to be ready for
+// typing the moment it appears, not after the user clicks it.
+onMounted(focus)
 
 async function unlock(): Promise<void> {
   if (busy.value) return
@@ -50,7 +57,7 @@ const onKey = (e: KeyboardEvent): void => {
 
 <template>
   <div class="lock-overlay" @mousedown.self="focus">
-    <div class="lock-card">
+    <div ref="trapEl" tabindex="-1" class="lock-card">
       <div class="lock-icon"><Icon name="lock" :size="26" /></div>
       <h1 class="lock-title">{{ t('lock.title') }}</h1>
       <p class="lock-sub">{{ t('lock.desc') }}</p>

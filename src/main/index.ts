@@ -76,6 +76,50 @@ const TRAY_LABELS: Record<UiLang, { show: string; hide: string; palette: string;
   'zh-TW': { show: '顯示 X-SSH', hide: '隱藏', palette: '開啟命令面板', quit: '結束' },
   en: { show: 'Show X-SSH', hide: 'Hide', palette: 'Open command palette', quit: 'Quit' }
 }
+
+/**
+ * Native dialog strings. These are drawn by the OS, not by the renderer, so
+ * they need their own table — the tray menu above already localizes, and a
+ * dialog that ignored the setting showed Chinese to an English user.
+ * Keys are looked up as NL[key][lang] with an English fallback.
+ */
+const NL: Record<string, Record<UiLang, string>> = {
+  overwriteLocalMsg: {
+    zh: '以下本地文件已存在,下载将覆盖:',
+    'zh-TW': '以下本機檔案已存在,下載將覆寫:',
+    en: 'These local files already exist and will be overwritten:'
+  },
+  overwrite: { zh: '覆盖', 'zh-TW': '覆寫', en: 'Overwrite' },
+  skip: { zh: '跳过', 'zh-TW': '略過', en: 'Skip' },
+  keepBoth: { zh: '保留两者', 'zh-TW': '兩者都保留', en: 'Keep both' },
+  cancel: { zh: '取消', 'zh-TW': '取消', en: 'Cancel' },
+  overwriteRemoteMsg: {
+    zh: '以下远端文件已存在,请选择处理方式:',
+    'zh-TW': '以下遠端檔案已存在,請選擇處理方式:',
+    en: 'These remote files already exist — choose how to handle them:'
+  },
+  exportHostsJson: { zh: '备份主机到 JSON', 'zh-TW': '備份主機為 JSON', en: 'Back up hosts to JSON' },
+  exportSshConfig: { zh: '导出 OpenSSH 配置', 'zh-TW': '匯出 OpenSSH 設定', en: 'Export OpenSSH config' },
+  importHostsJson: { zh: '从 JSON 恢复主机', 'zh-TW': '從 JSON 還原主機', en: 'Restore hosts from JSON' },
+  exportAll: { zh: '导出全部数据', 'zh-TW': '匯出全部資料', en: 'Export all data' },
+  importAll: { zh: '导入全部数据', 'zh-TW': '匯入全部資料', en: 'Import all data' },
+  exportLog: { zh: '导出历史日志', 'zh-TW': '匯出歷史日誌', en: 'Export history log' },
+  saveSessionLog: { zh: '保存会话日志', 'zh-TW': '儲存工作階段日誌', en: 'Save session log' },
+  pickDownloadDir: { zh: '选择下载到的文件夹', 'zh-TW': '選擇下載資料夾', en: 'Choose the download folder' },
+  pickUploadDir: { zh: '选择要上传的文件夹', 'zh-TW': '選擇要上傳的資料夾', en: 'Choose the folder to upload' },
+  pickPackDir: { zh: '选择保存打包文件的文件夹', 'zh-TW': '選擇儲存封裝檔的資料夾', en: 'Choose where to save the archive' },
+  pickArchive: { zh: '选择要上传并解压的归档文件', 'zh-TW': '選擇要上傳並解壓縮的封存檔', en: 'Choose the archive to upload and extract' },
+  pickEditor: { zh: '选择外部编辑器程序', 'zh-TW': '選擇外部編輯器程式', en: 'Choose the external editor' },
+  pickBackupDir: { zh: '选择备份目录', 'zh-TW': '選擇備份目錄', en: 'Choose the backup folder' },
+  pickPrivateKey: { zh: '选择私钥', 'zh-TW': '選擇私鑰', en: 'Choose a private key' },
+  importPrivateKey: { zh: '导入私钥', 'zh-TW': '匯入私鑰', en: 'Import a private key' }
+}
+/** Localized dialog string for the current UI language (English fallback). */
+async function dl(key: string): Promise<string> {
+  const lang = resolveLang(await settings.get<LangPref>('lang'), systemLocales())
+  return NL[key]?.[lang] ?? NL[key]?.en ?? key
+}
+
 async function buildTrayMenu(win: BrowserWindow): Promise<Electron.Menu> {
   const lang = resolveLang(await settings.get<LangPref>('lang'), systemLocales())
   const L = TRAY_LABELS[lang]
@@ -267,10 +311,10 @@ async function confirmOverwriteLocal(targets: string[]): Promise<boolean> {
   if (!existing.length) return true
   const { response } = await dialog.showMessageBox({
     type: 'warning',
-    buttons: ['覆盖', '取消'],
+    buttons: [await dl('overwrite'), await dl('cancel')],
     defaultId: 1,
     cancelId: 1,
-    message: '以下本地文件已存在,下载将覆盖:',
+    message: await dl('overwriteLocalMsg'),
     detail: existing.map((p) => basename(p)).join(', ')
   })
   return response === 0
@@ -297,10 +341,10 @@ async function resolveUploadOverwrite(
   if (!conflicts.length) return 'overwrite'
   const { response } = await dialog.showMessageBox({
     type: 'warning',
-    buttons: ['覆盖', '跳过', '保留两者', '取消'],
+    buttons: [await dl('overwrite'), await dl('skip'), await dl('keepBoth'), await dl('cancel')],
     defaultId: 0,
     cancelId: 3,
-    message: '以下远端文件已存在,请选择处理方式:',
+    message: await dl('overwriteRemoteMsg'),
     detail: conflicts.join(', ')
   })
   if (response === 0) return 'overwrite'
@@ -1010,7 +1054,7 @@ function registerIpc(): void {
   ipcMain.handle(IPC.hostsImportSshConfig, () => importSshConfig())
   ipcMain.handle(IPC.hostsExportJson, async () => {
     const res = await dialog.showSaveDialog({
-      title: '备份主机到 JSON',
+      title: await dl('exportHostsJson'),
       defaultPath: 'x-ssh-hosts.json',
       filters: [{ name: 'JSON', extensions: ['json'] }]
     })
@@ -1025,7 +1069,7 @@ function registerIpc(): void {
   })
   ipcMain.handle(IPC.hostsExportSshConfig, async () => {
     const res = await dialog.showSaveDialog({
-      title: '导出 OpenSSH 配置',
+      title: await dl('exportSshConfig'),
       defaultPath: 'config',
       filters: [{ name: 'OpenSSH config', extensions: ['config'] }]
     })
@@ -1040,7 +1084,7 @@ function registerIpc(): void {
   })
   ipcMain.handle(IPC.hostsImportJson, async () => {
     const res = await dialog.showOpenDialog({
-      title: '从 JSON 恢复主机',
+      title: await dl('importHostsJson'),
       properties: ['openFile'],
       filters: [{ name: 'JSON', extensions: ['json'] }]
     })
@@ -1056,7 +1100,7 @@ function registerIpc(): void {
   // ---- Full data backup (hosts + secrets + snippets + snapshots + history) ----
   ipcMain.handle(IPC.dataExportAll, async () => {
     const res = await dialog.showSaveDialog({
-      title: '导出全部数据',
+      title: await dl('exportAll'),
       defaultPath: `x-ssh-backup-${new Date().toISOString().slice(0, 10)}.json`,
       filters: [{ name: 'JSON', extensions: ['json'] }]
     })
@@ -1081,7 +1125,7 @@ function registerIpc(): void {
   })
   ipcMain.handle(IPC.dataImportAll, async () => {
     const res = await dialog.showOpenDialog({
-      title: '导入全部数据',
+      title: await dl('importAll'),
       properties: ['openFile'],
       filters: [{ name: 'JSON', extensions: ['json'] }]
     })
@@ -1137,7 +1181,7 @@ function registerIpc(): void {
   })
   ipcMain.handle(IPC.historyExport, async (_e, text: string) => {
     const res = await dialog.showSaveDialog({
-      title: '导出历史日志',
+      title: await dl('exportLog'),
       defaultPath: `x-ssh-log-${new Date().toISOString().slice(0, 10)}.txt`,
       filters: [{ name: 'Text', extensions: ['txt', 'log'] }]
     })
@@ -1380,7 +1424,7 @@ function registerIpc(): void {
     IPC.sessionLogStart,
     async (e, sessionId: string) => {
       const res = await dialog.showSaveDialog({
-        title: '保存会话日志',
+        title: await dl('saveSessionLog'),
         defaultPath: `session-${new Date().toISOString().replace(/[:.]/g, '-')}.log`,
         filters: [{ name: 'Log', extensions: ['log', 'txt'] }]
       })
@@ -1479,7 +1523,7 @@ function registerIpc(): void {
     ) => {
       if (!sshManager) return { ok: false, error: '窗口未就绪' }
       const res = await dialog.showOpenDialog({
-        title: '选择下载到的文件夹',
+        title: await dl('pickDownloadDir'),
         properties: ['openDirectory']
       })
       if (res.canceled || !res.filePaths[0]) return { ok: false, canceled: true }
@@ -1537,7 +1581,7 @@ function registerIpc(): void {
     async (_e, sessionId: string, remoteDir: string, concurrency?: number, overwrite?: UploadOverwrite) => {
       if (!sshManager) return { ok: false, error: '窗口未就绪', count: 0 }
       const res = await dialog.showOpenDialog({
-        title: '选择要上传的文件夹',
+        title: await dl('pickUploadDir'),
         properties: ['openDirectory', 'multiSelections']
       })
       if (res.canceled) return { ok: false, canceled: true, count: 0 }
@@ -1631,7 +1675,7 @@ function registerIpc(): void {
     ) => {
       if (!sshManager) return { ok: false, error: '窗口未就绪' }
       const res = await dialog.showOpenDialog({
-        title: '选择保存打包文件的文件夹',
+        title: await dl('pickPackDir'),
         properties: ['openDirectory']
       })
       if (res.canceled || !res.filePaths[0]) return { ok: false, canceled: true }
@@ -1654,7 +1698,7 @@ function registerIpc(): void {
     async (_e, sessionId: string, remoteDir: string, concurrency?: number, overwrite?: UploadOverwrite) => {
       if (!sshManager) return { ok: false, error: '窗口未就绪' }
       const res = await dialog.showOpenDialog({
-        title: '选择要上传并解压的归档文件',
+        title: await dl('pickArchive'),
         properties: ['openFile'],
         filters: [
           { name: '归档文件', extensions: ['zip', 'tar', 'gz', 'tgz', 'tar.gz'] }
@@ -1934,7 +1978,7 @@ function registerIpc(): void {
   })
   ipcMain.handle(IPC.pickExecutable, async () => {
     const res = await dialog.showOpenDialog({
-      title: '选择外部编辑器程序',
+      title: await dl('pickEditor'),
       properties: ['openFile'],
       filters:
         process.platform === 'win32'
@@ -1945,7 +1989,7 @@ function registerIpc(): void {
   })
   ipcMain.handle(IPC.pickDirectory, async () => {
     const res = await dialog.showOpenDialog({
-      title: '选择备份目录',
+      title: await dl('pickBackupDir'),
       properties: ['openDirectory', 'createDirectory']
     })
     return res.canceled ? undefined : res.filePaths[0]
@@ -1972,7 +2016,7 @@ function registerIpc(): void {
   // ---- Dialogs ----
   ipcMain.handle(IPC.pickKeyFile, async () => {
     const res = await dialog.showOpenDialog({
-      title: '选择私钥',
+      title: await dl('pickPrivateKey'),
       properties: ['openFile', 'showHiddenFiles']
     })
     return res.canceled ? undefined : res.filePaths[0]
@@ -1991,7 +2035,7 @@ function registerIpc(): void {
   )
   ipcMain.handle(IPC.keysImport, async () => {
     const res = await dialog.showOpenDialog({
-      title: '导入私钥',
+      title: await dl('importPrivateKey'),
       properties: ['openFile', 'showHiddenFiles']
     })
     if (res.canceled || !res.filePaths[0]) return { ok: false, canceled: true }

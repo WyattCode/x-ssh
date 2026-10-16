@@ -158,10 +158,11 @@ const bannerShown = computed(
 const bannerBtn = ref<HTMLButtonElement>()
 watch(bannerShown, (shown) => {
   if (!shown) return
-  // Never pull focus out of a modal: the palette, settings, host editor and
-  // confirm dialog all bind Esc/Enter on their own element, so taking focus
-  // away silently disables those keys while the dialog is still up.
-  if (document.querySelector('.overlay')) return
+  // Never pull focus out of a modal: the palette, host editor and confirm
+  // dialog all bind Esc/Enter on their own element, so taking focus away
+  // silently disables those keys while the dialog is still up. The host
+  // editor's root is `.layer`, everything else uses `.overlay`.
+  if (document.querySelector('.overlay, .layer')) return
   // Nor from someone mid-word in any other field (a rename box, the SFTP
   // filter…). The dead terminal is exactly what we do want to take it from,
   // and focus sits in its hidden textarea — hence the .xterm exception.
@@ -297,6 +298,19 @@ function accentSoft(hex: string, alpha = 0.14): string {
   const n = parseInt(m[1], 16)
   return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`
 }
+/** Picks black or white text for a filled accent surface: a light custom
+ *  accent (e.g. pale yellow) needs dark labels to stay readable. */
+function accentContrast(hex: string): string {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex)
+  if (!m) return '#fff'
+  const n = parseInt(m[1], 16)
+  const srgb = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => {
+    const c = v / 255
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
+  })
+  const lum = 0.2126 * srgb[0] + 0.7152 * srgb[1] + 0.0722 * srgb[2]
+  return lum > 0.45 ? '#0b0d11' : '#fff'
+}
 // Apply the custom accent (or reset to the theme default) whenever it changes.
 watch(
   () => store.accentColor,
@@ -305,13 +319,11 @@ watch(
     if (hex) {
       root.style.setProperty('--accent', hex)
       root.style.setProperty('--accent-soft', accentSoft(hex))
-      root.style.setProperty('--row-sel', accentSoft(hex, 0.18))
-      root.style.setProperty('--row-sel-ring', accentSoft(hex, 0.28))
+      root.style.setProperty('--accent-contrast', accentContrast(hex))
     } else {
       root.style.removeProperty('--accent')
       root.style.removeProperty('--accent-soft')
-      root.style.removeProperty('--row-sel')
-      root.style.removeProperty('--row-sel-ring')
+      root.style.removeProperty('--accent-contrast')
     }
   },
   { immediate: true }
