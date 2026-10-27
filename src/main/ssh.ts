@@ -1325,9 +1325,31 @@ export class SshManager {
     return new Promise((res, rej) => sftp.readdir(dir, (e, l) => (e ? rej(e) : res(l as never))))
   }
 
+  /** Downloads this process interrupted. A retry may only continue one of these:
+   *  a local file that merely happens to be smaller is often an older copy, and
+   *  appending the remote tail to it produces a corrupt file. Key is
+   *  `${sessionId}\0${remotePath}`. */
+  private partialDownloads = new Map<
+    string,
+    { localSize: number; remoteSize: number; remoteMtimeMs: number }
+  >()
+
   private statSize(sftp: SFTPWrapper, path: string): Promise<number> {
     return new Promise((res, rej) =>
       sftp.stat(path, (e, s) => (e ? rej(e) : res((s as { size: number }).size)))
+    )
+  }
+
+  /** Size plus mtime (ms), or null when the file is not there. Uploads use the
+   *  mtime to tell "already the same file" from "same length, different
+   *  content" — a one-character edit keeps the size. */
+  private statFile(sftp: SFTPWrapper, path: string): Promise<{ size: number; mtimeMs: number } | null> {
+    return new Promise((res) =>
+      sftp.stat(path, (e, s) => {
+        if (e || !s) return res(null)
+        const st = s as { size: number; mtime?: number }
+        res({ size: st.size, mtimeMs: (st.mtime ?? 0) * 1000 })
+      })
     )
   }
 
@@ -1877,21 +1899,32 @@ export class SshManager {
         }
         let read: Readable | undefined
         let write: Writable | undefined
+        let remoteInfo: { size: number; mtimeMs: number } | null = null
+        const partialKey = `${sessionId}\u0000${item.remote}`
         try {
           emit(item.name)
           // Both streams are built here so a throwing constructor can't leave
           // the other one orphaned (a stream nobody listens to turns its
           // 'error' into an uncaught exception).
-          // Resume: if a partial local file exists and is smaller than the
-          // remote, continue from its size (append); a larger/equal partial is
-          // stale, so start over. On error/cancel we deliberately keep the
-          // partial (no cleanup) so a retry can pick up where it left off.
+          // Resume: only a transfer this process interrupted of the *same* remote
+          // version continues where it stopped (append); anything else in the
+          // local path — an older copy, a different build of the file — is
+          // replaced from the start. On error/cancel the partial is kept so the
+          // next attempt can pick up from it.
           let offset = 0
           try {
             const localSize = (await stat(this.longPath(item.local))).size
             if (localSize > 0) {
-              const remoteSize = await this.statSize(sftp, item.remote).catch(() => -1)
-              if (remoteSize > localSize) offset = localSize
+              const remote = await this.statFile(sftp, item.remote)
+              remoteInfo = remote
+              const prior = this.partialDownloads.get(partialKey)
+              const resumable =
+                !!remote &&
+                !!prior &&
+                prior.localSize === localSize &&
+                prior.remoteSize === remote.size &&
+                prior.remoteMtimeMs === remote.mtimeMs
+              if (resumable) offset = localSize
               else await unlink(item.local)
             }
           } catch {
@@ -1909,6 +1942,7 @@ export class SshManager {
             }
           )
           filesDone++
+          this.partialDownloads.delete(partialKey)
           if (verifyChecksums) {
             try {
               await this.verifyChecksum(sessionId, item.remote, item.local)
@@ -1920,6 +1954,18 @@ export class SshManager {
         } catch {
           read?.destroy()
           write?.destroy()
+          // Remember what was interrupted, so a retry continues this exact
+          // remote version rather than guessing from the file size.
+          if (remoteInfo) {
+            const localNow = await stat(this.longPath(item.local)).catch(() => null)
+            if (localNow) {
+              this.partialDownloads.set(partialKey, {
+                localSize: localNow.size,
+                remoteSize: remoteInfo.size,
+                remoteMtimeMs: remoteInfo.mtimeMs
+              })
+            }
+          }
           if (this.cancelledJobs.has(jobId)) return
           failures.push(item.name)
         }
@@ -2120,18 +2166,22 @@ export class SshManager {
             // Conflict policy for files that already exist at the target.
             // - skip: leave existing remote files alone (counted as done).
             // - keep: upload alongside under a fresh name (name (1).ext, ...).
-            // - overwrite (default): resume partials; skip truly identical-size
-            //   remote files; otherwise write from the start / from the offset.
+            // - overwrite (default): resume partials; skip a remote file that is the
+            //   same size *and* not older; otherwise write from the start / offset.
             let offset = 0
             let localSize: number | null = null
+            let localMtime = 0
             try {
-              localSize = (await stat(this.longPath(item.local))).size
+              const st = await stat(this.longPath(item.local))
+              localSize = st.size
+              localMtime = st.mtimeMs
             } catch {
               /* source missing — let the stream error below */
             }
             if (localSize !== null) {
-              const remoteSize = await this.statSize(sftp, item.remote).catch(() => -1)
-              const exists = remoteSize >= 0
+              const remote = await this.statFile(sftp, item.remote)
+              const remoteSize = remote ? remote.size : -1
+              const exists = remote !== null
               if (exists && overwrite === 'skip') {
                 filesDone++
                 if (localSize) bytesDone += localSize
@@ -2141,8 +2191,11 @@ export class SshManager {
               if (exists && overwrite === 'keep') {
                 item.remote = await this.uniqueRemote(sftp, item.remote)
               } else if (!exists || overwrite !== 'keep') {
-                // overwrite (default) resume/from-scratch.
-                if (remoteSize === localSize) {
+                // overwrite (default) resume/from-scratch. Equal size is not
+                // equal content — editing one character keeps the length — so
+                // skip only when the remote copy is at least as new. The 1 s
+                // slack covers sftp's second-resolution mtime.
+                if (remote && remoteSize === localSize && remote.mtimeMs >= localMtime - 1000) {
                   filesDone++
                   if (localSize) bytesDone += localSize
                   emit(item.name)

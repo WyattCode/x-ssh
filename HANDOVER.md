@@ -151,7 +151,11 @@
 
 **第六批(本地面板的竞态)**:`refreshLocal` 没有远端 `load()` 已有的序号守卫,连点进入两级目录时,先发出的旧响应后到会把 `localPath` / `localEntries` 刷回旧目录,之后的上传 / 删除就作用在错的目录上。加 `localSeq`,过期响应直接丢弃(连 loading 标志也不回写)。
 
-**审核剩余未修**:上传时远端大小相同就跳过(内容改了也不传)、下载只按大小续传(可能拼坏文件);跳板机 `forwardOut`、`execRemote` 无超时;`SftpDrawer` 几处输入框缺 IME 守卫、本地面板没有序号守卫;设置 / 文本编辑器 / 片段变量框与抽屉内几个弹窗仍无焦点陷阱;`recordChord` 的冲突检测没算硬编码键位(Mod+1..9、终端里的 Ctrl+C / Ctrl+V)。
+**第七批(上传/下载的判定)**:① 上传默认策略下原来只要 `remoteSize === localSize` 就跳过——改一个字符长度不变,远端永远不更新,界面还报成功。新增 `statFile()`(大小 + mtime),现在**同尺寸且远端不早于本地**(给 1 秒余量,SFTP 的 mtime 只有秒级)才跳过;本地更新则覆盖。② 下载原来只要本地文件更小就无条件追加,而"更小"可能是一个**旧版本**的完整文件,拼出来是坏的。新增 `partialDownloads`(键 `sessionId\0remotePath`),只有"本进程自己中断过、且远端大小与 mtime 都没变"才续传,否则删掉本地从头下;失败分支写记录、成功清除。**实测**(本地临时 sshd 靶机 + 应用内调用 `sftp.uploadPaths`):本地 4 字节 `AAAA` 上传后远端为 `AAAA`;改成同样 4 字节的 `BBBB` 再传,远端变 `BBBB`(旧实现会跳过);内容不变的第三次上传,远端 mtime 一点没动(确认是跳过而非重传)。下载的续传判定**没有实测**(要制造一次中断)。
+
+**顺带发现、未修**:上传一个**不存在**的本地路径时 `sftp.uploadPaths` 返回 `{ ok: true, count: 1 }`,远端什么也没有 —— 计数和结果都被"算成功了"。下次可以查 `uploadPaths` 的 walk 是否把 stat 失败的文件当成已传。
+
+**审核剩余未修**:跳板机 `forwardOut`、`execRemote` 无超时;`SftpDrawer` 几处输入框缺 IME 守卫、本地面板没有序号守卫;设置 / 文本编辑器 / 片段变量框与抽屉内几个弹窗仍无焦点陷阱;`recordChord` 的冲突检测没算硬编码键位(Mod+1..9、终端里的 Ctrl+C / Ctrl+V)。
 
 验证:typecheck(node+web)、`vitest 324`、build 全绿;应用内临时 profile(`%TEMP%\x-ssh-verify-24`,端口 9223)实测:无模态时 Ctrl+K 正常开关、有主机编辑器且焦点在按钮上时 Ctrl+K 不再弹出、两个对话框打开即获得焦点。临时 profile 与进程已清理。
 
