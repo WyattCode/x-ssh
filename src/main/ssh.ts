@@ -2089,7 +2089,7 @@ export class SshManager {
     concurrency?: number,
     rateBytesPerSec = 0,
     overwrite: UploadOverwrite = 'overwrite'
-  ): Promise<void> {
+  ): Promise<{ files: number; failures: number }> {
     this.jobSession.set(jobId, sessionId)
     if (rateBytesPerSec > 0) this.jobRate.set(jobId, rateBytesPerSec)
     const conc = clampConcurrency(concurrency ?? SshManager.CONCURRENCY, SshManager.CONCURRENCY)
@@ -2270,6 +2270,10 @@ export class SshManager {
       this.jobSession.delete(jobId)
       this.lastProgressAt.delete(jobId)
     }
+    // Callers report these. A local path that could not even be stat'ed only
+    // bumps `failures`, and both counts used to be dropped on the floor — so
+    // uploading a path that does not exist answered "ok, 1 file".
+    return { files: filesDone, failures }
   }
 
   /** Windows caps ordinary paths at 260 chars, which a deep folder (node_modules

@@ -153,7 +153,9 @@
 
 **第七批(上传/下载的判定)**:① 上传默认策略下原来只要 `remoteSize === localSize` 就跳过——改一个字符长度不变,远端永远不更新,界面还报成功。新增 `statFile()`(大小 + mtime),现在**同尺寸且远端不早于本地**(给 1 秒余量,SFTP 的 mtime 只有秒级)才跳过;本地更新则覆盖。② 下载原来只要本地文件更小就无条件追加,而"更小"可能是一个**旧版本**的完整文件,拼出来是坏的。新增 `partialDownloads`(键 `sessionId\0remotePath`),只有"本进程自己中断过、且远端大小与 mtime 都没变"才续传,否则删掉本地从头下;失败分支写记录、成功清除。**实测**(本地临时 sshd 靶机 + 应用内调用 `sftp.uploadPaths`):本地 4 字节 `AAAA` 上传后远端为 `AAAA`;改成同样 4 字节的 `BBBB` 再传,远端变 `BBBB`(旧实现会跳过);内容不变的第三次上传,远端 mtime 一点没动(确认是跳过而非重传)。下载的续传判定**没有实测**(要制造一次中断)。
 
-**顺带发现、未修**:上传一个**不存在**的本地路径时 `sftp.uploadPaths` 返回 `{ ok: true, count: 1 }`,远端什么也没有 —— 计数和结果都被"算成功了"。下次可以查 `uploadPaths` 的 walk 是否把 stat 失败的文件当成已传。
+**第八批(上传结果不再撒谎)**:上一批顺带发现"上传一个不存在的本地路径返回 `{ ok: true, count: 1 }`"。根因:`uploadJob` 里 `walk()` 对 `stat` 失败的路径只 `failures++` 然后跳过,而这些计数**从未返回**;IPC 一律 `return { ok: true, count: paths.length }`(按请求数,不按成功数)。现在 `uploadJob` 返回 `{ files, failures }`,四处调用点(选文件上传 / 上传目录 / 上传指定路径 / 上传并解压)改成 `failures > 0` 就 `ok: false` + `error: "N 个文件失败"`,`count` 用真正的成功数;上传并解压那条在失败时不再继续解压。**实测**(临时靶机 + 应用内调用):不存在的路径 → `{ ok: false, count: 0, error: "1 个文件失败" }`;真实文件 → `{ ok: true, count: 1 }`。
+
+**清理靶机的坑(记下来省下次)**:杀 sshd 别用 `Stop-Process` 按 `Path -like '*OpenSSH*'` 过滤(部分进程 `Path` 为空,杀不到),也别按命令行匹配 `xssh-target` —— **会把正在执行这条命令的 PowerShell 自己也匹配上**、当场把命令打断。按进程名 `sshd.exe` 精确匹配,或直接用记下的 PID。
 
 **审核剩余未修**:跳板机 `forwardOut`、`execRemote` 无超时;`SftpDrawer` 几处输入框缺 IME 守卫、本地面板没有序号守卫;设置 / 文本编辑器 / 片段变量框与抽屉内几个弹窗仍无焦点陷阱;`recordChord` 的冲突检测没算硬编码键位(Mod+1..9、终端里的 Ctrl+C / Ctrl+V)。
 
