@@ -1524,7 +1524,10 @@ function registerIpc(): void {
       _e,
       sessionId: string,
       items: { path: string; name: string; isDir: boolean }[],
-      concurrency?: number
+      concurrency?: number,
+      /** True when the caller already decided (resume after a drop); a prompt
+       *  there would hang every unattended call. */
+      overwriteLocal?: boolean
     ) => {
       if (!sshManager) return { ok: false, error: '窗口未就绪' }
       const res = await dialog.showOpenDialog({
@@ -1533,7 +1536,7 @@ function registerIpc(): void {
       })
       if (res.canceled || !res.filePaths[0]) return { ok: false, canceled: true }
       // Confirmation before overwriting existing local files in the target dir.
-      if (!(await confirmOverwriteLocal(items.map((it) => join(res.filePaths[0], it.name))))) {
+      if (!overwriteLocal && !(await confirmOverwriteLocal(items.map((it) => join(res.filePaths[0], it.name))))) {
         return { ok: false, canceled: true }
       }
       try {
@@ -1566,11 +1569,13 @@ function registerIpc(): void {
       sessionId: string,
       items: { path: string; name: string; isDir: boolean }[],
       targetDir: string,
-      concurrency?: number
+      concurrency?: number,
+      /** See sftp:downloadMany — resume must not ask again. */
+      overwriteLocal?: boolean
     ) => {
       if (!sshManager) return { ok: false, error: '窗口未就绪' }
       // Confirmation before overwriting existing local files in the target dir.
-      if (!(await confirmOverwriteLocal(items.map((it) => join(targetDir, it.name))))) {
+      if (!overwriteLocal && !(await confirmOverwriteLocal(items.map((it) => join(targetDir, it.name))))) {
         return { ok: false, canceled: true }
       }
       try {

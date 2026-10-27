@@ -374,8 +374,10 @@ async function resumeDownloads(): Promise<void> {
       sid = mapped
     }
     // Resumes into the recorded local directory; partial files are picked up by
-    // downloadJob. A per-op failure is skipped, not fatal to the rest.
-    const r = await window.api.sftp.downloadTo(sid, op.items, op.localDir, store.transferConcurrency)
+    // downloadJob. A per-op failure is skipped, not fatal to the rest. The user
+    // already chose to download these, so a second overwrite prompt (which also
+    // blocked the resume forever when nobody was at the keyboard) is skipped.
+    const r = await window.api.sftp.downloadTo(sid, op.items, op.localDir, store.transferConcurrency, true)
     if (!r.ok && !r.canceled) {
       failed++
       keep.push(op)

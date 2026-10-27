@@ -179,16 +179,18 @@ const api = {
     downloadMany: (
       sessionId: string,
       items: { path: string; name: string; isDir: boolean }[],
-      concurrency?: number
+      concurrency?: number,
+      overwriteLocal?: boolean
     ): Promise<SftpResult> =>
-      ipcRenderer.invoke(IPC.sftpDownloadMany, sessionId, items, concurrency),
+      ipcRenderer.invoke(IPC.sftpDownloadMany, sessionId, items, concurrency, overwriteLocal),
     downloadTo: (
       sessionId: string,
       items: { path: string; name: string; isDir: boolean }[],
       targetDir: string,
-      concurrency?: number
+      concurrency?: number,
+      overwriteLocal?: boolean
     ): Promise<SftpResult> =>
-      ipcRenderer.invoke(IPC.sftpDownloadTo, sessionId, items, targetDir, concurrency),
+      ipcRenderer.invoke(IPC.sftpDownloadTo, sessionId, items, targetDir, concurrency, overwriteLocal),
     revealLocal: (target: string): Promise<{ ok: boolean; error?: string }> =>
       ipcRenderer.invoke(IPC.sftpRevealLocal, target),
     upload: (sessionId: string, remoteDir: string, concurrency?: number, overwrite?: UploadOverwrite): Promise<SftpResult> =>
