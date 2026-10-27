@@ -110,6 +110,19 @@ function bindingOf(id: RebindableAction): string {
 function startRecord(id: RebindableAction): void {
   recording.value = id
 }
+/** Chords the app acts on regardless of the rebindable table: the number jump in
+   *  App.vue, and the terminal's copy / paste / find. Recording one of these used
+   *  to be accepted and then never fired, while the action's old binding was gone. */
+const RESERVED_CHORDS = [
+  ...Array.from({ length: 9 }, (_, i) => `Mod+${i + 1}`),
+  'Mod+c',
+  'Mod+v',
+  'Mod+f'
+]
+function isReservedChord(chord: string): boolean {
+  const canon = canonicalChord(chord, isMac)
+  return !!canon && RESERVED_CHORDS.some((r) => canonicalChord(r, isMac) === canon)
+}
 function recordChord(e: KeyboardEvent, id: RebindableAction): void {
   // The chord being recorded must not also run (Ctrl+1 jumping to tab 1).
   e.preventDefault()
@@ -145,6 +158,10 @@ function recordChord(e: KeyboardEvent, id: RebindableAction): void {
   const owner = conflictOwner(chord, id)
   if (owner) {
     toast(t('set.sc.conflict', { other: t('sck.' + DESC_KEY[owner]) }), 'error')
+    return
+  }
+  if (isReservedChord(chord)) {
+    toast(t('set.sc.reserved'), 'error')
     return
   }
   const next = { ...store.keybindings, [id]: chord }
