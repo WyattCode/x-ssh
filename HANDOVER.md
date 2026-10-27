@@ -173,6 +173,8 @@
 
 **第十二批(`execRemote` 加超时)**:它只监听 `close`/`error`,远端命令卡住(tar 等 stdin、NFS 挂死)时打包下载 / 解压 / 校验三条路永远不返回,渠道也不释放、没有取消入口。现在实例字段 `execTimeoutMs`(默认 5 分钟)+ 超时后 `reject('远端命令超时')` 并 `channel.close()`;`finish()` 幂等,超时与正常关闭先到先算。测试 `connect.test.ts` 新增一条:假服务器接受 exec 但**永不结束**,`execTimeoutMs = 150` 时 `packAndDownload` 在 5 秒内以该错误拒绝(325 个用例全绿)。字段是公开的,以后测别的超时可以照用。**`forwardOut` 仍无超时**(跳板机上目标端口被静默丢弃时 `connect` 不 settle),那条没做。
 
+**第十三批(跳板机 open 超时)**:`connectJump` 在跳板机 `ready` 之后调 `forwardOut`,回调是唯一出口;跳板机接受了 SSH 却在目标端口上被防火墙静默丢弃时,ssh2 没有自己的超时,`connect()` 永不 settle、会话登记泄漏。现在 `ready` 里起一个 `jumpForwardTimeoutMs`(默认 30 秒)计时,超时走原有的 `fail()`(关跳板客户端 + 拒绝),回调到达时清计时。测试 `connect.test.ts` 新增一条:假跳板机对 `tcpip` **永不回应**,200 毫秒超时下 `connect` 返回失败且错误里带"跳板机"(326 个用例全绿)。
+
 **审核剩余未修**:跳板机 `forwardOut` 无超时;`SftpDrawer` 几处输入框缺 IME 守卫、本地面板没有序号守卫;设置 / 文本编辑器 / 片段变量框与抽屉内几个弹窗仍无焦点陷阱;`recordChord` 的冲突检测没算硬编码键位(Mod+1..9、终端里的 Ctrl+C / Ctrl+V)。
 
 验证:typecheck(node+web)、`vitest 324`、build 全绿;应用内临时 profile(`%TEMP%\x-ssh-verify-24`,端口 9223)实测:无模态时 Ctrl+K 正常开关、有主机编辑器且焦点在按钮上时 Ctrl+K 不再弹出、两个对话框打开即获得焦点。临时 profile 与进程已清理。

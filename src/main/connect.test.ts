@@ -270,3 +270,50 @@ describe('SshManager.execRemote (timeout)', () => {
     stuck.close()
   })
 })
+
+describe('SshManager.connectJump (channel-open timeout)', () => {
+  it('gives up when the hop never answers the open towards the target', async () => {
+    // Accepts the SSH session, then holds the direct-tcpip open forever: what a
+    // hop behind a firewall that drops the target looks like. ssh2 has no
+    // timeout for this, so connect() used to stay pending for good.
+    const mute = new Server({ hostKeys: [hostKey.private] }, (client) => {
+      client.on('authentication', (ctx) => {
+        const ok = ctx.method === 'password' && ctx.username === 'u' && ctx.password === 'p'
+        ;(ok ? ctx.accept() : ctx.reject(['password'])) as unknown
+      })
+      client.on('ready', () => {
+        client.on('session', (accept) => {
+          const sess = accept()
+          sess.on('pty', (a) => a())
+          sess.on('shell', (a) => a().write('$ '))
+          sess.on('exec', (a) => a().end())
+        })
+        const raw = client as unknown as {
+          on: (
+            ev: 'tcpip',
+            fn: (accept: () => unknown, reject: () => void, data: unknown) => void
+          ) => void
+        }
+        raw.on('tcpip', (_accept, _reject, _data) => {
+          // Deliberately never answered.
+        })
+      })
+      client.on('error', () => undefined)
+    })
+    await new Promise<void>((r) => mute.listen(0, '127.0.0.1', () => r()))
+    const mutePort = (mute.address() as AddressInfo).port
+    const kh = await hosts({ [entry(mutePort)]: realFp, [entry(port)]: realFp })
+    const mgr = new SshManager(sender as never, kh)
+    mgr.jumpForwardTimeoutMs = 200
+    const started = Date.now()
+    const res = await mgr.connect(
+      target({
+        jump: { host: H, port: mutePort, username: 'u', auth: 'password', password: 'p' } as JumpConfig
+      })
+    )
+    expect(res.ok).toBe(false)
+    expect(res.error ?? '').toContain('跳板机')
+    expect(Date.now() - started).toBeLessThan(5000)
+    mute.close()
+  })
+})

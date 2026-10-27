@@ -428,12 +428,18 @@ export class SshManager {
         })
       })
       client.on('ready', () => {
+        // The hop can accept the SSH connection yet never answer the channel
+        // open — a firewall dropping the target is the usual cause — and ssh2
+        // has no timeout of its own, so connect() would never settle.
+        const timer = setTimeout(() => fail('跳板机没有回应到目标的连接请求'), this.jumpForwardTimeoutMs)
+        timer.unref?.()
         client.forwardOut(
           '127.0.0.1',
           0,
           targetHost,
           targetPort,
           (err, channel) => {
+            clearTimeout(timer)
             if (err) return fail('无法通过跳板机连通目标: ' + friendlyError(err.message))
             if (settled) {
               channel.close()
@@ -1296,6 +1302,11 @@ export class SshManager {
    *  or a command waiting on stdin must not hang the caller forever. Exposed as
    *  a field so tests can shorten it. */
   execTimeoutMs = 5 * 60_000
+
+  /** How long the jump host may take to answer a channel open towards the
+   *  target. ssh2 imposes no limit, and a firewall dropping the target on the
+   *  hop's side leaves connect() unsettled for good. */
+  jumpForwardTimeoutMs = 30_000
 
   private emitProgress(p: SftpProgress): void {
     // Continuous-sync jobs run silently: no per-file progress, no UI toasts.
