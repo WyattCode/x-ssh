@@ -143,7 +143,9 @@
 
 **第二批(同日晚)**:① 确认框关闭后若 opener 已被移除(菜单项、刚被删掉的行)或已禁用,焦点仍会掉到 body —— `modals.ts` 加 `focusFallbackSurface()`(最上面一个 `[tabindex="-1"]`,兜底到 SFTP 抽屉根),`ConfirmDialog` 只在 opener 真可用时才回填;② `hosts.save` 在两处都没有 try/catch,磁盘满 / hosts 损坏时面板不关、毫无提示 —— `HostEditor` 改为 toast `ed.saveFail` 并留在面板里,`CommandPalette` 提示后照样用输入的密码连接(顺手加 `submitting` 守卫:连按两次回车原来会开两条连接)。正常路径实测:编辑器改字段 → Esc → Esc 取消后焦点仍在"名称";兜底路径只做代码确认(没造出 opener 被移除的场景)。
 
-**审核剩余未修**:快捷键录制只按修饰键也能存成死键;上传时远端大小相同就跳过(内容改了也不传)、下载只按大小续传(可能拼坏文件);`local:readText` 无大小上限;跳板机 `forwardOut`、`execRemote` 无超时;`sftp:openWith` 直接 spawn 渲染层给的路径;`SftpDrawer` 几处输入框缺 IME 守卫、本地面板没有序号守卫;设置 / 文本编辑器 / 片段变量框与抽屉内几个弹窗仍无焦点陷阱。
+**第三批**:快捷键录制只按修饰键(Ctrl+Shift)会存成 `Mod+Shift+Shift` 这种永远匹配不上的死键,而它已经把原默认键位覆盖了 —— `SettingsDialog.recordChord` 现在遇到纯修饰键直接返回、继续等真正的键。实测:录制中按 Ctrl+Shift 仍停在"请按下新组合键…"、绑定未变;按 Ctrl+Alt+J 正常写入。注:应用工具按不了纯修饰键,这一条是用合成 `keydown` 事件在渲染层验证的。
+
+**审核剩余未修**:上传时远端大小相同就跳过(内容改了也不传)、下载只按大小续传(可能拼坏文件);`local:readText` 无大小上限;跳板机 `forwardOut`、`execRemote` 无超时;`sftp:openWith` 直接 spawn 渲染层给的路径;`SftpDrawer` 几处输入框缺 IME 守卫、本地面板没有序号守卫;设置 / 文本编辑器 / 片段变量框与抽屉内几个弹窗仍无焦点陷阱;`recordChord` 的冲突检测没算硬编码键位(Mod+1..9、终端里的 Ctrl+C / Ctrl+V)。
 
 验证:typecheck(node+web)、`vitest 324`、build 全绿;应用内临时 profile(`%TEMP%\x-ssh-verify-24`,端口 9223)实测:无模态时 Ctrl+K 正常开关、有主机编辑器且焦点在按钮上时 Ctrl+K 不再弹出、两个对话框打开即获得焦点。临时 profile 与进程已清理。
 

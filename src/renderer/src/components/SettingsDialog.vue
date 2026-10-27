@@ -127,6 +127,10 @@ function recordChord(e: KeyboardEvent, id: RebindableAction): void {
   if (isMac && e.ctrlKey) mods.push('Ctrl')
   if (e.shiftKey) mods.push('Shift')
   if (e.altKey) mods.push('Alt')
+  // A chord has to end in a real key. Ctrl+Shift alone used to store
+  // "Mod+Shift+Shift" — nothing can ever match that, and it had already
+  // replaced the action's working default.
+  if (e.key === 'Control' || e.key === 'Shift' || e.key === 'Alt' || e.key === 'Meta' || e.key === 'AltGraph') return
   if (!mods.length) return // require at least one modifier to avoid eating typing
   let key = e.key
   if (key === ' ') key = 'Space'
