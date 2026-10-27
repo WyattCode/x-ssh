@@ -147,6 +147,8 @@
 
 **第四批(主进程防御)**:① `local:readText` 无大小上限,对一个大文件做"与本地比较"会把整个文件读进主进程内存 —— 加 2 MB 上限(与远端 `sftpReadText` 同一阈值),超限返回"文件过大"。② `sftp:openWith` 把渲染层给的程序路径直接 `spawn`,等于该通道可以运行机器上任意程序 —— 现在只允许设置里存过的程序(`externalEditor` 与 `fileOpeners` 的值),否则拒绝;`openWith` 与 `editExternal` 的 `name` 也加了单段校验(`basename(name) === name`),防止拼出临时目录外的路径。渲染层实际只传 `store.fileOpeners[ext]`,行为不变。
 
+**第五批(SFTP 抽屉的 IME)**:抽屉里四个回车处理(本机新建、远程新建、重命名、路径编辑)原来都不看 IME 组字,中文输入法里在候选词上按回车会按**尚未提交的旧文本**建出名字不对的目录,重命名框则直接被关掉、已输内容丢失。新增 `isImeEnter(e)`(`isComposing` 或 `keyCode === 229`),四个入口都先过它;重命名的模板调用补了 `$event`。**未在应用里验**(要真实 SFTP 会话 + 中文输入法)。
+
 **审核剩余未修**:上传时远端大小相同就跳过(内容改了也不传)、下载只按大小续传(可能拼坏文件);跳板机 `forwardOut`、`execRemote` 无超时;`SftpDrawer` 几处输入框缺 IME 守卫、本地面板没有序号守卫;设置 / 文本编辑器 / 片段变量框与抽屉内几个弹窗仍无焦点陷阱;`recordChord` 的冲突检测没算硬编码键位(Mod+1..9、终端里的 Ctrl+C / Ctrl+V)。
 
 验证:typecheck(node+web)、`vitest 324`、build 全绿;应用内临时 profile(`%TEMP%\x-ssh-verify-24`,端口 9223)实测:无模态时 Ctrl+K 正常开关、有主机编辑器且焦点在按钮上时 Ctrl+K 不再弹出、两个对话框打开即获得焦点。临时 profile 与进程已清理。

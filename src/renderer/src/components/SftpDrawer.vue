@@ -278,7 +278,16 @@ function localEnterSelection(): void {
   if (!t) return
   if (t.isDir) void refreshLocal(localJoin(localPath.value, t.name))
 }
-async function localSubmit(): Promise<void> {
+/** The Enter that commits an IME candidate (typing Chinese) belongs to the input
+ *  method: running the handler there creates the folder under the text the
+ *  candidate had not replaced yet, or closes the box and loses it. */
+function isImeEnter(e?: Event): boolean {
+  const k = e as KeyboardEvent | undefined
+  return !!k && (k.isComposing === true || k.keyCode === 229)
+}
+
+async function localSubmit(e?: Event): Promise<void> {
+  if (isImeEnter(e)) return
   const name = localModal.value.trim()
   if (!name || !localPath.value) return
   if (localModal.action === 'new') {
@@ -1056,7 +1065,8 @@ function startRename(entry: FileEntry): void {
   renameInput.value = entry.name
   focusEdit()
 }
-async function commitRename(entry: FileEntry): Promise<void> {
+async function commitRename(entry: FileEntry, e?: Event): Promise<void> {
+  if (isImeEnter(e)) return
   // Esc clears renamingName first; the ensuing blur must not still rename.
   if (renamingName.value !== entry.name) return
   const next = renameInput.value.trim()
@@ -1075,7 +1085,8 @@ function startCreate(kind: 'folder' | 'file'): void {
   newName.value = ''
   focusEdit()
 }
-async function commitCreate(): Promise<void> {
+async function commitCreate(e?: Event): Promise<void> {
+  if (isImeEnter(e)) return
   const name = newName.value.trim()
   const kind = creatingKind.value
   creatingKind.value = null
@@ -1318,7 +1329,8 @@ function startPathEdit(): void {
   pathEditing.value = true
   nextTick(() => pathEl.value?.select())
 }
-function commitPathEdit(): void {
+function commitPathEdit(e?: Event): void {
+  if (isImeEnter(e)) return
   // Esc sets pathEditing=false first; the ensuing blur must not still navigate.
   if (!pathEditing.value) return
   pathEditing.value = false
@@ -1536,7 +1548,7 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
                 v-model="renameInput"
                 class="edit-input"
                 @click.stop
-                @keydown.enter.prevent="commitRename(entry)"
+                @keydown.enter.prevent="commitRename(entry, $event)"
                 @keydown.esc.prevent="renamingName = null"
                 @blur="commitRename(entry)"
               />
