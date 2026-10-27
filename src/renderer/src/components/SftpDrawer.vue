@@ -79,6 +79,8 @@ const localPath = ref('')
 const localEntries = ref<LocalEntry[]>([])
 const localLoading = ref(false)
 const localError = ref('')
+/** Bumped per local listing; see the guard in refreshLocal. */
+let localSeq = 0
 async function refreshLocal(dir?: string): Promise<void> {
   const prev = localPath.value
   if (dir) localPath.value = dir
@@ -90,14 +92,21 @@ async function refreshLocal(dir?: string): Promise<void> {
   }
   localLoading.value = true
   localError.value = ''
+  // The remote pane already guards this: a slow reply from the directory the
+  // user just left must not repaint over the one they are in now, or uploads
+  // and deletes run against the wrong folder.
+  const seq = ++localSeq
+  const target = localPath.value
   try {
-    const r = await window.api.local.list(localPath.value)
+    const r = await window.api.local.list(target)
+    if (seq !== localSeq) return
     localPath.value = r.path
     localEntries.value = r.entries
   } catch {
+    if (seq !== localSeq) return
     localError.value = tt('sfp.localErr')
   } finally {
-    localLoading.value = false
+    if (seq === localSeq) localLoading.value = false
   }
 }
 function toggleLocal(): void {
