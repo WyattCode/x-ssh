@@ -1867,18 +1867,20 @@ function registerIpc(): void {
       if (!name || name === '.' || name === '..' || basename(name) !== name) {
         return { ok: false, error: '文件名无效' }
       }
-      const dir = await mkdtemp(join(tmpdir(), 'xssh-open-'))
-      const local = join(dir, name)
-      await requireSshManager().downloadTree(sessionId, remotePath, dir, name, false)
+      // Only an editor the user stored in settings may be launched from here;
+      // otherwise this channel is a way to run any binary on the machine.
+      // Checked before the download so a refusal costs nothing.
       if (program) {
-        // Only an editor the user stored in settings may be launched from here;
-        // otherwise this channel is a way to run any binary on the machine.
         const editor = (await settings.get<string>('externalEditor')) || ''
         const openers = (await settings.get<Record<string, string>>('fileOpeners')) || {}
         const allowed = new Set([editor, ...Object.values(openers)].filter(Boolean))
         if (!allowed.has(program)) return { ok: false, error: '程序没有在设置中配置' }
-        spawn(program, [local], { detached: true, stdio: 'ignore' }).unref()
-      } else await shell.openPath(local)
+      }
+      const dir = await mkdtemp(join(tmpdir(), 'xssh-open-'))
+      const local = join(dir, name)
+      await requireSshManager().downloadTree(sessionId, remotePath, dir, name, false)
+      if (program) spawn(program, [local], { detached: true, stdio: 'ignore' }).unref()
+      else await shell.openPath(local)
       setTimeout(() => void rm(dir, { recursive: true, force: true }).catch(() => undefined), 30 * 60 * 1000)
       return { ok: true }
     } catch (e) {

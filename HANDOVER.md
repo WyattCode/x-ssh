@@ -145,7 +145,7 @@
 
 **第三批**:快捷键录制只按修饰键(Ctrl+Shift)会存成 `Mod+Shift+Shift` 这种永远匹配不上的死键,而它已经把原默认键位覆盖了 —— `SettingsDialog.recordChord` 现在遇到纯修饰键直接返回、继续等真正的键。实测:录制中按 Ctrl+Shift 仍停在"请按下新组合键…"、绑定未变;按 Ctrl+Alt+J 正常写入。注:应用工具按不了纯修饰键,这一条是用合成 `keydown` 事件在渲染层验证的。
 
-**第四批(主进程防御)**:① `local:readText` 无大小上限,对一个大文件做"与本地比较"会把整个文件读进主进程内存 —— 加 2 MB 上限(与远端 `sftpReadText` 同一阈值),超限返回"文件过大"。② `sftp:openWith` 把渲染层给的程序路径直接 `spawn`,等于该通道可以运行机器上任意程序 —— 现在只允许设置里存过的程序(`externalEditor` 与 `fileOpeners` 的值),否则拒绝;`openWith` 与 `editExternal` 的 `name` 也加了单段校验(`basename(name) === name`),防止拼出临时目录外的路径。渲染层实际只传 `store.fileOpeners[ext]`,行为不变。
+**第四批(主进程防御)**:① `local:readText` 无大小上限,对一个大文件做"与本地比较"会把整个文件读进主进程内存 —— 加 2 MB 上限(与远端 `sftpReadText` 同一阈值),超限返回"文件过大"。② `sftp:openWith` 把渲染层给的程序路径直接 `spawn`,等于该通道可以运行机器上任意程序 —— 现在只允许设置里存过的程序(`externalEditor` 与 `fileOpeners` 的值),否则拒绝;这项检查放在**下载之前**(拒绝时不必先把文件拉下来)。`openWith` 与 `editExternal` 的 `name` 也加了单段校验(`basename(name) === name`),防止拼出临时目录外的路径。渲染层实际只传 `store.fileOpeners[ext]`,行为不变。应用内实测(临时 profile,无会话):未配置程序 → `程序没有在设置中配置`(先于会话检查)、`../evil` → `文件名无效`、不传程序 → 走到 `会话不存在`(正常路径没被挡住)。**真正打开的路径仍没验**(要靶机)。
 
 **第五批(SFTP 抽屉的 IME)**:抽屉里四个回车处理(本机新建、远程新建、重命名、路径编辑)原来都不看 IME 组字,中文输入法里在候选词上按回车会按**尚未提交的旧文本**建出名字不对的目录,重命名框则直接被关掉、已输内容丢失。新增 `isImeEnter(e)`(`isComposing` 或 `keyCode === 229`),四个入口都先过它;重命名的模板调用补了 `$event`。**未在应用里验**(要真实 SFTP 会话 + 中文输入法)。
 
