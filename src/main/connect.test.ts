@@ -233,3 +233,40 @@ describe('SshManager.connect (host-key verification)', () => {
     void mgr.disconnect(res.sessionId!)
   })
 })
+
+describe('SshManager.execRemote (timeout)', () => {
+  it('gives up on a command that never closes', async () => {
+    // The stand-in accepts the exec and never ends it — a tar waiting on stdin
+    // or a command stuck on a hung mount. Without a limit, every caller of
+    // pack / unzip / checksum waited forever with no way to cancel.
+    const stuck = new Server({ hostKeys: [hostKey.private] }, (client) => {
+      client.on('authentication', (ctx) => {
+        const ok = ctx.method === 'password' && ctx.username === 'u' && ctx.password === 'p'
+        ;(ok ? ctx.accept() : ctx.reject(['password'])) as unknown
+      })
+      client.on('ready', () => {
+        client.on('session', (accept) => {
+          const sess = accept()
+          sess.on('pty', (a) => a())
+          sess.on('shell', (a) => a().write('$ '))
+          sess.on('exec', (a) => void a())
+        })
+      })
+      client.on('error', () => undefined)
+    })
+    await new Promise<void>((r) => stuck.listen(0, '127.0.0.1', () => r()))
+    const p = (stuck.address() as AddressInfo).port
+    const kh = await hosts({ [entry(p)]: realFp })
+    const mgr = new SshManager(sender as never, kh)
+    mgr.execTimeoutMs = 150
+    const res = await mgr.connect(target({ port: p }))
+    expect(res, JSON.stringify(res)).toMatchObject({ ok: true })
+    const started = Date.now()
+    await expect(
+      mgr.packAndDownload(res.sessionId!, [{ path: '/tmp/a.txt', name: 'a.txt', isDir: false }], dir)
+    ).rejects.toThrow('远端命令超时')
+    expect(Date.now() - started).toBeLessThan(5000)
+    void mgr.disconnect(res.sessionId!)
+    stuck.close()
+  })
+})

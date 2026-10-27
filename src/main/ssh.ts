@@ -1292,6 +1292,11 @@ export class SshManager {
    *  renderer must not depend on this string. */
   private static readonly CANCELLED_TEXT = '已取消'
 
+  /** Limit for one-shot remote commands (tar / unzip / sha256sum). A stuck mount
+   *  or a command waiting on stdin must not hang the caller forever. Exposed as
+   *  a field so tests can shorten it. */
+  execTimeoutMs = 5 * 60_000
+
   private emitProgress(p: SftpProgress): void {
     // Continuous-sync jobs run silently: no per-file progress, no UI toasts.
     if (this.quietJobs.has(p.id)) return
@@ -2520,18 +2525,43 @@ export class SshManager {
     )
   }
 
-  /** Runs a remote command on the shell, resolving with its combined output. */
-  private execRemote(sessionId: string, command: string): Promise<{ code: number; out: string }> {
+  /** Runs a remote command on the shell, resolving with its combined output.
+   *  Times out: `close` never arrives if the command blocks on stdin or on a
+   *  stuck mount, and the IPC waiting on it (pack / unzip / checksum) would
+   *  then hang for the rest of the session with no way to cancel. */
+  private execRemote(
+    sessionId: string,
+    command: string,
+    timeoutMs = this.execTimeoutMs
+  ): Promise<{ code: number; out: string }> {
     const session = this.sessions.get(sessionId)
     if (!session) return Promise.reject(new Error('会话已断开'))
     return new Promise((resolve, reject) => {
-      session.client.exec(command, (err, channel) => {
-        if (err) return reject(err)
+      let settled = false
+      let channel: { close: () => void } | undefined
+      const finish = (fn: () => void): void => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        fn()
+      }
+      const timer = setTimeout(() => {
+        finish(() => reject(new Error('远端命令超时')))
+        try {
+          channel?.close()
+        } catch {
+          /* already gone */
+        }
+      }, timeoutMs)
+      timer.unref?.()
+      session.client.exec(command, (err, ch) => {
+        if (err) return finish(() => reject(err))
+        channel = ch
         let out = ''
-        channel.on('data', (d: Buffer) => (out += d.toString('utf8')))
-        channel.stderr.on('data', (d: Buffer) => (out += d.toString('utf8')))
-        channel.on('close', (code: number) => resolve({ code, out }))
-        channel.on('error', reject)
+        ch.on('data', (d: Buffer) => (out += d.toString('utf8')))
+        ch.stderr.on('data', (d: Buffer) => (out += d.toString('utf8')))
+        ch.on('close', (code: number) => finish(() => resolve({ code, out })))
+        ch.on('error', (e: Error) => finish(() => reject(e)))
       })
     })
   }

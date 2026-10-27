@@ -171,7 +171,9 @@
 
 **第十一批(下载返回值补齐,三件事一次验完)**:`downloadJob` 现在返回 `{ files, failures, cancelled }`,`sftp:download` / `downloadMany` / `downloadTo` 三条通道据此回报:取消 → `{ ok: false, canceled: true }`,有失败 → `{ ok: false, error: "N 个文件失败" }`,`count` 用真正的成功数。靶机上**一次跑完三项**(200 MB 文件):① 下载到**不存在**的两级目录 `…\xssh-new\sub` → `ok: true, count: 1`,目录被建出来、209,715,200 字节写入;② 传输中取消 → `{ ok: false, canceled: true }`;③ 紧接着续传 → 209,715,200 字节且与远端 SHA-256 一致。**取消后部分文件会保留**(续传的前提)。
 
-**审核剩余未修**:跳板机 `forwardOut`、`execRemote` 无超时;`SftpDrawer` 几处输入框缺 IME 守卫、本地面板没有序号守卫;设置 / 文本编辑器 / 片段变量框与抽屉内几个弹窗仍无焦点陷阱;`recordChord` 的冲突检测没算硬编码键位(Mod+1..9、终端里的 Ctrl+C / Ctrl+V)。
+**第十二批(`execRemote` 加超时)**:它只监听 `close`/`error`,远端命令卡住(tar 等 stdin、NFS 挂死)时打包下载 / 解压 / 校验三条路永远不返回,渠道也不释放、没有取消入口。现在实例字段 `execTimeoutMs`(默认 5 分钟)+ 超时后 `reject('远端命令超时')` 并 `channel.close()`;`finish()` 幂等,超时与正常关闭先到先算。测试 `connect.test.ts` 新增一条:假服务器接受 exec 但**永不结束**,`execTimeoutMs = 150` 时 `packAndDownload` 在 5 秒内以该错误拒绝(325 个用例全绿)。字段是公开的,以后测别的超时可以照用。**`forwardOut` 仍无超时**(跳板机上目标端口被静默丢弃时 `connect` 不 settle),那条没做。
+
+**审核剩余未修**:跳板机 `forwardOut` 无超时;`SftpDrawer` 几处输入框缺 IME 守卫、本地面板没有序号守卫;设置 / 文本编辑器 / 片段变量框与抽屉内几个弹窗仍无焦点陷阱;`recordChord` 的冲突检测没算硬编码键位(Mod+1..9、终端里的 Ctrl+C / Ctrl+V)。
 
 验证:typecheck(node+web)、`vitest 324`、build 全绿;应用内临时 profile(`%TEMP%\x-ssh-verify-24`,端口 9223)实测:无模态时 Ctrl+K 正常开关、有主机编辑器且焦点在按钮上时 Ctrl+K 不再弹出、两个对话框打开即获得焦点。临时 profile 与进程已清理。
 
