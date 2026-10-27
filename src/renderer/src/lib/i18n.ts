@@ -2362,6 +2362,17 @@ function systemLocales(): readonly string[] {
 
 /** The stored preference; no saved value means "follow system". */
 const pref = ref<LangPref>(parseLangPref((window.api.prefs as { lang?: unknown } | undefined)?.lang))
+// `api.prefs` is captured when the window is created. A plain renderer reload
+// (a crash, or main's win.reload) reuses it, so a language picked since launch
+// would fall back to "follow system" until the next restart. Ask the settings
+// file itself once the page is up.
+void window.api.settings
+  .get<unknown>('lang')
+  .then((saved) => {
+    const stored = parseLangPref(saved)
+    if (stored !== pref.value) pref.value = stored
+  })
+  .catch(() => undefined)
 const systemLang: Lang = langFromLocales(systemLocales())
 /** The language actually shown. */
 const lang = computed<Lang>(() => (pref.value === 'system' ? systemLang : pref.value))
