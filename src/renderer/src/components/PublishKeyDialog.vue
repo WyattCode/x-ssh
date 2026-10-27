@@ -1,10 +1,9 @@
 <script setup lang="ts">
-import { nextTick, onMounted, ref, reactive, computed, watch } from 'vue'
+import { nextTick, ref, reactive, computed, watch } from 'vue'
 import { useFocusTrap } from '../composables/focusTrap'
 
 const dialogEl = ref<HTMLElement>()
 useFocusTrap(dialogEl, () => store.publishOpen)
-onMounted(() => nextTick(() => dialogEl.value?.focus()))
 import { useSessions } from '../stores/sessions'
 import { useI18n } from '../lib/i18n'
 import type { ManagedKey, Host } from '../../../shared/types'
@@ -12,6 +11,14 @@ import Icon from './Icon.vue'
 
 const store = useSessions()
 const { t } = useI18n()
+// Mounted for the app's lifetime and shown by its own v-if, so an onMounted
+// focus ran once at startup with no element and never again.
+watch(
+  () => store.publishOpen,
+  (open) => {
+    if (open) nextTick(() => dialogEl.value?.focus())
+  }
+)
 
 const keys = ref<ManagedKey[]>([])
 const keyId = ref('')

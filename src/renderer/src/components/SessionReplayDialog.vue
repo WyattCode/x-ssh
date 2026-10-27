@@ -1,15 +1,22 @@
 <script setup lang="ts">
-import { nextTick, onMounted, ref, watch } from 'vue'
+import { nextTick, ref, watch } from 'vue'
 import { useFocusTrap } from '../composables/focusTrap'
 
 const dialogEl = ref<HTMLElement>()
 useFocusTrap(dialogEl, () => store.replayOpen)
-onMounted(() => nextTick(() => dialogEl.value?.focus()))
 import { useSessions } from '../stores/sessions'
 import { useI18n } from '../lib/i18n'
 import Icon from './Icon.vue'
 
 const store = useSessions()
+// Mounted for the app's lifetime and shown by its own v-if, so an onMounted
+// focus ran once at startup with no element and never again.
+watch(
+  () => store.replayOpen,
+  (open) => {
+    if (open) nextTick(() => dialogEl.value?.focus())
+  }
+)
 const { t } = useI18n()
 
 const path = ref('')

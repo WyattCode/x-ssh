@@ -1,4 +1,4 @@
-import { onBeforeUnmount, watch, type Ref } from 'vue'
+import { onBeforeUnmount, onMounted, watch, type Ref } from 'vue'
 
 /**
  * Keeps Tab / Shift+Tab inside a modal element while it is open.
@@ -43,9 +43,17 @@ function focusableWithin(root: HTMLElement): HTMLElement[] {
   )
 }
 
+/** Traps that are open, outermost first. A dialog opened on top of another
+ *  (a confirm over a host editor) must be the only one handling Tab: with both
+ *  listening, the lower trap pulls focus back into a panel the user cannot see,
+ *  and the upper one drags it to its first item again — Tab never moves. */
+const openTraps: object[] = []
+
 export function useFocusTrap(el: Ref<HTMLElement | undefined>, isOpen: () => boolean): void {
+  const token = {}
   function onKeydown(e: KeyboardEvent): void {
     if (e.key !== 'Tab') return
+    if (openTraps[openTraps.length - 1] !== token) return
     const root = el.value
     if (!root) return
     const items = focusableWithin(root)
@@ -79,13 +87,32 @@ export function useFocusTrap(el: Ref<HTMLElement | undefined>, isOpen: () => boo
   // Bind on the document (capture) rather than the element: focus can already
   // have escaped when the trap installs, and a document listener keeps working
   // regardless of where focus currently sits.
-  watch(
-    isOpen,
-    (open) => {
-      if (open) document.addEventListener('keydown', onKeydown, true)
-      else document.removeEventListener('keydown', onKeydown, true)
-    },
-    { immediate: true }
-  )
-  onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown, true))
+  //
+  // Both the first read and the watcher wait for mount: callers tend to declare
+  // the trap above the state it reads (`useFocusTrap(el, () => store.open)`
+  // before `const store = ...`), and touching that binding during setup throws
+  // a TDZ error that Vue swallows — leaving the trap silently uninstalled.
+  let stop: (() => void) | undefined
+  function sync(open: boolean): void {
+    const index = openTraps.indexOf(token)
+    if (open && index === -1) {
+      document.addEventListener('keydown', onKeydown, true)
+      openTraps.push(token)
+    } else if (!open && index !== -1) {
+      document.removeEventListener('keydown', onKeydown, true)
+      openTraps.splice(index, 1)
+    }
+  }
+  onMounted(() => {
+    sync(isOpen())
+    stop = watch(isOpen, sync)
+  })
+  onBeforeUnmount(() => {
+    stop?.()
+    const index = openTraps.indexOf(token)
+    if (index !== -1) {
+      document.removeEventListener('keydown', onKeydown, true)
+      openTraps.splice(index, 1)
+    }
+  })
 }

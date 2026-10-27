@@ -97,7 +97,7 @@
 
 ## 下一步(如果继续)
 - **待亲眼看的**(都只过了 typecheck / 单测):
-  - 设置 → 常规 → 语言那一排四个按钮排不排得下;Codex 里右键「复制」和菜单靠底部时收进窗口;繁体界面整体过一遍。(第十二次会话末记;「桌面版语言」代码在 `f6fef73` 已做完,这四项至今**没在应用里点过**。)
+  - ~~设置 → 常规 → 语言那一排四个按钮排不排得下~~、~~繁体界面整体过一遍~~ 已在应用内点过(第二十三次会话:四个按钮 285px / 容器 296px 不溢出,繁體各页无截断);剩下 Codex 里右键「复制」和菜单靠底部时收进窗口仍未验。
   - **第十五次会话记:host-key 确认卡的三种形态**——首次连接(未信任)、密钥变更、跳板机密钥失败。
     **三种都在应用内点过了**(2026-10-08/09,装好的 0.4.0 + 临时 profile + 回环假 sshd,不碰真实 userData):
     - ① 首次连接(未信任):卡片标题「主机密钥未信任」、按钮「信任此密钥并连接」、正文「127.0.0.1:22600 的主机密钥
@@ -117,6 +117,33 @@
 - 按用户截图式 UI 反馈继续修复。
 - 如版本号增加,改 `package.json` + 更新 `CHANGELOG.md` 后 `npm.cmd run dist` 重打包。
 - 大规模改动前先跑 `npm.cmd run typecheck && npm.cmd run build` 与 `npm.cmd run lint:i18n` 保证通过。
+
+# 会话记录:第二十三次会话(2026-10-27,实测第二十二次会话的焦点陷阱:三处缺陷)
+
+用户让接着干,于是去验第二十二次会话自称"已接 12 处"、却**一次都没在界面里点过**的那批交互。手法:构建产物 + 临时 profile(`--user-data-dir=%TEMP%\x-ssh-verify-23`,调试端口 9222,不碰真实 userData),用真实 Tab / Esc 键点,`document.activeElement` 判读。**结论:那 12 处里有 7 处根本没装上,而且装上的也有互抢问题。**
+
+1. **【高】7 个组件的焦点陷阱从未安装。** 启动时控制台固定 7 条 `ReferenceError: Cannot access 'store' before initialization`。根因:第 22 次把 `useFocusTrap(...)` 写在 `const store = useSessions()` **之前**,而 composable 里 `watch(isOpen, cb, { immediate: true })` 会立刻求值 `() => store.paletteOpen`,抛 TDZ;Vue 把 effect 里的异常吞成 console.error,setup 继续执行,**监听却再也没装上**(依赖收集也一并断了)。受影响的是 CommandPalette、ConfirmDialog、HistorySearch、TmuxDialog 等 7 处。修在 composable 本身:首次读取和 watcher 都挪进 `onMounted`,调用方一行不动,也堵住以后再把 trap 写在状态声明前面的可能。
+2. **【中】嵌套陷阱互抢,Tab 卡在第一个按钮。** 确认框叠在主机编辑器上时,两个 document 捕获监听同时生效:先注册的编辑器陷阱把焦点拽回面板(它认为"焦点跑出去了"),确认框陷阱又把焦点拽回自己第一个按钮 —— 反复按 Tab 始终停在"取消",永远到不了"放弃修改"。修:模块级 `openTraps` 栈,只有栈顶处理 Tab(打开入栈、关闭/卸载出栈)。
+3. **【中】确认框关闭后焦点落回 body。** `ConfirmDialog` 是全局宿主,关闭时把当前聚焦的按钮连同 DOM 一起摘掉;触发它的对话框还开着、Esc 监听在它自己的面板上,于是键盘彻底失效。实测路径:编辑器改字段 → Esc 弹确认(焦点正确落在"取消",danger 保护没问题)→ Esc 取消 → 编辑器还在,但 Esc 和打字都没反应。修:打开时记下 `document.activeElement`,关闭后 `nextTick` 回填,`isConnected` 防调用方已关闭,队列里有下一个确认时不抢。
+
+**实测通过**(构建产物 + 真实按键):编辑器首尾 Tab / Shift+Tab 折返;确认框内 Tab 在两个按钮间往返并折返;取消后焦点回到"名称"输入框、再按 Esc 能重新弹出确认;命令面板 Tab 从最后一行折回搜索框、Shift+Tab 从搜索框折回最后一行;设置 → 语言四个按钮总宽 285px、容器 296px,**不溢出**;切繁體后侧栏 / 设置 / 连接埠轉送 / 終端機各页即时切换,溢出审计(所有可见元素的 `scrollWidth > clientWidth`)为空;语言落盘并在**重启**后生效。
+
+**已知、这轮没修**:渲染层 reload(主进程 `win.reload()`,渲染进程崩溃后走这条路)复用的是**创建窗口那一刻**的 `prefs`,所以语言会退回"跟随系统",直到下次重启;设置本身没丢(`settings.json` 里 `lang` 是正确的)。修它要动启动偏好那条路。另:设置页只在当前窗口宽度(1440)下量过,没测更窄的窗口。
+
+验证:`typecheck`、`vitest 324`、`build`、`lint:i18n` 全绿。
+
+## 续(同日):第二轮审核 + 修掉四条
+
+三条并行只读审核(焦点/覆层、渲染层交互、主进程与共享)加逐条亲自核实。**误报一条**:自动备份用 `exportJson(true)` 被报成缺陷,其实是 `store.ts:175` 注释写明有意为之(定时备份要在锁定时也能跑);真正的小瑕疵只是 `writeFile` 没传 `mode`。确认的问题里先修了四条。
+
+1. **全局快捷键没有模态判断(最高危)**:对话框开着时按 Ctrl+K,面板会在它**底下**打开(z-index 100 对 110~130),焦点被搬进看不见的搜索框,打字进那里、回车可能连上一台主机,可见对话框的 Esc / Tab 全失效。新增 `src/renderer/src/lib/modals.ts`(集中列出所有覆层根类名,导出 `modalCount()`),`App.vue` 的 `onGlobalKey` 在有模态时一律不处理快捷键(`effective()` 随之前移到数字跳转之前),唯一例外是只开着面板时它自己的开关快捷键。注意:焦点在输入框里时 `inEditable` 本来就会先返回,所以"面板里 Ctrl+K 关不掉"是原有行为,不是回归。
+2. **三个对话框焦点从未进入**:`ForwardDialog` / `PublishKeyDialog` / `SessionReplayDialog` 常驻挂载、内部 `v-if` 显隐,`onMounted` 那次 focus 跑在启动时、`dialogEl` 还是 undefined。改成 `watch(openFlag)` 后 `nextTick` 聚焦。实测发布公钥与会话回放打开后焦点都在 `.kp-dialog` / `.rp-dialog` 内。
+3. **确认框队列跳过 danger 焦点**:`answer()` 置 `open=false`、`present()` 又置回 `true` 在同一个 tick,`watch(open)` 新旧值都是 `true`,回调根本不跑,排队进来的第二条(可能是删除确认)会继承上一条"确定"按钮的焦点。`confirm.ts` 的 state 加 `seq`(每次 `present` 自增),宿主改为盯 `seq` 设焦点、单独盯 `open` 做关闭回填。
+4. **多行粘贴确认后用了死的 `term`**:`TerminalView.pasteClipboard` 在 `await confirm(...)` 之后直接用 `term`,期间会话掉线 / 标签关闭会抛 TypeError 或粘进已替换的会话。取消分支改 `term?.focus()`,粘贴前加 `if (!term) return`。
+
+**审核剩余未修**(逐条已核实,按我建议的顺序排):确认框回填在 opener 已移除时落空(SFTP 菜单里删除);`hosts.save` 在 `HostEditor` / `CommandPalette` 无 try/catch(磁盘满或 hosts 损坏时静默失败);快捷键录制只按修饰键也能存成死键;上传时远端大小相同就跳过(内容改了也不传)、下载只按大小续传(可能拼坏文件);`local:readText` 无大小上限;跳板机 `forwardOut`、`execRemote` 无超时;`sftp:openWith` 直接 spawn 渲染层给的路径;`SftpDrawer` 几处输入框缺 IME 守卫、本地面板没有序号守卫;设置 / 文本编辑器 / 片段变量框与抽屉内几个弹窗仍无焦点陷阱。
+
+验证:typecheck(node+web)、`vitest 324`、build 全绿;应用内临时 profile(`%TEMP%\x-ssh-verify-24`,端口 9223)实测:无模态时 Ctrl+K 正常开关、有主机编辑器且焦点在按钮上时 Ctrl+K 不再弹出、两个对话框打开即获得焦点。临时 profile 与进程已清理。
 
 # 会话记录:第二十二次会话(2026-10-17 凌晨,"全面修复":收掉第三轮记录的低危项)
 

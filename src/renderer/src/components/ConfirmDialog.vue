@@ -9,14 +9,43 @@ const { state, answer } = useConfirm()
 const okEl = ref<HTMLButtonElement>()
 const cancelEl = ref<HTMLButtonElement>()
 
+// Closing removes the focused button from the DOM, and the dialog that raised
+// the confirm usually stays open with a keydown.esc listener on its own root —
+// so without this, cancelling a confirm leaves focus on <body> and the caller
+// stops answering Esc or typing.
+let returnFocusEl: HTMLElement | null = null
+
+// Watch the presented item, not `open`: a queued confirm swaps in while `open`
+// stays true (answer() and present() run in the same tick), so watching `open`
+// missed it and the new — possibly destructive — confirm inherited the focus of
+// the previous one, with Enter sitting on its destructive button.
 watch(
-  () => state.open,
-  (o) => {
+  () => state.seq,
+  () => {
+    if (!state.open) return
+    if (!returnFocusEl) {
+      const active = document.activeElement
+      returnFocusEl = active instanceof HTMLElement && active !== document.body ? active : null
+    }
     // A destructive confirm must not have Enter land on the destructive
     // button: focus Cancel instead (matching how the host editor keeps its
     // delete action off the primary slot).
-    if (!o) return
     nextTick(() => (state.danger ? cancelEl.value : okEl.value)?.focus())
+  },
+  { immediate: true }
+)
+
+watch(
+  () => state.open,
+  (open) => {
+    if (open) return
+    const back = returnFocusEl
+    returnFocusEl = null
+    // A queued confirm may already be presenting; don't pull focus back to the
+    // dialog underneath it.
+    nextTick(() => {
+      if (!state.open && back?.isConnected) back.focus()
+    })
   }
 )
 </script>

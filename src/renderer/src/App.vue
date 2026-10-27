@@ -11,6 +11,7 @@ import {
 } from 'vue'
 import { useSessions } from './stores/sessions'
 import { appMod, isMac } from './composables/platform'
+import { modalCount } from './lib/modals'
 import TabBar from './components/TabBar.vue'
 import CommandPalette from './components/CommandPalette.vue'
 import HostEditor from './components/HostEditor.vue'
@@ -212,6 +213,18 @@ function onGlobalKey(e: KeyboardEvent): void {
   // Don't hijack typing in form fields (editors, rename, search…).
   if (inEditable) return
 
+  const effective = (id: string): string => store.keybindings[id] ?? DEFAULT_BINDINGS[id as RebindableAction]
+
+  // A dialog owns the keyboard while it is up: firing a shortcut behind it acts
+  // on something the user cannot see (the palette opens *under* the editor, so
+  // typing lands in a hidden search box). The palette is the one exception —
+  // its own chord closes it again.
+  const modals = modalCount()
+  if (modals > 0) {
+    const paletteChord = chordMatches(e, effective('palette')) || chordMatches(e, effective('palette2'))
+    if (!(store.paletteOpen && modals === 1 && paletteChord)) return
+  }
+
   // Number-jump and terminal copy/paste are hard-wired (not rebindable).
   // ⌘ on macOS, Ctrl elsewhere — leaves Ctrl+1..9 free for the shell on macOS.
   const mod = appMod(e)
@@ -226,10 +239,8 @@ function onGlobalKey(e: KeyboardEvent): void {
     return
   }
 
-  // Resolve the effective chord for each rebindable action (user override or
-  // default) and dispatch to a handler when the key matches. Ctrl+W respects a
-  // live terminal (werase) via a flag on the handler.
-  const effective = (id: string): string => store.keybindings[id] ?? DEFAULT_BINDINGS[id as RebindableAction]
+  // Dispatch a matching chord to its handler. Ctrl+W respects a live terminal
+  // (werase) via a flag on the handler.
   // Terminals stay mounted behind the other pages; the shortcuts that act on
   // one (close, split, focus…) only apply where you can see it.
   const onTerm = store.page === 'terminal'

@@ -1,10 +1,9 @@
 <script setup lang="ts">
-import { nextTick, onMounted, reactive, computed, ref } from 'vue'
+import { nextTick, reactive, computed, ref, watch } from 'vue'
 import { useFocusTrap } from '../composables/focusTrap'
 
 const dialogEl = ref<HTMLElement>()
 useFocusTrap(dialogEl, () => store.forwardOpen)
-onMounted(() => nextTick(() => dialogEl.value?.focus()))
 import { useSessions } from '../stores/sessions'
 import { useI18n } from '../lib/i18n'
 import { useConfirm } from '../composables/confirm'
@@ -14,6 +13,14 @@ import Icon from './Icon.vue'
 const store = useSessions()
 const { t } = useI18n()
 const { confirm } = useConfirm()
+// Mounted for the app's lifetime and shown by its own v-if, so an onMounted
+// focus ran once at startup with no element and never again.
+watch(
+  () => store.forwardOpen,
+  (open) => {
+    if (open) nextTick(() => dialogEl.value?.focus())
+  }
+)
 
 const list = computed(() => store.activePane?.params.portForwards ?? [])
 const modeLabel = (m?: ForwardMode): string =>

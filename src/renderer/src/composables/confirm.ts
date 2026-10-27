@@ -14,6 +14,9 @@ interface ConfirmState extends Required<ConfirmOptions> {
   open: boolean
   message: string
   resolve: ((v: boolean) => void) | null
+  /** Bumped for every presented item. Queued confirms swap in while `open`
+   *  stays true, so the host cannot see them by watching `open` alone. */
+  seq: number
 }
 
 interface Queued {
@@ -33,7 +36,8 @@ const state = reactive<ConfirmState>({
   confirmText: t('confirm.ok'),
   cancelText: t('confirm.cancel'),
   danger: false,
-  resolve: null
+  resolve: null,
+  seq: 0
 })
 const queue: Queued[] = []
 
@@ -44,6 +48,7 @@ function present(item: Queued): void {
   state.cancelText = item.opts.cancelText ?? t('confirm.cancel')
   state.danger = item.opts.danger ?? false
   state.open = true
+  state.seq++
 }
 
 export function useConfirm(): {

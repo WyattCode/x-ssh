@@ -115,10 +115,13 @@ async function pasteClipboard(): Promise<void> {
       { title: t('term.pasteConfirmTitle'), confirmText: t('term.pasteConfirmOk'), cancelText: t('term.cancel') }
     )
     if (!ok) {
-      term.focus()
+      term?.focus()
       return
     }
   }
+  // The session can go away while the confirm is up (drop, tab closed, pane
+  // reconnecting tears this view down with it) — don't paste into a dead one.
+  if (!term) return
   term.paste(clean)
   term.focus()
 }
