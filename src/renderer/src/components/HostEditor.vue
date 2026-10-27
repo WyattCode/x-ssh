@@ -349,7 +349,14 @@ async function save(): Promise<void> {
   // previously saved secret untouched (empty → undefined, store won't overwrite).
   const pw = form.auth === 'password' && password.value ? password.value : undefined
   const pp = form.auth === 'key' && passphrase.value ? passphrase.value : undefined
-  store.hosts = await window.api.hosts.save(host, pw, pp)
+  try {
+    store.hosts = await window.api.hosts.save(host, pw, pp)
+  } catch {
+    // Main rejects when the hosts file cannot be written (disk full, unreadable
+    // file). Without this the panel just sat there with nothing said.
+    toast(t('ed.saveFail'), 'error')
+    return
+  }
   emit('close')
 }
 

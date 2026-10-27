@@ -47,6 +47,8 @@ watch(selected, () => {
 const pending = ref<{ params: ConnectParams; title: string } | null>(null)
 const password = ref('')
 const remember = ref(true)
+/** One connect per prompt: a second Enter (or a slow save) must not open two. */
+const submitting = ref(false)
 const pwEl = ref<HTMLInputElement>()
 
 // Inline broadcast-command prompt state.
@@ -345,14 +347,29 @@ function activate(item: Item): void {
 }
 
 async function submitPassword(): Promise<void> {
-  if (!pending.value) return
-  const { params, title } = pending.value
-  // Persist the password to the host (encrypted) so we don't prompt next time.
-  if (remember.value && params.hostId && password.value) {
-    const h = store.hosts.find((x) => x.id === params.hostId)
-    if (h) store.hosts = await window.api.hosts.save({ ...toRaw(h) }, password.value)
+  // Enter can arrive twice while the first attempt is still saving/writing —
+  // without this each press started its own connection.
+  if (!pending.value || submitting.value) return
+  submitting.value = true
+  try {
+    const { params, title } = pending.value
+    // Persist the password to the host (encrypted) so we don't prompt next time.
+    if (remember.value && params.hostId && password.value) {
+      const h = store.hosts.find((x) => x.id === params.hostId)
+      if (h) {
+        try {
+          store.hosts = await window.api.hosts.save({ ...toRaw(h) }, password.value)
+        } catch {
+          // Remembering it is a convenience; connect anyway and say why it
+          // wasn't saved instead of dropping the connect on the floor.
+          toast(t('ed.saveFail'), 'error')
+        }
+      }
+    }
+    connect({ ...params, password: password.value }, title)
+  } finally {
+    submitting.value = false
   }
-  connect({ ...params, password: password.value }, title)
 }
 
 function openBroadcast(): void {

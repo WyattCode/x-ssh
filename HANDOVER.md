@@ -141,7 +141,9 @@
 3. **确认框队列跳过 danger 焦点**:`answer()` 置 `open=false`、`present()` 又置回 `true` 在同一个 tick,`watch(open)` 新旧值都是 `true`,回调根本不跑,排队进来的第二条(可能是删除确认)会继承上一条"确定"按钮的焦点。`confirm.ts` 的 state 加 `seq`(每次 `present` 自增),宿主改为盯 `seq` 设焦点、单独盯 `open` 做关闭回填。
 4. **多行粘贴确认后用了死的 `term`**:`TerminalView.pasteClipboard` 在 `await confirm(...)` 之后直接用 `term`,期间会话掉线 / 标签关闭会抛 TypeError 或粘进已替换的会话。取消分支改 `term?.focus()`,粘贴前加 `if (!term) return`。
 
-**审核剩余未修**(逐条已核实,按我建议的顺序排):确认框回填在 opener 已移除时落空(SFTP 菜单里删除);`hosts.save` 在 `HostEditor` / `CommandPalette` 无 try/catch(磁盘满或 hosts 损坏时静默失败);快捷键录制只按修饰键也能存成死键;上传时远端大小相同就跳过(内容改了也不传)、下载只按大小续传(可能拼坏文件);`local:readText` 无大小上限;跳板机 `forwardOut`、`execRemote` 无超时;`sftp:openWith` 直接 spawn 渲染层给的路径;`SftpDrawer` 几处输入框缺 IME 守卫、本地面板没有序号守卫;设置 / 文本编辑器 / 片段变量框与抽屉内几个弹窗仍无焦点陷阱。
+**第二批(同日晚)**:① 确认框关闭后若 opener 已被移除(菜单项、刚被删掉的行)或已禁用,焦点仍会掉到 body —— `modals.ts` 加 `focusFallbackSurface()`(最上面一个 `[tabindex="-1"]`,兜底到 SFTP 抽屉根),`ConfirmDialog` 只在 opener 真可用时才回填;② `hosts.save` 在两处都没有 try/catch,磁盘满 / hosts 损坏时面板不关、毫无提示 —— `HostEditor` 改为 toast `ed.saveFail` 并留在面板里,`CommandPalette` 提示后照样用输入的密码连接(顺手加 `submitting` 守卫:连按两次回车原来会开两条连接)。正常路径实测:编辑器改字段 → Esc → Esc 取消后焦点仍在"名称";兜底路径只做代码确认(没造出 opener 被移除的场景)。
+
+**审核剩余未修**:快捷键录制只按修饰键也能存成死键;上传时远端大小相同就跳过(内容改了也不传)、下载只按大小续传(可能拼坏文件);`local:readText` 无大小上限;跳板机 `forwardOut`、`execRemote` 无超时;`sftp:openWith` 直接 spawn 渲染层给的路径;`SftpDrawer` 几处输入框缺 IME 守卫、本地面板没有序号守卫;设置 / 文本编辑器 / 片段变量框与抽屉内几个弹窗仍无焦点陷阱。
 
 验证:typecheck(node+web)、`vitest 324`、build 全绿;应用内临时 profile(`%TEMP%\x-ssh-verify-24`,端口 9223)实测:无模态时 Ctrl+K 正常开关、有主机编辑器且焦点在按钮上时 Ctrl+K 不再弹出、两个对话框打开即获得焦点。临时 profile 与进程已清理。
 

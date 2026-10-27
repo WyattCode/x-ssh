@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { watch, nextTick, ref } from 'vue'
 import { useFocusTrap } from '../composables/focusTrap'
+import { focusFallbackSurface } from '../lib/modals'
 const trapEl = ref<HTMLElement>()
 useFocusTrap(trapEl, () => state.open)
 import { useConfirm } from '../composables/confirm'
@@ -44,7 +45,19 @@ watch(
     // A queued confirm may already be presenting; don't pull focus back to the
     // dialog underneath it.
     nextTick(() => {
-      if (!state.open && back?.isConnected) back.focus()
+      if (state.open) return
+      // The opener can be gone by now — a menu item that closed with the menu,
+      // a row this confirm just deleted — or left disabled while it ran.
+      const usable =
+        !!back &&
+        back.isConnected &&
+        back.getClientRects().length > 0 &&
+        !(back as HTMLButtonElement).disabled
+      if (usable) {
+        back!.focus()
+        if (document.activeElement === back) return
+      }
+      focusFallbackSurface()
     })
   }
 )
