@@ -11,6 +11,7 @@
 ## 常用命令(Windows/PowerShell)
 - 必须用 `npm.cmd`(直接 `npm` 会因执行策略失败)。
 - 校验: `npm.cmd run typecheck`、`npm.cmd run build`
+- **本地 SFTP 靶机**:`powershell -File scripts\dev-sshd.ps1 start|stop|status|clean`。密钥、配置、`authorized_keys` 全在 `%TEMP%\xssh-target`,只绑 `127.0.0.1:2222`,**不碰 `%USERPROFILE%\.ssh`**;客户端私钥是 `%TEMP%\xssh-target\id_dev`(主机编辑页「密钥」直接填这个路径),登录用户是你当前 Windows 账号。配置里**不能写 `PerSourcePenalties`**(Windows 自带的 OpenSSH 是 9.x,不认识,写了 sshd 直接起不来)。脚本按 PID 文件停进程 —— 别自己按命令行匹配杀,会把执行命令的 PowerShell 一起匹配掉。
 - **单元测试**: `npm.cmd run test`(Vitest 2;共 **295** 用例:纯逻辑在 `src/shared/*` / `src/renderer/src/lib/*`,外加 `src/main/*.test.ts` 的集成测试(起真 ssh2 服务器)。**没有任何组件测试**,界面交互只能人工验。
 - **i18n 键对称校验**: `npm.cmd run lint:i18n`(现在串跑两个脚本:桌面端 `scripts/lint-i18n.mjs` + 移动端 `scripts/lint-i18n-mobile.mjs`;桌面端 zh / zh-TW / en 722/722/722 全对称,移动端三份资源对称且代码里 0 条内联中文)。
 - **发版流程**:升 `package.json`/lock(`npm.cmd version x.y.z --no-git-tag-version`,会把 `schemes` 那行重排,手动还原)+ CHANGELOG → 提交推 `main` → `git tag vx.y.z` 并推 tag;CI(`ci.yml` 的 `release` 作业,windows-latest,约 8 分钟)自动建 GitHub Release 并挂 `X-SSH.Setup.x.y.z.exe` + `.blockmap`。**安卓不在这条流水线里**,APK 只能本机 `installDebug`。
@@ -151,7 +152,7 @@
 
 **第六批(本地面板的竞态)**:`refreshLocal` 没有远端 `load()` 已有的序号守卫,连点进入两级目录时,先发出的旧响应后到会把 `localPath` / `localEntries` 刷回旧目录,之后的上传 / 删除就作用在错的目录上。加 `localSeq`,过期响应直接丢弃(连 loading 标志也不回写)。
 
-**第七批(上传/下载的判定)**:① 上传默认策略下原来只要 `remoteSize === localSize` 就跳过——改一个字符长度不变,远端永远不更新,界面还报成功。新增 `statFile()`(大小 + mtime),现在**同尺寸且远端不早于本地**(给 1 秒余量,SFTP 的 mtime 只有秒级)才跳过;本地更新则覆盖。② 下载原来只要本地文件更小就无条件追加,而"更小"可能是一个**旧版本**的完整文件,拼出来是坏的。新增 `partialDownloads`(键 `sessionId\0remotePath`),只有"本进程自己中断过、且远端大小与 mtime 都没变"才续传,否则删掉本地从头下;失败分支写记录、成功清除。**实测**(本地临时 sshd 靶机 + 应用内调用 `sftp.uploadPaths`):本地 4 字节 `AAAA` 上传后远端为 `AAAA`;改成同样 4 字节的 `BBBB` 再传,远端变 `BBBB`(旧实现会跳过);内容不变的第三次上传,远端 mtime 一点没动(确认是跳过而非重传)。下载的续传判定**没有实测**(要制造一次中断)。
+**第七批(上传/下载的判定)**:① 上传默认策略下原来只要 `remoteSize === localSize` 就跳过——改一个字符长度不变,远端永远不更新,界面还报成功。新增 `statFile()`(大小 + mtime),现在**同尺寸且远端不早于本地**(给 1 秒余量,SFTP 的 mtime 只有秒级)才跳过;本地更新则覆盖。② 下载原来只要本地文件更小就无条件追加,而"更小"可能是一个**旧版本**的完整文件,拼出来是坏的。新增 `partialDownloads`(键 `sessionId\0remotePath`),只有"本进程自己中断过、且远端大小与 mtime 都没变"才续传,否则删掉本地从头下;失败分支写记录、成功清除。**实测**(本地临时 sshd 靶机 + 应用内调用 `sftp.uploadPaths`):本地 4 字节 `AAAA` 上传后远端为 `AAAA`;改成同样 4 字节的 `BBBB` 再传,远端变 `BBBB`(旧实现会跳过);内容不变的第三次上传,远端 mtime 一点没动(确认是跳过而非重传)。下载的续传判定**没有实测**:想用 `sftp.downloadTo` 从 eval 里直接试,但目标位置已有同名文件时主进程会弹**原生覆盖确认框**,没人点它,调用就挂到超时(本地文件一个字节都没动)。要验只能从 SFTP 抽屉的界面走、由人点掉那个框;或者先给这条通道加一个"测试用不询问"的入口。`openWith` 的正向打开同样没验(需要在设置里配一个程序且不重载页面,才能从右键菜单触发)。
 
 **第八批(上传结果不再撒谎)**:上一批顺带发现"上传一个不存在的本地路径返回 `{ ok: true, count: 1 }`"。根因:`uploadJob` 里 `walk()` 对 `stat` 失败的路径只 `failures++` 然后跳过,而这些计数**从未返回**;IPC 一律 `return { ok: true, count: paths.length }`(按请求数,不按成功数)。现在 `uploadJob` 返回 `{ files, failures }`,四处调用点(选文件上传 / 上传目录 / 上传指定路径 / 上传并解压)改成 `failures > 0` 就 `ok: false` + `error: "N 个文件失败"`,`count` 用真正的成功数;上传并解压那条在失败时不再继续解压。**实测**(临时靶机 + 应用内调用):不存在的路径 → `{ ok: false, count: 0, error: "1 个文件失败" }`;真实文件 → `{ ok: true, count: 1 }`。
 
