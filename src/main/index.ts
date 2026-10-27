@@ -1484,7 +1484,7 @@ function registerIpc(): void {
       if (res.canceled || !res.filePath) return { ok: false, canceled: true }
       try {
         // Save-As: one file into the chosen path (dir + chosen basename).
-        await requireSshManager().downloadJob(
+        const r = await requireSshManager().downloadJob(
           sessionId,
           [{ path: remotePath, name: basename(res.filePath), isDir: false }],
           dirname(res.filePath),
@@ -1493,6 +1493,8 @@ function registerIpc(): void {
           await defaultTransferRate(),
           await verifyChecksumsEnabled()
         )
+        if (r.cancelled) return { ok: false, canceled: true }
+        if (r.failures) return { ok: false, error: `${r.failures} 个文件失败` }
         return { ok: true }
       } catch (e) {
         return { ok: false, error: friendlyError((e as Error).message) }
@@ -1540,8 +1542,10 @@ function registerIpc(): void {
         return { ok: false, canceled: true }
       }
       try {
-        await sshManager.downloadJob(sessionId, items, res.filePaths[0], randomUUID(), concurrency, await defaultTransferRate(), await verifyChecksumsEnabled())
-        return { ok: true, count: items.length }
+        const r = await sshManager.downloadJob(sessionId, items, res.filePaths[0], randomUUID(), concurrency, await defaultTransferRate(), await verifyChecksumsEnabled())
+        if (r.cancelled) return { ok: false, canceled: true }
+        if (r.failures) return { ok: false, error: `${r.failures} 个文件失败` }
+        return { ok: true, count: r.files }
       } catch (e) {
         return { ok: false, error: friendlyError((e as Error).message) }
       }
@@ -1579,8 +1583,10 @@ function registerIpc(): void {
         return { ok: false, canceled: true }
       }
       try {
-        await sshManager.downloadJob(sessionId, items, targetDir, randomUUID(), concurrency, await defaultTransferRate(), await verifyChecksumsEnabled())
-        return { ok: true, count: items.length }
+        const r = await sshManager.downloadJob(sessionId, items, targetDir, randomUUID(), concurrency, await defaultTransferRate(), await verifyChecksumsEnabled())
+        if (r.cancelled) return { ok: false, canceled: true }
+        if (r.failures) return { ok: false, error: `${r.failures} 个文件失败` }
+        return { ok: true, count: r.files }
       } catch (e) {
         return { ok: false, error: friendlyError((e as Error).message) }
       }

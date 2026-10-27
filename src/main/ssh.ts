@@ -1837,7 +1837,7 @@ export class SshManager {
     concurrency?: number,
     rateBytesPerSec = 0,
     verifyChecksums = false
-  ): Promise<void> {
+  ): Promise<{ files: number; failures: number; cancelled: boolean }> {
     this.jobSession.set(jobId, sessionId)
     if (rateBytesPerSec > 0) this.jobRate.set(jobId, rateBytesPerSec)
     // If the SFTP channel can't be opened the job never emits a terminal event,
@@ -1998,13 +1998,15 @@ export class SshManager {
         walkDone = true
       }
     })()
+    let cancelled = false
     try {
       // Promise.all up front: awaiting walkP first would leave a worker
       // rejection unhandled until we got here.
       const workers = Promise.all(Array.from({ length: conc }, () => worker()))
       await walkP
       await workers
-      if (this.cancelledJobs.has(jobId)) {
+      cancelled = this.cancelledJobs.has(jobId)
+      if (cancelled) {
         emit(label, false, SshManager.CANCELLED_TEXT)
       } else if (walkError) {
         emit(label, false, friendlyError((walkError as Error).message), true)
@@ -2023,6 +2025,9 @@ export class SshManager {
       this.jobSession.delete(jobId)
       this.lastProgressAt.delete(jobId)
     }
+    // Callers report these: a cancelled or failed download used to come back to
+    // the renderer as ok with the item count.
+    return { files: filesDone, failures: failures.length, cancelled }
   }
 
   /** Compares a just-downloaded file's SHA-256 against the remote copy.
