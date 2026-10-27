@@ -161,6 +161,14 @@
 
 **清理靶机的坑(记下来省下次)**:杀 sshd 别用 `Stop-Process` 按 `Path -like '*OpenSSH*'` 过滤(部分进程 `Path` 为空,杀不到),也别按命令行匹配 `xssh-target` —— **会把正在执行这条命令的 PowerShell 自己也匹配上**、当场把命令打断。按进程名 `sshd.exe` 精确匹配,或直接用记下的 PID。
 
+**第十批(用靶机把剩下的两条验完,并修掉顺手发现的第三条)**:
+
+- **`openWith` 正向**验过:把 `externalEditor` 设成 `notepad.exe` 后,`sftp:openWith` 传记事本 → `ok: true` 且**进程真的起来了**(`Get-Process notepad` 能看到);同一调用传 `cmd.exe` → `程序没有在设置中配置`。
+- **下载中断续传**验过:远端 200 MB,传输中调 `sftp.cancel(jobId)`(jobId 从 `onProgress` 里抓),留下 148,570,112 字节的部分文件;再下一次 → 209,715,200 字节且与远端 SHA-256 一致。**前提是目标目录已存在**(见下一条),取消后部分文件会保留(设计如此)。
+- **新发现并修**:下载到**不存在**的目标目录时,`downloadJob` 直接 `createWriteStream(join(localBase, name))`,ENOENT 被每个文件的 catch 记进 `failures`,而 IPC 无条件 `return { ok: true, count }` —— 现象是"报成功、一个字节没写、连目录都没建"。`downloadJob` 开头补 `mkdir(localBase, { recursive: true })`(续传队列指向被删掉的目录、拖到新文件夹都会碰到)。**这条只过了 typecheck,没重跑实测**。
+- **新发现、未修**:被**取消**的传输同样返回 `ok: true, count: N`(下载的失败/取消都没有反映到返回值里,和上传那条是同一类问题,上传已修、下载没修)。
+- 靶机清理的最终正确姿势:`scripts\dev-sshd.ps1 clean`;杀应用按 `Name -eq 'electron.exe'` 且命令行含临时 profile 目录;**别按命令行匹配 `xssh-target`**——会把跑命令的 PowerShell 自己杀掉。
+
 **审核剩余未修**:跳板机 `forwardOut`、`execRemote` 无超时;`SftpDrawer` 几处输入框缺 IME 守卫、本地面板没有序号守卫;设置 / 文本编辑器 / 片段变量框与抽屉内几个弹窗仍无焦点陷阱;`recordChord` 的冲突检测没算硬编码键位(Mod+1..9、终端里的 Ctrl+C / Ctrl+V)。
 
 验证:typecheck(node+web)、`vitest 324`、build 全绿;应用内临时 profile(`%TEMP%\x-ssh-verify-24`,端口 9223)实测:无模态时 Ctrl+K 正常开关、有主机编辑器且焦点在按钮上时 Ctrl+K 不再弹出、两个对话框打开即获得焦点。临时 profile 与进程已清理。

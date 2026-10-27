@@ -1848,6 +1848,11 @@ export class SshManager {
     })
     const conc = clampConcurrency(concurrency ?? SshManager.CONCURRENCY, SshManager.CONCURRENCY)
     const label = items.length === 1 ? items[0].name : `${items.length} 项`
+    // The target folder is not guaranteed to exist: a resumed queue may point at
+    // a directory the user deleted, and dragging onto a new folder passes one
+    // that was never made. Without this every write failed with ENOENT and the
+    // job still reported success, having written nothing.
+    await mkdir(this.longPath(localBase), { recursive: true }).catch(() => undefined)
     let bytesDone = 0
     let filesDone = 0
     let discovered = 0
