@@ -145,7 +145,9 @@
 
 **第三批**:快捷键录制只按修饰键(Ctrl+Shift)会存成 `Mod+Shift+Shift` 这种永远匹配不上的死键,而它已经把原默认键位覆盖了 —— `SettingsDialog.recordChord` 现在遇到纯修饰键直接返回、继续等真正的键。实测:录制中按 Ctrl+Shift 仍停在"请按下新组合键…"、绑定未变;按 Ctrl+Alt+J 正常写入。注:应用工具按不了纯修饰键,这一条是用合成 `keydown` 事件在渲染层验证的。
 
-**审核剩余未修**:上传时远端大小相同就跳过(内容改了也不传)、下载只按大小续传(可能拼坏文件);`local:readText` 无大小上限;跳板机 `forwardOut`、`execRemote` 无超时;`sftp:openWith` 直接 spawn 渲染层给的路径;`SftpDrawer` 几处输入框缺 IME 守卫、本地面板没有序号守卫;设置 / 文本编辑器 / 片段变量框与抽屉内几个弹窗仍无焦点陷阱;`recordChord` 的冲突检测没算硬编码键位(Mod+1..9、终端里的 Ctrl+C / Ctrl+V)。
+**第四批(主进程防御)**:① `local:readText` 无大小上限,对一个大文件做"与本地比较"会把整个文件读进主进程内存 —— 加 2 MB 上限(与远端 `sftpReadText` 同一阈值),超限返回"文件过大"。② `sftp:openWith` 把渲染层给的程序路径直接 `spawn`,等于该通道可以运行机器上任意程序 —— 现在只允许设置里存过的程序(`externalEditor` 与 `fileOpeners` 的值),否则拒绝;`openWith` 与 `editExternal` 的 `name` 也加了单段校验(`basename(name) === name`),防止拼出临时目录外的路径。渲染层实际只传 `store.fileOpeners[ext]`,行为不变。
+
+**审核剩余未修**:上传时远端大小相同就跳过(内容改了也不传)、下载只按大小续传(可能拼坏文件);跳板机 `forwardOut`、`execRemote` 无超时;`SftpDrawer` 几处输入框缺 IME 守卫、本地面板没有序号守卫;设置 / 文本编辑器 / 片段变量框与抽屉内几个弹窗仍无焦点陷阱;`recordChord` 的冲突检测没算硬编码键位(Mod+1..9、终端里的 Ctrl+C / Ctrl+V)。
 
 验证:typecheck(node+web)、`vitest 324`、build 全绿;应用内临时 profile(`%TEMP%\x-ssh-verify-24`,端口 9223)实测:无模态时 Ctrl+K 正常开关、有主机编辑器且焦点在按钮上时 Ctrl+K 不再弹出、两个对话框打开即获得焦点。临时 profile 与进程已清理。
 

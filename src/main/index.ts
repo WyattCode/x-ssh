@@ -1245,6 +1245,10 @@ function registerIpc(): void {
       // listed directory. Normalize, and refuse embedded NULs.
       const target = resolveDir(p)
       if (!target) return { ok: false, error: '路径无效' }
+      // Same ceiling as the remote side (sftpReadText): this feeds the compare
+      // view, and an unbounded read of a big file stalls the whole main process.
+      const info = await stat(target)
+      if (info.size > 2 * 1024 * 1024) return { ok: false, error: '文件过大(超过 2 MB),无法在此处打开' }
       const content = await readFile(target, 'utf8')
       return { ok: true, content }
     } catch (e) {
@@ -1817,6 +1821,10 @@ function registerIpc(): void {
     IPC.sftpEditExternal,
     async (_e, sessionId: string, remotePath: string, name: string) => {
       try {
+        // `name` becomes a path segment under the temp dir — keep it one segment.
+        if (!name || name === '.' || name === '..' || basename(name) !== name) {
+          return { ok: false, error: '文件名无效' }
+        }
         const dir = await mkdtemp(join(tmpdir(), 'xssh-edit-'))
         const local = join(dir, name)
         await requireSshManager().downloadTree(sessionId, remotePath, dir, name, false)
@@ -1855,11 +1863,22 @@ function registerIpc(): void {
   ipcMain.handle(IPC.sftpOpenWith, async (_e, sessionId: string, path: string, name: string, program?: string) => {
     try {
       const remotePath = path
+      // `name` becomes a path segment under the temp dir — keep it one segment.
+      if (!name || name === '.' || name === '..' || basename(name) !== name) {
+        return { ok: false, error: '文件名无效' }
+      }
       const dir = await mkdtemp(join(tmpdir(), 'xssh-open-'))
       const local = join(dir, name)
       await requireSshManager().downloadTree(sessionId, remotePath, dir, name, false)
-      if (program) spawn(program, [local], { detached: true, stdio: 'ignore' }).unref()
-      else await shell.openPath(local)
+      if (program) {
+        // Only an editor the user stored in settings may be launched from here;
+        // otherwise this channel is a way to run any binary on the machine.
+        const editor = (await settings.get<string>('externalEditor')) || ''
+        const openers = (await settings.get<Record<string, string>>('fileOpeners')) || {}
+        const allowed = new Set([editor, ...Object.values(openers)].filter(Boolean))
+        if (!allowed.has(program)) return { ok: false, error: '程序没有在设置中配置' }
+        spawn(program, [local], { detached: true, stdio: 'ignore' }).unref()
+      } else await shell.openPath(local)
       setTimeout(() => void rm(dir, { recursive: true, force: true }).catch(() => undefined), 30 * 60 * 1000)
       return { ok: true }
     } catch (e) {
