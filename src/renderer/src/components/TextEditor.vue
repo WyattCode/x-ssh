@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
+import { useFocusTrap } from '../composables/focusTrap'
 import { useConfirm } from '../composables/confirm'
 import { useI18n } from '../lib/i18n'
 import { highlight, langFromName } from '../lib/highlight'
@@ -16,6 +17,11 @@ const props = defineProps<{
   name: string
 }>()
 const emit = defineEmits<{ (e: 'close'): void; (e: 'saved'): void }>()
+
+// Keeps Tab inside the editor: otherwise the caret walks into the page behind
+// and Esc (bound on the panel) stops being delivered.
+const editorEl = ref<HTMLElement>()
+useFocusTrap(editorEl, () => props.open)
 
 // Platform modifier key for the save hint (⌘ on macOS, Ctrl elsewhere).
 const modKey = isMac ? '⌘' : 'Ctrl'
@@ -113,7 +119,7 @@ function onKeydown(e: KeyboardEvent): void {
 
 <template>
   <div v-if="open" class="overlay">
-    <div class="editor" @keydown="onKeydown">
+    <div ref="editorEl" class="editor" tabindex="-1" @keydown="onKeydown">
       <div class="head">
         <div class="titles">
           <span class="name">{{ name }}<span v-if="dirty" class="dot">●</span></span>

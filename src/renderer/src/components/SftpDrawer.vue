@@ -12,6 +12,7 @@ import {
   transferStatusText
 } from '../lib/transferFormat'
 import { globMatch } from '../lib/glob'
+import { useFocusTrap } from '../composables/focusTrap'
 import type { DownloadQueueOp } from '../stores/sessions'
 import { useConfirm } from '../composables/confirm'
 import { useI18n } from '../lib/i18n'
@@ -444,6 +445,16 @@ const localInput = ref<HTMLInputElement>()
 const selected = ref<Set<string>>(new Set())
 const anchor = ref<string | null>(null)
 const drawerEl = ref<HTMLElement>()
+// The drawer's own dialogs (new / rename, sync, deploy, preview) are modals too:
+// without a trap Tab walks into the file lists behind them.
+const localDlgEl = ref<HTMLElement>()
+const syncDlgEl = ref<HTMLElement>()
+const deployDlgEl = ref<HTMLElement>()
+const previewDlgEl = ref<HTMLElement>()
+useFocusTrap(localDlgEl, () => localModal.open)
+useFocusTrap(syncDlgEl, () => sync.open)
+useFocusTrap(deployDlgEl, () => deploy.open)
+useFocusTrap(previewDlgEl, () => preview.value.open)
 
 function focusEdit(): void {
   nextTick(() => {
@@ -1799,7 +1810,7 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
 
     <!-- ================= Dialogs ================= -->
     <div v-if="localModal.open" class="dlg-layer" @mousedown.self="localModal.open = false">
-      <div class="dlg small">
+      <div ref="localDlgEl" class="dlg small" tabindex="-1">
         <h3>{{ localModal.action === 'new' ? (localModal.kind === 'folder' ? tt('sfp.newFolder') : tt('sfp.newFile')) : tt('sfp.rename') }}</h3>
         <input
           ref="localInput"
@@ -1827,7 +1838,7 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
     />
 
     <div v-if="sync.open" class="dlg-layer" @mousedown.self="sync.open = false">
-      <div class="dlg" @keydown.esc="sync.open = false">
+      <div ref="syncDlgEl" class="dlg" tabindex="-1" @keydown.esc="sync.open = false">
         <div class="dlg-head">
           <h3>{{ tt('sfp.sync') }}</h3>
           <button class="ib sm" :title="tt('sfp.close')" @click="sync.open = false"><Icon name="close" :size="14" /></button>
@@ -1881,7 +1892,7 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
     />
 
     <div v-if="deploy.open" class="dlg-layer" @mousedown.self="deploy.open = false">
-      <div class="dlg" @keydown.esc="deploy.open = false">
+      <div ref="deployDlgEl" class="dlg" tabindex="-1" @keydown.esc="deploy.open = false">
         <div class="dlg-head">
           <h3>{{ tt('sfp.deploy') }}</h3>
           <button class="ib sm" :title="tt('sfp.close')" @click="deploy.open = false"><Icon name="close" :size="14" /></button>
@@ -1911,7 +1922,7 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
     </div>
 
     <div v-if="preview.open" class="dlg-layer" @mousedown.self="closePreview">
-      <div class="dlg preview" @keydown.esc="closePreview">
+      <div ref="previewDlgEl" class="dlg preview" tabindex="-1" @keydown.esc="closePreview">
         <div class="dlg-head">
           <h3 class="ellipsis">{{ preview.name }}</h3>
           <button class="ib sm" :title="tt('sfp.close')" @click="closePreview"><Icon name="close" :size="14" /></button>

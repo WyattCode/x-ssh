@@ -1,11 +1,16 @@
 <script setup lang="ts">
-import { nextTick, watch } from 'vue'
+import { nextTick, ref, watch } from 'vue'
+import { useFocusTrap } from '../composables/focusTrap'
 import { useSnippetVars } from '../composables/snippetVars'
 import { useI18n } from '../lib/i18n'
 import Icon from './Icon.vue'
 
 const { state, submit, cancel } = useSnippetVars()
 const { t } = useI18n()
+
+// Tab must stay in the dialog: the command it sends runs in the terminal behind it.
+const svEl = ref<HTMLElement>()
+useFocusTrap(svEl, () => state.open)
 
 watch(
   () => state.open,
@@ -27,7 +32,7 @@ function onKey(e: KeyboardEvent): void {
 
 <template>
   <div v-if="state.open" class="sv-backdrop" @mousedown.self="cancel">
-    <section class="sv" @keydown="onKey">
+    <section ref="svEl" class="sv" tabindex="-1" @keydown="onKey">
       <header class="sv-head">
         <Icon name="zap" :size="16" class="sv-ico" />
         <span class="sv-title">{{ t('snip.vars') }}</span>
