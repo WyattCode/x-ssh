@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import { useFocusTrap } from '../composables/focusTrap'
 import { useConfirm } from '../composables/confirm'
 import { useI18n } from '../lib/i18n'
@@ -22,6 +22,14 @@ const emit = defineEmits<{ (e: 'close'): void; (e: 'saved'): void }>()
 // and Esc (bound on the panel) stops being delivered.
 const editorEl = ref<HTMLElement>()
 useFocusTrap(editorEl, () => props.open)
+// Opening from the SFTP menu left focus on the drawer behind: Esc did nothing
+// until the first Tab pulled focus in.
+watch(
+  () => props.open,
+  (open) => {
+    if (open) nextTick(() => editorEl.value?.focus())
+  }
+)
 
 // Platform modifier key for the save hint (⌘ on macOS, Ctrl elsewhere).
 const modKey = isMac ? '⌘' : 'Ctrl'

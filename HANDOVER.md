@@ -179,6 +179,13 @@
 
 **第十五批(焦点陷阱的静态兜底)**:`src/renderer/src/composables/focusTrapCoverage.test.ts` 扫 `components/*.vue` 的**模板段**,凡是带模态根类(`overlay` / `layer` / `pm-overlay` / `dlg-layer` / `sv-backdrop` 等,名单与 `lib/modals.ts` 同源)或 `aria-modal` / `role="dialog"` 的组件,必须在源码里调用过 `useFocusTrap(`。TransferPanel 走 `.tpanel-backdrop`、是有意不设陷阱的侧栏(拖文件时要能操作后面的面板),列在 `ALLOWED` 里并注明理由。**踩了两次坑**:① 一开始用 `\boverlay\b` 会把 `.ctx-overlay` / `.pop-overlay` 这类右键菜单遮罩也算进来 —— 改成按 class 属性分词整体比对;② 只看整个文件会把 `HostsPage.vue` 脚本里那句选择器字符串 `'[aria-modal="true"], .overlay'` 误判成模态 —— 改为只扫 `<template>` 段。③ 最要命的一条:**阴性对照第一次没失败**,因为注释掉的 `// useFocusTrap(...)` 仍然含 `useFocusTrap(`;先剥注释再判断之后,注释掉那行会让测试如实报出 `SnippetVarsDialog.vue`(对照成立,恢复后 328 全绿)。这条检查只能证明"调用存在",证明不了 ref 指向正确的元素——界面行为仍需人工点。
 
+**第十六批(把抽屉的 Tab 行为验掉,并记下界面路径)**:抽屉里的**本地面板默认是关的**(`localOpen = false`),要用工具栏那个 `ib` 按钮(`sfp.local`,"本机双面板")打开;打开后本地头部才有 `ib sm` 的「新建文件 / 新建文件夹」图标,那才是 `localNew()` → `localModal` 模态框的入口。**工具栏上叫「新建文件夹」的那个按钮是远端面板的行内输入**(`@blur="commitCreate"`),按 Tab 让它失焦会立刻提交并收起 —— 看着像"对话框被 Tab 关掉了",其实是正常行为。实测(真实按键):本地面板 → 新建文件夹 → 焦点在 `INPUT.box` → 连按三次 Tab 后仍回到同一输入框(输入框 / 取消 / 确定三个循环)→ Esc 关闭正常。文本编辑器与片段变量框的陷阱仍只有 `focusTrapCoverage` 的静态保证,**没有逐个按过**。
+
+**操作教训**:用 `Start-Process` + `Start-Sleep` + `Wait-Process` 启动应用时,那次调用会一直阻塞到工具超时(900 秒)把窗口一起杀掉,白等十几分钟;去掉 `Start-Sleep`、只留 `Wait-Process -Id $p.Id`,调用会立刻返回"仍在运行",窗口留在那里给 `app` 工具接管。
+
+**第十七批(文本编辑器打开时没有焦点)**:从 SFTP 抽屉右键「编辑」打开应用内编辑器后,焦点仍停在背后的 `ASIDE.sftp` 上 —— 陷阱只在第一次按 Tab 时才把焦点拉进来,在那之前 Esc 无效。`TextEditor` 补了 `watch(() => props.open)` + `nextTick(focus)`。实测:改前 `active` 是 `ASIDE.sftp drawer`、`inside: false`;改后是 `DIV.editor`、`inside: true`。
+**注意**:编辑器里 Tab 被文本区当成缩进(实测内容从 24 字符涨到 26),所以这个对话框**没法用 Tab 循环来验证陷阱**,只能验"打开即有焦点"。片段变量框同样没有逐个按过。
+
 **审核剩余未修**:跳板机 `forwardOut` 无超时;`SftpDrawer` 几处输入框缺 IME 守卫、本地面板没有序号守卫;设置 / 文本编辑器 / 片段变量框与抽屉内几个弹窗仍无焦点陷阱;`recordChord` 的冲突检测没算硬编码键位(Mod+1..9、终端里的 Ctrl+C / Ctrl+V)。
 
 验证:typecheck(node+web)、`vitest 324`、build 全绿;应用内临时 profile(`%TEMP%\x-ssh-verify-24`,端口 9223)实测:无模态时 Ctrl+K 正常开关、有主机编辑器且焦点在按钮上时 Ctrl+K 不再弹出、两个对话框打开即获得焦点。临时 profile 与进程已清理。
