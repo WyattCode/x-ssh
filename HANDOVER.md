@@ -121,6 +121,14 @@
 
 # 会话记录:第二十三次会话(2026-10-27,实测第二十二次会话的焦点陷阱:三处缺陷)
 
+> **本会话总览(按主题;逐条原因与证据在下面的「批」里,时间顺序)**
+> - **焦点与键盘**:7 处焦点陷阱从未装上(TDZ,`01` 批)、嵌套陷阱互抢、确认框关闭后焦点掉 body、三个对话框焦点未进入、确认框队列跳过 danger 焦点;后来又补齐文本编辑器 / 片段变量框 / 抽屉四个弹层的陷阱,并修了编辑器打开不聚焦;快捷键录制会接受被硬编码占用的组合;模态打开时全局快捷键仍然生效。
+> - **上传 / 下载**:同尺寸不同内容被当作已同步跳过;下载按大小乱续传会拼坏文件;目标目录不存在时一个字节都不写却报成功;取消与失败都返回成功;无会话时上传还会把请求数当成功数。
+> - **超时**:`execRemote`(打包 / 解压 / 校验)与跳板机 `forwardOut` 都没有上限,远端卡住就永久挂起、渠道与登记一起泄漏。
+> - **接口防护**:`local:readText` 无大小上限;`sftp:openWith` 能执行渲染层给的任意程序;`openWith` / `editExternal` 的 `name` 未按单段校验。
+> - **提示与状态**:片段在没有会话时点了毫无反应;`hosts.save` 失败不提示;中文输入法回车被当作确认;语言在渲染层 reload 后退回「跟随系统」。
+> - **工具与文档**:`scripts/dev-sshd.ps1`(一条命令起停本机靶机)、`focusTrapCoverage` 静态检查(模态组件漏接陷阱即测试失败)。
+
 用户让接着干,于是去验第二十二次会话自称"已接 12 处"、却**一次都没在界面里点过**的那批交互。手法:构建产物 + 临时 profile(`--user-data-dir=%TEMP%\x-ssh-verify-23`,调试端口 9222,不碰真实 userData),用真实 Tab / Esc 键点,`document.activeElement` 判读。**结论:那 12 处里有 7 处根本没装上,而且装上的也有互抢问题。**
 
 1. **【高】7 个组件的焦点陷阱从未安装。** 启动时控制台固定 7 条 `ReferenceError: Cannot access 'store' before initialization`。根因:第 22 次把 `useFocusTrap(...)` 写在 `const store = useSessions()` **之前**,而 composable 里 `watch(isOpen, cb, { immediate: true })` 会立刻求值 `() => store.paletteOpen`,抛 TDZ;Vue 把 effect 里的异常吞成 console.error,setup 继续执行,**监听却再也没装上**(依赖收集也一并断了)。受影响的是 CommandPalette、ConfirmDialog、HistorySearch、TmuxDialog 等 7 处。修在 composable 本身:首次读取和 watcher 都挪进 `onMounted`,调用方一行不动,也堵住以后再把 trap 写在状态声明前面的可能。
