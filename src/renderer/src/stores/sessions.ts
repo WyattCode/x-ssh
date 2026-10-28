@@ -642,7 +642,12 @@ export const useSessions = defineStore('sessions', {
      *  snippet contains `{var}` placeholders, prompts for each before sending. */
     async sendSnippet(snippet: Snippet): Promise<void> {
       const sid = this.activePane?.sshSessionId
-      if (!sid) return
+      if (!sid) {
+        // The palette closes first, so with no live terminal the item used to
+        // vanish without a word — it looked like the app ignored the click.
+        toast(t('app.needLiveSession'), 'info')
+        return
+      }
       // Never type into a terminal that isn't on screen.
       this.setPage('terminal')
       if (snippet.confirm) {
