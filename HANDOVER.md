@@ -186,6 +186,8 @@
 **第十七批(文本编辑器打开时没有焦点)**:从 SFTP 抽屉右键「编辑」打开应用内编辑器后,焦点仍停在背后的 `ASIDE.sftp` 上 —— 陷阱只在第一次按 Tab 时才把焦点拉进来,在那之前 Esc 无效。`TextEditor` 补了 `watch(() => props.open)` + `nextTick(focus)`。实测:改前 `active` 是 `ASIDE.sftp drawer`、`inside: false`;改后是 `DIV.editor`、`inside: true`。
 **注意**:编辑器里 Tab 被文本区当成缩进(实测内容从 24 字符涨到 26),所以这个对话框**没法用 Tab 循环来验证陷阱**,只能验"打开即有焦点"。片段变量框同样没有逐个按过。
 
+**第十八批(片段变量框的陷阱也验了)**:先纠正两条自己的误判 —— 片段**不是**设置文件里的键,store 走的是 IPC `window.api.snippets.list()` / `save()`,所以 `settings.set('snippets', …)` 会被白名单拒掉(而且我最初没看返回值),直接改 profile 的 `settings.json` 也没用。用 `snippets.save()` 写入后 `Echo Var`(`echo {who}`)立刻出现在 store 里。**从命令面板点它时变量框没打开、焦点落到 BODY**,原因未查清(面板关闭与 `sendSnippet` 的时序?);但直接从 store 调 `s.store.sendSnippet(...)` 能正常打开,于是用它验证:焦点在 `INPUT.sv-input`,连按 Tab 依次到"发送"→关闭按钮,始终在 `.sv` 内,按 Esc 关闭(四个元素消失)。**片段变量框的陷阱通过**;那条"从面板点不开"的现象**没有复现第二次**,记在这里备查。
+
 **审核剩余未修**:跳板机 `forwardOut` 无超时;`SftpDrawer` 几处输入框缺 IME 守卫、本地面板没有序号守卫;设置 / 文本编辑器 / 片段变量框与抽屉内几个弹窗仍无焦点陷阱;`recordChord` 的冲突检测没算硬编码键位(Mod+1..9、终端里的 Ctrl+C / Ctrl+V)。
 
 验证:typecheck(node+web)、`vitest 324`、build 全绿;应用内临时 profile(`%TEMP%\x-ssh-verify-24`,端口 9223)实测:无模态时 Ctrl+K 正常开关、有主机编辑器且焦点在按钮上时 Ctrl+K 不再弹出、两个对话框打开即获得焦点。临时 profile 与进程已清理。
