@@ -177,6 +177,8 @@
 
 **第十四批(补焦点陷阱 + reload 后的语言)**:① 文本编辑器、命令片段变量框、SFTP 抽屉里的四个弹层(新建 / 重命名、同步、部署、预览)都声明自己是模态却没有陷阱,Tab 会走进背后的页面、Esc 随之失效 —— 各自加 `tabindex="-1"` 与 `useFocusTrap`。**设置页不是模态**(`.settings` 只有 `display:flex` 和背景,没有遮罩 / 定位 / z-index,它是换页),审阅里那条是误报,没动。② 渲染层 reload(崩溃后 `win.reload()`)复用的是窗口创建时捕获的 `prefs`,语言会退回"跟随系统" —— `i18n.ts` 现在在模块加载时再向设置文件要一次 `lang`,不同才覆盖。实测:临时 profile 里把 `lang` 写成 `zh-TW` 后 reload,侧栏是"連線 / 終端機"(改之前会退回简体)。两条都过了 typecheck / build / 326 用例;**陷阱的界面行为仍未逐个点过**。
 
+**第十五批(焦点陷阱的静态兜底)**:`src/renderer/src/composables/focusTrapCoverage.test.ts` 扫 `components/*.vue` 的**模板段**,凡是带模态根类(`overlay` / `layer` / `pm-overlay` / `dlg-layer` / `sv-backdrop` 等,名单与 `lib/modals.ts` 同源)或 `aria-modal` / `role="dialog"` 的组件,必须在源码里调用过 `useFocusTrap(`。TransferPanel 走 `.tpanel-backdrop`、是有意不设陷阱的侧栏(拖文件时要能操作后面的面板),列在 `ALLOWED` 里并注明理由。**踩了两次坑**:① 一开始用 `\boverlay\b` 会把 `.ctx-overlay` / `.pop-overlay` 这类右键菜单遮罩也算进来 —— 改成按 class 属性分词整体比对;② 只看整个文件会把 `HostsPage.vue` 脚本里那句选择器字符串 `'[aria-modal="true"], .overlay'` 误判成模态 —— 改为只扫 `<template>` 段。③ 最要命的一条:**阴性对照第一次没失败**,因为注释掉的 `// useFocusTrap(...)` 仍然含 `useFocusTrap(`;先剥注释再判断之后,注释掉那行会让测试如实报出 `SnippetVarsDialog.vue`(对照成立,恢复后 328 全绿)。这条检查只能证明"调用存在",证明不了 ref 指向正确的元素——界面行为仍需人工点。
+
 **审核剩余未修**:跳板机 `forwardOut` 无超时;`SftpDrawer` 几处输入框缺 IME 守卫、本地面板没有序号守卫;设置 / 文本编辑器 / 片段变量框与抽屉内几个弹窗仍无焦点陷阱;`recordChord` 的冲突检测没算硬编码键位(Mod+1..9、终端里的 Ctrl+C / Ctrl+V)。
 
 验证:typecheck(node+web)、`vitest 324`、build 全绿;应用内临时 profile(`%TEMP%\x-ssh-verify-24`,端口 9223)实测:无模态时 Ctrl+K 正常开关、有主机编辑器且焦点在按钮上时 Ctrl+K 不再弹出、两个对话框打开即获得焦点。临时 profile 与进程已清理。
