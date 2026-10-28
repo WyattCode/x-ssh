@@ -1,6 +1,6 @@
 {
   "name": "x-ssh",
-  "version": "0.4.5",
+  "version": "0.5.0",
   "description": "A keyboard-first, command-palette-driven SSH client.",
   "main": "./out/main/index.js",
   "author": "X-SSH",

@@ -3,7 +3,7 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 与 [语义化版本](https://semver.org/lang/zh-CN/)。
 版本号格式: MAJOR.MINOR.PATCH。功能(feature)加 MINOR,修复/打磨加 PATCH,破坏性改动加 MAJOR。
 
-## [Unreleased]
+## [0.5.0] - 2026-10-28
 
 这一轮以「把只在编译里过关的交互真正点一遍」为主,顺带修掉验证过程中暴露的问题。除个别注明外,均在应用内用真实按键 / 真实 SSH 会话验证过。
 
