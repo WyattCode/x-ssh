@@ -6,6 +6,7 @@ import { useConfirm } from '../composables/confirm'
 import { useSnippetVars } from '../composables/snippetVars'
 import { clampConcurrency } from '../../../shared/fsUtils'
 import { decideStatusEvent, retryDelayMs, shouldReviveOnOnline } from '../lib/reconnect'
+import { isCancelled } from '../lib/transferFormat'
 import {
   buildFlatTree,
   buildGrid,
@@ -143,11 +144,6 @@ function serializeTabs(tabs: { title: string; layout: LayoutNode; panes: Pane[];
       })
     }
   })
-}
-
-/** A job whose transfer has been cancelled in the main process. */
-function isCancelled(t: Pick<SftpProgress, 'error'>): boolean {
-  return t.error === '已取消'
 }
 
 // Guards the global sftp:progress subscription so it's registered exactly once
