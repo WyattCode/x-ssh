@@ -514,6 +514,7 @@ class HostDraft(private val initial: Host?) {
             // 换成密码登录就不留私钥(反之亦然):没用的秘密不存。
             keyPath = if (key && keyData.isEmpty()) keyPath else "",
             keyFingerprint = if (sameEndpoint) initial.keyFingerprint else "",
+            keyFingerprints = if (sameEndpoint) initial.keyFingerprints else emptyList(),
             password = if (key) "" else password,
             keyData = if (key) keyData else "",
             keyPassphrase = if (key && keyLocked) keyPassphrase else "",

@@ -140,6 +140,10 @@ describe('SshManager.quietExec (background OS detection)', () => {
   it('aborts when the host key changed', async () => {
     const kh = new KnownHosts()
     await kh.load()
+    // Earlier cases in this file may already have trusted the real fingerprint
+    // for 127.0.0.1:port; set() now *adds*, so wipe first or the real key would
+    // still be accepted alongside the stale one.
+    await kh.forget('127.0.0.1', port)
     await kh.set('127.0.0.1', port, 'f'.repeat(64))
     const logins = seen.logins
     const mgr = new SshManager(sender as never, kh)

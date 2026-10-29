@@ -19,7 +19,7 @@ const entry = (p: number) => KnownHosts.key(H, p)
 // to seed each test's records in memory (avoiding the shared file, which would
 // bleed across tests).
 const mapOf = (kh: unknown) =>
-  (kh as { map: Record<string, { fp: string; firstSeen?: number }> }).map
+  (kh as { map: Record<string, { fps: string[]; firstSeen?: number }> }).map
 
 // Counters over the fake servers, shared with the handlers below.
 let shells = 0
@@ -121,12 +121,15 @@ const sender: { isDestroyed: () => boolean; send: ReturnType<typeof vi.fn> } = {
   send: vi.fn()
 }
 
-/** A KnownHosts holding exactly the `host:port → fp` records named, in memory only. */
-async function hosts(records: Record<string, string>) {
+/** A KnownHosts holding exactly the `host:port → fps` records named, in memory only. */
+async function hosts(records: Record<string, string | string[]>) {
   const kh = new KnownHosts()
   await kh.load()
   const m = mapOf(kh)
-  for (const [k, fp] of Object.entries(records)) m[k] = { fp, firstSeen: 0 }
+  for (const [k, fp] of Object.entries(records)) {
+    const fps = (Array.isArray(fp) ? fp : [fp]).map((x) => x.toLowerCase())
+    m[k] = { fps, firstSeen: 0 }
+  }
   return kh
 }
 
@@ -199,7 +202,20 @@ describe('SshManager.connect (host-key verification)', () => {
     expect(res.keyHost).toBe(H)
     expect(res.keyPort).toBe(port)
     expect(shells).toBe(shellsBefore)
-    expect(mapOf(kh)[entry(port)]?.fp).toBe(stale) // the old record is left intact
+    expect(mapOf(kh)[entry(port)]?.fps).toEqual([stale]) // the old record is left intact
+  })
+
+  it('connects when the presented key is one of several trusted fingerprints', async () => {
+    tunnelDest = { host: '', port: 0 }
+    const stale = 'f'.repeat(64)
+    const kh = await hosts({ [entry(port)]: [stale, realFp] })
+    const mgr = new SshManager(sender as never, kh)
+    const res = await mgr.connect(target())
+    expect(res, JSON.stringify(res)).toMatchObject({ ok: true })
+    expect(res.sessionId).toBeTruthy()
+    // Prior trust is still there after a successful connect on the new key.
+    expect(mapOf(kh)[entry(port)]?.fps).toEqual([stale, realFp])
+    void mgr.disconnect(res.sessionId!)
   })
 
   it('refuses an unrecorded jump before the user credential goes through it', async () => {

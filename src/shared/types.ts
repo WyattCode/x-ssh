@@ -177,7 +177,10 @@ export interface Snippet {
 export interface KnownHostEntry {
   host: string
   port: number
+  /** Primary (first trusted) fingerprint — kept for older UI / export readers. */
   fingerprint: string
+  /** Every trusted fingerprint for this host:port (rotation keeps prior keys). */
+  fingerprints?: string[]
   /** ms epoch of first trust (when set) — used to age out stale keys. */
   firstSeen?: number
 }

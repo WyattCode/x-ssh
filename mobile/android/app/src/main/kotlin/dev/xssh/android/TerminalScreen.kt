@@ -198,7 +198,7 @@ fun TerminalScreen(
     // 系统的解锁窗口只有 10 秒,读完指纹再点「信任」早过了 —— 原来第一次连一台加锁主机要按两三次。
     // 键里去掉了指纹(信任之后只有它变),其余任何一项变了(编辑浮层里改了密码)就作废重新解锁。
     // 离开这一屏就没了;连上之后也清掉(会话自己留着一份用于重连)。
-    var unlocked by remember(host.copy(keyFingerprint = ""), jumpHost?.copy(keyFingerprint = "")) {
+    var unlocked by remember(host.copy(keyFingerprint = "", keyFingerprints = emptyList()), jumpHost?.copy(keyFingerprint = "", keyFingerprints = emptyList())) {
         mutableStateOf<Pair<Host, Host?>?>(null)
     }
     // 局域网权限只问一次:拒绝了也照常尝试连接,失败提示里会说明原因。

@@ -1256,7 +1256,12 @@ async function resetMasterLock(): Promise<void> {
                 <div v-for="k in store.knownHosts" :key="`${k.host}:${k.port}`" class="row list">
                   <div class="r-text">
                     <span class="r-title mono">{{ k.host }}:{{ k.port }}</span>
-                    <span class="r-desc mono ellipsis" :title="formatFingerprint(k.fingerprint)">{{ formatFingerprint(k.fingerprint) }}</span>
+                    <span
+                      v-for="(fp, i) in (k.fingerprints?.length ? k.fingerprints : [k.fingerprint])"
+                      :key="i"
+                      class="r-desc mono ellipsis"
+                      :title="formatFingerprint(fp)"
+                    >{{ formatFingerprint(fp) }}</span>
                   </div>
                   <span
                     v-if="keyAge(k.firstSeen)"

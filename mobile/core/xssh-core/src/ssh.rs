@@ -131,14 +131,29 @@ pub enum HostKeyVerdict {
     Changed,
 }
 
-/// 纯函数:拿实际指纹和已信任的比对。指纹比较不区分大小写与首尾空白。
+/// 纯函数:拿实际指纹和已信任的比对。
+///
+/// `known` 可以是一把指纹,也可以是多行(每行一把)——一台主机允许同时信任多把
+/// 主机密钥,服务端轮换时旧的不必作废。指纹是 "SHA256:" + base64,base64 大小写
+/// 有意义 —— 必须逐字节相等;忽略大小写会把两把不同的密钥判成同一把。
 pub fn verify_host_key(known: Option<&str>, actual: &str) -> HostKeyVerdict {
-    match known.map(str::trim).filter(|k| !k.is_empty()) {
-        None => HostKeyVerdict::Unknown,
-        // 指纹是 "SHA256:" + base64,base64 大小写有意义 —— 必须逐字节相等。
-        // 忽略大小写会让两把不同的密钥被判成同一把,是白送出去的安全余量。
-        Some(known) if known == actual.trim() => HostKeyVerdict::Trusted,
-        Some(_) => HostKeyVerdict::Changed,
+    let actual = actual.trim();
+    let keys: Vec<&str> = known
+        .map(str::trim)
+        .filter(|k| !k.is_empty())
+        .map(|k| {
+            k.lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
+    if keys.is_empty() {
+        HostKeyVerdict::Unknown
+    } else if keys.iter().any(|k| *k == actual) {
+        HostKeyVerdict::Trusted
+    } else {
+        HostKeyVerdict::Changed
     }
 }
 
@@ -787,5 +802,16 @@ H+1bWL3HrzyeMpLQ==
         assert_eq!(verify_host_key(Some("SHA256:aaa"), "SHA256:bbb"), HostKeyVerdict::Changed);
         // 前缀相同也不算通过。
         assert_eq!(verify_host_key(Some("SHA256:aaa"), "SHA256:aaab"), HostKeyVerdict::Changed);
+    }
+
+    #[test]
+    fn any_of_several_trusted_keys_is_accepted() {
+        let known = "SHA256:aaa\nSHA256:bbb\nSHA256:ccc";
+        assert_eq!(verify_host_key(Some(known), "SHA256:bbb"), HostKeyVerdict::Trusted);
+        assert_eq!(verify_host_key(Some(known), "SHA256:aaa"), HostKeyVerdict::Trusted);
+        assert_eq!(verify_host_key(Some(known), "SHA256:zzz"), HostKeyVerdict::Changed);
+        // 空行 / 首尾空白不影响。
+        let spaced = "  SHA256:aaa  \n\n  SHA256:bbb  ";
+        assert_eq!(verify_host_key(Some(spaced), "SHA256:bbb"), HostKeyVerdict::Trusted);
     }
 }

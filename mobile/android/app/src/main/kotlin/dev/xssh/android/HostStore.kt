@@ -19,8 +19,18 @@ data class Host(
     /**
      * 已信任的服务端主机密钥指纹(SHA256:…)。空 = 还没信任过,首次连接会弹确认框。
      * 存了之后每次连接都比对,不一致就拒绝 —— 这是防中间人的唯一一道关。
+     *
+     * 兼容字段:等于 [keyFingerprints] 的第一把。服务端轮换密钥时旧指纹仍留在
+     * [keyFingerprints] 里,不要只改这一项。新代码请用 [trustedHostKeys] /
+     * [withTrustedHostKey]。
      */
     val keyFingerprint: String = "",
+    /**
+     * 这台主机信任的全部主机密钥指纹。服务端轮换时点「信任新密钥」会**追加**,
+     * 不会抹掉旧的 —— 双密钥窗口 / 回滚到旧密钥都能连上。
+     * 老数据只有 [keyFingerprint] 时,加载时迁进这里。
+     */
+    val keyFingerprints: List<String> = emptyList(),
     /** 密码认证用。落盘时经 [Secrets] 加密(Android 密钥库、不可导出),不存明文。 */
     val password: String = "",
     /**
@@ -105,6 +115,44 @@ data class Host(
  * 密码原来只放内存 —— 结果是存过密码、连过一次,下次打开(进程被回收、重装、
  * 系统重启)又得重新输密码、再存、再连。
  */
+
+/** 这台主机当前信任的全部指纹(去空白、去重、保序)。 */
+fun Host.trustedHostKeys(): List<String> {
+    val raw = if (keyFingerprints.isNotEmpty()) keyFingerprints else listOfNotNull(keyFingerprint.takeIf { it.isNotBlank() })
+    val seen = linkedSetOf<String>()
+    for (fp in raw) {
+        val t = fp.trim()
+        if (t.isNotEmpty()) seen.add(t)
+    }
+    return seen.toList()
+}
+
+/** 信任一把新的主机密钥:追加进列表,不抹掉旧的。 */
+fun Host.withTrustedHostKey(fingerprint: String): Host {
+    val fp = fingerprint.trim()
+    if (fp.isEmpty()) return this
+    val all = (trustedHostKeys() + fp).distinct()
+    return copy(keyFingerprint = all.first(), keyFingerprints = all)
+}
+
+
+/** 从一条主机 JSON 读出指纹列表:优先 `keyFingerprints` 数组,否则迁单个 `keyFingerprint`。 */
+private fun readFingerprints(item: JSONObject): List<String> {
+    val out = linkedSetOf<String>()
+    val arr = item.optJSONArray("keyFingerprints")
+    if (arr != null) {
+        for (i in 0 until arr.length()) {
+            val t = arr.optString(i).trim()
+            if (t.isNotEmpty()) out.add(t)
+        }
+    }
+    if (out.isEmpty()) {
+        val one = item.optString("keyFingerprint").trim()
+        if (one.isNotEmpty()) out.add(one)
+    }
+    return out.toList()
+}
+
 /** 三条凭据。给用户看的名字在界面层按资源取(见 HostInfo.kt),这里不带文字。 */
 enum class SecretField { Password, PrivateKey, Passphrase }
 
@@ -194,7 +242,8 @@ class HostStore(context: Context) {
                         // 默认跟数据类一致(密码);只有明确存了 "key" 才是私钥。
                         auth = if (item.optString("auth") == "key") AuthKind.KEY else AuthKind.PASSWORD,
                         keyPath = item.optString("keyPath"),
-                        keyFingerprint = item.optString("keyFingerprint"),
+                        keyFingerprint = readFingerprints(item).let { it.firstOrNull().orEmpty() },
+                        keyFingerprints = readFingerprints(item),
                         password = plain[0],
                         keyData = plain[1],
                         keyPassphrase = plain[2],
@@ -249,7 +298,9 @@ class HostStore(context: Context) {
             item.put("username", host.username)
             item.put("auth", if (host.auth == AuthKind.PASSWORD) "password" else "key")
             item.put("keyPath", host.keyPath)
-            item.put("keyFingerprint", host.keyFingerprint)
+            val trusted = host.trustedHostKeys()
+            item.put("keyFingerprint", trusted.firstOrNull().orEmpty())
+            item.put("keyFingerprints", JSONArray(trusted))
             // 三条凭据按这台主机**当前**的加锁状态写:
             // - 加锁的:明文要重新封进这道锁(普通 `seal` 用的是另一把不带认证要求的密钥,
             //   拿它写就等于把锁悄悄去掉了,而 `lockSecrets` 还写着 true)。

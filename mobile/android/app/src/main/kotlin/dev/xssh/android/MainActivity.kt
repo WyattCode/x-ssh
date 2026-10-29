@@ -300,7 +300,8 @@ fun App(devTarget: DevTarget? = null) {
                 },
                 onTrustKey = { host, fingerprint ->
                     // 换一个 Host 实例 → 终端的 remember(host) 失效 → 带着新指纹重连。
-                    persist(hosts.map { if (it.id == host.id) it.copy(keyFingerprint = fingerprint) else it })
+                    // 追加信任,不抹掉这台主机已有的其它主机密钥。
+                    persist(hosts.map { if (it.id == host.id) it.withTrustedHostKey(fingerprint) else it })
                 },
                 onPin = { pinned -> persist(hosts.map { if (it.id == pinned.id) pinned else it }) },
                 onConnected = { id ->
@@ -529,15 +530,16 @@ private fun PhoneFlow(
             },
             onTrustKey = { fingerprint ->
                 // 换一个 Host 实例 → 终端屏的 remember(host) 失效 → 带着新指纹重连。
-                val trusted = current.host.copy(keyFingerprint = fingerprint)
+                // 追加信任,不抹掉这台主机已有的其它主机密钥。
+                val trusted = current.host.withTrustedHostKey(fingerprint)
                 if (hosts.any { it.id == trusted.id }) {
-                    persist(hosts.map { if (it.id == trusted.id) it.copy(keyFingerprint = fingerprint) else it })
+                    persist(hosts.map { if (it.id == trusted.id) it.withTrustedHostKey(fingerprint) else it })
                 }
                 onScreen(current.copy(host = trusted))
             },
             // 跳板机的指纹存到跳板机那台上;主机表一变,终端屏拿到新的跳板机实例,随之重连。
             onTrustJumpKey = { jump, fingerprint ->
-                persist(hosts.map { if (it.id == jump.id) it.copy(keyFingerprint = fingerprint) else it })
+                persist(hosts.map { if (it.id == jump.id) it.withTrustedHostKey(fingerprint) else it })
             },
             onFiles = { onScreen(Screen.Files(current)) },
             // 连上 / 接管的那一刻记一笔"最近使用"(失败和自动重连不算)。

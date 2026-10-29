@@ -42,12 +42,15 @@ const isFocused = computed(
 
 /** A host-key rejection (first connect or a changed key): the pane needs a
  *  trust action, not a plain reconnect. */
-const oldFingerprint = computed(() => {
+const oldFingerprints = computed(() => {
   const pn = pane.value
-  if (pn?.errorCode !== 'host_key_changed') return ''
+  if (pn?.errorCode !== 'host_key_changed') return [] as string[]
   const host = pn.hostKeyHost ?? pn.params.host
   const port = pn.hostKeyPort ?? (pn.params.port || 22)
-  return store.knownHosts.find((k) => k.host === host && k.port === port)?.fingerprint ?? ''
+  const entry = store.knownHosts.find((k) => k.host === host && k.port === port)
+  if (!entry) return []
+  const fps = entry.fingerprints?.length ? entry.fingerprints : [entry.fingerprint]
+  return fps.filter(Boolean)
 })
 const hostKeyRejected = computed(
   () =>
@@ -131,9 +134,9 @@ const splitEl = ref<HTMLElement>()
             <span class="fp-label">{{ t('app.keyFpNow') }}</span>
             <code class="fp">{{ formatFingerprint(pane.hostKey) }}</code>
           </div>
-          <div v-if="oldFingerprint" class="fp-row">
-            <span class="fp-label">{{ t('app.keyFpOld') }}</span>
-            <code class="fp old">{{ formatFingerprint(oldFingerprint) }}</code>
+          <div v-for="(fp, i) in oldFingerprints" :key="i" class="fp-row">
+            <span class="fp-label">{{ t('app.keyFpOld') }}<template v-if="oldFingerprints.length > 1"> · {{ i + 1 }}</template></span>
+            <code class="fp old">{{ formatFingerprint(fp) }}</code>
           </div>
         </div>
         <button

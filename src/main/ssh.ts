@@ -388,15 +388,14 @@ export class SshManager {
         const hashedKey = Buffer.isBuffer(keyOrHash)
           ? createHash('sha256').update(keyOrHash).digest('hex')
           : keyOrHash
-        const known = this.knownHosts.get(jump.host, jump.port)
-        if (!known) {
+        if (!this.knownHosts.get(jump.host, jump.port)) {
           keyRejected = true
           keyUnknown = true
           lastKey = hashedKey
           this.noteRejected(jump.host, jump.port, hashedKey)
           return cb(false)
         }
-        if (known === hashedKey) return cb(true)
+        if (this.knownHosts.accepts(jump.host, jump.port, hashedKey)) return cb(true)
         this.noteRejected(jump.host, jump.port, hashedKey)
         keyRejected = true
         lastKey = hashedKey
@@ -871,15 +870,14 @@ export class SshManager {
       const hashedKey = Buffer.isBuffer(keyOrHash)
         ? createHash('sha256').update(keyOrHash).digest('hex')
         : keyOrHash
-      const known = this.knownHosts.get(params.host, port)
-      if (!known) {
+      if (!this.knownHosts.get(params.host, port)) {
         keyRejected = true
         keyUnknown = true
         lastKey = hashedKey
         this.noteRejected(params.host, port, hashedKey)
         return cb(false)
       }
-      if (known === hashedKey) return cb(true)
+      if (this.knownHosts.accepts(params.host, port, hashedKey)) return cb(true)
       this.noteRejected(params.host, port, hashedKey)
       keyRejected = true
       lastKey = hashedKey
@@ -2747,7 +2745,7 @@ export class SshManager {
     }
     const config = SshManager.baseConfig(params.host, port, params.username, undefined, 12_000)
     config.hostVerifier = (hashedKey: string, cb: (valid: boolean) => void): void => {
-      cb(this.knownHosts.get(params.host, port) === hashedKey)
+      cb(this.knownHosts.accepts(params.host, port, hashedKey))
     }
     const client = new Client()
     let jumpClient: Client | null = null
