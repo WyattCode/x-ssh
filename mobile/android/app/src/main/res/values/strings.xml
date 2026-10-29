@@ -206,6 +206,8 @@
     <string name="set_language">Language</string>
     <string name="set_selected">Selected</string>
     <string name="set_terminal_font">Terminal font</string>
+    <string name="set_terminal_theme">Terminal theme</string>
+    <string name="set_term_theme_system">Match appearance</string>
     <string name="set_title">Settings</string>
     <string name="snip_cancel">Cancel</string>
     <string name="snip_command">Command</string>

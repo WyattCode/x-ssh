@@ -49,11 +49,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import uniffi.xssh_ffi.StyledRun
 
-/* ─────────────────────────────── 设置:语言 + 终端字体 ───────────────────────────────
+/* ─────────────────────────────── 设置:语言 + 终端配色 + 终端字体 ───────────────────────────────
 
-   原来这一页只有终端字体(入口是 Aa)。加了界面语言以后改叫「设置」:上面语言,下面字体。
+   原来这一页只有终端字体(入口是 Aa)。加了界面语言以后改叫「设置」:上面语言,中间配色,下面字体。
    手机 / 折叠屏整页推进来,平板居中浮层,两边内容同一份([SettingsContent])。
 
+   配色方案 id / 显示名与桌面版 `terminalThemes.ts` 一致(Nord / Dracula …);空 = 跟随外观。
 
    一张卡片一款字体:名字 + 一段**用终端自己的画法画出来的**样例(同一套格子、同样的中英混排、
    同样的制表符),所以卡片里看到的就是连上之后看到的。点一下就换,立刻生效。
@@ -157,8 +158,93 @@ fun FontList(modifier: Modifier = Modifier, onPicked: (() -> Unit)? = null) {
     }
 }
 
+/** 配色色带:底色 + ANSI 前 8 色圆点(一眼能分清 Nord / Dracula)。 */
+@Composable
+private fun SchemeSwatch(term16: List<Long>, background: Long, modifier: Modifier = Modifier) {
+    Row(
+        modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(rgbColor(background))
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        term16.take(8).forEach { rgb ->
+            Box(
+                Modifier
+                    .size(12.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(rgbColor(rgb))
+                    .border(0.5.dp, androidx.compose.ui.graphics.Color.White.copy(alpha = 0.25f), RoundedCornerShape(50)),
+            )
+        }
+    }
+}
+
 /**
- * 设置的内容:语言一组(跟随系统 / 简体中文 / 繁體中文 / English,当前的打勾),下面是终端字体。
+ * 终端配色列表:「跟随外观」+ 桌面同名六套。
+ * 点一下立刻换(终端页通过 [LocalXssh] 重组套色);平板浮层不自动关掉,方便连着比。
+ */
+@Composable
+fun SchemeList(modifier: Modifier = Modifier) {
+    val p = LocalXssh.current
+    val current = TerminalSchemeChoice.currentId
+    val dark = p.dark
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        val systemSelected = current.isEmpty()
+        val system = TerminalSchemes.resolve("", dark)
+        XsshCard(
+            modifier = Modifier.fillMaxWidth(),
+            highlight = systemSelected,
+            onClick = { TerminalSchemeChoice.choose("") },
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    stringResource(R.string.set_term_theme_system),
+                    color = p.text,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
+                )
+                if (systemSelected) {
+                    Icon(XIcons.Check, contentDescription = stringResource(R.string.set_selected), tint = p.accent, modifier = Modifier.size(20.dp))
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+            SchemeSwatch(
+                term16 = system.term16,
+                background = if (dark) 0x000000 else 0xFFFFFF,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        TerminalSchemes.PRESETS.forEach { preset ->
+            val selected = preset.id == current
+            XsshCard(
+                modifier = Modifier.fillMaxWidth(),
+                highlight = selected,
+                onClick = { TerminalSchemeChoice.choose(preset.id) },
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        preset.label,
+                        color = p.text,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (selected) {
+                        Icon(XIcons.Check, contentDescription = stringResource(R.string.set_selected), tint = p.accent, modifier = Modifier.size(20.dp))
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                SchemeSwatch(preset.term16, preset.background, Modifier.fillMaxWidth())
+            }
+        }
+    }
+}
+
+/**
+ * 设置的内容:语言一组,中间终端配色,下面终端字体。
  * 语言的名字各用各自的文字写 —— 看不懂当前语言的人也要能找到自己那一行。
  */
 @Composable
@@ -200,6 +286,14 @@ fun SettingsContent(onFontPicked: (() -> Unit)? = null) {
             }
         }
     }
+    Spacer(Modifier.height(24.dp))
+    Text(
+        stringResource(R.string.set_terminal_theme),
+        color = p.textDim,
+        fontSize = 13.sp,
+        modifier = Modifier.padding(start = TitlePad, bottom = 7.dp),
+    )
+    SchemeList()
     Spacer(Modifier.height(24.dp))
     Text(
         stringResource(R.string.set_terminal_font),

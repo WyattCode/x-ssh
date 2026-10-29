@@ -87,6 +87,7 @@ object XsshFonts {
     fun init(context: android.content.Context) {
         appContext = context.applicationContext
         TerminalFontChoice.load(context)
+        TerminalSchemeChoice.load(context)
     }
 
     /** 系统思源黑体简体的 android Typeface(终端画中文用)。 */

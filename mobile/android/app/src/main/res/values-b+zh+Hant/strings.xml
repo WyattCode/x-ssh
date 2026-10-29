@@ -205,6 +205,8 @@
     <string name="set_language">語言</string>
     <string name="set_selected">已選取</string>
     <string name="set_terminal_font">終端機字型</string>
+    <string name="set_terminal_theme">終端機配色</string>
+    <string name="set_term_theme_system">跟隨外觀</string>
     <string name="set_title">設定</string>
     <string name="snip_cancel">取消</string>
     <string name="snip_command">指令</string>

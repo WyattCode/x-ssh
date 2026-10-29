@@ -563,9 +563,9 @@ private fun TerminalView(
 
     val backdrop = rememberLayerBackdrop()
 
-    // 终端配色跟着界面的深浅色走:16 色交给 Rust 解析,前景/背景用来回答程序的颜色查询
-    // (Codex 会据此选深色还是浅色主题)。
-    LaunchedEffect(p.dark) {
+    // 终端配色跟着外观 / 设置里的方案走:16 色交给 Rust 解析,前景/背景用来回答程序的颜色查询
+    // (Codex 会据此选深色还是浅色主题)。换 Nord / Dracula 也要重套色。
+    LaunchedEffect(p.dark, p.termBg, p.termFg, p.termCursor, p.term16) {
         withContext(Dispatchers.IO) { live.applyTheme(p) }
     }
 
@@ -1833,7 +1833,7 @@ private fun TerminalCanvas(
                 for (r in sel.start.row..minOf(sel.end.row, gridRows - 1)) {
                     val range = sel.colsOn(r, cols) ?: continue
                     drawRect(
-                        color = p.accent.copy(alpha = 0.32f),
+                        color = p.termSelection,
                         topLeft = Offset(range.first * cw, r * ch),
                         size = Size((range.last - range.first + 1) * cw, ch),
                     )
