@@ -182,7 +182,7 @@ export class KeyManager {
     if (!isPrivateKey(buf)) {
       await rm(priv, { force: true }).catch(() => {})
       await rm(`${priv}.pub`, { force: true }).catch(() => {})
-      throw new Error('所选文件不是有效的私钥')
+      throw new Error('invalid-private-key')
     }
     const label = basename(srcPath).replace(/\.(pem|key|pub)$/i, '')
     const labels = await this.readLabels()
@@ -195,7 +195,7 @@ export class KeyManager {
    *  derived from an unprotected private key). Used by "publish key to hosts". */
   async publicKey(id: string): Promise<string> {
     await this.ensureDir()
-    if (basename(id) !== id) throw new Error('非法密钥标识')
+    if (basename(id) !== id) throw new Error('illegal-key-id')
     const priv = join(this.keysDir, id)
     try {
       return (await readFile(`${priv}.pub`, 'utf8')).trim()
@@ -209,7 +209,7 @@ export class KeyManager {
   async remove(id: string): Promise<void> {    await this.ensureDir()
     // Only ever operate inside the key dir: refuse path traversal in the id,
     // since it arrives over IPC from the renderer.
-    if (basename(id) !== id) throw new Error('非法密钥标识')
+    if (basename(id) !== id) throw new Error('illegal-key-id')
     const priv = join(this.keysDir, id)
     await rm(priv, { force: true })
     await rm(`${priv}.pub`, { force: true })

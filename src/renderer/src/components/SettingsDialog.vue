@@ -441,7 +441,8 @@ async function checkForUpdates(): Promise<void> {
   const r = await window.api.checkUpdate()
   updateState.checking = false
   if (!r.ok) {
-    updateState.error = r.error ?? t('set.gen.updateErr')
+    updateState.error =
+      r.error === 'update-parse-failed' ? t('set.gen.updateParseFail') : (r.error ?? t('set.gen.updateErr'))
     return
   }
   if (r.fresh) {

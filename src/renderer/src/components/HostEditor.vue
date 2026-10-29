@@ -19,6 +19,13 @@ const { t } = useI18n()
 const { toast } = useToast()
 const { confirm } = useConfirm()
 
+/** Maps a key-operation error code from main to a localized message. */
+function keyOpError(err?: string): string {
+  if (err === 'invalid-private-key') return t('host.invalidPrivateKey')
+  if (err === 'illegal-key-id') return t('host.illegalKeyId')
+  return err ?? t('host.keyImportFail')
+}
+
 const uid = (): string =>
   `host-${Date.now()}-${Math.floor(Math.random() * 1e6)}`
 
@@ -261,7 +268,7 @@ async function importKey(): Promise<void> {
   const r = await window.api.keys.import()
   if (r.canceled) return
   if (!r.ok || !r.key) {
-    toast(r.error ?? t('host.keyImportFail'), 'error')
+    toast(keyOpError(r.error), 'error')
     return
   }
   form.keyPath = r.key.path
@@ -276,7 +283,7 @@ async function deleteKey(k: ManagedKey): Promise<void> {
     if (form.keyPath === k.path) form.keyPath = ''
     await loadKeys()
   } else if (r.error) {
-    toast(r.error, 'error')
+    toast(keyOpError(r.error), 'error')
   }
   panelEl.value?.focus()
 }
