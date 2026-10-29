@@ -76,7 +76,8 @@ watch(
       content.value = r.content ?? ''
       original.value = content.value
     } else {
-      error.value = r.error ?? t('ed.loadFail')
+      error.value =
+        r.error === 'file-too-large' ? t('sfp.fileTooLarge') : (r.error ?? t('ed.loadFail'))
     }
   }
 )

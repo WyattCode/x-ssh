@@ -97,6 +97,12 @@ fun HostKeyGate(
     onExit: () -> Unit,
 ) {
     val p = LocalXssh.current
+    var trusted by remember { mutableStateOf(false) }
+    fun trustOnce() {
+        if (trusted) return
+        trusted = true
+        onTrust()
+    }
     val content = GateContent(
         icon = if (changed) XIcons.Alert else XIcons.Shield,
         tint = if (changed) p.danger else p.accent,
@@ -114,7 +120,7 @@ fun HostKeyGate(
             else -> null
         },
         noteColor = if (changed) p.danger else p.textDim,
-        onEnter = if (changed) null else onTrust,
+        onEnter = if (changed) null else trustOnce,
         body = {
             if (changed) {
                 FingerprintCard(stringResource(R.string.host_gate_last_recorded), host.keyFingerprint, p.textDim)
@@ -131,7 +137,7 @@ fun HostKeyGate(
                     if (changed) R.string.host_gate_trust_new_key else R.string.host_gate_trust_and_connect,
                 ),
                 primaryKind = if (changed) ButtonKind.Danger else ButtonKind.Primary,
-                onPrimary = onTrust,
+                onPrimary = trustOnce,
                 secondary = stringResource(R.string.host_cancel),
                 onSecondary = onExit,
             )

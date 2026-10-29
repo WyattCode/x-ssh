@@ -37,7 +37,8 @@ async function load(p: string): Promise<void> {
   const r = await window.api.local.readText(p)
   loading.value = false
   if (!r.ok) {
-    err.value = r.error ?? t('replay.readFail')
+    err.value =
+      r.error === 'file-too-large' ? t('sfp.fileTooLarge') : (r.error ?? t('replay.readFail'))
     content.value = ''
     return
   }
