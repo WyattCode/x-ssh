@@ -252,10 +252,18 @@ fun HostActions(
     onDelete: (Host) -> Unit,
 ) {
     Column(Modifier.widthIn(max = PageMaxWidth)) {
+        // 连上 / 确认删除都只认第一次点:双击在 :disabled 生效前就能把终端推两遍,
+        // 或者让 onDelete 在页面离开组合之前跑两次。
+        var acted by remember(host.id, running) { mutableStateOf(false) }
+        fun actOnce(block: () -> Unit) {
+            if (acted) return
+            acted = true
+            block()
+        }
         XsshButton(
             stringResource(if (running) R.string.host_open_session else R.string.host_connect),
             modifier = Modifier.fillMaxWidth(),
-        ) { onConnect(host) }
+        ) { actOnce { onConnect(host) } }
         Spacer(Modifier.height(GapItem))
         var confirming by remember(host.id, running) { mutableStateOf(false) }
         Row(horizontalArrangement = Arrangement.spacedBy(GapItem)) {
@@ -270,7 +278,7 @@ fun HostActions(
                     kind = ButtonKind.Danger,
                     modifier = Modifier.weight(1f),
                 ) {
-                    if (confirming) onDelete(host) else confirming = true
+                    if (confirming) actOnce { onDelete(host) } else confirming = true
                 }
             }
         }

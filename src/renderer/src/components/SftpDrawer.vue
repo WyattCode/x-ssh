@@ -1138,24 +1138,30 @@ async function downloadSelected(): Promise<void> {
   if (!props.sessionId) return
   const items = selectedEntries()
   if (!items.length) return
-  if (items.length === 1 && !items[0].isDir) {
-    // Single file → Save-As dialog.
-    await window.api.sftp.download(
-      props.sessionId,
-      posixJoin(path.value, items[0].name),
-      items[0].name,
-      store.transferConcurrency
-    )
-    return
+  if (busy.value) return
+  busy.value = true
+  try {
+    if (items.length === 1 && !items[0].isDir) {
+      // Single file → Save-As dialog.
+      await window.api.sftp.download(
+        props.sessionId,
+        posixJoin(path.value, items[0].name),
+        items[0].name,
+        store.transferConcurrency
+      )
+      return
+    }
+    // Multiple / folders → pick one target folder.
+    const payload = items.map((e) => ({
+      path: posixJoin(path.value, e.name),
+      name: e.name,
+      isDir: e.isDir
+    }))
+    const r = await window.api.sftp.downloadMany(props.sessionId, payload, store.transferConcurrency)
+    if (!r.ok && !r.canceled) error.value = r.error ?? tt('sfp.downloadFail')
+  } finally {
+    busy.value = false
   }
-  // Multiple / folders → pick one target folder.
-  const payload = items.map((e) => ({
-    path: posixJoin(path.value, e.name),
-    name: e.name,
-    isDir: e.isDir
-  }))
-  const r = await window.api.sftp.downloadMany(props.sessionId, payload, store.transferConcurrency)
-  if (!r.ok && !r.canceled) error.value = r.error ?? tt('sfp.downloadFail')
 }
 async function packDownloadSelected(): Promise<void> {
   if (!props.sessionId) return

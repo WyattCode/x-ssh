@@ -1,3 +1,21 @@
+# 会话记录:连续改进 M3.96(2026-10-30,复核打磨:公钥发布回收 finally + SFTP 下载 busy + HostInfo 连接/删除一次)
+
+功能清单已够,本轮按站立规则做开源复核打磨(不合并)。未动 PR #30 / #29–#12 与更早的 #4–#11。
+
+**核过已过时 / 已在未合并 PR(本轮不重做)**:
+1–18. 同 M3.95 所列 PR #12–#29。
+19. ConnectGate trustOnce/actOnce + SftpDrawer pack/del busy + TmuxDialog —— PR #30。
+20. 回收公钥确认文案 —— PR #25;本轮只补 publish/revoke try/finally 与互斥 disabled(主分支尚无 confirm)。
+
+**修了**:
+1. **PublishKeyDialog**:`publish`/`revoke` 重入闸 + try/finally;按钮互斥 disabled(抛错不再卡死)。
+2. **SftpDrawer** `downloadSelected`:busy 闸 + try/finally(与 pack 对称;未动 pack/del/sync)。
+3. **Android HostInfo HostActions**:`actOnce` 包住连接与确认删除,防双推终端 / 双删。
+
+**验证**:`typecheck` + vitest **334** / 30 文件全绿。未跑 Gradle。未合并。
+
+---
+
 # X-SSH 交接文档
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。

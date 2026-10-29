@@ -42,28 +42,36 @@ function toggleHost(h: Host): void {
 
 async function publish(): Promise<void> {
   if (!keyId.value || !selected.size) return
+  if (busy.value || revokeBusy.value) return
   busy.value = true
   err.value = ''
   results.value = []
-  const r = await window.api.keys.publish(keyId.value, [...selected])
-  busy.value = false
-  if (!r.ok) {
-    err.value = r.error ?? t('keyPub.fail')
-    return
+  try {
+    const r = await window.api.keys.publish(keyId.value, [...selected])
+    if (!r.ok) {
+      err.value = r.error ?? t('keyPub.fail')
+      return
+    }
+    results.value = r.results ?? []
+  } finally {
+    busy.value = false
   }
-  results.value = r.results ?? []
 }
 async function revoke(): Promise<void> {
   if (!keyId.value || !selected.size) return
+  if (busy.value || revokeBusy.value) return
   revokeBusy.value = true
   revokeResults.value = []
-  const r = await window.api.keys.revoke(keyId.value, [...selected])
-  revokeBusy.value = false
-  if (!r.ok) {
-    err.value = r.error ?? t('keyPub.revokeFail')
-    return
+  try {
+    const r = await window.api.keys.revoke(keyId.value, [...selected])
+    if (!r.ok) {
+      err.value = r.error ?? t('keyPub.revokeFail')
+      return
+    }
+    revokeResults.value = r.results ?? []
+  } finally {
+    revokeBusy.value = false
   }
-  revokeResults.value = r.results ?? []
 }
 
 watch(
@@ -102,10 +110,10 @@ watch(
           <p v-if="!hostList.length" class="kp-empty">{{ t('keyPub.noHosts') }}</p>
         </div>
         <div class="kp-actions">
-          <button class="kp-run" :disabled="busy || !keyId || !selected.size" @click="publish">
+          <button class="kp-run" :disabled="busy || revokeBusy || !keyId || !selected.size" @click="publish">
             <Icon name="send" :size="14" />{{ t('keyPub.publish') }}
           </button>
-          <button class="kp-run ghost" :disabled="revokeBusy || !keyId || !selected.size" @click="revoke">
+          <button class="kp-run ghost" :disabled="revokeBusy || busy || !keyId || !selected.size" @click="revoke">
             <Icon name="trash" :size="14" />{{ t('keyPub.revoke') }}
           </button>
         </div>
