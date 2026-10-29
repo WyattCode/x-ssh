@@ -1274,11 +1274,13 @@ async function resetMasterLock(): Promise<void> {
               <h3>{{ t('set.sec.connLog') }}</h3>
               <p class="g-desc">{{ t('set.sec.connLogDesc') }}</p>
               <div class="card">
-                <div v-for="(l, i) in connLog" :key="i" class="row log">
-                  <span class="log-time">{{ connTime(l.at) }}</span>
-                  <span class="log-event" :class="l.event">{{ eventLabel(l.event) }}</span>
-                  <span class="mono grow ellipsis">{{ l.username }}@{{ l.host }}:{{ l.port }}</span>
-                  <span v-if="l.detail" class="mono faint ellipsis log-detail">{{ l.detail }}<template v-if="l.bytes != null"> · {{ fmtBytes(l.bytes) }}</template></span>
+                <div v-if="connLog.length" class="log-list">
+                  <div v-for="(l, i) in connLog" :key="i" class="row log">
+                    <span class="log-time">{{ connTime(l.at) }}</span>
+                    <span class="log-event" :class="l.event">{{ eventLabel(l.event) }}</span>
+                    <span class="mono grow ellipsis">{{ l.username }}@{{ l.host }}:{{ l.port }}</span>
+                    <span v-if="l.detail" class="mono faint ellipsis log-detail">{{ l.detail }}<template v-if="l.bytes != null"> · {{ fmtBytes(l.bytes) }}</template></span>
+                  </div>
                 </div>
                 <div v-if="!connLog.length" class="row empty">{{ t('set.sec.connLogEmpty') }}</div>
                 <div v-else class="row actions-row">
@@ -1826,6 +1828,15 @@ async function resetMasterLock(): Promise<void> {
 .log-event.forward {
   color: var(--accent);
   background: var(--accent-soft);
+}
+/* Disconnect is neutral, not a failure: grey chip, distinct from connect/error. */
+.log-event.disconnect {
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--text-dim) 14%, transparent);
+}
+.log-list {
+  max-height: 320px;
+  overflow-y: auto;
 }
 .log-detail {
   max-width: 240px;

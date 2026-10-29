@@ -33,6 +33,10 @@ watchEffect(() => {
 
 async function setPref(next: ThemePref): Promise<void> {
   if (next === pref.value) return
+  // Optimistic: flip the choice before the round-trip. The cycle button reads
+  // `pref` to pick its next step, so waiting for main would make two quick
+  // clicks both ask for the same theme and swallow a step.
+  pref.value = next
   try {
     // Main answers with the resolved appearance. Taking it together with the
     // new choice means switching back to 'system' lands on the OS's real
@@ -42,8 +46,10 @@ async function setPref(next: ThemePref): Promise<void> {
     systemDark.value = dark
   } catch {
     /* switch locally anyway; the media query still tracks the OS */
+    // No rollback (that would flash the old theme); just re-read the OS when
+    // the on-screen theme now depends on it.
+    if (pref.value === 'system') systemDark.value = media.matches
   }
-  pref.value = next
 }
 
 export function useTheme(): {

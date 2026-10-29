@@ -789,7 +789,9 @@ const zh: Dict = {
   'tabbar.rename': '重命名',
   'tabbar.filter': '过滤标签…',
   'tabbar.closeTab': '关闭',
-  'tabbar.closeOthers': '关闭其他'
+  'tabbar.closeOthers': '关闭其他',
+  'tabbar.closeAll': '关闭全部',
+  'tabbar.closeAllConfirm': '关闭全部标签？仍在连接的会话会先收到 exit。'
 }
 
 const en: Dict = {
@@ -1561,7 +1563,9 @@ const en: Dict = {
   'tabbar.rename': 'Rename',
   'tabbar.filter': 'Filter tabs…',
   'tabbar.closeTab': 'Close',
-  'tabbar.closeOthers': 'Close others'
+  'tabbar.closeOthers': 'Close others',
+  'tabbar.closeAll': 'Close all',
+  'tabbar.closeAllConfirm': 'Close all tabs? Live sessions will receive exit first.'
 }
 
 /** Traditional Chinese, Taiwan usage. Keys missing here fall back to `zh`. */
@@ -2347,7 +2351,9 @@ const zhTW: Dict = {
   'tabbar.rename': '重新命名',
   'tabbar.filter': '篩選分頁…',
   'tabbar.closeTab': '關閉',
-  'tabbar.closeOthers': '關閉其他分頁'
+  'tabbar.closeOthers': '關閉其他分頁',
+  'tabbar.closeAll': '關閉全部分頁',
+  'tabbar.closeAllConfirm': '關閉全部分頁？仍在連線的工作階段會先收到 exit。'
 }
 
 const dicts: Record<Lang, Dict> = { zh, 'zh-TW': zhTW, en }

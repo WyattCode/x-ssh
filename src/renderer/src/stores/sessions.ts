@@ -6,6 +6,7 @@ import { useConfirm } from '../composables/confirm'
 import { useSnippetVars } from '../composables/snippetVars'
 import { clampConcurrency } from '../../../shared/fsUtils'
 import { decideStatusEvent, retryDelayMs, shouldReviveOnOnline } from '../lib/reconnect'
+import { closeAllNeedsConfirm } from '../lib/tabCloseGuard'
 import {
   buildFlatTree,
   buildGrid,
@@ -1786,6 +1787,27 @@ export const useSessions = defineStore('sessions', {
       const others = this.tabs.filter((t) => t.id !== id).map((t) => t.id)
       others.forEach((oid) => this.closeTab(oid))
       this.activeId = id
+    },
+
+    /** Closes every tab. Confirms first when any of them has a live session,
+     *  and sends `exit` to each live shell so it winds down gracefully. */
+    async closeAll(): Promise<void> {
+      if (closeAllNeedsConfirm(this.confirmClose, this.tabs)) {
+        const ok = await confirm(t('tabbar.closeAllConfirm'), {
+          title: t('app.closeExitTitle'),
+          confirmText: t('app.closeExitOk'),
+          cancelText: t('confirm.cancel'),
+          danger: true
+        })
+        if (!ok) return
+        for (const tab of this.tabs) {
+          for (const p of tab.panes) {
+            if (p.status === 'connected' && p.sshSessionId) void window.api.ssh.input(p.sshSessionId, 'exit\n')
+          }
+        }
+      }
+      const ids = this.tabs.map((t) => t.id)
+      ids.forEach((id) => this.closeTab(id))
     },
 
     /** Reorders a tab by dragging it onto another tab. */

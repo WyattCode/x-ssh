@@ -1,3 +1,25 @@
+# 会话记录:连续改进 M3.84(2026-10-30,复核打磨:主题循环竞态 + 关闭全部确认 + 连接日志 disconnect/滚动)
+
+功能清单已够,本轮按站立规则做开源复核打磨(不合并)。未动 PR #18 / #17 / #16 / #15 / #14 / #13 / #12 与更早的 #4–#11。
+
+**核过已过时 / 已在未合并 PR(本轮不重做)**:
+1. TransferPanel 失败原因 / ETA + Android 罚分地板 —— PR #12。
+2. 桌面重连中途罚分地板 + local/SOCKS `forwardOut` 超时 —— PR #13。
+3. HostEditor 密钥小层陷阱 / 命令面板遮罩回退 / 强调色样本 / 分组标签按下 —— PR #14。
+4. TransferPanel 暂停图标响应式 / Android 坏 SFTP 句柄丢弃 / ForwardDialog Enter —— PR #15。
+5. sendSnippet 活会话复核 / known_hosts·片段删除确认 / ForwardsPage 切 mode 清错 —— PR #16。
+6. 快照恢复确认 + 关闭其他尊重 confirmClose + 侧栏按下缩小 —— PR #17。
+7. OSC52 空白 base64 + 主锁 Enter/busy + 离线点透明度 —— PR #18。
+
+**修了**:
+1. **主题循环竞态**:`composables/theme.ts` `setPref` 在 await IPC 前乐观写 `pref`,侧栏/设置连点不再吞掉一步;失败不回滚(避免闪),跟随系统时回读 media。
+2. **标签栏「关闭全部」+ confirmClose**:新纯函数 `lib/tabCloseGuard.ts` `closeAllNeedsConfirm`(+4 测);`sessions.closeAll` 有活会话且开了确认时弹一次危险确认并先发 `exit`;TabBar 右键菜单加入口。
+3. **连接日志 UI**:`.log-event.disconnect` 补中性灰芯片(原先无样式、和默认糊在一起);日志行包进 `.log-list`(`max-height:320px` 可滚),空态/清空按钮仍在外。
+
+**验证**:`typecheck` + `lint:i18n` + vitest **338** 全绿(原 334;+`tabCloseGuard` 4)。Android 本轮未改。未合并。
+
+---
+
 # X-SSH 交接文档
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。

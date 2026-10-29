@@ -87,6 +87,11 @@ function run(action: (id: string) => void): void {
   action(menu.tabId)
   menu.open = false
 }
+/** Close all is not per-tab, so it can't go through `run` (which passes the id). */
+function closeAllTabs(): void {
+  menu.open = false
+  void store.closeAll()
+}
 
 // ---- Split / layout presets ----
 const layoutMenu = reactive({ open: false, x: 0, y: 0 })
@@ -258,6 +263,7 @@ function cancelRename(): void {
       <div class="sep" />
       <button @click="run(store.closeTabSafe)">{{ t('tabbar.closeTab') }}</button>
       <button :disabled="store.tabs.length < 2" @click="run(store.closeOthers)">{{ t('tabbar.closeOthers') }}</button>
+      <button :disabled="store.tabs.length < 1" @click="closeAllTabs">{{ t('tabbar.closeAll') }}</button>
     </div>
   </div>
 </template>
