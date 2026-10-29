@@ -1579,10 +1579,21 @@ export const useSessions = defineStore('sessions', {
     },
 
     /** Registers the host key the user just confirmed, then reconnects.
-     *  Used for both an unrecognized key (first connect) and a changed one
-     *  (trust the new key, overwriting the stale record). The fingerprint comes
-     *  from the last rejection (result of connect), not from the saved host, so
-     *  it lands on the right entry even when a jump hop is the one rejected. */
+     *  Used for both an unrecognized key (first connect) and a changed one.
+     *
+     *  Trusting **adds** the presented fingerprint to that host:port's trusted
+     *  set — it never wipes the keys already recorded there. That makes
+     *  "trust new" after a `host_key_changed` rotation-safe: a server that
+     *  presents two keys during a rotation window stays connectable on both,
+     *  and rolling back to the old key needs no second confirmation.
+     *
+     *  Dropping the old key(s) is a separate, explicit action: forget the entry
+     *  (settings → known hosts) and trust again. There is deliberately no
+     *  "replace" path here.
+     *
+     *  The fingerprint comes from the last rejection (result of connect), not
+     *  from the saved host, so it lands on the right entry even when a jump hop
+     *  is the one rejected. */
     async trustAndReconnect(paneId: string): Promise<void> {
       const found = this.findPane(paneId)
       if (!found) return

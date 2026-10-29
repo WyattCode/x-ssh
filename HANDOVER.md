@@ -33,6 +33,7 @@
 
 ## 架构要点
 
+- **主机密钥可多枚并存(M3.75,2026-10-30):** `known_hosts.json` 每条 `host:port` 存 `fps: string[]`(加载时迁入旧的裸字符串 / `{fp}`);`set()`/`ssh:trustHostKey` **追加**不覆盖;`accepts()` 任一匹配即通过。导出带 `fingerprints[]` + 兼容字段 `fingerprint`(第一把)。要丢掉旧密钥请「忘记」整条记录后再信任。安卓侧见 `mobile/HANDOVER.md` M3.75。
 - **主机密钥:首次连接也人工确认(第十五次会话,2026-10-03)。** 原来 `connect()` 对**未知**主机密钥静默记下就放行(纯 TOFU)、`connectJump()` 对跳板机同样静默信任;「变更」才拒绝。现在 `hostVerifier` 对**未知 / 变更都拒绝**,把服务器出示的 SHA-256 指纹回传渲染层,面板弹(与密钥变更同款)确认卡,用户点按钮经新 IPC `ssh:trustHostKey`(写 `known_hosts.json`)显式信任再重连——替代原来的「删除记录 + 重碰」。跳板机密钥失败从此自带 code / 指纹 / 是哪一台(`KeyError`,`connect` 的 catch 透传),不再被吞成无 code 的普通失败;密钥类报错改按界面语言翻译(原来英文界面弹主进程硬编码中文)。`quietExec` 的后台探测不放松(仍只碰已记录主机);连接复用(multiplex)复用已验证过的连接,不引入新信任面。`src/main/connect.test.ts` 起真 ssh2 服务器 5 条钉住这条链。- **密码/密钥永不离开主进程**:SSH 在主进程(`src/main/ssh.ts`),渲染层经 IPC(preload `src/preload/index.ts`)调用。
 - **共享纯函数**: `src/shared/fsUtils.ts`(POSIX 路径 `posixJoin`/`parentOf`、并发钳制 `clampConcurrency`、归档命令构造 `buildPackCommand`/`buildExtractCommand`、粘贴清理 `sanitizePasteText`、私钥识别 `isPrivateKey`/`sanitizeKeyName`),由主进程(`ssh.ts`)与渲染层(store/组件)共用并配套单元测试。**新增通用纯逻辑请放这里**。
 - **SSH 密钥库**: `src/main/keyManager.ts` 管理用户密钥到 `<userData>/keys/`(每个密钥一个 id 文件 + `.pub`);`ssh-keygen` 生成/`-lf` 指纹。IPC `keys:list/generate/import/delete` → preload `api.keys.*`。**只存私钥文件不存 passphrase**;主机编辑器(认证为 key 时)从密钥库下拉选择、生成、导入、删除。
@@ -107,7 +108,7 @@
       SHA256:…」;点信任后 `known_hosts.json` 写入该指纹(与靶机打印的钥匙逐字同源)并带 `firstSeen`。
     - ② 密钥变更:让靶机在两次连接之间换掉主机密钥(日志 `SWAPPED: now serving key B`)。卡片标题「主机密钥变更」,
       正文「…服务器重装过会这样,被中间人冒充也会这样 —— 确认后再信任新密钥。」,**旧指纹与新指纹两个都显示**,
-      按钮是「信任新密钥并重连」(与未信任卡的按钮区分);点后进 shell,`known_hosts` 换成新指纹、`firstSeen` 更新。
+      按钮是「信任新密钥并重连」(与未信任卡的按钮区分);点后进 shell,`known_hosts` **追加**新指纹(旧的仍保留,便于轮换窗口),`firstSeen` 保持首次信任时间。
     - ③ 跳板机密钥失败:连接一台经未记录跳板机的主机,卡片指明是跳板那台(`127.0.0.1:22601`)并显示其指纹;
       点信任后跳板指纹写入 `known_hosts`。另验到一条边界:跳板机没存密码时报「跳板机需要密码,但没有已保存的密码。
       请在「主机」编辑页为跳板主机设置密码后重试,或改用密钥认证」。
