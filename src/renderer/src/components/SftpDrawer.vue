@@ -963,7 +963,8 @@ async function diffWithLocal(entry: FileEntry): Promise<void> {
   if (!picked.ok || !picked.path) return
   const local = await window.api.local.readText(picked.path)
   if (!local.ok || local.content === undefined) {
-    error.value = local.error ?? tt('sfp.diffFail')
+    error.value =
+      local.error === 'path-invalid' ? tt('sfp.pathInvalid') : (local.error ?? tt('sfp.diffFail'))
     return
   }
   diff.remoteName = entry.name
@@ -1169,7 +1170,9 @@ async function packDownloadSelected(): Promise<void> {
   busy.value = true
   try {
     const r = await window.api.sftp.packDownload(props.sessionId, payload)
-    if (!r.ok && !r.canceled) error.value = r.error ?? tt('sfp.packFail')
+    if (!r.ok && !r.canceled)
+      error.value =
+        r.error === 'nothing-to-pack' ? tt('sfp.nothingToPack') : (r.error ?? tt('sfp.packFail'))
     else if (r.ok) await load(path.value)
   } finally {
     busy.value = false
@@ -1307,7 +1310,7 @@ async function revealHistory(h: TransferHistoryItem): Promise<void> {
   if (!target) return
   historyMenu.open = false
   const r = await window.api.sftp.revealLocal(target)
-  if (!r.ok) toast(r.error ?? tt('sfp.revealFail'), 'error')
+  if (!r.ok) toast(r.error === 'path-invalid' ? tt('sfp.pathInvalid') : (r.error ?? tt('sfp.revealFail')), 'error')
 }
 // Finished downloads reveal their dest; finished uploads reveal their source.
 function canReveal(h: TransferHistoryItem): boolean {

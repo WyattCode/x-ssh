@@ -2,6 +2,26 @@
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。
 
+
+## HANDOVER M3.108 — review polish (path-invalid + reveal toast / no-public-key / nothing-to-pack)
+
+**Branch:** `fix/review-polish-m3108` (from origin/main). **Do NOT merge.** Open PR (see report).
+**Skipped / do not redo:** PR #42 `fix/review-polish-m3107` (editExternal/openWith / backupBusy / Android HostEditor+HostSheet saving) and #41–#12, #4–#11. Features / intentional deferrals / M3.77–M3.107 done items. Left `文件过大` size branches alone (#40).
+
+### Fixes shipped
+1. **path-invalid + TransferPanel silent reveal** — `localReadText` path check + `sftpRevealLocal` return `path-invalid`; SessionReplay / SftpDrawer diff+revealHistory map `sfp.pathInvalid`; TransferPanel `reveal()` awaits and toasts (was `void` swallow).
+2. **no-public-key** — `keysPublicKey` / publish / revoke return stable code; PublishKeyDialog maps `keyPub.noPublicKey`.
+3. **nothing-to-pack** — `packAndDownload` empty items → code; SftpDrawer maps `sfp.nothingToPack`.
+
+### Verify
+- typecheck OK; lint:i18n OK (desktop 752/752/752); vitest **334**/30 green.
+- Model: DeepSeek-V4.1-Flash-1017 via ds.py; thinking=off medium; 24/24 HAND_APPLY after applicator fix for multi-hunk-under-one-FILE (first apply got only 7). No hand-fix of product code. Incidents: applicator miss logged, not a model fail.
+
+### Next
+Continue continuous-improve from origin/main on a new branch; do **not** touch/merge this PR or #42–#12 / #4–#11. Prefer substantive P0/P1 over busy-gates.
+
+---
+
 ## 项目概述
 - 极简、键盘优先的 SSH 客户端。Electron + Vue 3 (Vite) + TypeScript。
 - 平台: Windows (`win32`)。目录: `D:\Documents\Claude Code\X-SSH`。

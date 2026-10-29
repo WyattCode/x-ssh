@@ -48,7 +48,8 @@ async function publish(): Promise<void> {
   const r = await window.api.keys.publish(keyId.value, [...selected])
   busy.value = false
   if (!r.ok) {
-    err.value = r.error ?? t('keyPub.fail')
+    err.value =
+      r.error === 'no-public-key' ? t('keyPub.noPublicKey') : (r.error ?? t('keyPub.fail'))
     return
   }
   results.value = r.results ?? []
@@ -60,7 +61,8 @@ async function revoke(): Promise<void> {
   const r = await window.api.keys.revoke(keyId.value, [...selected])
   revokeBusy.value = false
   if (!r.ok) {
-    err.value = r.error ?? t('keyPub.revokeFail')
+    err.value =
+      r.error === 'no-public-key' ? t('keyPub.noPublicKey') : (r.error ?? t('keyPub.revokeFail'))
     return
   }
   revokeResults.value = r.results ?? []
