@@ -5,6 +5,7 @@ const trapEl = ref<HTMLElement>()
 useFocusTrap(trapEl, () => store.historyOpen)
 import { useSessions } from '../stores/sessions'
 import { useI18n } from '../lib/i18n'
+import { isImeKey } from '../lib/ime'
 import Icon from './Icon.vue'
 
 const store = useSessions()
@@ -105,6 +106,10 @@ function copy(hit: Hit): void {
   store.toggleHistory(false)
 }
 function onKey(e: KeyboardEvent): void {
+  // While an IME is composing, Enter / arrows / Esc belong to the candidate
+  // list: picking a word out of it would otherwise jump to that session and
+  // close this dialog mid-typing.
+  if (isImeKey(e)) return
   if (e.key === 'Escape') store.toggleHistory(false)
   else if (e.key === 'ArrowDown') {
     e.preventDefault()
@@ -113,6 +118,7 @@ function onKey(e: KeyboardEvent): void {
     e.preventDefault()
     active.value = Math.max(active.value - 1, 0)
   } else if (e.key === 'Enter' && results.value[active.value]) {
+    e.preventDefault()
     pick(results.value[active.value])
   }
 }
@@ -120,7 +126,7 @@ function onKey(e: KeyboardEvent): void {
 
 <template>
   <div v-if="store.historyOpen" class="overlay" @mousedown.self="store.toggleHistory(false)">
-    <div ref="trapEl" tabindex="-1" class="panel" @keydown="onKey" @keydown.enter.prevent>
+    <div ref="trapEl" tabindex="-1" class="panel" @keydown="onKey">
       <div class="bar">
         <Icon name="search" :size="15" />
         <input

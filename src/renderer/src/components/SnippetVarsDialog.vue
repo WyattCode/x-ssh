@@ -3,6 +3,7 @@ import { nextTick, ref, watch } from 'vue'
 import { useFocusTrap } from '../composables/focusTrap'
 import { useSnippetVars } from '../composables/snippetVars'
 import { useI18n } from '../lib/i18n'
+import { isImeKey } from '../lib/ime'
 import Icon from './Icon.vue'
 
 const { state, submit, cancel } = useSnippetVars()
@@ -24,7 +25,7 @@ watch(
 function onKey(e: KeyboardEvent): void {
   // While an IME is composing, Enter picks a candidate, not "run" — this box
   // exists precisely to type variable values (often Chinese).
-  if (e.isComposing || e.keyCode === 229) return
+  if (isImeKey(e)) return
   if (e.key === 'Enter') submit()
   else if (e.key === 'Escape') cancel()
 }

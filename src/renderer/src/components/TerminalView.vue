@@ -10,6 +10,7 @@ import { useFontSize } from '../composables/fontSize'
 import { useConfirm } from '../composables/confirm'
 import { themeFor } from '../lib/terminalThemes'
 import { useI18n } from '../lib/i18n'
+import { isImeKey } from '../lib/ime'
 import { useSessions } from '../stores/sessions'
 import {
   DEFAULT_BINDINGS,
@@ -241,6 +242,19 @@ function runSearch(forward: boolean): void {
   const opts = { caseSensitive: searchBar.caseSensitive }
   if (forward) search.findNext(searchBar.query, opts)
   else search.findPrevious(searchBar.query, opts)
+}
+/** Enter / Shift+Enter in the search box. Bound plainly and cancelled here so
+ *  that the Enter which commits an IME candidate is left to the input method —
+ *  searching on it would jump to a match for the half-composed query. */
+function onSearchEnter(e: KeyboardEvent, forward: boolean): void {
+  if (isImeKey(e)) return
+  e.preventDefault()
+  runSearch(forward)
+}
+function onSearchEsc(e: KeyboardEvent): void {
+  if (isImeKey(e)) return
+  e.preventDefault()
+  closeSearch()
 }
 function openSearch(): void {
   searchBar.open = true
@@ -692,9 +706,9 @@ onBeforeUnmount(() => {
         class="sb-input"
         :placeholder="t('term.searchPlaceholder')"
         spellcheck="false"
-        @keydown.enter.exact.prevent="runSearch(true)"
-        @keydown.shift.enter.prevent="runSearch(false)"
-        @keydown.esc.prevent="closeSearch"
+        @keydown.enter.exact="onSearchEnter($event, true)"
+        @keydown.shift.enter="onSearchEnter($event, false)"
+        @keydown.esc="onSearchEsc($event)"
         @input="runSearch(true)"
       />
       <button class="sb-btn case" :class="{ on: searchBar.caseSensitive }" :title="t('term.caseTip')" @click="toggleCase">Aa</button>

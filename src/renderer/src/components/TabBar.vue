@@ -4,6 +4,7 @@ import { useSessions, type Tab } from '../stores/sessions'
 import { useI18n } from '../lib/i18n'
 import { isMac } from '../composables/platform'
 import { useZoom } from '../composables/zoom'
+import { isImeKey } from '../lib/ime'
 import Icon from './Icon.vue'
 
 const store = useSessions()
@@ -130,7 +131,13 @@ function startRename(): void {
     editEl.value?.select()
   })
 }
-function commitRename(): void {
+function commitRename(e?: Event): void {
+  // The Enter that commits an IME candidate belongs to the input method: taking
+  // it here would rename the tab to the text the candidate had not replaced yet.
+  // `.prevent` in the template would run before this check and swallow the
+  // candidate, so the keydown is bound plainly and cancelled here.
+  if (isImeKey(e)) return
+  if (e && 'key' in e) e.preventDefault()
   if (editingId.value) store.renameTab(editingId.value, editingText.value)
   editingId.value = ''
 }
@@ -171,7 +178,7 @@ function cancelRename(): void {
           class="rename"
           spellcheck="false"
           @click.stop
-          @keydown.enter.prevent="commitRename"
+          @keydown.enter="commitRename($event)"
           @keydown.esc.prevent="cancelRename"
           @blur="commitRename"
         />

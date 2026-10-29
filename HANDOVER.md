@@ -6,17 +6,18 @@
 - 极简、键盘优先的 SSH 客户端。Electron + Vue 3 (Vite) + TypeScript。
 - 平台: Windows (`win32`)。目录: `D:\Documents\Claude Code\X-SSH`。
 - **git 仓库**(`main` 分支),远程: `https://github.com/WyattCode/x-ssh`(私有)。
-- 版本: `package.json` 当前为 **0.4.1**(2026-10-15 发;**桌面代码与 0.4.0 完全相同**,0.4.1 只是把移动端修复记入版本;`v0.4.0` tag 已含远程上的 macOS 改动);有 `CHANGELOG.md`(Keep a Changelog + 语义化)。
+- 版本: `package.json` 当前为 **0.5.0**(2026-10-28 发;这一轮把「只在编译里过关的交互」真正点了一遍,见第二十三次会话)。有 `CHANGELOG.md`(Keep a Changelog + 语义化),`v0.5.0` tag 已推。
 
 ## 常用命令(Windows/PowerShell)
 - 必须用 `npm.cmd`(直接 `npm` 会因执行策略失败)。
 - 校验: `npm.cmd run typecheck`、`npm.cmd run build`
 - **本地 SFTP 靶机**:`powershell -File scripts\dev-sshd.ps1 start|stop|status|clean`。密钥、配置、`authorized_keys` 全在 `%TEMP%\xssh-target`,只绑 `127.0.0.1:2222`,**不碰 `%USERPROFILE%\.ssh`**;客户端私钥是 `%TEMP%\xssh-target\id_dev`(主机编辑页「密钥」直接填这个路径),登录用户是你当前 Windows 账号。配置里**不能写 `PerSourcePenalties`**(Windows 自带的 OpenSSH 是 9.x,不认识,写了 sshd 直接起不来)。脚本按 PID 文件停进程 —— 别自己按命令行匹配杀,会把执行命令的 PowerShell 一起匹配掉。
-- **单元测试**: `npm.cmd run test`(Vitest 2;共 **295** 用例:纯逻辑在 `src/shared/*` / `src/renderer/src/lib/*`,外加 `src/main/*.test.ts` 的集成测试(起真 ssh2 服务器)。**没有任何组件测试**,界面交互只能人工验。
+- **单元测试**: `npm.cmd run test`(Vitest 2;共 **334** 用例 / **30** 个文件:纯逻辑在 `src/shared/*` / `src/renderer/src/lib/*`,外加 `src/main/*.test.ts` 的集成测试(起真 ssh2 服务器),以及两个源码静态检查(`focusTrapCoverage`、`imeEnterCoverage`)。**没有任何组件测试**,界面交互只能人工验。
+  - **配置里钉死了单进程**(`vitest.config.ts` 的 `singleFork`),别改回默认并行:Windows 上并行会让 Vitest 的 SSR 模块缓存互相踩,随机一整个文件报 `EPERM open ...\ssr\<hash>` 然后**静默不收集**,那一跑仍然报绿、只是数字变小(实测同一份代码连跑 10 次出现过 334 / 325 / 326 / 313 / 331 五种结果)。**看到用例数比 334 少,先怀疑这个,别怀疑测试挂掉。**
 - **i18n 键对称校验**: `npm.cmd run lint:i18n`(现在串跑两个脚本:桌面端 `scripts/lint-i18n.mjs` + 移动端 `scripts/lint-i18n-mobile.mjs`;桌面端 zh / zh-TW / en 722/722/722 全对称,移动端三份资源对称且代码里 0 条内联中文)。
 - **发版流程**:升 `package.json`/lock(`npm.cmd version x.y.z --no-git-tag-version`,会把 `schemes` 那行重排,手动还原)+ CHANGELOG → 提交推 `main` → `git tag vx.y.z` 并推 tag;CI(`ci.yml` 的 `release` 作业,windows-latest,约 8 分钟)自动建 GitHub Release 并挂 `X-SSH.Setup.x.y.z.exe` + `.blockmap`。**安卓不在这条流水线里**,APK 只能本机 `installDebug`。
-- **本机部署**:`npm.cmd run package` → 关掉 `D:\Apps\X-SSH` 里的进程(按精确路径 `Path -eq 'D:\Apps\X-SSH\X-SSH.exe'` 筛,别按窗口标题;用户授权过可代关)→ `robocopy release\win-unpacked D:\Apps\X-SSH /E` → 对比 `X-SSH.exe` / `resources\app.asar` 哈希。2026-10-15 已装 0.4.1。
-- 打包: `npm.cmd run dist` → `release\X-SSH Setup 0.4.1.exe`(NSIS)+ `release\win-unpacked\X-SSH.exe` + `.blockmap`。electron-builder 已是 **26.x**。
+- **本机部署**:`npm.cmd run package` → 关掉 `D:\Apps\X-SSH` 里的进程(按精确路径 `Path -eq 'D:\Apps\X-SSH\X-SSH.exe'` 筛,别按窗口标题;用户授权过可代关)→ `robocopy release\win-unpacked D:\Apps\X-SSH /E` → 对比 `X-SSH.exe` / `resources\app.asar` 哈希。**本机装的还是 2026-10-08 的旧构建**,0.4.1 / 0.5.0 都没部署过(2026-10-29 核过 `D:\Apps\X-SSH\X-SSH.exe` 的 mtime)。
+- 打包: `npm.cmd run dist` → `release\X-SSH Setup 0.5.0.exe`(NSIS)+ `release\win-unpacked\X-SSH.exe` + `.blockmap`。electron-builder 已是 **26.x**。`release/` 里现在只有 0.4.0 的 Setup exe,win-unpacked 是 10-17 的。
 - **图标**:全部由 `python build/icon-src/make_icons.py` 生成(Pillow + numpy),别手改产物。几何是从 `build/icon-src/reference/` 里用户给的三张参考图拟合的
   (两根镜像的平行四边形条、水平切口、倾角约 45.4°、圆角 63/1024,形状 IoU 0.97)。产物:`build/icon.icon`(macOS 26/27 Icon Composer 文档:
   四个 SVG 图层,白天 / 夜间两套条靠 `hidden-specializations` 切换,背景 `fill-specializations`;按 HIG 图层是**不带圆角的方形**、不自己画阴影高光)、
@@ -114,10 +115,86 @@
       否则换钥匙与在途连接相撞、靶机自己把自己弄断;bash 里起的后台进程会被命令收尾一并清掉,
       需要让「靶机 + 两次连接」跑在同一个进程里。
   - 移动端 M3.65 字标:MuMu 验过、**真机(18 Fold 等)没验**(见 `mobile/HANDOVER.md` M3.65)。
-- `CHANGELOG.md` 的 Unreleased 已累积这一轮(快速连接 / 后台识别系统 / 新界面,第十五次会话补了主机密钥确认);三种语言 / 防丢失 / 右键复制已随 0.3.0 发过。要发版时升版本号、改日期。
+  - **中文输入法的回车**(第二十四次会话):已经用合成 `KeyboardEvent` 验到「输入法回车不被我们吞掉、真实回车照常执行」,但**没有在真实中文输入法下看过候选词框**——那要人手动打。想彻底确认,挑连接页搜索框和标签重命名两处各打一次中文、在候选框上按回车即可。
+- `CHANGELOG.md` 现在有 `Unreleased` 段(第二十四次会话的输入法修复 + 测试配置)。要发版时升版本号、改日期。
 - 按用户截图式 UI 反馈继续修复。
 - 如版本号增加,改 `package.json` + 更新 `CHANGELOG.md` 后 `npm.cmd run dist` 重打包。
 - 大规模改动前先跑 `npm.cmd run typecheck && npm.cmd run build` 与 `npm.cmd run lint:i18n` 保证通过。
+
+# 会话记录:第二十四次会话(2026-10-29,中文输入法的回车 + 测试套件自己会漏跑)
+
+> **本会话总览**
+> - **中文输入法按回车**:两半问题。① 一批入口没有组字判断,选词时的回车会被当成确认执行(最糟的是连接页搜索会直接连主机);② 更要命的一半是这些地方写着 `@keydown.enter.prevent` —— `.prevent` 在处理器**之前**执行,处理器里再判断已经晚了,候选词被 `preventDefault` 卡住,**中文用户在这些框里选不了词**。
+> - **测试套件会静默漏跑**:Vitest 在 Windows 上并行跑文件会抢同一个 SSR 缓存文件,抢输的那个报 `EPERM`、用例被静默跳过,但整跑仍然报绿。这比上面那条严重得多。
+
+用户说「继续吧,继续完善」,于是从最常见的中文交互往下挖,结果在验证过程中撞到一个影响所有人的问题。
+
+## 一、中文输入法的回车(应用层面)
+
+**先说清楚两半问题的区别**,这是这次唯一需要记住的判断方法:
+
+- 处理器里写 `if (e.isComposing) return` 只挡住「我误把选词回车当确认」;
+- 但模板上的 `@keydown.enter.prevent` 里的 `.prevent` 是 Vue 编译进 `withModifiers` 的,**它在调用处理器之前就 `preventDefault()` 了**。组字状态下的回车被取消默认行为,浏览器就不再把它交给输入法 → **候选词选不上**,输入框看起来对回车毫无反应。
+
+所以正确写法只有一种:**模板不加 `.prevent`,处理器里先判断组字,再自己 `preventDefault()`**。
+
+新增 `src/renderer/src/lib/ime.ts` 的 `isImeKey()`(`isComposing || keyCode === 229`,允许传 `undefined`,因为 `blur` 路径没有事件),替换掉原先散在四个组件里的六份重复写法;`SftpDrawer` 里原有的本地 `isImeEnter()` 保留为薄包装,免得改一堆调用点。
+
+按危险程度排,修掉的是:
+
+1. **连接页搜索框(最危)**:输入法是中文时在搜索框里打主机名,选词按的回车会走 `onSearchEnter` → 只剩一台主机就直接 `connect()`。等于**选个词就连上一台服务器**。
+2. **标签重命名**:选词回车直接提交,标签被改成候选词替换前的半截文字,输入框也关了。
+3. **SFTP 抽屉**:远程新建 / 重命名 / 路径编辑三处。修之前「守卫是写了但 `.prevent` 抢先」,等于候选词提交不了;`commitRename(entry, $event)` 那处有传事件、另外两处 `commitCreate` / `commitPathEdit` 模板没传 `$event`,守卫拿到 `undefined` 直接放行。现在三处统一。
+4. **本地面板的「按模式选择」**(`selectByPattern`):全角括号这类模式串常用中文输入法打,原来回车会在打字中途就把文件选上。这个函数连事件参数都没有,是这次新加的。
+5. **生成密钥**的两个输入框(密钥名、口令):回车会拿半截名字生成一对密钥并写进 `keys/`。
+6. **命令广播**(`submitBroadcast`):广播是发给**所有**在线会话的真实命令,从这里发出去了很难收回。原来模板直接 `@keydown.enter.stop.prevent="submitBroadcast"`,完全绕过 `onKey` 里已有的组字判断。
+7. **会话历史搜索**(`HistorySearch`):原来面板根上挂着 `@keydown.enter.prevent`,**无条件**取消所有回车;`onKey` 也没有组字判断,选词回车会直接 `pick()` 跳走并关窗。
+8. **终端搜索框**:中文搜索时回车被 `.prevent` 卡住,候选词提交不了。
+9. **锁屏**:`unlock()` 在组字时被触发,会拿半截口令去验证。
+
+**没动、也不该动**:连接页主机卡片上的 `@keydown.enter.self`(焦点在卡片上,根本不在输入框,不会有组字)、权限对话框(只有八进制数字和复选框)、设置页两个 `@keyup.enter`(写的是幂等偏好,重复保存无害,已列进静态检查的例外)。
+
+## 二、测试套件自己会静默漏跑(比上面重要)
+
+改完之后跑 `npm run test`,先后拿到 334 和 325 两个数,都是绿的。一开始以为是我新加的测试有问题,查下去发现是**测试基础设施**的毛病:
+
+- 现象:同一份代码连跑 10 次,得到 `334 / 325 / 326 / 313 / 331` 五种结果,缺的文件随机(有一次缺的恰好是几分钟前刚改过模块对应的测试)。
+- 根因:Vitest 默认并行跑多个测试文件,它把 SSR 转译后的模块按内容哈希写进临时目录,**两个 worker 抢同一个文件**,抢输的那个报
+  `Error: EPERM: operation not permitted, open 'C:\Users\...\Temp\<随机>\ssr\<hash>'`,
+  而这个错误只算一条 "Unhandled Error",那个文件的用例**再也不会被收集**,整跑依然 `passed`。
+- 修法:`vitest.config.ts` 固定 `pool: 'forks'` + `singleFork: true`。连跑 8 次全部 30 个文件 / 334 个用例,EPERM 也不再出现。总耗时仍约 3 秒,并行本来没换来什么。
+
+**给以后的我**:看到用例数不等于 334,先看 `Test Files` 是不是 30,别急着找「测试挂了」。这条已经写进上面的「常用命令」小节。
+
+## 三、静态兜底
+
+新增 `src/renderer/src/composables/imeEnterCoverage.test.ts`,两条:
+
+- 模板里处理回车的组件,源码里必须出现 `isImeKey(` 或 `isImeEnter(`;
+- 模板里**不允许**出现带 `.prevent` 的 `@key*down*.enter` 绑定。
+
+**做了阴性对照**(这类检查最容易写成永远通过):把 `TabBar` 的绑定改回 `.prevent` → 第二条如实报出 `TabBar.vue: @keydown.enter.prevent`;把 `commitRename` 里的守卫注释掉 → 第一条报出 `TabBar.vue`。还原后全绿。
+
+## 四、这一轮的实测(不是只看 typecheck)
+
+构建产物 + 临时 profile(`%TEMP%\x-ssh-verify-25`,调试端口 9224),用 CDP 在渲染层合成 `KeyboardEvent`,分别带 `isComposing: true` 和普通状态,读 `defaultPrevented`:
+
+| 场景 | 真实回车 | 输入法回车 |
+|---|---|---|
+| 命令面板搜索框 | `prevented: true`(被处理) | `prevented: false`(放行给输入法) |
+| 会话历史搜索 | 面板保持打开 | `prevented: false`,面板保持打开(不再误跳会话) |
+
+两个方向都对得上:真实回车仍然照常执行,输入法回车完全放行。**注意这里只验了「事件是否被我们吞掉」,没有验真机输入法的候选词弹出** —— 那需要真人在中文输入法下打字。
+
+**踩到的坑(记下来省下次)**:这台机器上 `ELECTRON_RUN_AS_NODE=1` 是常驻环境变量,直接跑 `electron.exe` 会退化成纯 Node 并报 `Cannot read properties of undefined (reading 'exports')`;必须先 `unset`。另外 `http_proxy` 也在环境里,`fetch('http://127.0.0.1:9224/...')` 会被代理挡掉,要用 `env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY`。
+
+## 五、文档订正
+
+顺手改了「项目概述」里过期的一行:原来写「`package.json` 当前为 0.4.1」,实际早已是 0.5.0。同时把本机部署那条改成「`D:\Apps\X-SSH` 还是 10-08 的旧构建,0.4.1 / 0.5.0 都没部署过」。
+
+验证:`typecheck`(node+web)、`vitest 334`(30 文件,连跑多次稳定)、`build`、`lint:i18n` 全绿。
+
+---
 
 # 会话记录:第二十三次会话(2026-10-27,实测第二十二次会话的焦点陷阱:三处缺陷)
 

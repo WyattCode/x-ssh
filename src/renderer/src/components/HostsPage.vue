@@ -5,6 +5,7 @@ import { useI18n } from '../lib/i18n'
 import { useConfirm } from '../composables/confirm'
 import { formatAgo } from '../lib/transferFormat'
 import { parseTarget } from '../lib/target'
+import { isImeKey } from '../lib/ime'
 import type { Host } from '../../../shared/types'
 import Icon from './Icon.vue'
 import OsIcon from './OsIcon.vue'
@@ -189,7 +190,14 @@ function quickGo(): void {
 /** Enter: the suggested address when one is offered, else the only host the
  *  filter left. */
 function onSearchEnter(e: KeyboardEvent): void {
-  if (e.isComposing) return
+  // The Enter that commits an IME candidate belongs to the input method — taking
+  // it here would connect to a host on the keystroke that only picked a word out
+  // of the candidate list. `.prevent` in the template runs *before* this check
+  // and would also stop the candidate from ever being committed (the search box
+  // simply stops responding to Enter while composing), so the keydown is bound
+  // plainly and cancelled here.
+  if (isImeKey(e)) return
+  e.preventDefault()
   if (showSuggest.value) quickGo()
   else if (visible.value.length === 1) {
     const only = visible.value[0]
@@ -304,7 +312,7 @@ defineExpose({ focusSearch: () => searchEl.value?.focus() })
               :placeholder="t('hosts.search')"
               spellcheck="false"
               @keydown.esc="query = ''"
-              @keydown.enter.prevent="onSearchEnter"
+              @keydown.enter="onSearchEnter"
               @focus="searchFocused = true"
               @blur="searchFocused = false"
             />

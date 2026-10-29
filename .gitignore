@@ -7,3 +7,5 @@ release
 .vite
 .claude
 __pycache__
+# Project-local agent data (memory logs, session state). Kept on disk, not in git.
+.workbuddy/

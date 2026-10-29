@@ -5,6 +5,7 @@ const trapEl = ref<HTMLElement>()
 useFocusTrap(trapEl, () => true)
 import { useSessions } from '../stores/sessions'
 import { useI18n } from '../lib/i18n'
+import { isImeKey } from '../lib/ime'
 import Icon from './Icon.vue'
 
 const store = useSessions()
@@ -51,6 +52,9 @@ async function unlock(): Promise<void> {
 }
 
 const onKey = (e: KeyboardEvent): void => {
+  // The Enter that commits an IME candidate belongs to the input method, not to
+  // us: unlocking on it would submit a passphrase that is still half-composed.
+  if (isImeKey(e)) return
   if (e.key === 'Enter') void unlock()
 }
 </script>

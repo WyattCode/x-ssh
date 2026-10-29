@@ -12,6 +12,7 @@ import {
   transferStatusText
 } from '../lib/transferFormat'
 import { globMatch } from '../lib/glob'
+import { isImeKey } from '../lib/ime'
 import { useFocusTrap } from '../composables/focusTrap'
 import type { DownloadQueueOp } from '../stores/sessions'
 import { useConfirm } from '../composables/confirm'
@@ -164,7 +165,10 @@ const localPattern = ref('')
 const localPatternErr = ref('')
 
 /** Selects the local entries matching a glob pattern (replacing the selection). */
-function selectByPattern(): void {
+function selectByPattern(e?: Event): void {
+  // A glob pattern is often typed with an IME on (全角括号 and the like), where
+  // the Enter that commits the candidate would otherwise select files mid-typing.
+  if (isImeEnter(e)) return
   const pattern = localPattern.value.trim()
   if (!pattern) return
   const matched = localSorted.value
@@ -292,8 +296,7 @@ function localEnterSelection(): void {
  *  method: running the handler there creates the folder under the text the
  *  candidate had not replaced yet, or closes the box and loses it. */
 function isImeEnter(e?: Event): boolean {
-  const k = e as KeyboardEvent | undefined
-  return !!k && (k.isComposing === true || k.keyCode === 229)
+  return isImeKey(e)
 }
 
 async function localSubmit(e?: Event): Promise<void> {
@@ -1091,6 +1094,7 @@ async function commitRename(entry: FileEntry, e?: Event): Promise<void> {
   if (isImeEnter(e)) return
   // Esc clears renamingName first; the ensuing blur must not still rename.
   if (renamingName.value !== entry.name) return
+  if (e) e.preventDefault()
   const next = renameInput.value.trim()
   renamingName.value = null
   if (!props.sessionId || !next || next === entry.name) return
@@ -1109,6 +1113,7 @@ function startCreate(kind: 'folder' | 'file'): void {
 }
 async function commitCreate(e?: Event): Promise<void> {
   if (isImeEnter(e)) return
+  if (e) e.preventDefault()
   const name = newName.value.trim()
   const kind = creatingKind.value
   creatingKind.value = null
@@ -1355,6 +1360,7 @@ function commitPathEdit(e?: Event): void {
   if (isImeEnter(e)) return
   // Esc sets pathEditing=false first; the ensuing blur must not still navigate.
   if (!pathEditing.value) return
+  if (e) e.preventDefault()
   pathEditing.value = false
   const p = pathInput.value.trim()
   if (p && p !== path.value) load(p)
@@ -1459,7 +1465,7 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
             v-model="pathInput"
             class="path-input"
             spellcheck="false"
-            @keydown.enter.prevent="commitPathEdit"
+            @keydown.enter="commitPathEdit($event)"
             @keydown.esc.prevent="pathEditing = false"
             @blur="commitPathEdit"
           />
@@ -1544,7 +1550,7 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
                 v-model="newName"
                 class="edit-input"
                 :placeholder="creatingKind === 'folder' ? tt('sfp.folderName') : tt('sfp.fileName')"
-                @keydown.enter.prevent="commitCreate"
+                @keydown.enter="commitCreate($event)"
                 @keydown.esc.prevent="creatingKind = null"
                 @blur="commitCreate"
               />
@@ -1570,7 +1576,7 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
                 v-model="renameInput"
                 class="edit-input"
                 @click.stop
-                @keydown.enter.prevent="commitRename(entry, $event)"
+                @keydown.enter="commitRename(entry, $event)"
                 @keydown.esc.prevent="renamingName = null"
                 @blur="commitRename(entry)"
               />
@@ -1646,7 +1652,7 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
           </template>
           <label class="pattern" :class="{ bad: !!localPatternErr }" :title="localPatternErr || ''">
             <Icon name="search" :size="12" />
-            <input v-model="localPattern" :placeholder="tt('sfp.patternPh')" spellcheck="false" @keyup.enter="selectByPattern" />
+            <input v-model="localPattern" :placeholder="tt('sfp.patternPh')" spellcheck="false" @keyup.enter="selectByPattern($event)" />
           </label>
           <button class="ib sm" :title="tt('sfp.selectAll')" @click="localSelectAll"><Icon name="check-all" :size="14" /></button>
           <button class="ib sm" :title="tt('sfp.deploy')" :disabled="!localSelCount || !props.sessionId" @click="openDeploy"><Icon name="send" :size="14" /></button>
@@ -1817,7 +1823,7 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
           v-model="localModal.value"
           class="box"
           :placeholder="localModal.kind === 'folder' ? tt('sfp.folderName') : tt('sfp.fileName')"
-          @keydown.enter="localSubmit"
+          @keydown.enter="localSubmit($event)"
           @keydown.esc="localModal.open = false"
         />
         <p v-if="localModal.error" class="dlg-err">{{ localModal.error }}</p>

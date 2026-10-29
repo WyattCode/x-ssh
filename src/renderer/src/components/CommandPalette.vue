@@ -6,6 +6,7 @@ useFocusTrap(trapEl, () => store.paletteOpen)
 import { useSessions } from '../stores/sessions'
 import { fuzzyScore, fuzzyMatch } from '../lib/fuzzy'
 import { parseTarget } from '../lib/target'
+import { isImeKey } from '../lib/ime'
 import { useI18n } from '../lib/i18n'
 import { useToast } from '../composables/toast'
 import Icon from './Icon.vue'
@@ -384,12 +385,21 @@ function submitBroadcast(): void {
   const sent = store.broadcastCommand(cmd)
   toast(sent ? t('pal.broadcastSent', { n: sent }) : t('pal.broadcastNone'), sent ? 'success' : 'error')
 }
+/** Enter in the broadcast box sends the command to every live session — a
+ *  real, hard-to-undo action, so it must not fire on the Enter that only
+ *  commits an IME candidate. Bound here rather than with `.prevent` in the
+ *  template, which would run first and swallow the candidate. */
+function onBroadcastEnter(e: KeyboardEvent): void {
+  if (isImeKey(e)) return
+  e.preventDefault()
+  submitBroadcast()
+}
 
 function onKey(e: KeyboardEvent): void {
   // While an IME is composing, Enter/arrows/Esc are the candidate list's, not
   // ours — searching a Chinese host label would otherwise connect on the Enter
   // that just picks the word.
-  if (e.isComposing || e.keyCode === 229) return
+  if (isImeKey(e)) return
   if (broadcastOpen.value) {
     if (e.key === 'Enter') {
       e.preventDefault()
@@ -445,7 +455,7 @@ function onKey(e: KeyboardEvent): void {
           :placeholder="t('pal.broadcastPlaceholder')"
           spellcheck="false"
           autocomplete="off"
-          @keydown.enter.stop.prevent="submitBroadcast"
+          @keydown.enter.stop="onBroadcastEnter"
         />
         <div class="hint">
           <span><span class="kbd">Enter</span> {{ t('pal.broadcastSend') }}</span>

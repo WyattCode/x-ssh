@@ -6,6 +6,7 @@ import { useSessions } from '../stores/sessions'
 import { useI18n } from '../lib/i18n'
 import { useToast } from '../composables/toast'
 import { useConfirm } from '../composables/confirm'
+import { isImeKey } from '../lib/ime'
 import Icon from './Icon.vue'
 import OsIcon from './OsIcon.vue'
 import { PRESETS } from '../lib/terminalThemes'
@@ -231,7 +232,11 @@ function openGenerate(): void {
   keyModal.passphrase = ''
   keyModal.error = ''
 }
-async function generateKey(): Promise<void> {
+async function generateKey(e?: Event): Promise<void> {
+  // The Enter that commits an IME candidate belongs to the input method: taking
+  // it here would generate a key named after the half-typed text.
+  if (isImeKey(e)) return
+  if (e) e.preventDefault()
   keyModal.error = ''
   const name = keyModal.name.trim()
   if (!name) {
@@ -291,7 +296,7 @@ function commitTag(): boolean {
   return true
 }
 function onTagKey(e: KeyboardEvent): void {
-  if (e.isComposing || e.keyCode === 229) return
+  if (isImeKey(e)) return
   if ((e.key === 'Enter' || e.key === ',' || e.key === '，') && tagDraft.value.trim()) {
     // Ours, not the editor's "Enter saves".
     e.preventDefault()
@@ -367,7 +372,7 @@ async function save(): Promise<void> {
 function onEnter(e: KeyboardEvent): void {
   // The Enter that commits an IME candidate (typing 生产 into 名称) arrives here
   // too — that one belongs to the input method, not to us.
-  if (e.isComposing || e.keyCode === 229) return
+  if (isImeKey(e)) return
   const inField = (e.target as HTMLElement | null)?.tagName === 'INPUT'
   if (!inField && !(e.ctrlKey || e.metaKey)) return
   e.preventDefault()
@@ -678,7 +683,7 @@ async function remove(): Promise<void> {
             <div class="card">
               <label class="row">
                 <span class="r-label">{{ t('host.keyName') }}</span>
-                <input ref="keyNameEl" v-model="keyModal.name" class="r-input" :placeholder="t('host.keyNamePh')" @keydown.enter.stop.prevent="generateKey" />
+                <input ref="keyNameEl" v-model="keyModal.name" class="r-input" :placeholder="t('host.keyNamePh')" @keydown.enter.stop="generateKey($event)" />
               </label>
               <div class="row">
                 <span class="r-label">{{ t('host.keyType') }}</span>
@@ -688,7 +693,7 @@ async function remove(): Promise<void> {
               </div>
               <label class="row">
                 <span class="r-label">{{ t('host.passphrase') }}</span>
-                <input v-model="keyModal.passphrase" class="r-input" type="password" :placeholder="t('host.passphraseAsk')" @keydown.enter.stop.prevent="generateKey" />
+                <input v-model="keyModal.passphrase" class="r-input" type="password" :placeholder="t('host.passphraseAsk')" @keydown.enter.stop="generateKey($event)" />
               </label>
             </div>
             <p v-if="keyModal.error" class="err">{{ keyModal.error }}</p>
