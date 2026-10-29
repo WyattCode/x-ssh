@@ -379,6 +379,7 @@ const zh: Dict = {
   'term.pasteConfirm': '即将向终端粘贴 {n} 行内容,确定继续吗?',
   'term.pasteConfirmOk': '粘贴',
   'term.cancel': '取消',
+  'term.linkOpenFail': '无法打开链接',
 
   // text editor
   'ed.loadFail': '无法读取文件',
@@ -1153,6 +1154,7 @@ const en: Dict = {
   'term.pasteConfirm': 'About to paste {n} lines into the terminal. Continue?',
   'term.pasteConfirmOk': 'Paste',
   'term.cancel': 'Cancel',
+  'term.linkOpenFail': 'Could not open link',
 
   // text editor
   'ed.loadFail': 'Failed to read file',
@@ -1936,6 +1938,7 @@ const zhTW: Dict = {
   'term.pasteConfirm': '即將向終端機貼上 {n} 行內容,確定要繼續嗎?',
   'term.pasteConfirmOk': '貼上',
   'term.cancel': '取消',
+  'term.linkOpenFail': '無法開啟連結',
 
   // text editor
   'ed.loadFail': '無法讀取檔案',

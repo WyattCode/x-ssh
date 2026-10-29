@@ -2,6 +2,26 @@
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。
 
+## HANDOVER M3.123 — review polish (tmuxAttach fail-closed / reveal access / link open toast)
+
+**Branch:** `fix/review-polish-m3123` (from origin/main). **Do NOT merge.** Open PR (see report).
+**Skipped / do not redo:** PR #57 `fix/review-polish-m3122` (localList rethrow / openExternal fail-closed / hist.untitled) and #56–#12, #4–#11. Features / intentional deferrals / M3.77–M3.122 done items.
+
+### Fixes shipped
+1. **tmuxAttach false success** — `tmuxAttachOrCreate` returned void and IPC always `{ ok: true }` when sshManager existed, even with no session/stream (silent no-op). Now returns `boolean`; IPC propagates so #47's `tmux.attachFail` toast can fire.
+2. **revealLocal missing path** — `showItemInFolder` does not throw for deleted downloads; handler now `access`es first and fail-closes so SftpDrawer history reveal toast fires.
+3. **Terminal link open silent fail** — `openLink` ignored `openExternal` false/reject. Toast `term.linkOpenFail` (zh/en/zh-TW).
+
+### Verify
+- typecheck OK; lint:i18n OK (750/750/750 desktop); vitest **334**/30 green.
+- Model: DeepSeek-V4.1-Flash-1017 via ds.py; thinking=off medium; 10/10 HAND_APPLY first try. No hand-fix. Incidents: none.
+
+### Next
+Continue continuous-improve from origin/main on a new branch; do **not** touch/merge this PR or #57–#12 / #4–#11. Prefer substantive P0/P1 over busy-gates.
+
+---
+
+
 ## 项目概述
 - 极简、键盘优先的 SSH 客户端。Electron + Vue 3 (Vite) + TypeScript。
 - 平台: Windows (`win32`)。目录: `D:\Documents\Claude Code\X-SSH`。
