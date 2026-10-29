@@ -645,7 +645,19 @@ async function backupNow(): Promise<void> {
   backupBusy.value = true
   const r = await window.api.data.backupNow()
   backupBusy.value = false
-  toast(r.ok ? t('set.sec.backupDone') : (r.error ?? t('set.sec.backupFail')), r.ok ? 'success' : 'error')
+  if (r.ok) {
+    toast(t('set.sec.backupDone'), 'success')
+    return
+  }
+  // Main answers with a code, not a sentence: "not configured" and "the write
+  // failed" are different problems and must not share one message.
+  const msg =
+    r.error === 'backup-not-configured'
+      ? t('set.sec.backupNotConfigured')
+      : r.error === 'backup-failed'
+        ? t('set.sec.backupWriteFail')
+        : (r.error ?? t('set.sec.backupFail'))
+  toast(msg, 'error')
 }
 
 // ---- App master-lock ----

@@ -324,6 +324,8 @@ const zh: Dict = {
   'set.sec.backupNow': '立即备份',
   'set.sec.backupDone': '备份完成',
   'set.sec.backupFail': '备份失败',
+  'set.sec.backupNotConfigured': '自动备份未启用或未选择目标目录',
+  'set.sec.backupWriteFail': '写入备份失败',
 
   // app master-lock
   'lock.title': '主密码锁',
@@ -410,6 +412,10 @@ const zh: Dict = {
   'sfp.createFail': '新建失败',
   'sfp.downloadFail': '下载失败',
   'sfp.delFail': '删除失败',
+  'sfp.sessionMissing': '会话不存在',
+  'sfp.sessionGone': '会话已断开',
+  'sfp.remoteTimeout': '远端命令超时',
+  'sfp.unsafeFilename': '不安全的文件名',
   'sfp.delTitle': '删除确认',
   'sfp.delOk': '删除',
   'sfp.delOneFile': '确定删除文件「{name}」吗?',
@@ -1100,6 +1106,8 @@ const en: Dict = {
   'set.sec.backupNow': 'Back up now',
   'set.sec.backupDone': 'Backup complete',
   'set.sec.backupFail': 'Backup failed',
+  'set.sec.backupNotConfigured': 'Auto-backup is off or no folder is set',
+  'set.sec.backupWriteFail': 'Failed to write backup',
 
   // app master-lock
   'lock.title': 'Master passphrase lock',
@@ -1184,6 +1192,10 @@ const en: Dict = {
   'sfp.createFail': 'Create failed',
   'sfp.downloadFail': 'Download failed',
   'sfp.delFail': 'Delete failed',
+  'sfp.sessionMissing': 'Session not found',
+  'sfp.sessionGone': 'Session disconnected',
+  'sfp.remoteTimeout': 'Remote command timed out',
+  'sfp.unsafeFilename': 'Unsafe file name',
   'sfp.delTitle': 'Confirm delete',
   'sfp.delOk': 'Delete',
   'sfp.delOneFile': 'Delete file "{name}"?',
@@ -1881,6 +1893,8 @@ const zhTW: Dict = {
   'set.sec.backupNow': '立即備份',
   'set.sec.backupDone': '備份完成',
   'set.sec.backupFail': '備份失敗',
+  'set.sec.backupNotConfigured': '自動備份未啟用或未選擇目標資料夾',
+  'set.sec.backupWriteFail': '寫入備份失敗',
 
   // app master-lock
   'lock.title': '主密碼鎖',
@@ -1967,6 +1981,10 @@ const zhTW: Dict = {
   'sfp.createFail': '建立失敗',
   'sfp.downloadFail': '下載失敗',
   'sfp.delFail': '刪除失敗',
+  'sfp.sessionMissing': '工作階段不存在',
+  'sfp.sessionGone': '工作階段已斷線',
+  'sfp.remoteTimeout': '遠端命令逾時',
+  'sfp.unsafeFilename': '不安全的檔名',
   'sfp.delTitle': '刪除確認',
   'sfp.delOk': '刪除',
   'sfp.delOneFile': '確定要刪除檔案「{name}」嗎?',

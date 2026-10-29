@@ -1206,7 +1206,7 @@ export class SshManager {
   // ---- SFTP ----
   private getSftp(sessionId: string): Promise<SFTPWrapper> {
     const session = this.sessions.get(sessionId)
-    if (!session) return Promise.reject(new Error('会话不存在'))
+    if (!session) return Promise.reject(new Error('session-missing'))
     if (session.sftp) return Promise.resolve(session.sftp)
     // Reuse an in-flight sftp() so concurrent callers don't open extra channels.
     if (session.sftpPromise) return session.sftpPromise
@@ -1254,7 +1254,9 @@ export class SshManager {
     // ".." (e.g. "..cache") is a legitimate file and must be allowed.
     const rel = relative(base, p)
     if (isAbsolute(rel) || rel.split(/[\\/]/)[0] === '..') {
-      throw new Error(`不安全的文件名: ${name}`)
+      // A machine code, not a message: the renderer localizes it. The offending
+      // name is already on screen in the listing, so it isn't repeated here.
+      throw new Error('unsafe-filename')
     }
     return p
   }
@@ -2546,7 +2548,7 @@ export class SshManager {
     timeoutMs = this.execTimeoutMs
   ): Promise<{ code: number; out: string }> {
     const session = this.sessions.get(sessionId)
-    if (!session) return Promise.reject(new Error('会话已断开'))
+    if (!session) return Promise.reject(new Error('session-gone'))
     return new Promise((resolve, reject) => {
       let settled = false
       let channel: { close: () => void } | undefined
@@ -2557,7 +2559,7 @@ export class SshManager {
         fn()
       }
       const timer = setTimeout(() => {
-        finish(() => reject(new Error('远端命令超时')))
+        finish(() => reject(new Error('remote-timeout')))
         try {
           channel?.close()
         } catch {
@@ -2685,7 +2687,7 @@ export class SshManager {
   /** Runs a command on a dedicated shell channel and returns its stdout. */
   private remoteExec(sessionId: string, cmd: string): Promise<string> {
     const session = this.sessions.get(sessionId)
-    if (!session) return Promise.reject(new Error('会话不存在'))
+    if (!session) return Promise.reject(new Error('session-missing'))
     return new Promise((resolve, reject) => {
       session.client.exec(cmd, (err, stream) => {
         if (err) return reject(err)

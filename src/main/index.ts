@@ -1150,8 +1150,14 @@ function registerIpc(): void {
     }
   })
   ipcMain.handle(IPC.dataBackupNow, async () => {
+    // writeAutoBackupSync() answers false both for "nothing configured" and for
+    // a failed write; tell them apart here so the renderer can say which it was
+    // (and in the user's own language) instead of showing one Chinese string.
+    const enabled = (await settings.get<boolean>('autoBackup')) === true
+    const dir = await settings.get<string>('autoBackupDir')
+    if (!enabled || !dir) return { ok: false, error: 'backup-not-configured' }
     const ok = await writeAutoBackupSync()
-    return { ok, error: ok ? undefined : '自动备份未启用或未选择目标目录' }
+    return { ok, error: ok ? undefined : 'backup-failed' }
   })
   ipcMain.handle(IPC.dataRescheduleBackup, async () => {
     await scheduleAutoBackup()

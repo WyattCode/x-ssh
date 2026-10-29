@@ -264,7 +264,7 @@ describe('SshManager.execRemote (timeout)', () => {
     const started = Date.now()
     await expect(
       mgr.packAndDownload(res.sessionId!, [{ path: '/tmp/a.txt', name: 'a.txt', isDir: false }], dir)
-    ).rejects.toThrow('远端命令超时')
+    ).rejects.toThrow('remote-timeout')
     expect(Date.now() - started).toBeLessThan(5000)
     void mgr.disconnect(res.sessionId!)
     stuck.close()
