@@ -5,11 +5,15 @@ import {
   formatBytes,
   formatSpeed,
   formatAgo,
+  formatTransferName,
   transferStatusText,
   CANCELLED_MARKER
 } from './transferFormat'
 
 const tr = (key: string, vars?: Record<string, number>): string =>
+  vars ? `${key}:${JSON.stringify(vars)}` : key
+
+const trName = (key: string, vars?: Record<string, string | number>): string =>
   vars ? `${key}:${JSON.stringify(vars)}` : key
 
 describe('isCancelled', () => {
@@ -92,6 +96,21 @@ describe('formatAgo', () => {
     expect(formatAgo(now - 60_000, tr, now)).toBe('sfp.minAgo:{"n":1}')
     expect(formatAgo(now - 3_600_000, tr, now)).toBe('sfp.hrAgo:{"n":1}')
     expect(formatAgo(now - 86_400_000, tr, now)).toBe('sfp.dayAgo:{"n":1}')
+  })
+})
+
+describe('formatTransferName', () => {
+  it('maps the machine token to a localized item count', () => {
+    expect(formatTransferName('items:3', trName)).toBe('sfp.nItems:{"n":3}')
+  })
+
+  it('maps the legacy Chinese label too', () => {
+    expect(formatTransferName('3 项', trName)).toBe('sfp.nItems:{"n":3}')
+  })
+
+  it('passes a plain filename through unchanged', () => {
+    expect(formatTransferName('report.txt', trName)).toBe('report.txt')
+    expect(formatTransferName('同步', trName)).toBe('同步')
   })
 })
 

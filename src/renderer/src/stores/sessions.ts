@@ -6,6 +6,7 @@ import { useConfirm } from '../composables/confirm'
 import { useSnippetVars } from '../composables/snippetVars'
 import { clampConcurrency } from '../../../shared/fsUtils'
 import { decideStatusEvent, retryDelayMs, shouldReviveOnOnline } from '../lib/reconnect'
+import { formatTransferName } from '../lib/transferFormat'
 import {
   buildFlatTree,
   buildGrid,
@@ -1010,7 +1011,7 @@ export const useSessions = defineStore('sessions', {
               host: owner.params.host,
               port: owner.params.port || 22,
               username: owner.params.username,
-              detail: p.error ? `${p.name} · ${p.error}` : p.name,
+              detail: p.error ? `${formatTransferName(p.name, t)} · ${p.error}` : formatTransferName(p.name, t),
               bytes: p.transferred
             })
           }
@@ -1019,11 +1020,13 @@ export const useSessions = defineStore('sessions', {
           if (!cancelled) {
             window.api.notify(
               p.error ? t('sfp.notifyError') : t('sfp.notifyDone'),
-              `${p.name}\n${p.direction === 'up' ? t('sfp.up') : t('sfp.down')}${p.error ? ` · ${p.error}` : ''}`,
+              `${formatTransferName(p.name, t)}\n${p.direction === 'up' ? t('sfp.up') : t('sfp.down')}${p.error ? ` · ${p.error}` : ''}`,
               !p.error
             )
             toast(
-              p.error ? `${p.name} · ${t('sfp.failed')}` : `${p.name} · ${t('sfp.done')}`,
+              p.error
+                ? `${formatTransferName(p.name, t)} · ${t('sfp.failed')}`
+                : `${formatTransferName(p.name, t)} · ${t('sfp.done')}`,
               p.error ? 'error' : 'success'
             )
           }

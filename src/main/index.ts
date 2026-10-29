@@ -1640,7 +1640,9 @@ function registerIpc(): void {
     ) => {
       if (!sshManager) return { ok: false, error: '窗口未就绪', count: 0 }
       try {
-        await sshManager.syncJob(sessionId, localDir, remoteDir, mode, deleteExtras, randomUUID(), concurrency, await defaultTransferRate())
+        const r = await sshManager.syncJob(sessionId, localDir, remoteDir, mode, deleteExtras, randomUUID(), concurrency, await defaultTransferRate())
+        // A cancelled sync used to answer ok:true, so the UI reported success.
+        if (r.cancelled) return { ok: false, canceled: true, count: 0 }
         return { ok: true, count: 0 }
       } catch (e) {
         return { ok: false, error: friendlyError((e as Error).message), count: 0 }
