@@ -105,6 +105,9 @@ fun HostEditorScreen(
     val error = draft.error
     val scope = rememberCoroutineScope()
     var keyMessage by remember { mutableStateOf<String?>(null) }
+    // ✓ / Ctrl+S / 口令格的 onDone 都能触发保存;buildHostForSave 要跑几百毫秒,
+    // 期间再点一次会存两遍、跳两次页。用这个开关把重复的调用挡在外面。
+    var saving by remember { mutableStateOf(false) }
     val importKey = rememberKeyImporter(draft) { keyMessage = it }
 
     val context = LocalContext.current
@@ -112,14 +115,20 @@ fun HostEditorScreen(
     fun save() {
         // 用私钥登录时要验一次口令(解私钥要几百毫秒)、加锁开关要用密钥库并可能弹一次
         // 解锁,都放到 IO 之外由 buildHostForSave 自己安排;这里只管收结果。
+        if (saving) return
         val activity = hostActivity(context)
         if (activity == null) {
             draft.error = UiText(R.string.edit_err_no_page)
             return
         }
+        saving = true
         scope.launch {
-            val host = buildHostForSave(activity, draft)
-            host?.let(onSave)
+            try {
+                val host = buildHostForSave(activity, draft)
+                host?.let(onSave)
+            } finally {
+                saving = false
+            }
         }
     }
 

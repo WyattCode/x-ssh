@@ -527,6 +527,12 @@ function hostLabel(id: string): string {
 
 // ---- known hosts / SSH config ----
 async function forgetKnownHost(k: KnownHostEntry): Promise<void> {
+  const ok = await confirm(t('set.sec.forgetConfirm', { host: `${k.host}:${k.port}` }), {
+    title: t('set.sec.delete'),
+    confirmText: t('set.sec.delete'),
+    danger: true
+  })
+  if (!ok) return
   await window.api.knownHosts.forget(k.host, k.port)
   await store.loadKnownHosts()
 }
