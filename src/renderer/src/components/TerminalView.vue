@@ -8,6 +8,7 @@ import { SearchAddon } from '@xterm/addon-search'
 import { useTheme } from '../composables/theme'
 import { useFontSize } from '../composables/fontSize'
 import { useConfirm } from '../composables/confirm'
+import { useToast } from '../composables/toast'
 import { themeFor } from '../lib/terminalThemes'
 import { useI18n } from '../lib/i18n'
 import { isImeKey } from '../lib/ime'
@@ -40,6 +41,7 @@ const { mode } = useTheme()
 const { size: fontSize } = useFontSize()
 const store = useSessions()
 const { t } = useI18n()
+const { toast } = useToast()
 
 // Per-host terminal overrides (fall back to the global settings).
 const host = computed(() => {
@@ -184,6 +186,7 @@ async function toggleLog(): Promise<void> {
   } else {
     const res = await window.api.ssh.startLog(props.sessionId)
     if (res.ok) logOn.value = true
+    else if (!res.canceled) toast(t('term.logFail'), 'error')
   }
 }
 

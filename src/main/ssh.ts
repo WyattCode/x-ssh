@@ -234,9 +234,16 @@ export class SshManager {
       session.logWrite = ws
       session.logging = true
       ws.on('error', () => {
-        // A failed write (dir removed / disk full) shouldn't crash the session;
-        // just stop logging quietly.
+        // A failed write (dir removed / disk full) shouldn't crash the session.
+        // Drop logWrite too — otherwise startLog stays permanently false until
+        // the user hits stop, and the UI can keep showing "on" after logging died.
         session.logging = false
+        if (session.logWrite === ws) session.logWrite = undefined
+        try {
+          ws.end()
+        } catch {
+          /* already dead */
+        }
       })
       return true
     } catch {
@@ -2823,10 +2830,16 @@ export class SshManager {
 
   /** Lists tmux session names on the remote, via a throwaway exec channel. */
   async tmuxListSessions(sessionId: string): Promise<string[]> {
+    if (!this.sessions.has(sessionId)) throw new Error('no-session')
     const out = await this.remoteExec(
       sessionId,
       'tmux list-sessions -F "#{session_name}" 2>/dev/null || true'
-    ).catch(() => '')
+    ).catch((e) => {
+      // Session dropped mid-call — surface to the dialog. Soft exec failures
+      // while still connected (rare with `|| true`) still look like "none".
+      if (!this.sessions.has(sessionId)) throw e
+      return ''
+    })
     return out.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)
   }
 
