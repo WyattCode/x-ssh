@@ -54,7 +54,10 @@ async function remove(s: ForwardGroup, row: ForwardRow): Promise<void> {
     // Stop it now if it's running.
     if (row.running && s.pane) {
       const r = await store.removeForwardFrom(s.pane, row.rule.mode, row.rule.localPort)
-      if (!r.ok && !row.saved) toast(r.error ?? t('fw.fail'), 'error')
+      if (!r.ok) {
+        toast(r.error ?? t('fw.removeFail'), 'error')
+        return
+      }
     }
     if (row.saved && s.host) {
       // The host as it is now, not as it was when the page last rendered.

@@ -2,6 +2,15 @@
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。
 
+## HANDOVER M3.128 — 审查修复(键名写入失败 / 忘记主机密钥 / 转发删除)
+
+分支 `fix/review-polish-m3128`(自 `origin/main`)。**不要合并**;跳过已开的 PR #4–#62(尤其 #62 / #61 / #60 / #59 / #58 / #57 / #47 / #44 / #55 / #56),本批不重复其改动。
+
+- **A) 密钥标签写入失败不再被吞掉** — `src/main/keyManager.ts`:`writeLabels` 去掉 `.catch(() => undefined)`,磁盘满 / 权限错误会真正抛出;`generate` 与 `import` 在标签写入失败时回滚刚写入的密钥文件(私钥 + `.pub`)并抛出,避免「界面显示已命名、重启后变回 UUID」。`readLabels` 与 `remove` 的清理逻辑不变。
+- **B) 忘记已知主机有了失败路径** — `src/main/index.ts` 的 `IPC.knownHostsForget` 改为返回 `{ ok }` / `{ ok: false, error }`;`src/preload/index.ts` 的 `knownHosts.forget` 返回类型同步;`SettingsDialog.forgetKnownHost` 失败时 toast(`set.sec.forgetFail`)且不再刷新列表。
+- **C) 端口转发页删除规则不再「假成功」** — `ForwardsPage.vue` 的 `remove`:运行中的规则若 `removeForwardFrom` 失败,toast(`fw.removeFail`)并直接返回,不再把主机配置里的规则删掉(此前监听仍在、下次连接又不会开、且无提示)。
+- **D) i18n** — `zh` / `en` / `zh-TW` 三语同步新增 `set.sec.forgetFail`、`fw.removeFail`。
+
 ## 项目概述
 - 极简、键盘优先的 SSH 客户端。Electron + Vue 3 (Vite) + TypeScript。
 - 平台: Windows (`win32`)。目录: `D:\Documents\Claude Code\X-SSH`。

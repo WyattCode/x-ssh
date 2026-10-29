@@ -527,7 +527,11 @@ function hostLabel(id: string): string {
 
 // ---- known hosts / SSH config ----
 async function forgetKnownHost(k: KnownHostEntry): Promise<void> {
-  await window.api.knownHosts.forget(k.host, k.port)
+  const r = await window.api.knownHosts.forget(k.host, k.port)
+  if (!r.ok) {
+    toast(r.error ?? t('set.sec.forgetFail'), 'error')
+    return
+  }
   await store.loadKnownHosts()
 }
 /** Human age of a trusted host key ('' for unknown/too young to matter). */

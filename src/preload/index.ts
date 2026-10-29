@@ -79,7 +79,7 @@ const api = {
   },
   knownHosts: {
     list: (): Promise<KnownHostEntry[]> => ipcRenderer.invoke(IPC.knownHostsList),
-    forget: (host: string, port: number): Promise<void> =>
+    forget: (host: string, port: number): Promise<{ ok: boolean; error?: string }> =>
       ipcRenderer.invoke(IPC.knownHostsForget, host, port)
   },
   connLog: {

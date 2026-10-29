@@ -101,7 +101,7 @@ export class KeyManager {
   }
 
   private async writeLabels(labels: Record<string, string>): Promise<void> {
-    await writeFile(this.labelsPath, JSON.stringify(labels), { mode: 0o600 }).catch(() => undefined)
+    await writeFile(this.labelsPath, JSON.stringify(labels), { mode: 0o600 })
   }
 
   private async sshKeygen(args: string[]): Promise<{ stdout: string }> {
@@ -153,9 +153,17 @@ export class KeyManager {
       /* ignore */
     }
     // Remember the friendly label so the UI never shows the auto-generated id.
-    const labels = await this.readLabels()
-    labels[id] = opts.name
-    await this.writeLabels(labels)
+    // If the sidecar write fails, delete the new keypair — otherwise generate
+    // looks successful with the typed name, then list() shows the raw id forever.
+    try {
+      const labels = await this.readLabels()
+      labels[id] = opts.name
+      await this.writeLabels(labels)
+    } catch (e) {
+      await rm(priv, { force: true }).catch(() => {})
+      await rm(`${priv}.pub`, { force: true }).catch(() => {})
+      throw e
+    }
     return this.describe(priv, id, opts.name).then((k) => {
       k.type = typeOut ?? k.type
       k.fingerprint = fp ?? k.fingerprint
@@ -185,9 +193,15 @@ export class KeyManager {
       throw new Error('所选文件不是有效的私钥')
     }
     const label = basename(srcPath).replace(/\.(pem|key|pub)$/i, '')
-    const labels = await this.readLabels()
-    labels[id] = label
-    await this.writeLabels(labels)
+    try {
+      const labels = await this.readLabels()
+      labels[id] = label
+      await this.writeLabels(labels)
+    } catch (e) {
+      await rm(priv, { force: true }).catch(() => {})
+      await rm(`${priv}.pub`, { force: true }).catch(() => {})
+      throw e
+    }
     return this.describe(priv, id, label)
   }
 
