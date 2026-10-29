@@ -431,7 +431,7 @@ export class SshManager {
         // The hop can accept the SSH connection yet never answer the channel
         // open — a firewall dropping the target is the usual cause — and ssh2
         // has no timeout of its own, so connect() would never settle.
-        const timer = setTimeout(() => fail('跳板机没有回应到目标的连接请求'), this.jumpForwardTimeoutMs)
+        const timer = setTimeout(() => fail('jump-forward-timeout', { code: 'jump-forward-timeout' }), this.jumpForwardTimeoutMs)
         timer.unref?.()
         client.forwardOut(
           '127.0.0.1',
@@ -440,7 +440,7 @@ export class SshManager {
           targetPort,
           (err, channel) => {
             clearTimeout(timer)
-            if (err) return fail('无法通过跳板机连通目标: ' + friendlyError(err.message))
+            if (err) return fail('jump-connect-failed', { code: 'jump-connect-failed' })
             if (settled) {
               channel.close()
               client.end()
@@ -475,7 +475,7 @@ export class SshManager {
       let settled = false
       // A proxy that accepts the connection but never answers the handshake
       // must not hang the connect forever.
-      const handshakeTimer = setTimeout(() => fail('代理握手超时'), 15_000)
+      const handshakeTimer = setTimeout(() => fail('proxy-handshake-timeout'), 15_000)
       const fail = (msg: string): void => {
         if (settled) return
         settled = true
@@ -536,7 +536,7 @@ export class SshManager {
           if (phase === 0) {
             // Method-selection reply: [ver, method].
             if (buf.length < 2) return
-            if (buf[0] !== 5) return fail('SOCKS5 代理版本不符')
+            if (buf[0] !== 5) return fail('socks5-version')
             const method = buf[1]
             buf = buf.slice(2)
             if (method === 2) {
@@ -551,12 +551,12 @@ export class SshManager {
               sendConnect()
               return
             }
-            return fail('SOCKS5 代理要求认证,但未配置用户名密码')
+            return fail('socks5-auth-required')
           }
           if (phase === 1) {
             // Auth reply: [ver, status].
             if (buf.length < 2) return
-            if (buf[1] !== 0) return fail('SOCKS5 代理认证失败')
+            if (buf[1] !== 0) return fail('socks5-auth-failed')
             buf = buf.slice(2)
             phase = 2
             sendConnect()
@@ -565,13 +565,13 @@ export class SshManager {
           // CONNECT reply: [ver, rep, rsv, atyp, ...] — variable length.
           if (buf.length < 4) return
           const rep = buf[1]
-          if (rep !== 0) return fail(`SOCKS5 代理连接失败 (0x${rep.toString(16)})`)
+          if (rep !== 0) return fail('socks5-connect-failed')
           const atyp = buf[3]
           let hdrLen = 4
           if (atyp === 1) hdrLen += 4
           else if (atyp === 3) hdrLen += 1 + buf[4]
           else if (atyp === 4) hdrLen += 16
-          else return fail('SOCKS5 代理响应地址类型无效')
+          else return fail('socks5-addr-type')
           if (buf.length < hdrLen + 2) return
           const leftover = buf.slice(hdrLen + 2)
           cleanup()
@@ -617,7 +617,7 @@ export class SshManager {
         const code = status ? Number(status[1]) : 0
         if (leftover.length) sock.unshift(leftover)
         if (code === 200) res()
-        else rej(new Error(`HTTP 代理隧道失败 (${code})`))
+        else rej(new Error('http-proxy-failed'))
       }
       sock.on('data', onData)
     })
@@ -910,7 +910,17 @@ export class SshManager {
         config.sock = psock
       } catch (err) {
         this.sessions.delete(id)
-        return { ok: false, error: (err as Error).message }
+        const msg = (err as Error).message
+        const proxyCodes = new Set([
+          'proxy-handshake-timeout',
+          'socks5-version',
+          'socks5-auth-required',
+          'socks5-auth-failed',
+          'socks5-connect-failed',
+          'socks5-addr-type',
+          'http-proxy-failed'
+        ])
+        return { ok: false, error: msg, code: proxyCodes.has(msg) ? msg : undefined }
       }
     }
 

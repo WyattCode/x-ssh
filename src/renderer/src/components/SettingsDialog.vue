@@ -664,7 +664,7 @@ async function saveMasterLock(): Promise<void> {
       lockNewPass.value = ''
       toast(t('lock.saved'), 'success')
     } else {
-      toast(r.error ?? t('lock.saveFail'), 'error')
+      toast(r.error === 'passphrase-empty' ? t('lock.passReq') : (r.error ?? t('lock.saveFail')), 'error')
     }
   } finally {
     lockBusy.value = false
