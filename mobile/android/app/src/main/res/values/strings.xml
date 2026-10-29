@@ -377,4 +377,15 @@
         <item quantity="one">%d SSH session active</item>
         <item quantity="other">%d SSH sessions active</item>
     </plurals>
+    <string name="snap_title">Session snapshots</string>
+    <string name="snap_save">Save</string>
+    <string name="snap_default">Snapshot</string>
+    <string name="snap_empty">No snapshots yet. Open a session, then tap Save to capture the workspace.</string>
+    <string name="snap_delete">Delete</string>
+    <string name="snap_delete_confirm">Delete this snapshot?</string>
+    <string name="snap_hosts_n">%d hosts</string>
+    <string name="snap_missing_n">%d gone</string>
+    <string name="snap_menu">Snapshots</string>
+    <string name="term_snapshots">Snapshots</string>
+    <string name="term_menu_snapshots">Session snapshots</string>
 </resources>

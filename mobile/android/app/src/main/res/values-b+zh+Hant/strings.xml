@@ -362,4 +362,15 @@
     <plurals name="term_notify_title_many">
         <item quantity="other">%d 個 SSH 工作階段連線中</item>
     </plurals>
+    <string name="snap_title">工作階段快照</string>
+    <string name="snap_save">儲存</string>
+    <string name="snap_default">快照</string>
+    <string name="snap_empty">還沒有快照。連上主機後點「儲存」,記下目前工作區。</string>
+    <string name="snap_delete">刪除</string>
+    <string name="snap_delete_confirm">刪除這份快照?</string>
+    <string name="snap_hosts_n">%d 台主機</string>
+    <string name="snap_missing_n">%d 台已不在</string>
+    <string name="snap_menu">快照</string>
+    <string name="term_snapshots">快照</string>
+    <string name="term_menu_snapshots">工作階段快照</string>
 </resources>

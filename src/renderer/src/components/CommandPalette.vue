@@ -235,6 +235,13 @@ const sections = computed<{ id: string; title: string; items: Item[] }[]>(() => 
         icon: 'zap',
         run: () => void store.openSnapshot(s.id)
       })
+      snaps.push({
+        kind: 'action',
+        title: t('pal.snapDelete', { name: s.name }),
+        sub: t('pal.snapDeleteDesc'),
+        icon: 'trash',
+        run: () => void store.deleteSnapshot(s.id)
+      })
     }
     add('snapshots', t('pal.snapshots'), snaps)
   }

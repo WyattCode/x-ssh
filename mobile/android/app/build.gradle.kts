@@ -62,4 +62,6 @@ dependencies {
 
     // 纯逻辑单测(JVM,不碰设备):凭据取舍、密文形态、路径/前缀这类判错的代价是丢密码。
     testImplementation("junit:junit:4.13.2")
+    // SnapshotsTest 编解码走 org.json;android.jar stub 不够稳,显式拉一份 JVM 实现。
+    testImplementation("org.json:json:20240303")
 }

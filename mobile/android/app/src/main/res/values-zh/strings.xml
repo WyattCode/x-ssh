@@ -362,4 +362,15 @@
     <plurals name="term_notify_title_many">
         <item quantity="other">%d 个 SSH 会话连接中</item>
     </plurals>
+    <string name="snap_title">会话快照</string>
+    <string name="snap_save">保存</string>
+    <string name="snap_default">快照</string>
+    <string name="snap_empty">还没有快照。连上主机后点「保存」,记下当前工作区。</string>
+    <string name="snap_delete">删除</string>
+    <string name="snap_delete_confirm">删除这份快照?</string>
+    <string name="snap_hosts_n">%d 台主机</string>
+    <string name="snap_missing_n">%d 台已不在</string>
+    <string name="snap_menu">快照</string>
+    <string name="term_snapshots">快照</string>
+    <string name="term_menu_snapshots">会话快照</string>
 </resources>

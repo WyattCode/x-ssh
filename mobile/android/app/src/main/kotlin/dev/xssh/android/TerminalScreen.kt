@@ -176,6 +176,8 @@ fun TerminalScreen(
     onEditHost: (() -> Unit)? = null,
     /** 连上 / 接管到活会话的那一刻回调(主机 id):首页按"最近使用"排序就靠它。 */
     onConnected: (String) -> Unit = {},
+    /** 从快照恢复到另一台主机时切过去(同进程里换 Terminal 页)。 */
+    onSwitchHost: (Host) -> Unit = {},
 ) {
     val context = LocalContext.current
     // 跳板机从主机表里现查:信任了它的密钥、改了它的密码,这里拿到的就是新的那份,随之重连。
@@ -595,6 +597,7 @@ private fun TerminalView(
     var grid by remember { mutableStateOf(0 to 0) }
     // 命令片段面板(轨道 / 底栏 / 平板工具栏上的 ⚡)。
     var snippetsOpen by remember { mutableStateOf(false) }
+    var snapshotsOpen by remember { mutableStateOf(false) }
 
     // 捏合调完字号要记住;等手停下来再写盘,别把每一帧都落到 SharedPreferences。
     LaunchedEffect(fontSize) {
@@ -700,6 +703,7 @@ private fun TerminalView(
             fontSize = (fontSize - 1f).coerceIn(UiPrefs.FONT_MIN, UiPrefs.FONT_MAX)
         })
         add(MenuAction(context.getString(R.string.term_menu_snippets)) { snippetsOpen = true })
+        add(MenuAction(context.getString(R.string.term_menu_snapshots)) { snapshotsOpen = true })
         tablet?.let { add(MenuAction(context.getString(R.string.term_menu_edit_host), shortcut = "Ctrl+Shift+E") { it.onEdit() }) }
     }
     var canvasMenuAt by remember { mutableStateOf<DpOffset?>(null) }
@@ -952,6 +956,9 @@ private fun TerminalView(
             GlassReveal(!dead && reconnecting == 0 && !imeUp) {
                 GlassItem(XIcons.Bolt, stringResource(R.string.term_snippets)) { snippetsOpen = true }
             }
+            GlassReveal(!imeUp) {
+                GlassItem(XIcons.Layers, stringResource(R.string.term_snapshots)) { snapshotsOpen = true }
+            }
             GlassItem(
                 XIcons.Command,
                 stringResource(if (showKeys) R.string.term_hide_keys else R.string.term_show_keys),
@@ -1009,6 +1016,7 @@ private fun TerminalView(
                 GlassRevealRow(!dead && reconnecting == 0) {
                     ToolbarIcon(XIcons.Bolt, stringResource(R.string.term_snippets)) { snippetsOpen = true }
                 }
+                ToolbarIcon(XIcons.Layers, stringResource(R.string.term_snapshots)) { snapshotsOpen = true }
                 ToolbarIcon(
                     XIcons.Command,
                     stringResource(if (showKeys) R.string.term_hide_key_bar else R.string.term_show_key_bar),
@@ -1057,6 +1065,32 @@ private fun TerminalView(
             // 也和折叠屏同一个样子。试过把名字放到底下按钮左边,用户否掉了。
             HostLine(host = host, dead = dead, reconnecting = reconnecting)
         }
+    }
+
+
+    if (snapshotsOpen) {
+        val runningMap = SessionRegistry.sessions.collectAsState().value
+        val liveEntries = remember(runningMap) {
+            runningMap.values.sortedByDescending { it.lastOutputAt }.map { it.hostId to it.label }
+        }
+        SnapshotSheet(
+            tablet = tablet != null,
+            liveEntries = liveEntries,
+            activeHostId = host.id,
+            knownHostIds = LocalHosts.current.map { it.id }.toSet(),
+            onRestore = { _, focus ->
+                snapshotsOpen = false
+                if (focus != host.id) {
+                    LocalHosts.current.firstOrNull { it.id == focus }?.let(onSwitchHost)
+                } else {
+                    restoreFocus()
+                }
+            },
+            onDismiss = {
+                snapshotsOpen = false
+                restoreFocus()
+            },
+        )
     }
 
     if (snippetsOpen) {
