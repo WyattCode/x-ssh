@@ -7,7 +7,8 @@ import {
   pct as pctOf,
   formatBytes,
   formatSpeed,
-  formatAgo
+  formatAgo,
+  formatTransferError
 } from '../lib/transferFormat'
 import type { SftpProgress, TransferHistoryItem } from '../../../shared/types'
 import Icon from './Icon.vue'
@@ -45,7 +46,7 @@ const recent = computed(() => store.transferHistory.slice(0, 12))
 
 function histStatus(h: TransferHistoryItem): string {
   if (h.status === 'cancelled') return t('sfp.cancelled')
-  if (h.status === 'error') return h.error || t('sfp.failed')
+  if (h.status === 'error') return h.error ? formatTransferError(h.error, t) : t('sfp.failed')
   return t('sfp.done')
 }
 function reveal(h: TransferHistoryItem): void {

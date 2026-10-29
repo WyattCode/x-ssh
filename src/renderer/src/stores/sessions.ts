@@ -5,6 +5,7 @@ import { useToast } from '../composables/toast'
 import { useConfirm } from '../composables/confirm'
 import { useSnippetVars } from '../composables/snippetVars'
 import { clampConcurrency } from '../../../shared/fsUtils'
+import { isCancelled, formatTransferError } from '../lib/transferFormat'
 import { decideStatusEvent, retryDelayMs, shouldReviveOnOnline } from '../lib/reconnect'
 import {
   buildFlatTree,
@@ -143,11 +144,6 @@ function serializeTabs(tabs: { title: string; layout: LayoutNode; panes: Pane[];
       })
     }
   })
-}
-
-/** A job whose transfer has been cancelled in the main process. */
-function isCancelled(t: Pick<SftpProgress, 'error'>): boolean {
-  return t.error === '已取消'
 }
 
 // Guards the global sftp:progress subscription so it's registered exactly once
@@ -1010,7 +1006,7 @@ export const useSessions = defineStore('sessions', {
               host: owner.params.host,
               port: owner.params.port || 22,
               username: owner.params.username,
-              detail: p.error ? `${p.name} · ${p.error}` : p.name,
+              detail: p.error ? `${p.name} · ${formatTransferError(p.error, t)}` : p.name,
               bytes: p.transferred
             })
           }
@@ -1019,7 +1015,7 @@ export const useSessions = defineStore('sessions', {
           if (!cancelled) {
             window.api.notify(
               p.error ? t('sfp.notifyError') : t('sfp.notifyDone'),
-              `${p.name}\n${p.direction === 'up' ? t('sfp.up') : t('sfp.down')}${p.error ? ` · ${p.error}` : ''}`,
+              `${p.name}\n${p.direction === 'up' ? t('sfp.up') : t('sfp.down')}${p.error ? ` · ${formatTransferError(p.error, t)}` : ''}`,
               !p.error
             )
             toast(
@@ -1511,15 +1507,17 @@ export const useSessions = defineStore('sessions', {
             ? t('app.jumpNeedsPassword')
             : result.code === 'locked'
               ? t('app.locked')
-              : result.code === 'host_key_unknown'
-                ? viaJump
-                  ? t('app.keyUnknownJumpMsg', { host: keyWhere })
-                  : t('app.keyUnknownMsg', { host: keyWhere })
-                : result.code === 'host_key_changed'
+              : result.code === 'no-private-key'
+                ? t('app.noPrivateKey')
+                : result.code === 'host_key_unknown'
                   ? viaJump
-                    ? t('app.keyChangedJumpMsg', { host: keyWhere })
-                    : t('app.keyChangedMsg', { host: keyWhere })
-                  : (result.error ?? t('app.connectFail'))
+                    ? t('app.keyUnknownJumpMsg', { host: keyWhere })
+                    : t('app.keyUnknownMsg', { host: keyWhere })
+                  : result.code === 'host_key_changed'
+                    ? viaJump
+                      ? t('app.keyChangedJumpMsg', { host: keyWhere })
+                      : t('app.keyChangedMsg', { host: keyWhere })
+                    : (result.error ?? t('app.connectFail'))
         live.pane.message = msg
         live.pane.errorCode = result.code
         // Host-key rejection: stash what the user is being asked to trust —

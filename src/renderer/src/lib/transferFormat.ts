@@ -16,7 +16,7 @@ import type { SftpProgress } from '../../../shared/types'
  * and it silently did, for English, where the UI said "Cancelled" while main
  * wrote the Chinese literal.
  */
-export const CANCELLED_MARKER = '已取消'
+export const CANCELLED_MARKER = 'cancelled'
 
 /** Predicate over anything carrying a transfer's `error` field. */
 export interface Cancellable {
@@ -30,7 +30,8 @@ export function isCancelled(t: Cancellable | null | undefined): boolean {
   if (!t) return false
   // Prefer the explicit flag so the wording of the message is never load-bearing.
   if (t.cancelled !== undefined) return t.cancelled
-  return t.error === CANCELLED_MARKER
+  // Older main builds wrote the Chinese literal; keep recognising it.
+  return t.error === CANCELLED_MARKER || t.error === '已取消'
 }
 
 /** Percentage complete, 0–100. A finished job with no byte total reads as done. */
@@ -77,13 +78,32 @@ export function formatAgo(
   return tr('sfp.dayAgo', { n: Math.floor(seconds / 86400) })
 }
 
+/** Map main's transfer error codes to i18n. Unknown strings pass through. */
+export function formatTransferError(
+  err: string,
+  translate: (key: string, vars?: Record<string, string | number>) => string
+): string {
+  if (err === CANCELLED_MARKER || err === '已取消') return translate('sfp.cancelled')
+  if (err === 'sync-list-failed') return translate('sfp.syncListFailed')
+  const ff = /^files-failed:(\d+)$/.exec(err)
+  if (ff) return translate('sfp.filesFailed', { n: Number(ff[1]) })
+  const cm = /^checksum-mismatch:(\d+)$/.exec(err)
+  if (cm) return translate('sfp.checksumMismatch', { n: Number(cm[1]) })
+  return err
+}
+
 /** The status label for a running or finished transfer. */
 export function transferStatusText(
   t: Partial<Pick<SftpProgress, 'error' | 'done' | 'total' | 'transferred'>> & Cancellable,
   translate: (key: string) => string
 ): string {
   if (isCancelled(t)) return translate('sfp.cancelled')
-  if (t.error) return t.error
+  if (t.error) {
+    // Same loose-typing cast as formatAgo: the caller's translator may or may
+    // not accept vars, and the code mapping needs them.
+    const tr = translate as unknown as (key: string, vars?: Record<string, string | number>) => string
+    return formatTransferError(t.error, tr)
+  }
   if (t.done) return translate('sfp.done')
   return `${pct({ total: t.total ?? 0, transferred: t.transferred ?? 0, done: t.done })}%`
 }

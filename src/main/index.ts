@@ -1494,7 +1494,7 @@ function registerIpc(): void {
           await verifyChecksumsEnabled()
         )
         if (r.cancelled) return { ok: false, canceled: true }
-        if (r.failures) return { ok: false, error: `${r.failures} 个文件失败` }
+        if (r.failures) return { ok: false, error: `files-failed:${r.failures}` }
         return { ok: true }
       } catch (e) {
         return { ok: false, error: friendlyError((e as Error).message) }
@@ -1513,7 +1513,7 @@ function registerIpc(): void {
         const policy = await resolveUploadOverwrite(sessionId, remoteDir, res.filePaths.map((p) => basename(p)), overwrite)
         if (policy === 'cancel') return { ok: false, canceled: true, count: 0 }
         const r = await sshManager.uploadJob(sessionId, res.filePaths, remoteDir, randomUUID(), concurrency, await defaultTransferRate(), policy)
-        if (r.failures) return { ok: false, count: r.files, error: `${r.failures} 个文件失败` }
+        if (r.failures) return { ok: false, count: r.files, error: `files-failed:${r.failures}` }
         return { ok: true, count: r.files }
       } catch (e) {
         return { ok: false, error: friendlyError((e as Error).message), count: 0 }
@@ -1544,7 +1544,7 @@ function registerIpc(): void {
       try {
         const r = await sshManager.downloadJob(sessionId, items, res.filePaths[0], randomUUID(), concurrency, await defaultTransferRate(), await verifyChecksumsEnabled())
         if (r.cancelled) return { ok: false, canceled: true }
-        if (r.failures) return { ok: false, error: `${r.failures} 个文件失败` }
+        if (r.failures) return { ok: false, error: `files-failed:${r.failures}` }
         return { ok: true, count: r.files }
       } catch (e) {
         return { ok: false, error: friendlyError((e as Error).message) }
@@ -1585,7 +1585,7 @@ function registerIpc(): void {
       try {
         const r = await sshManager.downloadJob(sessionId, items, targetDir, randomUUID(), concurrency, await defaultTransferRate(), await verifyChecksumsEnabled())
         if (r.cancelled) return { ok: false, canceled: true }
-        if (r.failures) return { ok: false, error: `${r.failures} 个文件失败` }
+        if (r.failures) return { ok: false, error: `files-failed:${r.failures}` }
         return { ok: true, count: r.files }
       } catch (e) {
         return { ok: false, error: friendlyError((e as Error).message) }
@@ -1605,7 +1605,7 @@ function registerIpc(): void {
         const policy = await resolveUploadOverwrite(sessionId, remoteDir, res.filePaths.map((p) => basename(p)), overwrite)
         if (policy === 'cancel') return { ok: false, canceled: true, count: 0 }
         const r = await sshManager.uploadJob(sessionId, res.filePaths, remoteDir, randomUUID(), concurrency, await defaultTransferRate(), policy)
-        if (r.failures) return { ok: false, count: r.files, error: `${r.failures} 个文件失败` }
+        if (r.failures) return { ok: false, count: r.files, error: `files-failed:${r.failures}` }
         return { ok: true, count: r.files }
       } catch (e) {
         return { ok: false, error: friendlyError((e as Error).message), count: 0 }
@@ -1620,7 +1620,7 @@ function registerIpc(): void {
         const policy = await resolveUploadOverwrite(sessionId, remoteDir, paths.map((p) => basename(p)), overwrite)
         if (policy === 'cancel') return { ok: false, canceled: true, count: 0 }
         const r = await sshManager.uploadJob(sessionId, paths, remoteDir, randomUUID(), concurrency, await defaultTransferRate(), policy)
-        if (r.failures) return { ok: false, count: r.files, error: `${r.failures} 个文件失败` }
+        if (r.failures) return { ok: false, count: r.files, error: `files-failed:${r.failures}` }
         return { ok: true, count: r.files }
       } catch (e) {
         return { ok: false, error: friendlyError((e as Error).message), count: 0 }
@@ -1728,7 +1728,7 @@ function registerIpc(): void {
         if (policy === 'cancel') return { ok: false, canceled: true }
         // Upload the archive into remoteDir, then extract it there.
         const r = await sshManager.uploadJob(sessionId, res.filePaths, remoteDir, randomUUID(), concurrency, await defaultTransferRate(), policy)
-        if (r.failures) return { ok: false, error: `${r.failures} 个文件失败` }
+        if (r.failures) return { ok: false, error: `files-failed:${r.failures}` }
         const name = basename(res.filePaths[0])
         return await sshManager.extractArchive(sessionId, remoteDir, name)
       } catch (e) {
