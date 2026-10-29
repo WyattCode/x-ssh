@@ -114,6 +114,9 @@ class TerminalSession(
     @Volatile
     private var jumpCredentials: Host? = jump
 
+    /** 底下那条 SSH 连接(端口转发、SFTP 都挂在它上面)。 */
+    val session get() = live.session
+
     /** 同一条连接上的文件(SFTP),第一次打开文件面板时才开通道。 */
     val files = RemoteFiles(live.session, scope)
 

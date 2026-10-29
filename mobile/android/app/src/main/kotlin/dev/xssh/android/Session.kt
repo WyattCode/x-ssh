@@ -395,5 +395,14 @@ fun openTransport(host: Host, jump: Host?, cols: Int, rows: Int): Pair<Session, 
         throw e
     }
     Log.i(TAG, "shell open in ${elapsed()}ms (tmux=${host.tmux})")
+    // 保存的端口转发:逐条开,单条失败不伤 shell(界面自己看 forwards() / toast)。
+    if (host.portForwards.isNotEmpty()) {
+        val failed = applySavedForwards(session, host)
+        if (failed > 0) {
+            Log.w(TAG, "port forward: $failed/${host.portForwards.size} failed")
+        } else {
+            Log.i(TAG, "port forward: opened ${host.portForwards.size}")
+        }
+    }
     return session to shell
 }

@@ -595,6 +595,7 @@ private fun TerminalView(
     var grid by remember { mutableStateOf(0 to 0) }
     // 命令片段面板(轨道 / 底栏 / 平板工具栏上的 ⚡)。
     var snippetsOpen by remember { mutableStateOf(false) }
+    var forwardsOpen by remember { mutableStateOf(false) }
 
     // 捏合调完字号要记住;等手停下来再写盘,别把每一帧都落到 SharedPreferences。
     LaunchedEffect(fontSize) {
@@ -700,6 +701,7 @@ private fun TerminalView(
             fontSize = (fontSize - 1f).coerceIn(UiPrefs.FONT_MIN, UiPrefs.FONT_MAX)
         })
         add(MenuAction(context.getString(R.string.term_menu_snippets)) { snippetsOpen = true })
+        add(MenuAction(context.getString(R.string.term_menu_forwards)) { forwardsOpen = true })
         tablet?.let { add(MenuAction(context.getString(R.string.term_menu_edit_host), shortcut = "Ctrl+Shift+E") { it.onEdit() }) }
     }
     var canvasMenuAt by remember { mutableStateOf<DpOffset?>(null) }
@@ -951,6 +953,7 @@ private fun TerminalView(
             // 键盘弹着时也收起(同外观):外屏键盘占掉一半高度,轨道不能再多一颗;正在打字的人要的是键盘。
             GlassReveal(!dead && reconnecting == 0 && !imeUp) {
                 GlassItem(XIcons.Bolt, stringResource(R.string.term_snippets)) { snippetsOpen = true }
+                GlassItem(XIcons.Link, stringResource(R.string.term_forwards)) { forwardsOpen = true }
             }
             GlassItem(
                 XIcons.Command,
@@ -1008,6 +1011,7 @@ private fun TerminalView(
                 }
                 GlassRevealRow(!dead && reconnecting == 0) {
                     ToolbarIcon(XIcons.Bolt, stringResource(R.string.term_snippets)) { snippetsOpen = true }
+                    ToolbarIcon(XIcons.Link, stringResource(R.string.term_forwards)) { forwardsOpen = true }
                 }
                 ToolbarIcon(
                     XIcons.Command,
@@ -1074,6 +1078,19 @@ private fun TerminalView(
             },
             onDismiss = {
                 snippetsOpen = false
+                restoreFocus()
+            },
+        )
+    }
+
+    if (forwardsOpen) {
+        ForwardSheet(
+            host = host,
+            session = live.session,
+            tablet = tablet != null,
+            onHostChange = { },
+            onDismiss = {
+                forwardsOpen = false
                 restoreFocus()
             },
         )

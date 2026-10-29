@@ -377,4 +377,34 @@
         <item quantity="one">%d SSH session active</item>
         <item quantity="other">%d SSH sessions active</item>
     </plurals>
+    <string name="fwd_title">Port forwarding</string>
+    <string name="fwd_saved_title">Saved rules</string>
+    <string name="fwd_live_title">Port forwards</string>
+    <string name="fwd_mode_local">Local</string>
+    <string name="fwd_mode_remote">Remote</string>
+    <string name="fwd_mode_dynamic">SOCKS</string>
+    <string name="fwd_local_port">Listen port</string>
+    <string name="fwd_remote_host">Destination host</string>
+    <string name="fwd_remote_port">Destination port</string>
+    <string name="fwd_add">Add</string>
+    <string name="fwd_add_live">Add for this session</string>
+    <string name="fwd_edit">Edit rule</string>
+    <string name="fwd_delete">Delete</string>
+    <string name="fwd_remove_live">Stop</string>
+    <string name="fwd_empty">No saved rules yet.</string>
+    <string name="fwd_empty_live">No forwards running on this session.</string>
+    <string name="fwd_none_saved">None</string>
+    <string name="fwd_summary">%d rules</string>
+    <string name="fwd_status_on">On</string>
+    <string name="fwd_status_failed">Failed</string>
+    <string name="fwd_tag_temp">Temporary</string>
+    <string name="fwd_err_port_in_use">That local port is already in use.</string>
+    <string name="fwd_err_already">That rule is already open.</string>
+    <string name="fwd_err_bad_port">Enter a port between 1 and 65535.</string>
+    <string name="fwd_err_denied">The server refused this forward.</string>
+    <string name="fwd_hint_local">Listen on this device and tunnel to a host as seen from the server.</string>
+    <string name="fwd_hint_remote">Listen on the server and connect back to a host on this device.</string>
+    <string name="fwd_hint_dynamic">SOCKS5 proxy on this device, through the SSH session.</string>
+    <string name="term_forwards">Port forwards</string>
+    <string name="term_menu_forwards">Port forwards…</string>
 </resources>

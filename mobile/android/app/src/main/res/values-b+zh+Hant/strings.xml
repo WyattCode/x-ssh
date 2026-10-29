@@ -362,4 +362,34 @@
     <plurals name="term_notify_title_many">
         <item quantity="other">%d 個 SSH 工作階段連線中</item>
     </plurals>
+    <string name="fwd_title">連接埠轉發</string>
+    <string name="fwd_saved_title">已儲存的規則</string>
+    <string name="fwd_live_title">連接埠轉發</string>
+    <string name="fwd_mode_local">本機</string>
+    <string name="fwd_mode_remote">遠端</string>
+    <string name="fwd_mode_dynamic">SOCKS</string>
+    <string name="fwd_local_port">監聽連接埠</string>
+    <string name="fwd_remote_host">目標主機</string>
+    <string name="fwd_remote_port">目標連接埠</string>
+    <string name="fwd_add">新增</string>
+    <string name="fwd_add_live">僅本次工作階段</string>
+    <string name="fwd_edit">編輯規則</string>
+    <string name="fwd_delete">刪除</string>
+    <string name="fwd_remove_live">停止</string>
+    <string name="fwd_empty">還沒有儲存的規則。</string>
+    <string name="fwd_empty_live">這個工作階段上還沒有開著的轉發。</string>
+    <string name="fwd_none_saved">無</string>
+    <string name="fwd_summary">%d 條</string>
+    <string name="fwd_status_on">執行中</string>
+    <string name="fwd_status_failed">失敗</string>
+    <string name="fwd_tag_temp">暫時</string>
+    <string name="fwd_err_port_in_use">本機連接埠已被占用。</string>
+    <string name="fwd_err_already">這條規則已經開著。</string>
+    <string name="fwd_err_bad_port">連接埠要在 1 到 65535 之間。</string>
+    <string name="fwd_err_denied">伺服器拒絕了這條轉發。</string>
+    <string name="fwd_hint_local">在本機監聽,經 SSH 轉到伺服器視角的位址。</string>
+    <string name="fwd_hint_remote">在伺服器監聽,連回本機上的位址。</string>
+    <string name="fwd_hint_dynamic">在本機開 SOCKS5 代理,流量走這條 SSH。</string>
+    <string name="term_forwards">連接埠轉發</string>
+    <string name="term_menu_forwards">連接埠轉發…</string>
 </resources>
