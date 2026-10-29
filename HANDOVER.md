@@ -1,3 +1,20 @@
+# 会话记录:连续改进 M3.115(2026-10-30,复核打磨:connection-lost / store 锁定·备份码 / friendlyError 机器码透传 / Android 片段防双存)
+
+功能清单已够,本轮按站立规则做开源复核打磨(不合并)。未动 PR #49 `fix/review-polish-m3114` 与 #48–#12、#4–#11。本轮优先实质逻辑/i18n/状态,不堆 busy-gate。
+
+**核过已过时 / 已在未合并 PR(本轮不重做)**:
+1–N. 同 M3.114 所列 PR #12–#48,外加 #49 jump/proxy connect codes + passphrase-empty IPC。
+
+**修了**:
+1. **会话断开 i18n**:`ssh.ts` 两处 `连接已断开` → 稳定码 `connection-lost`;`sessions.applyEvent` 映射到已有 `app.sessionLost`(英文界面不再见硬编码中文)。
+2. **主机备份/导出锁定码**:`store.ts` `exportJson`/`exportSshConfig`/`importJson` 抛 `app-locked` / `invalid-backup`;Settings 主机 JSON/SSH 导出导入 toast 映射 `app.locked` / `set.sec.invalidBackup`(三语补键);`lock.setPassphrase` 锁定态抛 `app-locked`(口令空仍留给 #49 IPC)。
+3. **friendlyError 机器码透传**:kebab-case 码(如 `passphrase-empty`)不再被 `passphrase` 启发式改写成私钥文案;单测覆盖。
+4. **Android 片段防双存**:`SnippetEditor` `saving` 闸,镜像 HostEditor M3.107。
+
+**验证**:`typecheck` + `lint:i18n` + vitest **335** / 30 文件全绿(+1 friendlyError 透传用例)。未跑 Gradle。未合并。
+
+---
+
 # X-SSH 交接文档
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。

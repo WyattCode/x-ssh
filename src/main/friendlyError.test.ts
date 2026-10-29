@@ -8,6 +8,11 @@ describe('friendlyError', () => {
   it('keeps the plain-reset wording when the socket just dies', () => {
     expect(friendlyError('read ECONNRESET')).toBe('连接被服务器重置')
   })
+  it('passes through kebab-case machine codes', () => {
+    expect(friendlyError('passphrase-empty')).toBe('passphrase-empty')
+    expect(friendlyError('app-locked')).toBe('app-locked')
+    expect(friendlyError('connection-lost')).toBe('connection-lost')
+  })
 })
 
 describe('isTransientConnectError', () => {

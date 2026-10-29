@@ -579,16 +579,22 @@ async function importSshConfig(): Promise<void> {
   await store.loadHosts()
   await store.loadKnownHosts()
 }
+/** Maps the machine codes main returns for backup/restore into UI wording. */
+function backupErr(err: string | undefined, fallbackKey: 'set.sec.exportFail' | 'set.sec.importFail'): string {
+  if (err === 'app-locked') return t('app.locked')
+  if (err === 'invalid-backup') return t('set.sec.invalidBackup')
+  return err ?? t(fallbackKey)
+}
 async function exportHostsJson(): Promise<void> {
   const r = await window.api.hosts.exportJson()
-  if (!r.ok && !r.canceled) toast(r.error ?? t('set.sec.exportFail'), 'error')
+  if (!r.ok && !r.canceled) toast(backupErr(r.error, 'set.sec.exportFail'), 'error')
   else if (r.ok) toast(`${t('set.sec.exported')} ${store.hosts.length} ${t('set.sec.hosts')}`, 'success')
 }
 async function importHostsJson(): Promise<void> {
   const res = await confirm(t('set.sec.importJsonConfirm'))
   if (!res) return
   const r = await window.api.hosts.importJson()
-  if (!r.ok && !r.canceled) toast(r.error ?? t('set.sec.importFail'), 'error')
+  if (!r.ok && !r.canceled) toast(backupErr(r.error, 'set.sec.importFail'), 'error')
   else if (r.ok) {
     await store.loadHosts()
     toast(`${t('set.sec.imported')} ${r.count ?? 0} ${t('set.sec.hosts')}`, 'success')
@@ -596,7 +602,7 @@ async function importHostsJson(): Promise<void> {
 }
 async function exportSshConfig(): Promise<void> {
   const r = await window.api.hosts.exportSshConfig()
-  if (!r.ok && !r.canceled) toast(r.error ?? t('set.sec.exportFail'), 'error')
+  if (!r.ok && !r.canceled) toast(backupErr(r.error, 'set.sec.exportFail'), 'error')
   else if (r.ok) toast(t('set.sec.exportedSsh'), 'success')
 }
 
@@ -664,7 +670,7 @@ async function saveMasterLock(): Promise<void> {
       lockNewPass.value = ''
       toast(t('lock.saved'), 'success')
     } else {
-      toast(r.error ?? t('lock.saveFail'), 'error')
+      toast(r.error === 'app-locked' ? t('app.locked') : (r.error ?? t('lock.saveFail')), 'error')
     }
   } finally {
     lockBusy.value = false

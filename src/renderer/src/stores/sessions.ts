@@ -1632,7 +1632,7 @@ export const useSessions = defineStore('sessions', {
         // A clean `closed` (e.g. the user typed `exit`) keeps sshSessionId set
         // so the "session closed · reconnect" banner shows; no auto-reconnect.
         pane.status = status
-        if (message) pane.message = message
+        if (message) pane.message = message === 'connection-lost' ? t('app.sessionLost') : message
         return
       }
       // Drop the dead id so the terminal unmounts and the error / reconnect UI
@@ -1640,14 +1640,16 @@ export const useSessions = defineStore('sessions', {
       // also makes any trailing `closed` for this session a no-op.
       pane.sshSessionId = undefined
       pane.status = 'error'
-      if (message) pane.message = message
+      const display =
+        message === 'connection-lost' || !message ? t('app.sessionLost') : message
+      pane.message = display
       // When auto-reconnect is on, the "reconnecting…" banner communicates the
       // drop without us flooding a toast per attempt.
-      if (!this.autoReconnect) toast(message ?? t('app.sessionLost'), 'error')
+      if (!this.autoReconnect) toast(display, 'error')
       if (this.notifications) {
         window.api.notify(
           t('app.sessionDisconnected'),
-          `${pane.params.username}@${pane.params.host}${pane.params.port !== 22 ? `:${pane.params.port}` : ''}\n${message ?? t('app.sessionLost')}`,
+          `${pane.params.username}@${pane.params.host}${pane.params.port !== 22 ? `:${pane.params.port}` : ''}\n${display}`,
           true
         )
       }
