@@ -254,7 +254,7 @@ async function localDelete(): Promise<void> {
   const ok = await confirm(tt('sfp.confirmDel', { name: t.name }))
   if (!ok) return
   const r = await window.api.local.del(localPath.value, t.name, t.isDir)
-  if (!r.ok) toast(r.error ?? tt('sfp.delFail'), 'error')
+  if (!r.ok) toast(r.error === 'invalid-name' ? tt('sfp.invalidName') : (r.error ?? tt('sfp.delFail')), 'error')
   else await refreshLocal()
 }
 async function localDelSelected(): Promise<void> {
@@ -268,7 +268,7 @@ async function localDelSelected(): Promise<void> {
     const r = await window.api.local.del(localPath.value, e.name, e.isDir)
     if (!r.ok) {
       failed = true
-      toast(r.error ?? tt('sfp.delFail'), 'error')
+      toast(r.error === 'invalid-name' ? tt('sfp.invalidName') : (r.error ?? tt('sfp.delFail')), 'error')
     }
   }
   localSelSet.value = new Set()
@@ -306,7 +306,8 @@ async function localSubmit(e?: Event): Promise<void> {
   if (localModal.action === 'new') {
     const r = await window.api.local.create(localPath.value, name, localModal.kind)
     if (!r.ok) {
-      localModal.error = r.error ?? tt('sfp.createFail')
+      localModal.error =
+        r.error === 'invalid-name' ? tt('sfp.invalidName') : (r.error ?? tt('sfp.createFail'))
       return
     }
   } else {
@@ -314,7 +315,8 @@ async function localSubmit(e?: Event): Promise<void> {
     if (!t) return
     const r = await window.api.local.rename(localPath.value, t.name, name)
     if (!r.ok) {
-      localModal.error = r.error ?? tt('sfp.renameFail')
+      localModal.error =
+        r.error === 'invalid-name' ? tt('sfp.invalidName') : (r.error ?? tt('sfp.renameFail'))
       return
     }
   }

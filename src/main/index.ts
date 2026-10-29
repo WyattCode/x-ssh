@@ -483,7 +483,7 @@ async function withTempHosts(
     const h = (await store.list()).find((x) => x.id === hostId)
     const hostLabel = h ? `${h.username}@${h.host}${h.port && h.port !== 22 ? `:${h.port}` : ''}` : hostId
     if (!h) {
-      results.push({ host: hostLabel, ok: false, error: '主机不存在' })
+      results.push({ host: hostLabel, ok: false, error: 'host-missing' })
       continue
     }
     const params: ConnectParams = {
@@ -497,7 +497,7 @@ async function withTempHosts(
     }
     try {
       if (store.isLocked && !params.password && !params.passphrase) {
-        results.push({ host: hostLabel, ok: false, error: '应用已锁定' })
+        results.push({ host: hostLabel, ok: false, error: 'app-locked' })
         continue
       }
       if (h.auth === 'password' && !params.password) params.password = await store.getPassword(h.id)
@@ -522,7 +522,7 @@ async function withTempHosts(
       }
       const r = await requireSshManager().connect(params)
       if (!r.ok || !r.sessionId) {
-        results.push({ host: hostLabel, ok: false, error: r.error ?? '连接失败' })
+        results.push({ host: hostLabel, ok: false, error: r.error ?? 'connect-failed' })
         continue
       }
       const sid = r.sessionId
@@ -1266,7 +1266,7 @@ function registerIpc(): void {
     IPC.localCreate,
     async (_e, dir: string, name: string, kind: 'file' | 'folder') => {
       const target = resolveInside(dir, name)
-      if (!target) return { ok: false, error: '文件名不能用' }
+      if (!target) return { ok: false, error: 'invalid-name' }
       try {
         if (kind === 'folder') await mkdir(target)
         else await writeFile(target, '')
@@ -1281,7 +1281,7 @@ function registerIpc(): void {
     async (_e, dir: string, oldName: string, newName: string) => {
       const from = resolveInside(dir, oldName)
       const to = resolveInside(dir, newName)
-      if (!from || !to) return { ok: false, error: '文件名不能用' }
+      if (!from || !to) return { ok: false, error: 'invalid-name' }
       try {
         await rename(from, to)
         return { ok: true }
@@ -1296,7 +1296,7 @@ function registerIpc(): void {
       const target = resolveInside(dir, name)
       // Without this, `name` of "../.." plus recursive removal is a way to wipe
       // an arbitrary directory from the renderer.
-      if (!target) return { ok: false, error: '文件名不能用' }
+      if (!target) return { ok: false, error: 'invalid-name' }
       try {
         await rm(target, { recursive: isDir, force: isDir })
         return { ok: true }

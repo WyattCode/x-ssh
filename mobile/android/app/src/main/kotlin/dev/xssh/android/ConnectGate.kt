@@ -153,6 +153,15 @@ fun ConnectGate(
     onExit: () -> Unit,
 ) {
     val p = LocalXssh.current
+    // 失败页上回车、主按钮、重试按钮指向同一个动作:一次失败只允许触发一次,
+    // 否则连点两下(或回车 + 点按钮)会同时发起两次重连。以 failure 为 key,
+    // 下一次新的失败会重新给一次机会。
+    var acted by remember(failure) { mutableStateOf(false) }
+    fun actOnce(block: () -> Unit) {
+        if (acted) return
+        acted = true
+        block()
+    }
     val content = if (failure == null) {
         GateContent(
             icon = XIcons.Terminal,
@@ -181,17 +190,17 @@ fun ConnectGate(
             tint = p.danger,
             tile = p.danger.copy(alpha = 0.12f),
             title = stringResource(R.string.host_gate_failed),
-            onEnter = primary?.second,
+            onEnter = primary?.second?.let { action -> { actOnce(action) } },
             body = { MessageCard(failure) },
             actions = { stacked ->
                 GateButtons(
                     stacked = stacked,
                     primary = primary?.first,
-                    onPrimary = { primary?.second?.invoke() },
+                    onPrimary = { primary?.second?.let { actOnce(it) } },
                     // 有「填写密码」这类修复时,重试退到第二颗(填完再连就是重试)。
                     secondary = stringResource(R.string.host_back),
                     onSecondary = onExit,
-                    tertiary = if (fix != null && retry != null) retryLabel to retry else null,
+                    tertiary = if (fix != null && retry != null) retryLabel to { actOnce(retry) } else null,
                 )
             },
         )

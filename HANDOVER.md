@@ -1,3 +1,21 @@
+# 会话记录:连续改进 M3.106(2026-10-30,复核打磨:本机文件名/发布密钥 i18n + Android 连接失败页防双触发)
+
+功能清单已够,本轮按站立规则做开源复核打磨(不合并)。未动 PR #40 / #39–#12 与更早的 #4–#11。本轮优先实质逻辑/状态/无障碍/i18n。
+
+**核过已过时 / 已在未合并 PR(本轮不重做)**:
+1–29. 同 M3.105 所列 PR #12–#39。
+30. file-too-large/preview i18n + snippet save-once + HostKeyGate trustOnce —— PR #40。
+31. keyGen busy / sync busy 等 —— 更早未合并 PR。
+
+**修了**:
+1. **本机文件名无效**:localCreate/Rename/Delete 返回稳定码 `invalid-name`;SftpDrawer 新建/重命名/删除映射 `sfp.invalidName` 三语(英文不再见「文件名不能用」)。
+2. **发布/回收公钥逐主机错误**:`withTempHosts` 用 `host-missing` / `app-locked` / `connect-failed`;PublishKeyDialog `hostOpError` + `keyPub.hostMissing|appLocked|connectFailed` 三语。
+3. **Android ConnectGate 失败页**:`remember(failure)` + `actOnce`,防回车+重试/修复按钮双触发重连(不改 HostKeyGate)。
+
+**验证**:`typecheck` + `lint:i18n`(753) + vitest **334** / 30 文件全绿。未跑 Gradle。未合并。
+
+---
+
 # X-SSH 交接文档
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。
