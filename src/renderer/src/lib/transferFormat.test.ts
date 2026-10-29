@@ -5,7 +5,9 @@ import {
   formatBytes,
   formatSpeed,
   formatAgo,
+  formatEta,
   transferStatusText,
+  histStatusLabel,
   CANCELLED_MARKER
 } from './transferFormat'
 
@@ -95,6 +97,33 @@ describe('formatAgo', () => {
   })
 })
 
+describe('formatEta', () => {
+  it('is empty when the rate or the remaining bytes are unknown', () => {
+    expect(formatEta(1000, 0, tr)).toBe('')
+    expect(formatEta(1000, undefined, tr)).toBe('')
+    expect(formatEta(1000, 0.4, tr)).toBe('')
+    expect(formatEta(0, 1024, tr)).toBe('')
+    expect(formatEta(undefined, 1024, tr)).toBe('')
+  })
+
+  it('is empty when less than a second remains', () => {
+    // 100 B at 1 KB/s is ~0.1s — a countdown that reads "0s" is just noise.
+    expect(formatEta(100, 1024, tr)).toBe('')
+  })
+
+  it('rounds to whole seconds under a minute', () => {
+    expect(formatEta(1024, 1024, tr)).toBe('sfp.etaSec:{"n":1}')
+    expect(formatEta(10 * 1024, 1024, tr)).toBe('sfp.etaSec:{"n":10}')
+    expect(formatEta(59 * 1024, 1024, tr)).toBe('sfp.etaSec:{"n":59}')
+  })
+
+  it('switches to whole minutes at a minute and beyond', () => {
+    expect(formatEta(60 * 1024, 1024, tr)).toBe('sfp.etaMin:{"n":1}')
+    expect(formatEta(90 * 1024, 1024, tr)).toBe('sfp.etaMin:{"n":2}')
+    expect(formatEta(10 * 60 * 1024, 1024, tr)).toBe('sfp.etaMin:{"n":10}')
+  })
+})
+
 describe('transferStatusText', () => {
   it('labels a cancelled transfer as cancelled, not failed', () => {
     // The bug the shared helper fixes: one of the two copies compared against a
@@ -110,5 +139,13 @@ describe('transferStatusText', () => {
   it('reports done and in-progress', () => {
     expect(transferStatusText({ done: true }, tr)).toBe('sfp.done')
     expect(transferStatusText({ total: 100, transferred: 40 }, tr)).toBe('40%')
+  })
+})
+
+describe('histStatusLabel', () => {
+  it('returns only the short status, never the error body', () => {
+    expect(histStatusLabel('cancelled', tr)).toBe('sfp.cancelled')
+    expect(histStatusLabel('error', tr)).toBe('sfp.failed')
+    expect(histStatusLabel('done', tr)).toBe('sfp.done')
   })
 })

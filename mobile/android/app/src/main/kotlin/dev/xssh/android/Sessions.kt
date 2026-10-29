@@ -228,10 +228,13 @@ class TerminalSession(
         val host = credentials ?: return false
         val jump = jumpCredentials
         Log.i(TAG, "link dropped ($label), reconnecting")
+        // 上一次失败的原因。第一次是 null(按基础间隔);之后交给 delayMillis,
+        // 被 PerSourcePenalties 挡住时下一次等待至少 30 秒,别在惩罚窗口里越试越久。
+        var lastError: Throwable? = null
         for (attempt in 1..ReconnectPolicy.MAX_ATTEMPTS) {
             _frame.value = _frame.value.copy(reconnecting = attempt)
             _linkState.value = attempt
-            SessionRegistry.awaitRetry(ReconnectPolicy.delayMillis(attempt))
+            SessionRegistry.awaitRetry(ReconnectPolicy.delayMillis(attempt, lastError))
             val result = withContext(Dispatchers.IO) {
                 runCatching { openTransport(host, jump, live.cols, live.rows) }
             }
@@ -258,6 +261,7 @@ class TerminalSession(
                 return true
             }
             val error = result.exceptionOrNull() ?: continue
+            lastError = error
             Log.w(TAG, "reconnect $attempt failed ($label): [${error.javaClass.simpleName}] ${error.message}")
             if (ReconnectPolicy.isPermanent(error)) break
         }

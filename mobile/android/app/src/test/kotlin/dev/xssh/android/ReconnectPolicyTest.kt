@@ -2,6 +2,7 @@ package dev.xssh.android
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import uniffi.xssh_ffi.FfiException
@@ -25,6 +26,32 @@ class ReconnectPolicyTest {
     fun `all attempts together last about five minutes`() {
         val total = (1..ReconnectPolicy.MAX_ATTEMPTS).sumOf { ReconnectPolicy.delayMillis(it) } / 1000
         assertTrue("总共 $total 秒", total in 240..360)
+    }
+
+    @Test
+    fun `a rate-limited refusal is not permanent`() {
+        // PerSourcePenalties 只是"现在不行",不是"永远不行" —— 值得等窗口过去再试。
+        val e = FfiException.Message("Not allowed at this time")
+        assertFalse(ReconnectPolicy.isPermanent(e))
+        assertTrue(ReconnectPolicy.isRateLimited(e))
+    }
+
+    @Test
+    fun `a rate-limited refusal floors the retry delay at thirty seconds`() {
+        val e = FfiException.Message("Not allowed at this time")
+        // 第 1 次本来是 1 秒,被惩罚窗口抬到 30 秒。
+        assertEquals(30_000L, ReconnectPolicy.delayMillis(1, e))
+        // 普通错误还是原来的 1 秒。
+        assertEquals(1_000L, ReconnectPolicy.delayMillis(1, FfiException.Message("connection refused")))
+        // 第 6 次本来就是 30 秒,不会被拉长。
+        assertEquals(30_000L, ReconnectPolicy.delayMillis(6, e))
+    }
+
+    @Test
+    fun `penalty floor only applies to rate-limited errors`() {
+        assertEquals(30_000L, ReconnectPolicy.penaltyRetryDelayMs(FfiException.Message("not allowed at this time")))
+        assertNull(ReconnectPolicy.penaltyRetryDelayMs(FfiException.Message("connection refused")))
+        assertNull(ReconnectPolicy.penaltyRetryDelayMs(null))
     }
 
     @Test

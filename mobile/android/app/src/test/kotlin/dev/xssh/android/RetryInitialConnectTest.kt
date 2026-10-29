@@ -16,7 +16,7 @@ class RetryInitialConnectTest {
     @Test
     fun `a one-off failure is retried and the second try wins`() = runBlocking {
         var calls = 0
-        val result = retryInitialConnect(delayMillis = { 0 }) {
+        val result = retryInitialConnect(delayMillis = { _, _ -> 0 }) {
             calls++
             if (calls == 1) throw transient()
             "ok"
@@ -29,7 +29,7 @@ class RetryInitialConnectTest {
     fun `gives up after the attempt limit and rethrows the last error`() = runBlocking {
         var calls = 0
         try {
-            retryInitialConnect(attempts = 3, delayMillis = { 0 }) {
+            retryInitialConnect(attempts = 3, delayMillis = { _, _ -> 0 }) {
                 calls++
                 throw transient()
             }
@@ -43,7 +43,7 @@ class RetryInitialConnectTest {
     fun `permanent failures are not retried`() = runBlocking {
         var calls = 0
         try {
-            retryInitialConnect(delayMillis = { 0 }) {
+            retryInitialConnect(delayMillis = { _, _ -> 0 }) {
                 calls++
                 throw FfiException.Message("authentication failed")
             }
@@ -51,6 +51,23 @@ class RetryInitialConnectTest {
         } catch (e: FfiException) {
             assertEquals(1, calls)
         }
+    }
+
+    @Test
+    fun `rate limited failure waits at least 30 seconds and is retried`() = runBlocking {
+        var calls = 0
+        var seen = -1L
+        val result = retryInitialConnect(delayMillis = { attempt, err ->
+            seen = maxOf(initialRetryDelayMillis(attempt), ReconnectPolicy.penaltyRetryDelayMs(err) ?: 0L)
+            0L
+        }) {
+            calls++
+            if (calls == 1) throw FfiException.Message("Not allowed at this time")
+            "ok"
+        }
+        assertEquals("ok", result)
+        assertEquals(2, calls)
+        assertEquals(30_000L, seen)
     }
 
     @Test

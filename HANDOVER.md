@@ -2,6 +2,19 @@
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。
 
+# 会话记录:连续改进 M3.77(2026-10-30,复核打磨:TransferPanel 失败原因/ETA + Android 罚分重试下限)
+
+功能清单已够,本轮按站立规则做开源复核打磨(不合并)。
+
+**修了**:
+1. **桌面 TransferPanel**:进行中失败/取消残留行会留在 Active 并显示可换行的失败原因(以前 `!error` 过滤把 4 秒残留直接藏掉);历史徽章只留短状态,原因另起 `.tp-err` 行;进行中行加 ETA(`formatEta` + `sfp.etaSec`/`sfp.etaMin` 三字典)。
+2. **Android PerSourcePenalties**:移植桌面 `penaltyRetryDelayMs` —— `ReconnectPolicy.isRateLimited` / `penaltyRetryDelayMs`(30s),`delayMillis(attempt, lastError)` 取 max;首连 `retryInitialConnect` 的 delay 签名改为 `(attempt, error)`;`Sessions.reconnect` 把上次错误喂给下一次等待。单测覆盖罚分地板与首连捕获。
+
+**验证**:桌面 `typecheck` + vitest(含 transferFormat);Android 单测文件已更新(本机若无 SDK 则 CI/`testDebugUnitTest` 再跑)。未合并。
+
+---
+
+
 ## 项目概述
 - 极简、键盘优先的 SSH 客户端。Electron + Vue 3 (Vite) + TypeScript。
 - 平台: Windows (`win32`)。目录: `D:\Documents\Claude Code\X-SSH`。
