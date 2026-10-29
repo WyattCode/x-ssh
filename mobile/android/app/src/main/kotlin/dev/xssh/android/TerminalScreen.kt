@@ -608,7 +608,8 @@ private fun TerminalView(
 
     val paste: () -> Unit = {
         val clip = context.getSystemService(android.content.ClipboardManager::class.java)?.primaryClip
-        val text = clip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty()
+        val raw = clip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty()
+        val text = PasteSanitize.sanitize(raw)
         if (text.isNotEmpty()) live.paste(text)
     }
 
@@ -723,8 +724,9 @@ private fun TerminalView(
             override fun onDrop(event: DragAndDropEvent): Boolean {
                 dropHover = false
                 val clip = event.toAndroidDragEvent().clipData ?: return false
-                val text = (0 until clip.itemCount)
+                val raw = (0 until clip.itemCount)
                     .joinToString("\n") { clip.getItemAt(it).coerceToText(context).toString() }
+                val text = PasteSanitize.sanitize(raw)
                 if (text.isEmpty()) return false
                 live.paste(text)
                 return true

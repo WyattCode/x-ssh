@@ -1222,8 +1222,15 @@ function runMore(fn: () => void): void {
   fn()
 }
 // ---- Incremental sync (rsync-style) ----
-const sync = reactive({ open: false, local: '', remote: '', mode: 'both' as 'up' | 'down' | 'both', del: false, watch: false, interval: 5 })
+const sync = reactive({ open: false, local: '', remote: '', mode: 'both' as 'up' | 'down' | 'both', del: false, watch: false, interval: 5, busy: false, error: '' })
 const watchActive = ref(false)
+watch(
+  () => sync.mode,
+  (m) => {
+    if (m === 'both') sync.del = false
+    sync.error = ''
+  }
+)
 // ---- Directory tree diff (rsync-style, read-only) ----
 // The dialog itself lives in DirDiffDialog.vue; the drawer only seeds the two
 // paths from the panes it is currently showing.
@@ -1242,22 +1249,49 @@ function openSyncDialog(): void {
   sync.del = false
   sync.watch = false
   sync.interval = 5
+  sync.error = ''
+  sync.busy = false
   sync.open = true
 }
-async function startSync(): Promise<void> {
-  if (!props.sessionId || !sync.local || !sync.remote) return
+function closeSync(): void {
+  if (sync.busy) return
   sync.open = false
-  // Continuous mode keeps a background watcher alive on the session.
-  if (sync.watch) {
-    const r = await window.api.sftp.watchStart(
-      props.sessionId, sync.local, sync.remote, sync.mode, sync.del, sync.interval
+  sync.error = ''
+}
+async function startSync(): Promise<void> {
+  if (!props.sessionId || !sync.local || !sync.remote || sync.busy) return
+  sync.error = ''
+  sync.busy = true
+  try {
+    // Continuous mode keeps a background watcher alive on the session.
+    if (sync.watch) {
+      const r = await window.api.sftp.watchStart(
+        props.sessionId, sync.local, sync.remote, sync.mode, sync.del, sync.interval
+      )
+      if (r.ok) {
+        watchActive.value = true
+        sync.open = false
+      } else {
+        sync.error = r.error ?? tt('sfp.syncFail')
+      }
+      return
+    }
+    const r = await window.api.sftp.sync(
+      props.sessionId, sync.local, sync.remote, sync.mode, sync.del, store.transferConcurrency
     )
-    if (r.ok) watchActive.value = true
-    else error.value = r.error ?? tt('sfp.syncFail')
-    return
+    if (r.ok) {
+      sync.open = false
+    } else {
+      sync.error = r.error ?? tt('sfp.syncFail')
+    }
+  } finally {
+    sync.busy = false
   }
-  const r = await window.api.sftp.sync(props.sessionId, sync.local, sync.remote, sync.mode, sync.del, store.transferConcurrency)
-  if (!r.ok) error.value = r.error ?? tt('sfp.syncFail')
+}
+function onSyncEnter(e: KeyboardEvent): void {
+  if (e.key !== 'Enter' || isImeEnter(e) || sync.busy || !sync.local || !sync.remote) return
+  e.preventDefault()
+  void startSync()
 }
 async function stopWatch(): Promise<void> {
   if (!props.sessionId) return
@@ -1843,11 +1877,11 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
       @close="onPermClose"
     />
 
-    <div v-if="sync.open" class="dlg-layer" @mousedown.self="sync.open = false">
-      <div ref="syncDlgEl" class="dlg" tabindex="-1" @keydown.esc="sync.open = false">
+    <div v-if="sync.open" class="dlg-layer" @mousedown.self="closeSync">
+      <div ref="syncDlgEl" class="dlg" tabindex="-1" @keydown.esc="closeSync" @keydown="onSyncEnter">
         <div class="dlg-head">
           <h3>{{ tt('sfp.sync') }}</h3>
-          <button class="ib sm" :title="tt('sfp.close')" @click="sync.open = false"><Icon name="close" :size="14" /></button>
+          <button class="ib sm" :title="tt('sfp.close')" @click="closeSync"><Icon name="close" :size="14" /></button>
         </div>
         <div class="dlg-card">
           <label class="dlg-row">
@@ -1880,9 +1914,10 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
           </label>
         </div>
         <p v-if="!sync.local || !sync.remote" class="dlg-err">{{ tt('sfp.syncPathsRequired') }}</p>
+        <p v-if="sync.error" class="dlg-err">{{ sync.error }}</p>
         <div class="dlg-foot">
-          <button class="btn" @click="sync.open = false">{{ tt('sfp.cancel') }}</button>
-          <button class="btn btn-primary" :disabled="!sync.local || !sync.remote" @click="startSync">
+          <button class="btn" @click="closeSync">{{ tt('sfp.cancel') }}</button>
+          <button class="btn btn-primary" :disabled="sync.busy || !sync.local || !sync.remote" @click="startSync">
             {{ sync.watch ? tt('sfp.syncWatchStart') : tt('sfp.syncStart') }}
           </button>
         </div>
