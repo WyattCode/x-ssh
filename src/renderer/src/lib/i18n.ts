@@ -624,6 +624,7 @@ const zh: Dict = {
   'hist.hostFilter': '按主机过滤',
   'hist.allHosts': '所有主机',
   'hist.export': '导出当前结果',
+  'hist.untitled': '会话',
 
   // host editor
   'host.titleNew': '新建主机',
@@ -1398,6 +1399,7 @@ const en: Dict = {
   'hist.hostFilter': 'Filter by host',
   'hist.allHosts': 'All hosts',
   'hist.export': 'Export current results',
+  'hist.untitled': 'Session',
 
   'host.titleNew': 'New host',
   'host.titleEdit': 'Edit host',
@@ -2182,6 +2184,7 @@ const zhTW: Dict = {
   'hist.hostFilter': '依主機篩選',
   'hist.allHosts': '所有主機',
   'hist.export': '匯出目前結果',
+  'hist.untitled': '工作階段',
 
   // host editor
   'host.titleNew': '新增主機',

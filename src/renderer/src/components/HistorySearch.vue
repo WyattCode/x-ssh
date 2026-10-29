@@ -11,6 +11,12 @@ import Icon from './Icon.vue'
 const store = useSessions()
 const { t } = useI18n()
 
+/** Missing / legacy-Chinese labels → localized untitled. */
+function displayLabel(label: string): string {
+  if (!label || label === '会话') return t('hist.untitled')
+  return label
+}
+
 const query = ref('')
 const inputEl = ref<HTMLInputElement>()
 const active = ref(0)
@@ -93,7 +99,7 @@ watch(results, (r) => {
 
 /** Writes the current (filtered) results to a plaintext log via the main process. */
 function exportLog(): void {
-  const text = results.value.map((h) => `[${h.label}] ${h.line}`).join('\n')
+  const text = results.value.map((h) => `[${displayLabel(h.label)}] ${h.line}`).join('\n')
   void window.api.history.export(text)
 }
 
@@ -139,7 +145,7 @@ function onKey(e: KeyboardEvent): void {
         />
         <select v-model="hostFilter" class="hostsel" :title="t('hist.hostFilter')">
           <option value="">{{ t('hist.allHosts') }}</option>
-          <option v-for="h in hostLabels" :key="h" :value="h">{{ h }}</option>
+          <option v-for="h in hostLabels" :key="h" :value="h">{{ displayLabel(h) }}</option>
         </select>
         <span class="count" :title="results.length >= MAX_RESULTS ? t('hist.truncated') : undefined">
           {{ results.length >= MAX_RESULTS ? MAX_RESULTS + '+' : results.length }}
@@ -158,7 +164,7 @@ function onKey(e: KeyboardEvent): void {
           @mousemove="active = i"
           @click="pick(hit)"
         >
-          <span class="label">{{ hit.label }}</span>
+          <span class="label">{{ displayLabel(hit.label) }}</span>
           <span class="line">{{ hit.line }}</span>
           <span class="arch" :title="t('hist.copy')" @click.stop="copy(hit)"><Icon name="copy" :size="13" /></span>
         </button>

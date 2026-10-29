@@ -2,6 +2,26 @@
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。
 
+## HANDOVER M3.122 — review polish (localList fail / openExternal await / hist untitled)
+
+**Branch:** `fix/review-polish-m3122` (from origin/main). **Do NOT merge.** Open PR (see report).
+**Skipped / do not redo:** PR #56 `fix/review-polish-m3121` (dragCache fail / dialog filter i18n / spawnDetached) and #55–#12, #4–#11. Features / intentional deferrals / M3.77–M3.121 done items.
+
+### Fixes shipped
+1. **localList swallows FS errors → empty pane** — `IPC.localList` catch returned `{ path, entries: [] }` on EACCES/ENOENT, so the drawer looked empty with no banner. Rethrow so `refreshLocal` catch shows `sfp.localErr`. Early `!resolved` / `!st.isDirectory()` returns unchanged.
+2. **openExternal false success** — handler returned `true` before `shell.openExternal` settled and swallowed rejections. Now `async`, `await`, fail-closed (`false` on reject). http/https allow-list unchanged.
+3. **historyList fallback label hardcoded Chinese** — `s.label ?? '会话'` leaked into EN UI (HistorySearch host filter / rows / export). Machine missing-label is `''`; display uses new `hist.untitled` (zh/en/zh-TW) via `displayLabel`, mapping legacy `'会话'` too. Filter `:value` stays raw.
+
+### Verify
+- typecheck OK; lint:i18n OK (750/750/750 desktop); vitest **334**/30 green.
+- Model: DeepSeek-V4.1-Flash-1017 via ds.py; thinking=off medium; 10/10 HAND_APPLY first try. No hand-fix. Incidents: none.
+
+### Next
+Continue continuous-improve from origin/main on a new branch; do **not** touch/merge this PR or #56–#12 / #4–#11. Prefer substantive P0/P1 over busy-gates.
+
+---
+
+
 ## 项目概述
 - 极简、键盘优先的 SSH 客户端。Electron + Vue 3 (Vite) + TypeScript。
 - 平台: Windows (`win32`)。目录: `D:\Documents\Claude Code\X-SSH`。
