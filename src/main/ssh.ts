@@ -1605,7 +1605,7 @@ export class SshManager {
     }
 
     if (this.cancelledJobs.has(jobId)) emit('', 'up', false, SshManager.CANCELLED_TEXT)
-    else if (errors) emit('', 'up', false, `${errors} 项失败`)
+    else if (errors) emit('', 'up', false, `sync-items-failed:${errors}`)
     else {
       const t = bytesDone || 1
       this.emitProgress({ id: jobId, name: '同步', direction: 'up', transferred: t, total: t, count: totalPlanned, done: true })
@@ -2401,7 +2401,7 @@ export class SshManager {
     // One unremovable entry (e.g. no permission) must not abort the whole tree:
     // everything deletable is still gone, and we report only what remained.
     if (failed.length) {
-      throw new Error(`${failed.length} 个条目无法删除,可能是权限不足`)
+      throw new Error(`delete-failed:${failed.length}`)
     }
   }
 
@@ -2617,7 +2617,7 @@ export class SshManager {
       code: -1,
       out: (e as Error).message
     }))
-    if (code !== 0) return { ok: false, error: out.trim() || '解压失败' }
+    if (code !== 0) return { ok: false, error: out.trim() || 'extract-failed' }
     return { ok: true }
   }
 

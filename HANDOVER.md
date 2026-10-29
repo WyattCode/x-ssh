@@ -2,6 +2,26 @@
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。
 
+## HANDOVER M3.112 — review polish (delete-failed / extract-failed / sync-items-failed / tmux attach toast)
+
+**Branch:** `fix/review-polish-m3112` (from origin/main). **Do NOT merge.** Open PR (see report).
+**Skipped / do not redo:** PR #46 `fix/review-polish-m3111` (ssh-config import toast / window-not-ready / Publish per-host codes) and #45–#12, #4–#11. Features / intentional deferrals / M3.77–M3.111 done items.
+
+### Fixes shipped
+1. **SFTP partial delete Chinese** — `ssh.ts` throws `delete-failed:N`; SftpDrawer `sftpErr` → `sfp.deletePartial`.
+2. **Archive extract fail code** — remote extract returns `extract-failed` (was Chinese/`stderr`); SftpDrawer maps via `sftpErr` → `sfp.extractFail`.
+3. **Sync item failures** — sync emit `sync-items-failed:N`; TransferPanel `histStatus` + sessions `xferErr` → `sfp.syncItemsFailed`.
+4. **Tmux attach always closed dialog** — await `tmuxAttach`, toast `tmux.attachFail` on `!ok`, only close on success (IPC already returns `{ok}` when sshManager missing).
+
+### Verify
+- typecheck OK; lint:i18n OK (desktop 752/752/752); vitest **334**/30 green.
+- Model: DeepSeek-V4.1-Flash-1017 via ds.py; thinking=off medium; 23/23 HAND_APPLY clean. No product hand-fix. Incidents: none.
+
+### Next
+Continue continuous-improve from origin/main on a new branch; do **not** touch/merge this PR or #46–#12 / #4–#11. Prefer substantive P0/P1 over busy-gates.
+
+---
+
 ## 项目概述
 - 极简、键盘优先的 SSH 客户端。Electron + Vue 3 (Vite) + TypeScript。
 - 平台: Windows (`win32`)。目录: `D:\Documents\Claude Code\X-SSH`。

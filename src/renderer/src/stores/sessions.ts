@@ -38,6 +38,13 @@ const { confirm } = useConfirm()
 let counter = 0
 const uid = (p: string): string => `${p}-${Date.now()}-${counter++}`
 
+/** Maps a machine transfer-error code from main to UI text (else passes it on). */
+function xferErr(err: string): string {
+  const sm = /^sync-items-failed:(\d+)$/.exec(err)
+  if (sm) return t('sfp.syncItemsFailed', { n: Number(sm[1]) })
+  return err
+}
+
 /** A live port-forward failure, in the UI language. */
 function forwardError(r: { error?: string; code?: ForwardErrorCode }): string {
   switch (r.code) {
@@ -1010,7 +1017,7 @@ export const useSessions = defineStore('sessions', {
               host: owner.params.host,
               port: owner.params.port || 22,
               username: owner.params.username,
-              detail: p.error ? `${p.name} · ${p.error}` : p.name,
+              detail: p.error ? `${p.name} · ${xferErr(p.error)}` : p.name,
               bytes: p.transferred
             })
           }
@@ -1019,7 +1026,7 @@ export const useSessions = defineStore('sessions', {
           if (!cancelled) {
             window.api.notify(
               p.error ? t('sfp.notifyError') : t('sfp.notifyDone'),
-              `${p.name}\n${p.direction === 'up' ? t('sfp.up') : t('sfp.down')}${p.error ? ` · ${p.error}` : ''}`,
+              `${p.name}\n${p.direction === 'up' ? t('sfp.up') : t('sfp.down')}${p.error ? ` · ${xferErr(p.error)}` : ''}`,
               !p.error
             )
             toast(

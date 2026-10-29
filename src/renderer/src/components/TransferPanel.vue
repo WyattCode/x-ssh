@@ -45,7 +45,11 @@ const recent = computed(() => store.transferHistory.slice(0, 12))
 
 function histStatus(h: TransferHistoryItem): string {
   if (h.status === 'cancelled') return t('sfp.cancelled')
-  if (h.status === 'error') return h.error || t('sfp.failed')
+  if (h.status === 'error') {
+    const sm = h.error && /^sync-items-failed:(\d+)$/.exec(h.error)
+    if (sm) return t('sfp.syncItemsFailed', { n: Number(sm[1]) })
+    return h.error || t('sfp.failed')
+  }
   return t('sfp.done')
 }
 function reveal(h: TransferHistoryItem): void {

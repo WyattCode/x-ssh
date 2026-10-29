@@ -30,6 +30,14 @@ const { t: tt } = useI18n()
 const { toast } = useToast()
 const store = useSessions()
 
+/** Turns a machine error code from main into UI text (falls back to `err`). */
+function sftpErr(err: string | undefined, fallbackKey: string): string {
+  const m = err && /^delete-failed:(\d+)$/.exec(err)
+  if (m) return tt('sfp.deletePartial', { n: Number(m[1]) })
+  if (err === 'extract-failed') return tt('sfp.extractFail')
+  return err ?? tt(fallbackKey)
+}
+
 // `page`: the SFTP sidebar page shows this full-size (no resize edge, no close)
 // instead of as the drawer on the terminal page.
 const props = defineProps<{ sessionId?: string; open: boolean; terminalCwd?: string; reloadKey?: number; page?: boolean }>()
@@ -254,7 +262,7 @@ async function localDelete(): Promise<void> {
   const ok = await confirm(tt('sfp.confirmDel', { name: t.name }))
   if (!ok) return
   const r = await window.api.local.del(localPath.value, t.name, t.isDir)
-  if (!r.ok) toast(r.error ?? tt('sfp.delFail'), 'error')
+  if (!r.ok) toast(sftpErr(r.error, 'sfp.delFail'), 'error')
   else await refreshLocal()
 }
 async function localDelSelected(): Promise<void> {
@@ -268,7 +276,7 @@ async function localDelSelected(): Promise<void> {
     const r = await window.api.local.del(localPath.value, e.name, e.isDir)
     if (!r.ok) {
       failed = true
-      toast(r.error ?? tt('sfp.delFail'), 'error')
+      toast(sftpErr(r.error, 'sfp.delFail'), 'error')
     }
   }
   localSelSet.value = new Set()
@@ -1180,7 +1188,7 @@ async function uploadExtractPick(): Promise<void> {
   busy.value = true
   try {
     const r = await window.api.sftp.uploadExtract(props.sessionId, path.value, store.transferConcurrency)
-    if (!r.ok && !r.canceled) error.value = r.error ?? tt('sfp.extractFail')
+    if (!r.ok && !r.canceled) error.value = sftpErr(r.error, 'sfp.extractFail')
     else if (r.ok) await load(path.value)
   } finally {
     busy.value = false
@@ -1198,7 +1206,7 @@ async function delSelected(): Promise<void> {
   if (!ok) return
   for (const it of items) {
     const r = await window.api.sftp.remove(props.sessionId, posixJoin(path.value, it.name), it.isDir)
-    if (!r.ok) error.value = r.error ?? tt('sfp.delFail')
+    if (!r.ok) error.value = sftpErr(r.error, 'sfp.delFail')
   }
   selected.value = new Set()
   await load(path.value)
