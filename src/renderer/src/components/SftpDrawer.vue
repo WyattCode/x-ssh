@@ -705,16 +705,28 @@ function kindOf(e: { name: string; isDir: boolean; mode?: number }): FileKind {
 // ---- The two arrows between the panes: send the selection across ----
 async function uploadLocalSelection(): Promise<void> {
   if (!props.sessionId || !localSelCount.value) return
-  const paths = localSelectedNames().map((n) => localJoin(localPath.value, n))
-  const r = await window.api.sftp.uploadPaths(props.sessionId, path.value, paths, store.transferConcurrency)
-  if (!r.ok && !r.canceled) error.value = r.error ?? tt('sfp.uploadFail')
+  if (busy.value) return
+  busy.value = true
+  try {
+    const paths = localSelectedNames().map((n) => localJoin(localPath.value, n))
+    const r = await window.api.sftp.uploadPaths(props.sessionId, path.value, paths, store.transferConcurrency)
+    if (!r.ok && !r.canceled) error.value = r.error ?? tt('sfp.uploadFail')
+  } finally {
+    busy.value = false
+  }
 }
 async function downloadSelectionToLocal(): Promise<void> {
   if (!props.sessionId || !localPath.value || !selected.value.size) return
-  const items = selectedEntries().map((x) => ({ path: posixJoin(path.value, x.name), name: x.name, isDir: x.isDir }))
-  const r = await window.api.sftp.downloadTo(props.sessionId, items, localPath.value, store.transferConcurrency)
-  if (!r.ok && !r.canceled) toast(tt('sfp.downloadFail'), 'error')
-  else await refreshLocal()
+  if (busy.value) return
+  busy.value = true
+  try {
+    const items = selectedEntries().map((x) => ({ path: posixJoin(path.value, x.name), name: x.name, isDir: x.isDir }))
+    const r = await window.api.sftp.downloadTo(props.sessionId, items, localPath.value, store.transferConcurrency)
+    if (!r.ok && !r.canceled) toast(tt('sfp.downloadFail'), 'error')
+    else await refreshLocal()
+  } finally {
+    busy.value = false
+  }
 }
 
 function selectedEntries(): FileEntry[] {

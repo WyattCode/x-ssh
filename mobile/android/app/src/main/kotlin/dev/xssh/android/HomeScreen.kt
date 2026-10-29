@@ -971,11 +971,21 @@ private fun SwipeActions(
     val reveal = with(density) { RevealWidth.toPx() }
     val offset = remember { Animatable(0f) }
     var confirming by remember { mutableStateOf(false) }
+    // 确认删除只生效一次:连点两下 / 列表还没刷新时再点一下,不能删两次。
+    var deleted by remember { mutableStateOf(false) }
+    fun deleteOnce() {
+        if (deleted) return
+        deleted = true
+        onDelete()
+    }
     val motion = Motion.snappy<Float>()
 
     // 外部改了开合(别的卡片被打开、列表滚动)就跟着动。
     LaunchedEffect(open) {
-        if (!open) confirming = false
+        if (!open) {
+            confirming = false
+            deleted = false
+        }
         offset.animateTo(if (open) -reveal else 0f, motion)
     }
 
@@ -1021,7 +1031,7 @@ private fun SwipeActions(
             if (confirming) {
                 SwipeTile(stringResource(R.string.host_confirm_delete), p.bg, p.danger, Modifier.width(ActionTile * 2 + ActionGap)) {
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    onDelete()
+                    deleteOnce()
                 }
             } else {
                 SwipeTile(editLabel, p.accent, p.accentSoft, Modifier.width(ActionTile)) { onEdit() }
