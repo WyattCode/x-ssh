@@ -78,6 +78,7 @@ const zh: Dict = {
   'app.closePaneConfirm': '面板「{title}」仍有活跃会话,确定关闭吗?关闭前会先发送 exit。',
   'app.closeExitTitle': '关闭活跃会话',
   'app.closeExitOk': '发送 exit 并关闭',
+  'app.tabsPersistFail': '无法保存标签布局,下次启动可能无法恢复',
   'app.jumpNeedsPassword': '跳板机需要密码,但没有已保存的密码。请在「主机」编辑页为跳板主机设置密码后重试,或改用密钥认证。',
 
   // settings tabs
@@ -860,6 +861,7 @@ const en: Dict = {
   'app.closePaneConfirm': 'Pane "{title}" still has an active session. Close it? An `exit` is sent first.',
   'app.closeExitTitle': 'Close active session',
   'app.closeExitOk': 'Send exit & close',
+  'app.tabsPersistFail': 'Could not save the tab layout; it may not restore next launch',
   'app.jumpNeedsPassword': 'The jump host requires a password, but none is saved. Set one on the jump host profile (or switch to key auth) and retry.',
 
   'tab.general': 'General',
@@ -1635,6 +1637,7 @@ const zhTW: Dict = {
   'app.closePaneConfirm': '窗格「{title}」仍有作用中的工作階段,確定要關閉嗎?關閉前會先傳送 exit。',
   'app.closeExitTitle': '關閉作用中的工作階段',
   'app.closeExitOk': '傳送 exit 並關閉',
+  'app.tabsPersistFail': '無法儲存分頁配置,下次啟動可能無法還原',
   'app.jumpNeedsPassword': '跳板機需要密碼,但沒有已儲存的密碼。請在「主機」編輯頁為跳板主機設定密碼後重試,或改用金鑰驗證。',
 
   // settings tabs

@@ -69,6 +69,7 @@ export const RENDERER_SETTABLE_KEYS = new Set([
   'notifications',
   'notifySound',
   'openTabs',
+  'openTabsActiveIndex',
   'snapshots',
 ])
 

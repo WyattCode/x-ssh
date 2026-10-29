@@ -1,5 +1,9 @@
 # X-SSH 交接文档
 
+## M3.136（分支 `fix/review-polish-m3136`，**未合并**）
+- 修复：`setActivePane` 持久化当前面板（`activeIndex`）；新增 `openTabsActiveIndex` 的保存/恢复，`setActive` / `nextTab` / `closeOthers` 同步持久化当前标签；`persistTabs` 失败时提示 `app.tabsPersistFail`。
+- 说明：PR #70–#12 均未合并；本轮未重做 splitPane/divider、queue*、theme、setLang、addSftpRecent、applyLayoutPreset、openSnapshot、closeOthers 确认逻辑等既有改动。
+
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。
 
 ## 项目概述
