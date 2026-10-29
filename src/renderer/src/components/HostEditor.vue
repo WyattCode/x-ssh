@@ -62,6 +62,8 @@ const form = reactive({
 })
 const password = ref('')
 const passphrase = ref('')
+/** Guards against a second save (Enter / Save) while hosts.save is in flight. */
+const saving = ref(false)
 /** Which 更多选项 rows are open (each opens in place under its row). */
 const sections = reactive({ keys: false, proxy: false, forwards: false, onConnect: false, appearance: false })
 const labelEl = ref<HTMLInputElement>()
@@ -309,7 +311,7 @@ function onTagKey(e: KeyboardEvent): void {
 
 async function save(): Promise<void> {
   splitHostInput()
-  if (!canSave()) return
+  if (!canSave() || saving.value) return
   commitTag()
   const forwards = form.forwards
     .filter((f) => f.mode === 'dynamic' ? f.localPort > 0 : f.localPort > 0 && f.remotePort > 0)
@@ -354,6 +356,7 @@ async function save(): Promise<void> {
   // previously saved secret untouched (empty → undefined, store won't overwrite).
   const pw = form.auth === 'password' && password.value ? password.value : undefined
   const pp = form.auth === 'key' && passphrase.value ? passphrase.value : undefined
+  saving.value = true
   try {
     store.hosts = await window.api.hosts.save(host, pw, pp)
   } catch {
@@ -361,6 +364,8 @@ async function save(): Promise<void> {
     // file). Without this the panel just sat there with nothing said.
     toast(t('ed.saveFail'), 'error')
     return
+  } finally {
+    saving.value = false
   }
   emit('close')
 }
@@ -673,7 +678,7 @@ async function remove(): Promise<void> {
           <button v-if="host" type="button" class="btn btn-danger" @click="remove">{{ t('host.delete') }}</button>
           <span class="spacer" />
           <button type="button" class="btn" @click="void requestClose()">{{ t('host.cancel') }}</button>
-          <button type="button" class="btn btn-primary" :disabled="!canSave()" :title="canSave() ? undefined : t('host.saveDisabled')" @click="save">{{ t('host.save') }}</button>
+          <button type="button" class="btn btn-primary" :disabled="!canSave() || saving" :title="canSave() ? undefined : t('host.saveDisabled')" @click="save">{{ saving ? t('ed.saving') : t('host.save') }}</button>
         </footer>
 
         <!-- Generate a key: a small sheet over the panel. -->
