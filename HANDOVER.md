@@ -2,6 +2,24 @@
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。
 
+## HANDOVER M3.133 — snapshot/closeOthers confirmClose + saveSetting toast (PR open, NOT merged)
+
+Branch: `fix/review-polish-m3133` from `origin/main`. Do **not** merge; do **not** touch open PRs #4–#67.
+
+### Shipped
+1. **openSnapshot honors confirmClose** — if any pane is connected, confirm once, send `exit`, then replace tabs.
+2. **closeOthers honors confirmClose** — same for other tabs; async (TabBar `run` already tolerates it).
+3. **saveSetting** toasts `set.gen.writeFail` and returns `boolean`; **setGlobalShowHide** rolls back in-memory accel + restores previous OS shortcut when persist fails.
+
+### Verify
+- `npm run typecheck` / `lint:i18n` / `test` (expect ≥334).
+- Manual: enable confirm-on-close → open snapshot / close others with live tabs → dialog; refuse a settings key → toast; fail persist of global hotkey → field + OS shortcut revert.
+
+### Not in this PR
+theme/transfer (#67), snippets/connLog/editor (#66), hosts/bookmark (#65), SettingsStore/snapshots save (#64), addSftpRecent, lang/zoom/fontSize, applyLayoutPreset, TabBar.vue.
+
+---
+
 ## 项目概述
 - 极简、键盘优先的 SSH 客户端。Electron + Vue 3 (Vite) + TypeScript。
 - 平台: Windows (`win32`)。目录: `D:\Documents\Claude Code\X-SSH`。

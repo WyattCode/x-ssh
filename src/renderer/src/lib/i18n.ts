@@ -212,6 +212,7 @@ const zh: Dict = {
   'set.gen.snipPlaceholder': '要发送的命令(可多行)',
   'set.gen.cancel': '取消',
   'set.gen.save': '保存',
+  'set.gen.writeFail': '设置保存失败',
   'set.gen.addForward': '+ 添加',
 
   // settings terminal
@@ -613,6 +614,7 @@ const zh: Dict = {
   'pal.snapSave': '保存当前布局为快照…',
   'pal.snapSaveDesc': '记录所有标签与分屏,之后可一键重开',
   'pal.snapDefault': '快照',
+  'pal.snapOpenConfirm': '当前有活跃会话,打开快照会关闭它们。关闭前会先发送 exit。继续吗?',
 
   // history search
   'hist.placeholder': '搜索所有会话输出…',
@@ -789,7 +791,8 @@ const zh: Dict = {
   'tabbar.rename': '重命名',
   'tabbar.filter': '过滤标签…',
   'tabbar.closeTab': '关闭',
-  'tabbar.closeOthers': '关闭其他'
+  'tabbar.closeOthers': '关闭其他',
+  'tabbar.closeOthersConfirm': '将关闭另外 {n} 个标签(含活跃会话)。关闭前会先发送 exit。继续吗?'
 }
 
 const en: Dict = {
@@ -991,6 +994,7 @@ const en: Dict = {
   'set.gen.snipPlaceholder': 'Command to send (multi-line)',
   'set.gen.cancel': 'Cancel',
   'set.gen.save': 'Save',
+  'set.gen.writeFail': 'Could not save setting',
   'set.gen.addForward': '+ Add',
 
   'set.term.appearance': 'Appearance',
@@ -1387,6 +1391,7 @@ const en: Dict = {
   'pal.snapSave': 'Save current layout as snapshot…',
   'pal.snapSaveDesc': 'Captures all tabs & splits to reopen later',
   'pal.snapDefault': 'Snapshot',
+  'pal.snapOpenConfirm': 'Live sessions are open. Opening a snapshot will close them (exit is sent first). Continue?',
 
   // history search
   'hist.placeholder': 'Search all session output…',
@@ -1561,7 +1566,8 @@ const en: Dict = {
   'tabbar.rename': 'Rename',
   'tabbar.filter': 'Filter tabs…',
   'tabbar.closeTab': 'Close',
-  'tabbar.closeOthers': 'Close others'
+  'tabbar.closeOthers': 'Close others',
+  'tabbar.closeOthersConfirm': 'Close the other {n} tab(s), including any live sessions? An exit is sent first.'
 }
 
 /** Traditional Chinese, Taiwan usage. Keys missing here fall back to `zh`. */
@@ -1769,6 +1775,7 @@ const zhTW: Dict = {
   'set.gen.snipPlaceholder': '要傳送的指令(可多行)',
   'set.gen.cancel': '取消',
   'set.gen.save': '儲存',
+  'set.gen.writeFail': '設定儲存失敗',
   'set.gen.addForward': '+ 新增',
 
   // settings terminal
@@ -2171,6 +2178,7 @@ const zhTW: Dict = {
   'pal.snapSave': '將目前版面儲存為快照…',
   'pal.snapSaveDesc': '記錄所有分頁與分割畫面,之後可一鍵重新開啟',
   'pal.snapDefault': '快照',
+  'pal.snapOpenConfirm': '目前有作用中的工作階段,開啟快照會關閉它們。關閉前會先傳送 exit。要繼續嗎?',
 
   // history search
   'hist.placeholder': '搜尋所有工作階段的輸出…',
@@ -2347,7 +2355,8 @@ const zhTW: Dict = {
   'tabbar.rename': '重新命名',
   'tabbar.filter': '篩選分頁…',
   'tabbar.closeTab': '關閉',
-  'tabbar.closeOthers': '關閉其他分頁'
+  'tabbar.closeOthers': '關閉其他分頁',
+  'tabbar.closeOthersConfirm': '將關閉另外 {n} 個分頁(含作用中的工作階段)。關閉前會先傳送 exit。要繼續嗎?'
 }
 
 const dicts: Record<Lang, Dict> = { zh, 'zh-TW': zhTW, en }
