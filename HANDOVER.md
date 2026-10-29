@@ -1,5 +1,15 @@
 # X-SSH 交接文档
 
+## M3.135(分支 `fix/review-polish-m3135`,**未合并**)
+
+> 只做缺陷 / 界面打磨,**没有新功能**。`typecheck` / `lint:i18n` / vitest **334/334** 已绿;PR 未合并。
+
+1. **`splitPane` 从不落盘**:`stores/sessions.ts` 的 `splitPane` 改了 `tab.layout` / `tab.panes` 并连接,却不像 `applyLayoutPreset` / `openConnection` / `closePane` 那样调 `persistTabs()` —— 开着「启动恢复上次标签」时,Ctrl+D / 标签栏分屏在下次启动会退回单窗格。已在焦点交接之后补 `this.persistTabs()`。
+2. **拖分隔条不落盘**:`components/PaneNode.vue` 的 `onDividerDown` 每次 `pointermove` 都走 `store.resizePane`,但 `pointerup` 只摘监听 —— 松手后退出,下次恢复又回到拖动前的比例。现在在 `up` 里调一次 `store.persistTabs()`(只在松手时写,不在每次移动时写,避免刷爆 settings.json)。`resizePane` 本身没动。
+3. **续传队列 / 传输历史静默回滚**:`queueUpload` / `queueDownload` / `setDownloadQueue` / `pushTransferHistory` 原来先改内存再 fire-and-forget `settings.set`,主进程返回 `{ ok: false }`(或抛错)时界面上的续传条 / 历史会显示下次启动就消失的条目(`setDownloadQueue` 更糟:以为消费掉的续传操作其实还留在磁盘上)。现在四个都先存 `prev`,失败或抛错时**静默回滚**,**不弹 toast**(后台 / 自动路径,与 #69 `addSftpRecent` 同类;#67 已经给用户主动的清空操作加了提示)。`clearTransferQueue` / `clearDownloadQueue` / `clearTransferHistory` / `removeTransferHistory` 属 #67,未动。
+
+**状态说明**:#69–#12 这批 PR **都还没合并**,本分支也不包含它们;上面第 3 条只是沿用 #69 的「静默回滚」写法,不依赖它落地。
+
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。
 
 ## 项目概述

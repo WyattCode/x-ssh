@@ -73,6 +73,8 @@ function onDividerDown(e: PointerEvent, i: number): void {
   const up = (): void => {
     window.removeEventListener('pointermove', move)
     window.removeEventListener('pointerup', up)
+    // Persist once on release — not on every move (would thrash settings.json).
+    store.persistTabs()
   }
   window.addEventListener('pointermove', move)
   window.addEventListener('pointerup', up)

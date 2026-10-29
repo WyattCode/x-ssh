@@ -913,11 +913,17 @@ export const useSessions = defineStore('sessions', {
     /** Records an interrupted upload so it can be resumed after a reconnect. */
     async queueUpload(remoteDir: string, localPaths: string[]): Promise<void> {
       if (!localPaths.length) return
+      const prev = this.transferQueue
       this.transferQueue = [
         { id: uid('xfer'), remoteDir, localPaths, at: Date.now() },
         ...this.transferQueue
       ].slice(0, 20)
-      await window.api.settings.set('transferQueue', toPlain(this.transferQueue))
+      try {
+        const r = await window.api.settings.set('transferQueue', toPlain(this.transferQueue))
+        if (r && r.ok === false) this.transferQueue = prev
+      } catch {
+        this.transferQueue = prev
+      }
     },
     async clearTransferQueue(): Promise<void> {
       this.transferQueue = []
@@ -926,17 +932,29 @@ export const useSessions = defineStore('sessions', {
     /** Records an interrupted download so it can be resumed into its local dir. */
     async queueDownload(sessionId: string, items: DownloadItem[], localDir: string, hostId?: string): Promise<void> {
       if (!items.length || !localDir) return
+      const prev = this.downloadQueue
       this.downloadQueue = [
         { id: uid('xfer'), sessionId, hostId, items, localDir, at: Date.now() },
         ...this.downloadQueue
       ].slice(0, 20)
-      await window.api.settings.set('downloadQueue', toPlain(this.downloadQueue))
+      try {
+        const r = await window.api.settings.set('downloadQueue', toPlain(this.downloadQueue))
+        if (r && r.ok === false) this.downloadQueue = prev
+      } catch {
+        this.downloadQueue = prev
+      }
     },
     /** Rewrites the queue minus the ops a resume consumed; failed / unmapped
      *  ops stay so a later resume (after the host reconnects) can take them. */
     async setDownloadQueue(ops: DownloadQueueOp[]): Promise<void> {
+      const prev = this.downloadQueue
       this.downloadQueue = ops.slice(0, 20)
-      await window.api.settings.set('downloadQueue', toPlain(this.downloadQueue))
+      try {
+        const r = await window.api.settings.set('downloadQueue', toPlain(this.downloadQueue))
+        if (r && r.ok === false) this.downloadQueue = prev
+      } catch {
+        this.downloadQueue = prev
+      }
     },
     async clearDownloadQueue(): Promise<void> {
       this.downloadQueue = []
@@ -944,8 +962,14 @@ export const useSessions = defineStore('sessions', {
     },
     /** Records a finished transfer into the persisted history (newest first). */
     async pushTransferHistory(item: TransferHistoryItem): Promise<void> {
+      const prev = this.transferHistory
       this.transferHistory = [item, ...this.transferHistory].slice(0, 100)
-      await window.api.settings.set('sftpTransferHistory', toPlain(this.transferHistory))
+      try {
+        const r = await window.api.settings.set('sftpTransferHistory', toPlain(this.transferHistory))
+        if (r && r.ok === false) this.transferHistory = prev
+      } catch {
+        this.transferHistory = prev
+      }
     },
     async clearTransferHistory(): Promise<void> {
       this.transferHistory = []
@@ -1357,6 +1381,9 @@ export const useSessions = defineStore('sessions', {
       const t = this.tabs.find((x) => x.id === tabId)
       const p = t?.panes.find((x) => x.id === paneId)
       if (t && p?.status === 'connected') t.activePaneId = paneId
+      // Same as applyLayoutPreset: without this, restoreTabs comes back to a
+      // single pane after a split-only session.
+      this.persistTabs()
     },
 
     /** Sends a single command line to every connected pane across all tabs
