@@ -97,6 +97,14 @@ fun HostKeyGate(
     onExit: () -> Unit,
 ) {
     val p = LocalXssh.current
+    // Enter and the primary button both trust. A double Enter (or Enter + tap)
+    // used to fire onTrust twice and kick two overlapping reconnects.
+    var trusted by remember { mutableStateOf(false) }
+    fun trustOnce() {
+        if (trusted) return
+        trusted = true
+        onTrust()
+    }
     val content = GateContent(
         icon = if (changed) XIcons.Alert else XIcons.Shield,
         tint = if (changed) p.danger else p.accent,
@@ -114,7 +122,7 @@ fun HostKeyGate(
             else -> null
         },
         noteColor = if (changed) p.danger else p.textDim,
-        onEnter = if (changed) null else onTrust,
+        onEnter = if (changed) null else ({ trustOnce() }),
         body = {
             if (changed) {
                 FingerprintCard(stringResource(R.string.host_gate_last_recorded), host.keyFingerprint, p.textDim)
@@ -131,7 +139,7 @@ fun HostKeyGate(
                     if (changed) R.string.host_gate_trust_new_key else R.string.host_gate_trust_and_connect,
                 ),
                 primaryKind = if (changed) ButtonKind.Danger else ButtonKind.Primary,
-                onPrimary = onTrust,
+                onPrimary = { trustOnce() },
                 secondary = stringResource(R.string.host_cancel),
                 onSecondary = onExit,
             )
@@ -153,6 +161,14 @@ fun ConnectGate(
     onExit: () -> Unit,
 ) {
     val p = LocalXssh.current
+    // Retry / fix both reconnect: remember must be unconditional (Compose).
+    // Keyed on failure so a fresh error gets a fresh one-shot.
+    var acted by remember(failure) { mutableStateOf(false) }
+    fun actOnce(block: () -> Unit) {
+        if (acted) return
+        acted = true
+        block()
+    }
     val content = if (failure == null) {
         GateContent(
             icon = XIcons.Terminal,
@@ -181,17 +197,17 @@ fun ConnectGate(
             tint = p.danger,
             tile = p.danger.copy(alpha = 0.12f),
             title = stringResource(R.string.host_gate_failed),
-            onEnter = primary?.second,
+            onEnter = primary?.second?.let { run -> { actOnce(run) } },
             body = { MessageCard(failure) },
             actions = { stacked ->
                 GateButtons(
                     stacked = stacked,
                     primary = primary?.first,
-                    onPrimary = { primary?.second?.invoke() },
+                    onPrimary = { primary?.second?.let { actOnce(it) } },
                     // 有「填写密码」这类修复时,重试退到第二颗(填完再连就是重试)。
                     secondary = stringResource(R.string.host_back),
                     onSecondary = onExit,
-                    tertiary = if (fix != null && retry != null) retryLabel to retry else null,
+                    tertiary = if (fix != null && retry != null) retryLabel to ({ actOnce(retry) }) else null,
                 )
             },
         )

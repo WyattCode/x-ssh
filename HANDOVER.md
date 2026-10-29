@@ -1,3 +1,22 @@
+# 会话记录:连续改进 M3.95(2026-10-30,复核打磨:门页信任/重试一次 + SFTP 打包删除 busy + tmux 附着 busy)
+
+功能清单已够,本轮按站立规则做开源复核打磨(不合并)。未动 PR #29 / #28–#12 与更早的 #4–#11。
+
+**核过已过时 / 已在未合并 PR(本轮不重做)**:
+1–17. 同 M3.94 所列 PR #12–#28。
+18. PaneNode 自动重连禁用 / ForwardDialog busy / Android `requestReconnect` —— PR #29。
+19. Android `leaveScreen` / disconnect 一次 —— PR #28;本轮只做门页信任与失败重试一次。
+20. Sync 对话框 busy / SFTP 选区 prune —— PR #24 / #22 / #23;本轮只补 pack/delete busy。
+
+**修了**:
+1. **Android ConnectGate**:`HostKeyGate` `trustOnce`;失败态 `actOnce`(remember 提到函数顶、`remember(failure)` 复位),防双敲信任/重试叠握手。
+2. **SftpDrawer**:`packDownloadSelected` 加 busy 闸;`delSelected` 确认后 busy + try/finally。
+3. **TmuxDialog**:`attach` busy 重入闸;会话行与输入框 `:disabled`;`.tm-sess:disabled`。
+
+**验证**:`typecheck` + vitest **334** / 30 文件全绿。未跑 Gradle。未合并。
+
+---
+
 # X-SSH 交接文档
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。

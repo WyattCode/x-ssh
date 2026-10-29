@@ -1161,6 +1161,7 @@ async function packDownloadSelected(): Promise<void> {
   if (!props.sessionId) return
   const items = selectedEntries()
   if (!items.length) return
+  if (busy.value) return
   const payload = items.map((e) => ({
     path: posixJoin(path.value, e.name),
     name: e.name,
@@ -1196,12 +1197,18 @@ async function delSelected(): Promise<void> {
     : tt('sfp.delMany', { n: items.length })
   const ok = await confirm(msg, { title: tt('sfp.delTitle'), danger: true, confirmText: tt('sfp.delOk') })
   if (!ok) return
-  for (const it of items) {
-    const r = await window.api.sftp.remove(props.sessionId, posixJoin(path.value, it.name), it.isDir)
-    if (!r.ok) error.value = r.error ?? tt('sfp.delFail')
+  if (busy.value) return
+  busy.value = true
+  try {
+    for (const it of items) {
+      const r = await window.api.sftp.remove(props.sessionId, posixJoin(path.value, it.name), it.isDir)
+      if (!r.ok) error.value = r.error ?? tt('sfp.delFail')
+    }
+    selected.value = new Set()
+    await load(path.value)
+  } finally {
+    busy.value = false
   }
-  selected.value = new Set()
-  await load(path.value)
 }
 
 function runMenu(fn: () => void): void {
