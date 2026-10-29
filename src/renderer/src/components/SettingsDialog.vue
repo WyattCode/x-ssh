@@ -671,15 +671,20 @@ async function saveMasterLock(): Promise<void> {
   }
 }
 async function unlockNow(): Promise<void> {
-  if (!currentPass.value) return
-  const ok = await store.unlockApp(currentPass.value)
-  if (ok) {
-    currentPass.value = ''
-    await store.loadHosts()
-    store.connectPendingAfterUnlock()
-    toast(t('lock.unlocked'), 'success')
-  } else {
-    toast(t('lock.wrong'), 'error')
+  if (!currentPass.value || lockBusy.value) return
+  lockBusy.value = true
+  try {
+    const ok = await store.unlockApp(currentPass.value)
+    if (ok) {
+      currentPass.value = ''
+      await store.loadHosts()
+      store.connectPendingAfterUnlock()
+      toast(t('lock.unlocked'), 'success')
+    } else {
+      toast(t('lock.wrong'), 'error')
+    }
+  } finally {
+    lockBusy.value = false
   }
 }
 async function lockApp(): Promise<void> {
@@ -691,12 +696,18 @@ async function disableMasterLock(): Promise<void> {
     toast(t('lock.passReq'), 'error')
     return
   }
-  const ok = await store.disableMasterLock(currentPass.value)
-  if (ok) {
-    currentPass.value = ''
-    toast(t('lock.disabled'), 'success')
-  } else {
-    toast(t('lock.wrong'), 'error')
+  if (lockBusy.value) return
+  lockBusy.value = true
+  try {
+    const ok = await store.disableMasterLock(currentPass.value)
+    if (ok) {
+      currentPass.value = ''
+      toast(t('lock.disabled'), 'success')
+    } else {
+      toast(t('lock.wrong'), 'error')
+    }
+  } finally {
+    lockBusy.value = false
   }
 }
 async function resetMasterLock(): Promise<void> {
@@ -706,16 +717,22 @@ async function resetMasterLock(): Promise<void> {
     toast(t('lock.passReq'), 'error')
     return
   }
+  if (lockBusy.value) return
   const res = await confirm(t('lock.resetConfirm'))
   if (!res) return
-  const ok = await store.resetMasterLock(currentPass.value)
-  if (ok) {
-    currentPass.value = ''
-    await store.loadHosts()
-    store.connectPendingAfterUnlock()
-    toast(t('lock.resetDone'), 'success')
-  } else {
-    toast(t('lock.wrong'), 'error')
+  lockBusy.value = true
+  try {
+    const ok = await store.resetMasterLock(currentPass.value)
+    if (ok) {
+      currentPass.value = ''
+      await store.loadHosts()
+      store.connectPendingAfterUnlock()
+      toast(t('lock.resetDone'), 'success')
+    } else {
+      toast(t('lock.wrong'), 'error')
+    }
+  } finally {
+    lockBusy.value = false
   }
 }
 
@@ -1175,11 +1192,11 @@ async function resetMasterLock(): Promise<void> {
                     <input v-model="currentPass" type="password" class="box text-in" :placeholder="t('lock.placeholder')" />
                   </label>
                   <div class="row actions-row">
-                    <button v-if="store.lockLocked" class="btn sm btn-primary" @click="unlockNow">{{ t('lock.unlock') }}</button>
+                    <button v-if="store.lockLocked" class="btn sm btn-primary" :disabled="lockBusy" @click="unlockNow">{{ t('lock.unlock') }}</button>
                     <button class="btn sm" @click="lockApp">{{ t('lock.lockNow') }}</button>
                     <button class="btn sm" :disabled="lockBusy" @click="disableMasterLock">{{ t('lock.disable') }}</button>
                     <span class="spacer" />
-                    <button class="btn sm btn-danger" @click="resetMasterLock">{{ t('lock.reset') }}</button>
+                    <button class="btn sm btn-danger" :disabled="lockBusy" @click="resetMasterLock">{{ t('lock.reset') }}</button>
                   </div>
                 </template>
                 <label v-else class="row">

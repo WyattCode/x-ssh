@@ -1,3 +1,20 @@
+# 会话记录:连续改进 M3.98(2026-10-30,复核打磨:主机删除 busy + 主锁 unlock/disable/reset lockBusy + 编辑页确认删除一次)
+
+功能清单已够,本轮按站立规则做开源复核打磨(不合并)。未动 PR #32 / #31–#12 与更早的 #4–#11。
+
+**核过已过时 / 已在未合并 PR(本轮不重做)**:
+1–20. 同 M3.97 所列 PR #12–#31。
+21. backupNow finally + SftpDrawer 跨栏 upload/download busy + HomeScreen SwipeActions deleteOnce —— PR #32。
+
+**修了**:
+1. **HostsPage** `remove`:removing 闸 + try/finally(未动 connectingId / connect / duplicate)。
+2. **SettingsDialog** `unlockNow` / `disableMasterLock` / `resetMasterLock`:共用 lockBusy + unlock/reset 按钮 disabled(未动 backupNow / accent / saveMasterLock)。
+3. **Android HostEditorScreen**:确认删除 `deleteOnce`(Sessions 在 swipe/HostActions 之外)。
+
+**验证**:`typecheck` + vitest **334** / 30 文件全绿。未跑 Gradle。未合并。
+
+---
+
 # X-SSH 交接文档
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。

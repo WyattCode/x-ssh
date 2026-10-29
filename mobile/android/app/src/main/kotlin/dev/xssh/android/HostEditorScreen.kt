@@ -168,12 +168,19 @@ fun HostEditorScreen(
         if (initial != null && onDelete != null) {
             // 点两下才删,和主机页左滑、详情栏一致。
             var confirming by remember { mutableStateOf(false) }
+            // 第二下只算一次:连点两下不能删两次。
+            var deleted by remember { mutableStateOf(false) }
+            fun deleteOnce() {
+                if (deleted) return
+                deleted = true
+                onDelete(initial)
+            }
             FormGroup {
                 FormAction(
                     stringResource(if (confirming) R.string.edit_delete_confirm else R.string.edit_delete),
                     danger = true,
                 ) {
-                    if (confirming) onDelete(initial) else confirming = true
+                    if (confirming) deleteOnce() else confirming = true
                 }
             }
         }
