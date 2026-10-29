@@ -9,6 +9,7 @@ import { parseTarget } from '../lib/target'
 import { isImeKey } from '../lib/ime'
 import { useI18n } from '../lib/i18n'
 import { useToast } from '../composables/toast'
+import { useConfirm } from '../composables/confirm'
 import Icon from './Icon.vue'
 import OsIcon from './OsIcon.vue'
 import type { ConnectParams, Host, Snippet } from '../../../shared/types'
@@ -16,6 +17,7 @@ import type { ConnectParams, Host, Snippet } from '../../../shared/types'
 const store = useSessions()
 const { t } = useI18n()
 const { toast } = useToast()
+const { confirm } = useConfirm()
 const emit = defineEmits<{
   (e: 'new-host'): void
   (e: 'edit-host', h: Host): void
@@ -29,6 +31,7 @@ type Item =
   | { kind: 'host'; title: string; sub: string; host: Host; known: boolean }
   | { kind: 'snippet'; title: string; sub: string; snippet: Snippet }
   | { kind: 'action'; title: string; sub: string; run: () => void; icon: string }
+  | { kind: 'snapshot'; title: string; sub: string; id: string; icon: string }
 
 const query = ref('')
 const selected = ref(0)
@@ -225,15 +228,21 @@ const sections = computed<{ id: string; title: string; items: Item[] }[]>(() => 
       title: t('pal.snapSave'),
       sub: t('pal.snapSaveDesc'),
       icon: 'book',
-      run: () => void store.saveSnapshot(`${t('pal.snapDefault')} ${new Date().toLocaleTimeString()}`)
+      run: () => {
+        if (!store.tabs.length) {
+          toast(t('pal.snapEmpty'), 'error')
+          return
+        }
+        void store.saveSnapshot(`${t('pal.snapDefault')} ${new Date().toLocaleTimeString()}`)
+      }
     })
     for (const s of store.snapshots) {
       snaps.push({
-        kind: 'action',
+        kind: 'snapshot',
         title: s.name,
         sub: new Date(s.savedAt).toLocaleString(),
-        icon: 'zap',
-        run: () => void store.openSnapshot(s.id)
+        id: s.id,
+        icon: 'zap'
       })
     }
     add('snapshots', t('pal.snapshots'), snaps)
@@ -341,10 +350,19 @@ function activate(item: Item): void {
   } else if (item.kind === 'snippet') {
     store.togglePalette(false)
     void store.sendSnippet(item.snippet)
+  } else if (item.kind === 'snapshot') {
+    store.togglePalette(false)
+    void store.openSnapshot(item.id)
   } else {
     store.togglePalette(false)
     item.run()
   }
+}
+
+async function deleteSnap(item: { id: string; title: string }): Promise<void> {
+  const ok = await confirm(t('pal.snapDeleteConfirm', { name: item.title }))
+  if (!ok) return
+  await store.deleteSnapshot(item.id)
 }
 
 async function submitPassword(): Promise<void> {
@@ -535,6 +553,12 @@ function onKey(e: KeyboardEvent): void {
                 :title="t('pal.edit')"
                 @click.stop="emit('edit-host', item.host); store.togglePalette(false)"
               ><Icon name="edit" :size="14" /></span>
+              <span
+                v-if="item.kind === 'snapshot'"
+                class="edit"
+                :title="t('pal.snapDelete')"
+                @click.stop="void deleteSnap(item)"
+              ><Icon name="trash" :size="14" /></span>
             </button>
           </template>
           <div v-if="!items.length" class="empty">

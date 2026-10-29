@@ -8,6 +8,7 @@ import { SearchAddon } from '@xterm/addon-search'
 import { useTheme } from '../composables/theme'
 import { useFontSize } from '../composables/fontSize'
 import { useConfirm } from '../composables/confirm'
+import { useToast } from '../composables/toast'
 import { themeFor } from '../lib/terminalThemes'
 import { useI18n } from '../lib/i18n'
 import { isImeKey } from '../lib/ime'
@@ -91,6 +92,7 @@ const imeAbort = new AbortController()
 
 // ---- Clipboard actions ----
 const { confirm } = useConfirm()
+const { toast } = useToast()
 async function copySelection(): Promise<void> {
   const sel = term?.getSelection()
   if (sel) window.api.clipboard.writeText(sel)
@@ -168,6 +170,11 @@ function scrollToBottom(): void {
   term?.scrollToBottom()
   scrolledUp.value = false
 }
+/** Pill: jump to bottom and resume auto-follow (matches followTip copy). */
+function jumpFollow(): void {
+  followOutput.value = true
+  scrollToBottom()
+}
 function toggleFollow(): void {
   followOutput.value = !followOutput.value
   scrolledUp.value = false
@@ -184,6 +191,7 @@ async function toggleLog(): Promise<void> {
   } else {
     const res = await window.api.ssh.startLog(props.sessionId)
     if (res.ok) logOn.value = true
+    else if (!res.canceled) toast(t('term.logFail'), 'error')
   }
 }
 
@@ -718,7 +726,7 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-if="scrolledUp" class="follow-bar" @mousedown.stop>
-      <button class="follow-btn" :title="t('term.followTip')" @click="scrollToBottom">
+      <button class="follow-btn" :title="t('term.followTip')" @click="jumpFollow">
         <Icon name="arrow-down" :size="13" />
         <span>{{ t('term.follow') }}</span>
       </button>

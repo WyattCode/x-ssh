@@ -1807,8 +1807,12 @@ private fun NameDialog(
     val focus = remember { FocusRequester() }
     val name = field.text.trim()
     val valid = name.isNotEmpty() && (isPath || ('/' !in name && name != "." && name != ".."))
+    // Enter + 按钮连点会在 dialog=null 重组前触发两次 onConfirm(双改名/双建目录)。
+    var done by remember { mutableStateOf(false) }
     fun submit() {
-        if (valid) onConfirm(name)
+        if (!valid || done) return
+        done = true
+        onConfirm(name)
     }
     Dialog(onDismissRequest = onDismiss) {
         Column(

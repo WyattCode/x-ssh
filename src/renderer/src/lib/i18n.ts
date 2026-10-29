@@ -370,6 +370,7 @@ const zh: Dict = {
   'term.off': '关',
   'term.logStart': '记录日志',
   'term.logStop': '停止记录',
+  'term.logFail': '无法开始记录日志',
   'term.searchPlaceholder': '搜索输出…',
   'term.caseTip': '区分大小写',
   'term.prevTip': '上一个 (Shift+Enter)',
@@ -613,6 +614,9 @@ const zh: Dict = {
   'pal.snapSave': '保存当前布局为快照…',
   'pal.snapSaveDesc': '记录所有标签与分屏,之后可一键重开',
   'pal.snapDefault': '快照',
+  'pal.snapDelete': '删除此快照',
+  'pal.snapDeleteConfirm': '删除快照“{name}”？此操作不可撤销。',
+  'pal.snapEmpty': '当前没有标签,无法保存快照',
 
   // history search
   'hist.placeholder': '搜索所有会话输出…',
@@ -1144,6 +1148,7 @@ const en: Dict = {
   'term.off': 'off',
   'term.logStart': 'Start logging',
   'term.logStop': 'Stop logging',
+  'term.logFail': 'Could not start session log',
   'term.searchPlaceholder': 'Search output…',
   'term.caseTip': 'Case sensitive',
   'term.prevTip': 'Previous (Shift+Enter)',
@@ -1387,6 +1392,9 @@ const en: Dict = {
   'pal.snapSave': 'Save current layout as snapshot…',
   'pal.snapSaveDesc': 'Captures all tabs & splits to reopen later',
   'pal.snapDefault': 'Snapshot',
+  'pal.snapDelete': 'Delete this snapshot',
+  'pal.snapDeleteConfirm': 'Delete snapshot "{name}"? This cannot be undone.',
+  'pal.snapEmpty': 'No tabs open — nothing to snapshot',
 
   // history search
   'hist.placeholder': 'Search all session output…',
@@ -1927,6 +1935,7 @@ const zhTW: Dict = {
   'term.off': '關',
   'term.logStart': '記錄日誌',
   'term.logStop': '停止記錄',
+  'term.logFail': '無法開始記錄日誌',
   'term.searchPlaceholder': '搜尋輸出…',
   'term.caseTip': '區分大小寫',
   'term.prevTip': '上一個 (Shift+Enter)',
@@ -2171,6 +2180,9 @@ const zhTW: Dict = {
   'pal.snapSave': '將目前版面儲存為快照…',
   'pal.snapSaveDesc': '記錄所有分頁與分割畫面,之後可一鍵重新開啟',
   'pal.snapDefault': '快照',
+  'pal.snapDelete': '刪除此快照',
+  'pal.snapDeleteConfirm': '要刪除快照「{name}」嗎？此操作無法復原。',
+  'pal.snapEmpty': '目前沒有分頁,無法儲存快照',
 
   // history search
   'hist.placeholder': '搜尋所有工作階段的輸出…',
