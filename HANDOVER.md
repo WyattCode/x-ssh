@@ -2,6 +2,15 @@
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。
 
+## HANDOVER M3.126 — 备份/快捷键失败不再静默(修复,不合并)
+
+分支 `fix/review-polish-m3126`(自 origin/main),**不要合并**;PR #4–#60 一律不碰(尤其 #60 startLog/logWrite/term.logFail/tmuxList、#59 连接期转发绑定/forwardIn/updateOpenFail、#58 tmuxAttach/revealLocal/term.linkOpenFail、#57 localList 重抛/openExternal await/hist.untitled)。只改 `src/main/index.ts` 与 `HANDOVER.md`,未新增功能。
+
+- **A(P0)「立即备份」不再说谎**:`writeAutoBackupSync` 改为返回 `{ ok: true } | { ok: false; reason: 'disabled' | 'no-dir' | 'write' }`;`IPC.dataBackupNow` 按 reason 用 `dl()` 映射到 `backupDisabled` / `backupNoDir` / `backupWriteFail`。写盘失败(磁盘满/权限/目录没了)不再被说成「未启用或未选目录」,英文界面也不再弹中文。渲染层 `backupNow()` 原样显示 `r.error`,未改。
+- **B(P1)定时备份写失败会通知**:`scheduleAutoBackup` 的定时器只在 `reason === 'write'` 且通知开启时弹 `backupWriteFailTitle/Body`;disabled / no-dir 静默(用户中途改设置属正常)。`backupTimer.unref?.()` 保留。
+- **C(P1)启动时全局呼出快捷键注册失败会提示**:`applyGlobalShowHideFromSettings` 检查 `setGlobalShowHide` 的返回值,失败时弹 `globalShortcutFailTitle/Body`;不清除已保存的快捷键(冲突可能是临时的),`setGlobalShowHide` 与设置页保存路径未改。
+- 新增 NL 键(zh / zh-TW / en):`backupDisabled`、`backupNoDir`、`backupWriteFail`、`backupWriteFailTitle`、`backupWriteFailBody`、`globalShortcutFailTitle`、`globalShortcutFailBody`。
+
 ## 项目概述
 - 极简、键盘优先的 SSH 客户端。Electron + Vue 3 (Vite) + TypeScript。
 - 平台: Windows (`win32`)。目录: `D:\Documents\Claude Code\X-SSH`。
