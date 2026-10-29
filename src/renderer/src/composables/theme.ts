@@ -1,5 +1,10 @@
 import { ref, computed, watchEffect } from 'vue'
 import type { ThemePref } from '../../../shared/types'
+import { useI18n } from '../lib/i18n'
+import { useToast } from './toast'
+
+const { t } = useI18n()
+const { toast } = useToast()
 
 export type ThemeMode = 'light' | 'dark'
 export type { ThemePref }
@@ -38,10 +43,17 @@ async function setPref(next: ThemePref): Promise<void> {
     // new choice means switching back to 'system' lands on the OS's real
     // setting in one step — the media query only catches up a moment later,
     // and reading it first would flash the pinned theme's colors.
-    const { dark } = await window.api.theme.set(next)
-    systemDark.value = dark
+    const r = await window.api.theme.set(next)
+    // A refused / failed write must not move the UI: the choice would look
+    // applied now and revert on the next launch.
+    if (!r.ok) {
+      toast(r.error ?? t('app.themeFail'), 'error')
+      return
+    }
+    systemDark.value = r.dark
   } catch {
-    /* switch locally anyway; the media query still tracks the OS */
+    toast(t('app.themeFail'), 'error')
+    return
   }
   pref.value = next
 }

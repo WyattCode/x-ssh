@@ -292,7 +292,8 @@ const api = {
     /** Saves the appearance choice and pins the native theme (title bar) to it.
      *  Resolves whether the window is now dark — for 'system', the OS's real
      *  setting, so the renderer can switch without a wrong-color frame first. */
-    set: (pref: ThemePref): Promise<{ dark: boolean }> => ipcRenderer.invoke(IPC.themeSet, pref)
+    set: (pref: ThemePref): Promise<{ ok: boolean; dark: boolean; error?: string }> =>
+      ipcRenderer.invoke(IPC.themeSet, pref)
   },
   /** Opens a terminal link in the default browser (http/https only). */
   openExternal: (url: string): Promise<boolean> =>

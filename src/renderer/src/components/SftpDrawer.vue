@@ -392,6 +392,17 @@ async function resumeDownloads(): Promise<void> {
   showResume.value = store.downloadQueue.length > 0
   if (failed > 0) toast(tt('sfp.resumeDownloadPartial', { n: failed }), 'error')
 }
+// Discarding a queue is a settings write: if main refuses it the store rolls
+// the queue back, so the bar must be recomputed from the queues afterwards
+// instead of being hidden optimistically.
+async function discardTransferQueue(): Promise<void> {
+  await store.clearTransferQueue()
+  showResume.value = store.transferQueue.length > 0 || store.downloadQueue.length > 0
+}
+async function discardDownloadQueue(): Promise<void> {
+  await store.clearDownloadQueue()
+  showResume.value = store.transferQueue.length > 0 || store.downloadQueue.length > 0
+}
 // dragenter/leave bubble from child rows; count depth so the drop highlight
 // doesn't flicker off while the pointer crosses children.
 let dragDepth = 0
@@ -1497,13 +1508,13 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
         <Icon name="upload" :size="14" />
         <span class="grow">{{ tt('sfp.resumeHint', { n: store.transferQueue.length }) }}</span>
         <button class="btn sm btn-primary" @click="resumePending">{{ tt('sfp.resume') }}</button>
-        <button class="btn sm" @click="store.clearTransferQueue(); showResume = store.downloadQueue.length > 0">{{ tt('sfp.discard') }}</button>
+        <button class="btn sm" @click="discardTransferQueue">{{ tt('sfp.discard') }}</button>
       </template>
       <template v-if="store.downloadQueue.length">
         <Icon name="download" :size="14" />
         <span class="grow">{{ tt('sfp.resumeDownloadHint', { n: store.downloadQueue.length }) }}</span>
         <button class="btn sm btn-primary" @click="resumeDownloads">{{ tt('sfp.resumeDownload') }}</button>
-        <button class="btn sm" @click="store.clearDownloadQueue(); showResume = store.transferQueue.length > 0">{{ tt('sfp.discard') }}</button>
+        <button class="btn sm" @click="discardDownloadQueue">{{ tt('sfp.discard') }}</button>
       </template>
     </div>
 

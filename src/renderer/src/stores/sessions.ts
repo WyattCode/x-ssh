@@ -920,8 +920,18 @@ export const useSessions = defineStore('sessions', {
       await window.api.settings.set('transferQueue', toPlain(this.transferQueue))
     },
     async clearTransferQueue(): Promise<void> {
+      const prev = this.transferQueue
       this.transferQueue = []
-      await window.api.settings.set('transferQueue', toPlain(this.transferQueue))
+      try {
+        const r = await window.api.settings.set('transferQueue', toPlain(this.transferQueue))
+        if (r && r.ok === false) {
+          this.transferQueue = prev
+          toast(t('sfp.persistFail'), 'error')
+        }
+      } catch {
+        this.transferQueue = prev
+        toast(t('sfp.persistFail'), 'error')
+      }
     },
     /** Records an interrupted download so it can be resumed into its local dir. */
     async queueDownload(sessionId: string, items: DownloadItem[], localDir: string, hostId?: string): Promise<void> {
@@ -939,8 +949,18 @@ export const useSessions = defineStore('sessions', {
       await window.api.settings.set('downloadQueue', toPlain(this.downloadQueue))
     },
     async clearDownloadQueue(): Promise<void> {
+      const prev = this.downloadQueue
       this.downloadQueue = []
-      await window.api.settings.set('downloadQueue', toPlain(this.downloadQueue))
+      try {
+        const r = await window.api.settings.set('downloadQueue', toPlain(this.downloadQueue))
+        if (r && r.ok === false) {
+          this.downloadQueue = prev
+          toast(t('sfp.persistFail'), 'error')
+        }
+      } catch {
+        this.downloadQueue = prev
+        toast(t('sfp.persistFail'), 'error')
+      }
     },
     /** Records a finished transfer into the persisted history (newest first). */
     async pushTransferHistory(item: TransferHistoryItem): Promise<void> {
@@ -948,13 +968,33 @@ export const useSessions = defineStore('sessions', {
       await window.api.settings.set('sftpTransferHistory', toPlain(this.transferHistory))
     },
     async clearTransferHistory(): Promise<void> {
+      const prev = this.transferHistory
       this.transferHistory = []
-      await window.api.settings.set('sftpTransferHistory', toPlain(this.transferHistory))
+      try {
+        const r = await window.api.settings.set('sftpTransferHistory', toPlain(this.transferHistory))
+        if (r && r.ok === false) {
+          this.transferHistory = prev
+          toast(t('sfp.persistFail'), 'error')
+        }
+      } catch {
+        this.transferHistory = prev
+        toast(t('sfp.persistFail'), 'error')
+      }
     },
     /** Removes a single transfer entry from the persisted history. */
     async removeTransferHistory(id: string): Promise<void> {
+      const prev = this.transferHistory
       this.transferHistory = this.transferHistory.filter((h) => h.id !== id)
-      await window.api.settings.set('sftpTransferHistory', toPlain(this.transferHistory))
+      try {
+        const r = await window.api.settings.set('sftpTransferHistory', toPlain(this.transferHistory))
+        if (r && r.ok === false) {
+          this.transferHistory = prev
+          toast(t('sfp.persistFail'), 'error')
+        }
+      } catch {
+        this.transferHistory = prev
+        toast(t('sfp.persistFail'), 'error')
+      }
     },
 
     /** Registers the single global sftp:progress listener. Transfers keep

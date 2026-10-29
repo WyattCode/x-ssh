@@ -2,6 +2,24 @@
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。
 
+## HANDOVER M3.132 — theme persist + SFTP queue/history fail-closed (PR open, NOT merged)
+
+Branch: `fix/review-polish-m3132` from `origin/main`. Do **not** merge; do **not** touch open PRs #4–#66.
+
+### Shipped
+1. **theme:set fail-closed** — persist `theme` before `applyThemeSource`; return `{ ok, dark, error? }`. Renderer `setPref` toasts `app.themeFail` and leaves `pref` untouched on refuse/throw (no more “switch locally anyway”).
+2. **Transfer history clear/remove** — rollback + `sfp.persistFail` toast when `settings.set` refuses/throws.
+3. **Resume-queue discard** — same rollback/toast for `clearTransferQueue` / `clearDownloadQueue`; SftpDrawer discard buttons await and recompute `showResume` from both queues.
+
+### Verify
+- `npm run typecheck` / `lint:i18n` / `test` (expect ≥334).
+- Manual: flip theme with settings file unwritable → toast, UI stays; discard resume bar with refused key → bar stays.
+
+### Not in this PR
+SettingsStore.set (#64), snippets/connLog/editor (#66), removeHost/saveHost/bookmark (#65), addSftpRecent, zoom/fontSize/lang, knownHostsForget, Terminal linkOpenFail, previewFail.
+
+---
+
 ## 项目概述
 - 极简、键盘优先的 SSH 客户端。Electron + Vue 3 (Vite) + TypeScript。
 - 平台: Windows (`win32`)。目录: `D:\Documents\Claude Code\X-SSH`。
