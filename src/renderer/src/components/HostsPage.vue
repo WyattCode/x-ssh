@@ -724,6 +724,7 @@ defineExpose({ focusSearch: () => searchEl.value?.focus() })
 }
 .dot.offline {
   background: var(--text-faint);
+  opacity: 0.6;
 }
 .dot.unknown {
   background: transparent;

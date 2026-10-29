@@ -20,6 +20,7 @@ import { useTheme } from '../composables/theme'
 import type { SettingsTab } from '../stores/sessions'
 import type { KnownHostEntry } from '../../../shared/types'
 import { isMac } from '../composables/platform'
+import { isImeKey } from '../lib/ime'
 
 const store = useSessions()
 const { langPref, setLang, t } = useI18n()
@@ -671,15 +672,24 @@ async function saveMasterLock(): Promise<void> {
   }
 }
 async function unlockNow(): Promise<void> {
-  if (!currentPass.value) return
-  const ok = await store.unlockApp(currentPass.value)
-  if (ok) {
-    currentPass.value = ''
-    await store.loadHosts()
-    store.connectPendingAfterUnlock()
-    toast(t('lock.unlocked'), 'success')
-  } else {
-    toast(t('lock.wrong'), 'error')
+  if (lockBusy.value) return
+  if (!currentPass.value) {
+    toast(t('lock.passReq'), 'error')
+    return
+  }
+  lockBusy.value = true
+  try {
+    const ok = await store.unlockApp(currentPass.value)
+    if (ok) {
+      currentPass.value = ''
+      await store.loadHosts()
+      store.connectPendingAfterUnlock()
+      toast(t('lock.unlocked'), 'success')
+    } else {
+      toast(t('lock.wrong'), 'error')
+    }
+  } finally {
+    lockBusy.value = false
   }
 }
 async function lockApp(): Promise<void> {
@@ -687,36 +697,63 @@ async function lockApp(): Promise<void> {
   toast(t('lock.lockedNow'), 'success')
 }
 async function disableMasterLock(): Promise<void> {
+  if (lockBusy.value) return
   if (!currentPass.value) {
     toast(t('lock.passReq'), 'error')
     return
   }
-  const ok = await store.disableMasterLock(currentPass.value)
-  if (ok) {
-    currentPass.value = ''
-    toast(t('lock.disabled'), 'success')
-  } else {
-    toast(t('lock.wrong'), 'error')
+  lockBusy.value = true
+  try {
+    const ok = await store.disableMasterLock(currentPass.value)
+    if (ok) {
+      currentPass.value = ''
+      toast(t('lock.disabled'), 'success')
+    } else {
+      toast(t('lock.wrong'), 'error')
+    }
+  } finally {
+    lockBusy.value = false
   }
 }
 async function resetMasterLock(): Promise<void> {
+  if (lockBusy.value) return
   // Reset is verification-gated: enter the passphrase to confirm intent, so a
   // casual user can't wipe the lock with one unguarded click.
   if (!currentPass.value) {
     toast(t('lock.passReq'), 'error')
     return
   }
-  const res = await confirm(t('lock.resetConfirm'))
-  if (!res) return
-  const ok = await store.resetMasterLock(currentPass.value)
-  if (ok) {
-    currentPass.value = ''
-    await store.loadHosts()
-    store.connectPendingAfterUnlock()
-    toast(t('lock.resetDone'), 'success')
-  } else {
-    toast(t('lock.wrong'), 'error')
+  // Busy is held across the confirm too, so a double-click can't stack two
+  // confirmation dialogs (and two resets) on top of each other.
+  lockBusy.value = true
+  try {
+    const res = await confirm(t('lock.resetConfirm'))
+    if (!res) return
+    const ok = await store.resetMasterLock(currentPass.value)
+    if (ok) {
+      currentPass.value = ''
+      await store.loadHosts()
+      store.connectPendingAfterUnlock()
+      toast(t('lock.resetDone'), 'success')
+    } else {
+      toast(t('lock.wrong'), 'error')
+    }
+  } finally {
+    lockBusy.value = false
   }
+}
+/** Enter in either master-lock password field. Bound without `.prevent` so the
+ *  Enter that commits an IME candidate is left to the input method (see lib/ime). */
+function onLockPassEnter(e: KeyboardEvent): void {
+  if (isImeKey(e)) return
+  e.preventDefault()
+  if (!store.lockEnabled) {
+    void saveMasterLock()
+    return
+  }
+  if (store.lockLocked) void unlockNow()
+  // Enabled and already unlocked: Enter alone does nothing — disabling or
+  // resetting the lock needs an explicit click.
 }
 
 </script>
@@ -1172,19 +1209,19 @@ async function resetMasterLock(): Promise<void> {
                 <template v-if="store.lockEnabled">
                   <label class="row">
                     <div class="r-text"><span class="r-title">{{ t('lock.current') }}</span></div>
-                    <input v-model="currentPass" type="password" class="box text-in" :placeholder="t('lock.placeholder')" />
+                    <input v-model="currentPass" type="password" class="box text-in" :placeholder="t('lock.placeholder')" @keydown.enter="onLockPassEnter" />
                   </label>
                   <div class="row actions-row">
-                    <button v-if="store.lockLocked" class="btn sm btn-primary" @click="unlockNow">{{ t('lock.unlock') }}</button>
-                    <button class="btn sm" @click="lockApp">{{ t('lock.lockNow') }}</button>
+                    <button v-if="store.lockLocked" class="btn sm btn-primary" :disabled="lockBusy" @click="unlockNow">{{ t('lock.unlock') }}</button>
+                    <button class="btn sm" :disabled="lockBusy" @click="lockApp">{{ t('lock.lockNow') }}</button>
                     <button class="btn sm" :disabled="lockBusy" @click="disableMasterLock">{{ t('lock.disable') }}</button>
                     <span class="spacer" />
-                    <button class="btn sm btn-danger" @click="resetMasterLock">{{ t('lock.reset') }}</button>
+                    <button class="btn sm btn-danger" :disabled="lockBusy" @click="resetMasterLock">{{ t('lock.reset') }}</button>
                   </div>
                 </template>
                 <label v-else class="row">
                   <div class="r-text"><span class="r-title">{{ t('lock.new') }}</span></div>
-                  <input v-model="lockNewPass" type="password" class="box text-in" :placeholder="t('lock.placeholder')" />
+                  <input v-model="lockNewPass" type="password" class="box text-in" :placeholder="t('lock.placeholder')" @keydown.enter="onLockPassEnter" />
                   <button class="btn sm btn-primary" :disabled="lockBusy" @click="saveMasterLock">{{ t('lock.save') }}</button>
                 </label>
               </div>
