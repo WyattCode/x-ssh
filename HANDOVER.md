@@ -1,3 +1,32 @@
+# 会话记录:连续改进 M3.90(2026-10-30,复核打磨:密钥生成 busy + 回收公钥确认 + Android 主机保存 busy + known_hosts 当日龄)
+
+功能清单已够,本轮按站立规则做开源复核打磨(不合并)。未动 PR #24 / #23 / #22 / #21 / #20 / #19 / #18 / #17 / #16 / #15 / #14 / #13 / #12 与更早的 #4–#11。
+
+**核过已过时 / 已在未合并 PR(本轮不重做)**:
+1. TransferPanel 失败原因 / ETA + Android 罚分地板 —— PR #12。
+2. 桌面重连中途罚分地板 + local/SOCKS `forwardOut` 超时 —— PR #13。
+3. HostEditor 密钥小层陷阱 / 命令面板遮罩回退 / 强调色样本 / 分组标签按下 —— PR #14。
+4. TransferPanel 暂停图标响应式 / Android 坏 SFTP 句柄丢弃 / ForwardDialog Enter —— PR #15。
+5. sendSnippet 活会话复核 / known_hosts·片段删除确认 / ForwardsPage 切 mode 清错 —— PR #16。
+6. 快照恢复确认 + 关闭其他尊重 confirmClose + 侧栏按下缩小 —— PR #17。
+7. OSC52 空白 base64 + 主锁 Enter/busy + 离线点透明度 —— PR #18。
+8. 主题循环竞态 + 关闭全部确认 + 连接日志 disconnect/滚动 —— PR #19。
+9. ZoomHud 失焦粘滞 + 窗格失焦 blur + keyManager IPC 错误码 —— PR #20。
+10. TooltipLayer 失焦粘滞 + 片段变量重入/焦点 + 改地址清 reach —— PR #21。
+11. HostEditor Esc/saveError/session 冻结 + SFTP 本机选区 prune + 命令面板主机搜索 —— PR #22。
+12. 跳板一层对齐 Android + SFTP 远程选区 prune + 部署对话框 busy/错误 —— PR #23。
+13. 粘贴行数/死会话 + 同步对话框 busy/错误 + ForwardsPage 列表 + Android 粘贴消毒 —— PR #24。
+
+**修了**:
+1. **密钥生成双提交**:`HostEditor` 的 `keyModal.busy` 挡住第二次 Enter/点击;`closeKeySheet` 在 busy 时拒绝;生成中禁用输入/类型切换/取消/保存,按钮文案切到「生成中…」。
+2. **回收公钥无确认**:`PublishKeyDialog.revoke` 先走 `useConfirm(keyPub.revokeConfirm)`;发布与回收互相禁用对方按钮,防并行改远程 `authorized_keys`。
+3. **Android 主机编辑双保存**:`HostEditorScreen.save` 加 `saving` 闸;生物识别解锁期间再点 ✓ / Ctrl+S 不再起第二个协程。
+4. **known_hosts 当日龄**:`keyAge` 对不足一天返回 `''`(与 JSDoc「太新不显示」一致),不再画误导的 `0d` 徽章。
+
+**验证**:`lint:i18n` + vitest **334** 全绿(无新增纯函数测试)。本环境未跑 Gradle / typecheck Electron。未合并。
+
+---
+
 # X-SSH 交接文档
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。

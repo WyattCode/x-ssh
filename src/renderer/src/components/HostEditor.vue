@@ -70,6 +70,9 @@ useFocusTrap(panelEl, () => props.open)
 const tagInputEl = ref<HTMLInputElement>()
 const keyNameEl = ref<HTMLInputElement>()
 function closeKeySheet(): void {
+  // A generate in flight owns the sheet: dismissing it would let the late
+  // result close a sheet the user already left (or set a keyPath unseen).
+  if (keyModal.busy) return
   keyModal.open = false
   nextTick(() => panelEl.value?.focus())
 }
@@ -202,7 +205,7 @@ async function pickKey(): Promise<void> {
 
 // ---- SSH key library ----
 const managedKeys = ref<ManagedKey[]>([])
-const keyModal = reactive({ open: false, name: '', type: 'ed25519', passphrase: '', error: '' })
+const keyModal = reactive({ open: false, name: '', type: 'ed25519', passphrase: '', error: '', busy: false })
 async function loadKeys(): Promise<void> {
   managedKeys.value = await window.api.keys.list()
 }
@@ -231,31 +234,39 @@ function openGenerate(): void {
   keyModal.type = 'ed25519'
   keyModal.passphrase = ''
   keyModal.error = ''
+  keyModal.busy = false
 }
 async function generateKey(e?: Event): Promise<void> {
   // The Enter that commits an IME candidate belongs to the input method: taking
   // it here would generate a key named after the half-typed text.
   if (isImeKey(e)) return
   if (e) e.preventDefault()
+  // ssh-keygen takes a moment: a second Enter / click must not race the first.
+  if (keyModal.busy) return
   keyModal.error = ''
   const name = keyModal.name.trim()
   if (!name) {
     keyModal.error = t('host.keyNameReq')
     return
   }
-  const r = await window.api.keys.generate({
-    name,
-    type: keyModal.type,
-    passphrase: keyModal.passphrase || undefined
-  })
-  if (!r.ok || !r.key) {
-    keyModal.error = r.error ?? t('host.keyGenFail')
-    return
+  keyModal.busy = true
+  try {
+    const r = await window.api.keys.generate({
+      name,
+      type: keyModal.type,
+      passphrase: keyModal.passphrase || undefined
+    })
+    if (!r.ok || !r.key) {
+      keyModal.error = r.error ?? t('host.keyGenFail')
+      return
+    }
+    keyModal.open = false
+    form.keyPath = r.key.path
+    await loadKeys()
+    if (r.key.passphraseProtected === false) toast(t('host.keyUnprotected'), 'info')
+  } finally {
+    keyModal.busy = false
   }
-  keyModal.open = false
-  form.keyPath = r.key.path
-  await loadKeys()
-  if (r.key.passphraseProtected === false) toast(t('host.keyUnprotected'), 'info')
 }
 async function importKey(): Promise<void> {
   const r = await window.api.keys.import()
@@ -683,23 +694,23 @@ async function remove(): Promise<void> {
             <div class="card">
               <label class="row">
                 <span class="r-label">{{ t('host.keyName') }}</span>
-                <input ref="keyNameEl" v-model="keyModal.name" class="r-input" :placeholder="t('host.keyNamePh')" @keydown.enter.stop="generateKey($event)" />
+                <input ref="keyNameEl" v-model="keyModal.name" class="r-input" :placeholder="t('host.keyNamePh')" :disabled="keyModal.busy" @keydown.enter.stop="generateKey($event)" />
               </label>
               <div class="row">
                 <span class="r-label">{{ t('host.keyType') }}</span>
                 <div class="seg">
-                  <button v-for="ty in ['ed25519', 'rsa', 'ecdsa']" :key="ty" type="button" :class="{ on: keyModal.type === ty }" @click="keyModal.type = ty">{{ ty }}</button>
+                  <button v-for="ty in ['ed25519', 'rsa', 'ecdsa']" :key="ty" type="button" :class="{ on: keyModal.type === ty }" :disabled="keyModal.busy" @click="keyModal.type = ty">{{ ty }}</button>
                 </div>
               </div>
               <label class="row">
                 <span class="r-label">{{ t('host.passphrase') }}</span>
-                <input v-model="keyModal.passphrase" class="r-input" type="password" :placeholder="t('host.passphraseAsk')" @keydown.enter.stop="generateKey($event)" />
+                <input v-model="keyModal.passphrase" class="r-input" type="password" :placeholder="t('host.passphraseAsk')" :disabled="keyModal.busy" @keydown.enter.stop="generateKey($event)" />
               </label>
             </div>
             <p v-if="keyModal.error" class="err">{{ keyModal.error }}</p>
             <div class="key-actions">
-              <button type="button" class="btn" @click="closeKeySheet">{{ t('host.cancel') }}</button>
-              <button type="button" class="btn btn-primary" @click="generateKey">{{ t('host.save') }}</button>
+              <button type="button" class="btn" :disabled="keyModal.busy" @click="closeKeySheet">{{ t('host.cancel') }}</button>
+              <button type="button" class="btn btn-primary" :disabled="keyModal.busy" @click="generateKey">{{ keyModal.busy ? t('host.keyGenerating') : t('host.save') }}</button>
             </div>
           </div>
         </div>

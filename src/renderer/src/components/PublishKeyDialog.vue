@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { nextTick, ref, reactive, computed, watch } from 'vue'
 import { useFocusTrap } from '../composables/focusTrap'
+import { useConfirm } from '../composables/confirm'
 
 const dialogEl = ref<HTMLElement>()
 useFocusTrap(dialogEl, () => store.publishOpen)
@@ -11,6 +12,7 @@ import Icon from './Icon.vue'
 
 const store = useSessions()
 const { t } = useI18n()
+const { confirm } = useConfirm()
 // Mounted for the app's lifetime and shown by its own v-if, so an onMounted
 // focus ran once at startup with no element and never again.
 watch(
@@ -55,6 +57,9 @@ async function publish(): Promise<void> {
 }
 async function revoke(): Promise<void> {
   if (!keyId.value || !selected.size) return
+  // Revoking rewrites authorized_keys on the remotes and cannot be undone here.
+  const ok = await confirm(t('keyPub.revokeConfirm'))
+  if (!ok) return
   revokeBusy.value = true
   revokeResults.value = []
   const r = await window.api.keys.revoke(keyId.value, [...selected])
@@ -102,10 +107,10 @@ watch(
           <p v-if="!hostList.length" class="kp-empty">{{ t('keyPub.noHosts') }}</p>
         </div>
         <div class="kp-actions">
-          <button class="kp-run" :disabled="busy || !keyId || !selected.size" @click="publish">
+          <button class="kp-run" :disabled="busy || revokeBusy || !keyId || !selected.size" @click="publish">
             <Icon name="send" :size="14" />{{ t('keyPub.publish') }}
           </button>
-          <button class="kp-run ghost" :disabled="revokeBusy || !keyId || !selected.size" @click="revoke">
+          <button class="kp-run ghost" :disabled="revokeBusy || busy || !keyId || !selected.size" @click="revoke">
             <Icon name="trash" :size="14" />{{ t('keyPub.revoke') }}
           </button>
         </div>
