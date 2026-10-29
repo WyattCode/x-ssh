@@ -1,3 +1,29 @@
+# 会话记录:连续改进 M3.88(2026-10-30,复核打磨:跳板一层对齐 Android + SFTP 远程选区 prune + 部署对话框 busy/错误)
+
+功能清单已够,本轮按站立规则做开源复核打磨(不合并)。未动 PR #22 / #21 / #20 / #19 / #18 / #17 / #16 / #15 / #14 / #13 / #12 与更早的 #4–#11。
+
+**核过已过时 / 已在未合并 PR(本轮不重做)**:
+1. TransferPanel 失败原因 / ETA + Android 罚分地板 —— PR #12。
+2. 桌面重连中途罚分地板 + local/SOCKS `forwardOut` 超时 —— PR #13。
+3. HostEditor 密钥小层陷阱 / 命令面板遮罩回退 / 强调色样本 / 分组标签按下 —— PR #14。
+4. TransferPanel 暂停图标响应式 / Android 坏 SFTP 句柄丢弃 / ForwardDialog Enter —— PR #15。
+5. sendSnippet 活会话复核 / known_hosts·片段删除确认 / ForwardsPage 切 mode 清错 —— PR #16。
+6. 快照恢复确认 + 关闭其他尊重 confirmClose + 侧栏按下缩小 —— PR #17。
+7. OSC52 空白 base64 + 主锁 Enter/busy + 离线点透明度 —— PR #18。
+8. 主题循环竞态 + 关闭全部确认 + 连接日志 disconnect/滚动 —— PR #19。
+9. ZoomHud 失焦粘滞 + 窗格失焦 blur + keyManager IPC 错误码 —— PR #20。
+10. TooltipLayer 失焦粘滞 + 片段变量重入/焦点 + 改地址清 reach —— PR #21。
+11. TextEditor Esc/saveError/session 冻结 + SFTP 本机选区 prune + 命令面板主机搜索 —— PR #22。
+
+**修了**:
+1. **HostEditor 跳板机(桌面落后 Android)**:`lib/jumpCandidates.ts` —— 候选排除自身与「自己已有跳板」的主机(只支持一层);已被别人当跳板且尚未自设时禁用下拉并提示 `host.jumpBlocked`;遗留嵌套选中项仍保留在选项里以便看清/清掉。
+2. **SFTP 远程选区 prune**:改对 `entries`(目录真值)做 `pruneSelection`,不再被筛选框误清;被裁掉的 `anchor` 一并清掉(对齐未合并 #22 本机面板口径)。
+3. **部署对话框**:`closeDeploy` 在 `deploy.busy` 时拒绝 Esc/遮罩/取消/关闭;失败写进对话框内 `deploy.error`(不再藏到抽屉 banner 后面);Enter 提交(Shift+Enter 换行,IME 守卫)。
+
+**验证**:`typecheck` + `lint:i18n` + vitest **353** 全绿(原 334;+`jumpCandidates` 14 + `selectionPrune` 5)。Android 本轮未改代码(跳板规则桌面追上 `JumpField.kt`)。未合并。
+
+---
+
 # X-SSH 交接文档
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。
