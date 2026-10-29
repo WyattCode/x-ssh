@@ -250,31 +250,43 @@ function localRenameTarget(t: LocalEntry | null): void {
 async function localDelete(): Promise<void> {
   const t = localMenu.target
   if (!t || !localPath.value) return
+  if (busy.value) return
   localMenu.open = false
   const ok = await confirm(tt('sfp.confirmDel', { name: t.name }))
   if (!ok) return
-  const r = await window.api.local.del(localPath.value, t.name, t.isDir)
-  if (!r.ok) toast(r.error ?? tt('sfp.delFail'), 'error')
-  else await refreshLocal()
+  busy.value = true
+  try {
+    const r = await window.api.local.del(localPath.value, t.name, t.isDir)
+    if (!r.ok) toast(r.error ?? tt('sfp.delFail'), 'error')
+    else await refreshLocal()
+  } finally {
+    busy.value = false
+  }
 }
 async function localDelSelected(): Promise<void> {
   if (!localSelSet.value.size || !localPath.value) return
+  if (busy.value) return
   const entries = localSorted.value.filter((e) => localSelSet.value.has(e.name))
   if (!entries.length) return
   const ok = await confirm(tt('sfp.delMany', { n: entries.length }))
   if (!ok) return
-  let failed = false
-  for (const e of entries) {
-    const r = await window.api.local.del(localPath.value, e.name, e.isDir)
-    if (!r.ok) {
-      failed = true
-      toast(r.error ?? tt('sfp.delFail'), 'error')
+  busy.value = true
+  try {
+    let failed = false
+    for (const e of entries) {
+      const r = await window.api.local.del(localPath.value, e.name, e.isDir)
+      if (!r.ok) {
+        failed = true
+        toast(r.error ?? tt('sfp.delFail'), 'error')
+      }
     }
+    localSelSet.value = new Set()
+    localAnchor.value = null
+    await refreshLocal()
+    if (failed) toast(tt('sfp.delFail'), 'error')
+  } finally {
+    busy.value = false
   }
-  localSelSet.value = new Set()
-  localAnchor.value = null
-  await refreshLocal()
-  if (failed) toast(tt('sfp.delFail'), 'error')
 }
 // Keyboard helpers: act on the single currently-selected local entry.
 function localSelectedSingle(): LocalEntry | null {
