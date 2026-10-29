@@ -46,6 +46,18 @@ function requireSshManager(): SshManager {
   return sshManager
 }
 
+/** Detached spawn that settles on 'spawn' (ok) or 'error' (missing binary, etc.). */
+function spawnDetached(cmd: string, args: string[]): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(cmd, args, { detached: true, stdio: 'ignore' })
+    child.once('error', reject)
+    child.once('spawn', () => {
+      child.unref()
+      resolve()
+    })
+  })
+}
+
 // ---- System tray ----
 // A minimized/closed window can be tucked into the tray instead of quitting, so
 // long-running transfers keep running. Controlled by the `minimizeToTray`
@@ -112,7 +124,9 @@ const NL: Record<string, Record<UiLang, string>> = {
   pickEditor: { zh: '选择外部编辑器程序', 'zh-TW': '選擇外部編輯器程式', en: 'Choose the external editor' },
   pickBackupDir: { zh: '选择备份目录', 'zh-TW': '選擇備份目錄', en: 'Choose the backup folder' },
   pickPrivateKey: { zh: '选择私钥', 'zh-TW': '選擇私鑰', en: 'Choose a private key' },
-  importPrivateKey: { zh: '导入私钥', 'zh-TW': '匯入私鑰', en: 'Import a private key' }
+  importPrivateKey: { zh: '导入私钥', 'zh-TW': '匯入私鑰', en: 'Import a private key' },
+  filterArchive: { zh: '归档文件', 'zh-TW': '封存檔', en: 'Archives' },
+  filterExecutable: { zh: '程序', 'zh-TW': '程式', en: 'Programs' }
 }
 /** Localized dialog string for the current UI language (English fallback). */
 async function dl(key: string): Promise<string> {
@@ -232,21 +246,32 @@ function prefetchDrag(sessionId: string, items: DragItem[]): Promise<{ dir: stri
   if (!p) {
     p = (async () => {
       const dir = await mkdtemp(join(tmpdir(), 'xssh-drag-'))
-      for (const it of items) {
-        await requireSshManager().downloadTree(sessionId, it.remotePath, dir, it.name, it.isDir)
+      try {
+        for (const it of items) {
+          await requireSshManager().downloadTree(sessionId, it.remotePath, dir, it.name, it.isDir)
+        }
+        // A single file drags out as that file; multiple items (or a folder)
+        // land in a temporary directory, which Explorer accepts as a drop.
+        const local = items.length === 1 && !items[0].isDir
+          ? join(dir, items[0].name)
+          : dir
+        return { dir, local }
+      } catch (e) {
+        // Drop a half-downloaded tree immediately so a retry is not blocked by
+        // a poisoned cache entry and so temp dirs do not accumulate.
+        await rm(dir, { recursive: true, force: true }).catch(() => undefined)
+        throw e
       }
-      // A single file drags out as that file; multiple items (or a folder)
-      // land in a temporary directory, which Explorer accepts as a drop.
-      const local = items.length === 1 && !items[0].isDir
-        ? join(dir, items[0].name)
-        : dir
-      return { dir, local }
     })()
     dragCache.set(key, p)
-    // Expire the cache and delete the temp dir after a minute.
     const cached = p
+    // Evict a failed entry right away so the next mousedown can retry.
+    void cached.catch(() => {
+      if (dragCache.get(key) === cached) dragCache.delete(key)
+    })
+    // Expire the cache and delete the temp dir after a minute (success path).
     setTimeout(() => {
-      dragCache.delete(key)
+      if (dragCache.get(key) === cached) dragCache.delete(key)
       void cached
         .then(({ dir }) => rm(dir, { recursive: true, force: true }))
         .catch(() => undefined)
@@ -1719,7 +1744,7 @@ function registerIpc(): void {
         title: await dl('pickArchive'),
         properties: ['openFile'],
         filters: [
-          { name: '归档文件', extensions: ['zip', 'tar', 'gz', 'tgz', 'tar.gz'] }
+          { name: await dl('filterArchive'), extensions: ['zip', 'tar', 'gz', 'tgz', 'tar.gz'] }
         ]
       })
       if (res.canceled || !res.filePaths[0]) return { ok: false, canceled: true }
@@ -1845,8 +1870,14 @@ function registerIpc(): void {
         await requireSshManager().downloadTree(sessionId, remotePath, dir, name, false)
 
         const editor = await settings.get<string>('externalEditor')
-        if (editor) spawn(editor, [local], { detached: true, stdio: 'ignore' }).unref()
-        else await shell.openPath(local)
+        if (editor) {
+          try {
+            await spawnDetached(editor, [local])
+          } catch (e) {
+            await rm(dir, { recursive: true, force: true }).catch(() => undefined)
+            return { ok: false, error: friendlyError((e as Error).message) }
+          }
+        } else await shell.openPath(local)
 
         const remoteDir = remotePath.slice(0, remotePath.lastIndexOf('/')) || '/'
         let timer: NodeJS.Timeout | null = null
@@ -1894,8 +1925,14 @@ function registerIpc(): void {
       const dir = await mkdtemp(join(tmpdir(), 'xssh-open-'))
       const local = join(dir, name)
       await requireSshManager().downloadTree(sessionId, remotePath, dir, name, false)
-      if (program) spawn(program, [local], { detached: true, stdio: 'ignore' }).unref()
-      else await shell.openPath(local)
+      if (program) {
+        try {
+          await spawnDetached(program, [local])
+        } catch (e) {
+          await rm(dir, { recursive: true, force: true }).catch(() => undefined)
+          return { ok: false, error: friendlyError((e as Error).message) }
+        }
+      } else await shell.openPath(local)
       setTimeout(() => void rm(dir, { recursive: true, force: true }).catch(() => undefined), 30 * 60 * 1000)
       return { ok: true }
     } catch (e) {
@@ -2018,7 +2055,7 @@ function registerIpc(): void {
       properties: ['openFile'],
       filters:
         process.platform === 'win32'
-          ? [{ name: '程序', extensions: ['exe', 'cmd', 'bat'] }]
+          ? [{ name: await dl('filterExecutable'), extensions: ['exe', 'cmd', 'bat'] }]
           : []
     })
     return res.canceled ? undefined : res.filePaths[0]
