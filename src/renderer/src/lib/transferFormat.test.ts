@@ -5,11 +5,12 @@ import {
   formatBytes,
   formatSpeed,
   formatAgo,
+  formatTransferName,
   transferStatusText,
   CANCELLED_MARKER
 } from './transferFormat'
 
-const tr = (key: string, vars?: Record<string, number>): string =>
+const tr = (key: string, vars?: Record<string, string | number>): string =>
   vars ? `${key}:${JSON.stringify(vars)}` : key
 
 describe('isCancelled', () => {
@@ -92,6 +93,20 @@ describe('formatAgo', () => {
     expect(formatAgo(now - 60_000, tr, now)).toBe('sfp.minAgo:{"n":1}')
     expect(formatAgo(now - 3_600_000, tr, now)).toBe('sfp.hrAgo:{"n":1}')
     expect(formatAgo(now - 86_400_000, tr, now)).toBe('sfp.dayAgo:{"n":1}')
+  })
+})
+
+describe('formatTransferName', () => {
+  it('translates the sync job token main emits', () => {
+    expect(formatTransferName('sync', tr)).toBe('sfp.sync')
+  })
+
+  it('still maps the legacy Chinese token', () => {
+    expect(formatTransferName('同步', tr)).toBe('sfp.sync')
+  })
+
+  it('passes a real file name through untouched', () => {
+    expect(formatTransferName('report.tar.gz', tr)).toBe('report.tar.gz')
   })
 })
 

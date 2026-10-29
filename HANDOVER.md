@@ -1,3 +1,19 @@
+# 会话记录:连续改进 M3.116(2026-10-30,复核打磨:pack tar 退出码 / sync 任务名 i18n / remote-exit)
+
+功能清单已够,本轮按站立规则做开源复核打磨(不合并)。未动 PR #50 `fix/review-polish-m3115` 与 #49–#12、#4–#11。本轮优先实质逻辑/i18n。
+
+**核过已过时 / 已在未合并 PR(本轮不重做)**:
+1–N. 同 M3.115 所列 PR #12–#49,外加 #50 connection-lost / store app-locked·invalid-backup / friendlyError kebab / Android SnippetEditor save-once。
+
+**修了**:
+1. **P0 packAndDownload**:`execRemote` tar 非零退出仍去下载残缺归档 → 检查 `packed.code`,清理 tmp,返回稳定码 `pack-failed`;SftpDrawer 映射到已有 `sfp.packFail`。
+2. **同步任务名 i18n**:进度完成名 `同步` → 机器码 `sync`;`formatTransferName` + TransferPanel / toast·notify·connLog 显示映射到 `sfp.sync`(历史仍存原始 token)。
+3. **remote-exit:N**:`remoteExec` 非零退出码改为稳定码;PublishKeyDialog `mapError` + 三语 `keyPub.remoteExit`。
+
+**验证**:`typecheck` + `lint:i18n` + vitest **337** / 30 文件全绿(+3 formatTransferName)。未跑 Gradle。未合并。
+
+---
+
 # X-SSH 交接文档
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。

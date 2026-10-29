@@ -1169,8 +1169,11 @@ async function packDownloadSelected(): Promise<void> {
   busy.value = true
   try {
     const r = await window.api.sftp.packDownload(props.sessionId, payload)
-    if (!r.ok && !r.canceled) error.value = r.error ?? tt('sfp.packFail')
-    else if (r.ok) await load(path.value)
+    if (!r.ok && !r.canceled) {
+      // Main reports a failed tar as the machine code `pack-failed`; show the
+      // localized wording rather than the raw token.
+      error.value = r.error === 'pack-failed' ? tt('sfp.packFail') : (r.error ?? tt('sfp.packFail'))
+    } else if (r.ok) await load(path.value)
   } finally {
     busy.value = false
   }

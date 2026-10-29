@@ -7,7 +7,8 @@ import {
   pct as pctOf,
   formatBytes,
   formatSpeed,
-  formatAgo
+  formatAgo,
+  formatTransferName
 } from '../lib/transferFormat'
 import type { SftpProgress, TransferHistoryItem } from '../../../shared/types'
 import Icon from './Icon.vue'
@@ -102,7 +103,7 @@ function fmtSpeed(id: string): string {
             <div v-for="x in active" :key="x.id" class="tp-row">
               <Icon :name="x.direction === 'up' ? 'upload' : 'download'" :size="14" class="tp-dir" />
               <div class="tp-main">
-                <div class="tp-name">{{ x.name }}</div>
+                <div class="tp-name">{{ formatTransferName(x.name, t) }}</div>
                 <div class="tp-track">
                   <div class="tp-fill" :style="{ width: pct(x) + '%' }"></div>
                 </div>
@@ -129,7 +130,7 @@ function fmtSpeed(id: string): string {
             <div v-for="h in recent" :key="h.id" class="tp-row tp-hist">
               <Icon :name="h.direction === 'up' ? 'upload' : 'download'" :size="14" class="tp-dir" />
               <div class="tp-main">
-                <div class="tp-name">{{ h.name }}</div>
+                <div class="tp-name">{{ formatTransferName(h.name, t) }}</div>
                 <div class="tp-meta">
                   <span class="tp-badge" :class="h.status">{{ histStatus(h) }}</span>
                   <span>{{ fmtBytes(h.bytes) }}</span>

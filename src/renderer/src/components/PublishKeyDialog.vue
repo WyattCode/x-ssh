@@ -40,6 +40,14 @@ function toggleHost(h: Host): void {
   else selected.add(h.id)
 }
 
+/** Main reports a failed remote command as `remote-exit:N`; show it in the UI
+ *  language instead of the raw machine code. Anything else passes through. */
+function mapError(msg: string | undefined): string {
+  const m = /^remote-exit:(\d+)$/.exec(msg ?? '')
+  if (m) return t('keyPub.remoteExit', { n: Number(m[1]) })
+  return msg ?? ''
+}
+
 async function publish(): Promise<void> {
   if (!keyId.value || !selected.size) return
   busy.value = true
@@ -48,7 +56,7 @@ async function publish(): Promise<void> {
   const r = await window.api.keys.publish(keyId.value, [...selected])
   busy.value = false
   if (!r.ok) {
-    err.value = r.error ?? t('keyPub.fail')
+    err.value = mapError(r.error) || t('keyPub.fail')
     return
   }
   results.value = r.results ?? []
@@ -60,7 +68,7 @@ async function revoke(): Promise<void> {
   const r = await window.api.keys.revoke(keyId.value, [...selected])
   revokeBusy.value = false
   if (!r.ok) {
-    err.value = r.error ?? t('keyPub.revokeFail')
+    err.value = mapError(r.error) || t('keyPub.revokeFail')
     return
   }
   revokeResults.value = r.results ?? []
@@ -115,7 +123,7 @@ watch(
           <div v-for="(r, i) in results" :key="i" class="kp-result" :class="r.ok ? 'ok' : 'bad'">
             <Icon :name="r.ok ? 'check' : 'alert-triangle'" :size="13" />
             <span class="kp-host-label">{{ r.host }}</span>
-            <span v-if="!r.ok" class="kp-err">{{ r.error }}</span>
+            <span v-if="!r.ok" class="kp-err">{{ mapError(r.error) }}</span>
           </div>
         </div>
         <div v-if="revokeResults.length" class="kp-results">
@@ -123,7 +131,7 @@ watch(
           <div v-for="(r, i) in revokeResults" :key="i" class="kp-result" :class="r.ok ? 'ok' : 'bad'">
             <Icon :name="r.ok ? 'check' : 'alert-triangle'" :size="13" />
             <span class="kp-host-label">{{ r.host }}</span>
-            <span v-if="!r.ok" class="kp-err">{{ r.error }}</span>
+            <span v-if="!r.ok" class="kp-err">{{ mapError(r.error) }}</span>
           </div>
         </div>
       </div>

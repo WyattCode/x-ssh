@@ -58,6 +58,19 @@ export function formatSpeed(bytesPerSec: number | undefined): string {
 }
 
 /**
+ * Display name for a transfer job. Main may emit a machine token instead of a
+ * file name (a sync job reports `sync`), so the known tokens are translated and
+ * anything else — a real file name — passes through untouched.
+ */
+export function formatTransferName(
+  name: string,
+  translate: (key: string, vars?: Record<string, string | number>) => string
+): string {
+  if (name === 'sync' || name === '同步') return translate('sfp.sync')
+  return name
+}
+
+/**
  * A relative timestamp ("3 min ago"). Takes the translator so the caller's
  * language applies; the wording lives in i18n, not here.
  *
