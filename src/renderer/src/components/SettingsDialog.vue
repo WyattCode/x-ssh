@@ -206,12 +206,20 @@ watch(
 async function pickEditor(): Promise<void> {
   const p = await window.api.pickExecutable()
   if (p) {
-    await window.api.settings.set('externalEditor', p)
+    const r = await window.api.settings.set('externalEditor', p)
+    if (r && r.ok === false) {
+      toast(t('set.gen.writeFail'), 'error')
+      return
+    }
     store.externalEditor = p
   }
 }
 async function clearEditor(): Promise<void> {
-  await window.api.settings.set('externalEditor', '')
+  const r = await window.api.settings.set('externalEditor', '')
+  if (r && r.ok === false) {
+    toast(t('set.gen.writeFail'), 'error')
+    return
+  }
   store.externalEditor = null
 }
 
@@ -220,26 +228,42 @@ const openerForm = reactive({ ext: '', program: '' })
 async function upsertOpener(): Promise<void> {
   const ext = openerForm.ext.trim().toLowerCase().replace(/^\./, '')
   if (!ext) return
+  const prev = { ...store.fileOpeners }
   const next = { ...store.fileOpeners }
   if (openerForm.program) next[ext] = openerForm.program
   else delete next[ext]
   store.fileOpeners = next
-  await window.api.settings.set('fileOpeners', next)
+  const r = await window.api.settings.set('fileOpeners', next)
+  if (r && r.ok === false) {
+    store.fileOpeners = prev
+    toast(t('set.gen.writeFail'), 'error')
+    return
+  }
   openerForm.ext = ''
   openerForm.program = ''
 }
 async function setOpenerProgram(ext: string): Promise<void> {
   const p = await window.api.pickExecutable()
   if (!p) return
+  const prev = { ...store.fileOpeners }
   const next = { ...store.fileOpeners, [ext]: p }
   store.fileOpeners = next
-  await window.api.settings.set('fileOpeners', next)
+  const r = await window.api.settings.set('fileOpeners', next)
+  if (r && r.ok === false) {
+    store.fileOpeners = prev
+    toast(t('set.gen.writeFail'), 'error')
+  }
 }
 async function removeOpener(ext: string): Promise<void> {
+  const prev = { ...store.fileOpeners }
   const next = { ...store.fileOpeners }
   delete next[ext]
   store.fileOpeners = next
-  await window.api.settings.set('fileOpeners', next)
+  const r = await window.api.settings.set('fileOpeners', next)
+  if (r && r.ok === false) {
+    store.fileOpeners = prev
+    toast(t('set.gen.writeFail'), 'error')
+  }
 }
 
 // ---- custom accent color ('' = theme default) ----
@@ -504,19 +528,27 @@ function parseDefaultVars(s: string): Record<string, string> | undefined {
 }
 async function saveSnippet(): Promise<void> {
   if (!snippetForm.title.trim() || !snippetForm.text.trim()) return
-  await store.saveSnippet({
-    id: snippetForm.id || `snip-${Date.now()}-${Math.floor(Math.random() * 1e6)}`,
-    title: snippetForm.title.trim(),
-    text: snippetForm.text,
-    confirm: snippetForm.confirm || undefined,
-    group: snippetForm.group.trim() || undefined,
-    defaultVars: parseDefaultVars(snippetForm.defaultVars),
-    hostId: snippetForm.hostId || undefined
-  })
-  snippetForm.open = false
+  try {
+    await store.saveSnippet({
+      id: snippetForm.id || `snip-${Date.now()}-${Math.floor(Math.random() * 1e6)}`,
+      title: snippetForm.title.trim(),
+      text: snippetForm.text,
+      confirm: snippetForm.confirm || undefined,
+      group: snippetForm.group.trim() || undefined,
+      defaultVars: parseDefaultVars(snippetForm.defaultVars),
+      hostId: snippetForm.hostId || undefined
+    })
+    snippetForm.open = false
+  } catch {
+    toast(t('snip.saveFail'), 'error')
+  }
 }
 async function deleteSnippet(id: string): Promise<void> {
-  await store.deleteSnippet(id)
+  try {
+    await store.deleteSnippet(id)
+  } catch {
+    toast(t('snip.deleteFail'), 'error')
+  }
 }
 function oneLine(s: string): string {
   return s.replace(/\s+/g, ' ').trim().slice(0, 54)
@@ -554,7 +586,11 @@ async function clearConnLog(): Promise<void> {
   // first, and a misclick on a danger button shouldn't erase the record.
   const ok = await confirm(t('set.sec.connLogClearConfirm'))
   if (!ok) return
-  await window.api.connLog.clear()
+  const r = await window.api.connLog.clear()
+  if (!r.ok) {
+    toast(t('set.sec.connLogClearFail'), 'error')
+    return
+  }
   connLog.value = []
 }
 const eventLabel = (e: string): string =>

@@ -2,6 +2,21 @@
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。
 
+## HANDOVER M3.131 — 设置写盘失败不再装作成功(分支 `fix/review-polish-m3131`)
+
+> 分支 `fix/review-polish-m3131`(自 `origin/main`),**不合并**。与 #4–#65 的开放 PR 无重叠:#65(removeHost / saveHost / bookmarkFail)、#64(SettingsStore.set / 快照回滚 / HostEditor.deleteFail)、#63(writeLabels / knownHostsForget / ForwardsPage)、#62(ForwardDialog)、#61(AutoBackup)、#60–#40(busy 门 / 片段保存一次 / TransferPanel / importSshConfig / openExternal / localList)全部未触碰。
+
+这一轮只修「写盘失败却装作成功」这一类,不加功能:
+
+- **A) 命令片段保存 / 删除**(`SettingsDialog.vue`):`store.saveSnippet` / `deleteSnippet` 走设置写盘,抛错时原来只有一条未处理的 rejection(删除完全静默)。现在两处都 try/catch,失败 toast `snip.saveFail` / `snip.deleteFail`,保存失败时表单保持打开。**没有**加保存中的 busy 门(#40 负责)。
+- **B) 连接审计日志清空**(`main/index.ts` + `SettingsDialog.vue`):主进程 `connLogClear` 原来无条件 `{ ok: true }`;现在写失败返回 `{ ok: false }`(`SettingsStore.set` 目前仍吞错,#64 让它 reject 之后这条才真正生效)。渲染层拿到 `ok: false` 时 toast `set.sec.connLogClearFail` 并**不清空列表**,不再出现「界面说清空了、磁盘上还在」。
+- **C) 外部编辑器 / 按扩展名打开程序**(`SettingsDialog.vue`):`pickEditor` / `clearEditor` / `upsertOpener` / `setOpenerProgram` / `removeOpener` 原来先改 store 再写盘、不看返回值 —— 用户以为存住了,下次启动就没了。现在检查 `r.ok === false`,toast `set.gen.writeFail`,并把已经改过的 `store.fileOpeners` 回滚到写盘前的快照。
+- **D) i18n**:新增 `snip.saveFail` / `snip.deleteFail` / `set.sec.connLogClearFail` / `set.gen.writeFail`,zh / zh-TW / en 三份齐全(`npm.cmd run lint:i18n` 对称)。
+
+未做 / 不在本轮:`SettingsStore.set` 本身是否 reject(#64)、快照回滚、`HostEditor`、`removeHost` / `saveHost`、书签、`writeLabels`、`knownHostsForget`、`ForwardsPage`、`openExternal`、`localList`、`App.vue` 的 `editExternal`、片段保存的 busy 门(#40)。**没有合并任何 PR,也没碰 `/workspace/MCode`。**
+
+验证:`npm.cmd run typecheck`、`npm.cmd run lint:i18n`、`npm.cmd run build`。界面行为(toast 文案、回滚后的列表)**没有在运行中的应用里点过** —— 要造一次写盘失败才看得到。
+
 ## 项目概述
 - 极简、键盘优先的 SSH 客户端。Electron + Vue 3 (Vite) + TypeScript。
 - 平台: Windows (`win32`)。目录: `D:\Documents\Claude Code\X-SSH`。
