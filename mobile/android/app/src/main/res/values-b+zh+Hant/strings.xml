@@ -32,6 +32,7 @@
     <string name="edit_key_generated_name">本機產生 · ed25519</string>
     <string name="edit_key_has_passphrase">這把私鑰有密碼短語</string>
     <string name="edit_key_invalid_file">不是可用的私鑰檔案</string>
+    <string name="edit_key_lock_unavailable">未設鎖屏，私鑰未加鎖</string>
     <string name="edit_key_none">未匯入</string>
     <string name="edit_login_method">登入方式</string>
     <string name="edit_name">名稱</string>
