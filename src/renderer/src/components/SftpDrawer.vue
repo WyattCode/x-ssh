@@ -14,7 +14,7 @@ import {
 import { globMatch } from '../lib/glob'
 import { isImeKey } from '../lib/ime'
 import { useFocusTrap } from '../composables/focusTrap'
-import type { DownloadQueueOp } from '../stores/sessions'
+import type { DownloadQueueOp, TransferOp } from '../stores/sessions'
 import { useConfirm } from '../composables/confirm'
 import { useI18n } from '../lib/i18n'
 import { useToast } from '../composables/toast'
@@ -154,6 +154,8 @@ async function onLocalDrop(e: DragEvent): Promise<void> {
 // ---- local pane: selection, create / rename / delete ----
 const localMenu = reactive({ open: false, x: 0, y: 0, target: null as LocalEntry | null })
 const localModal = reactive({ open: false, kind: 'file' as 'file' | 'folder', action: 'new' as 'new' | 'rename', value: '', error: '', target: null as LocalEntry | null })
+/** True while a local create / rename is in flight, so OK / Enter can't fire twice. */
+const localSubmitting = ref(false)
 // Whether the last interaction was in the local pane, so keyboard shortcuts
 // route there (Ctrl+A / Delete / F2 / Enter / Backspace / Escape).
 const localActive = ref(false)
@@ -301,25 +303,31 @@ function isImeEnter(e?: Event): boolean {
 
 async function localSubmit(e?: Event): Promise<void> {
   if (isImeEnter(e)) return
+  if (localSubmitting.value) return
   const name = localModal.value.trim()
   if (!name || !localPath.value) return
-  if (localModal.action === 'new') {
-    const r = await window.api.local.create(localPath.value, name, localModal.kind)
-    if (!r.ok) {
-      localModal.error = r.error ?? tt('sfp.createFail')
-      return
+  localSubmitting.value = true
+  try {
+    if (localModal.action === 'new') {
+      const r = await window.api.local.create(localPath.value, name, localModal.kind)
+      if (!r.ok) {
+        localModal.error = r.error ?? tt('sfp.createFail')
+        return
+      }
+    } else {
+      const t = localModal.target
+      if (!t) return
+      const r = await window.api.local.rename(localPath.value, t.name, name)
+      if (!r.ok) {
+        localModal.error = r.error ?? tt('sfp.renameFail')
+        return
+      }
     }
-  } else {
-    const t = localModal.target
-    if (!t) return
-    const r = await window.api.local.rename(localPath.value, t.name, name)
-    if (!r.ok) {
-      localModal.error = r.error ?? tt('sfp.renameFail')
-      return
-    }
+    localModal.open = false
+    await refreshLocal()
+  } finally {
+    localSubmitting.value = false
   }
-  localModal.open = false
-  await refreshLocal()
 }
 function fmtLocalTime(ms?: number): string {
   if (!ms) return ''
@@ -332,20 +340,24 @@ const showResume = ref(false)
 async function resumePending(): Promise<void> {
   if (!props.sessionId) return
   const ops = [...store.transferQueue]
+  const keep: TransferOp[] = []
   let failed = 0
   let lastErr = ''
   for (const op of ops) {
     const r = await window.api.sftp.uploadPaths(props.sessionId, op.remoteDir, op.localPaths, store.transferConcurrency)
     if (!r.ok && !r.canceled) {
       // Don't abort the whole resume on the first failure — skip this op and
-      // keep trying the remaining queued uploads.
+      // keep trying the remaining queued uploads. Failed ops stay queued so a
+      // later resume can retry (same policy as resumeDownloads).
       failed++
       lastErr = r.error ?? tt('sfp.uploadFail')
+      keep.push(op)
       continue
     }
   }
-  await store.clearTransferQueue()
-  showResume.value = store.downloadQueue.length > 0
+  if (keep.length) await store.setTransferQueue(keep)
+  else await store.clearTransferQueue()
+  showResume.value = store.transferQueue.length > 0 || store.downloadQueue.length > 0
   if (failed > 0) {
     error.value = tt('sfp.resumePartial', { n: failed })
     if (lastErr) toast(lastErr, 'error')
@@ -1829,7 +1841,7 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
         <p v-if="localModal.error" class="dlg-err">{{ localModal.error }}</p>
         <div class="dlg-foot">
           <button class="btn" @click="localModal.open = false">{{ tt('sfp.cancel') }}</button>
-          <button class="btn btn-primary" @click="localSubmit">{{ tt('sfp.ok') }}</button>
+          <button class="btn btn-primary" :disabled="localSubmitting" @click="localSubmit">{{ tt('sfp.ok') }}</button>
         </div>
       </div>
     </div>

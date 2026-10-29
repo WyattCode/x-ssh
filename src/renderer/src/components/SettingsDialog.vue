@@ -516,6 +516,13 @@ async function saveSnippet(): Promise<void> {
   snippetForm.open = false
 }
 async function deleteSnippet(id: string): Promise<void> {
+  const s = store.snippets.find((x) => x.id === id)
+  const ok = await confirm(t('set.gen.snipDeleteConfirm', { name: s?.title ?? id }), {
+    title: t('set.gen.delete'),
+    confirmText: t('set.gen.delete'),
+    danger: true
+  })
+  if (!ok) return
   await store.deleteSnippet(id)
 }
 function oneLine(s: string): string {
