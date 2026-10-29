@@ -92,6 +92,7 @@ const stats = computed(() => {
 
 // ---- Filter / group tabs / sort ----
 const query = ref('')
+const connectingId = ref<string | null>(null)
 const UNGROUPED = '\u0000'
 const activeGroup = ref<string>('')
 const hasUngrouped = computed(() => store.hosts.some((h) => !h.group?.trim()))
@@ -208,7 +209,13 @@ function onSearchEnter(e: KeyboardEvent): void {
 
 // ---- Actions ----
 async function connect(h: Host): Promise<void> {
-  if ((await store.quickConnect(h)) === 'needs-password') store.askPasswordFor(h)
+  if (connectingId.value) return
+  connectingId.value = h.id
+  try {
+    if ((await store.quickConnect(h)) === 'needs-password') store.askPasswordFor(h)
+  } finally {
+    connectingId.value = null
+  }
 }
 function openSftp(h: Host): Promise<void> {
   return store.openSftpFor(h)
@@ -400,7 +407,7 @@ defineExpose({ focusSearch: () => searchEl.value?.focus() })
           v-for="h in visible"
           :key="h.id"
           class="hcard"
-          :class="{ busy: store.sftpConnecting === h.id }"
+          :class="{ busy: store.sftpConnecting === h.id || connectingId === h.id }"
           :style="{ '--host': h.color || 'var(--accent)' }"
           role="button"
           tabindex="0"
@@ -448,7 +455,7 @@ defineExpose({ focusSearch: () => searchEl.value?.focus() })
           v-for="h in visible"
           :key="h.id"
           class="hrow"
-          :class="{ busy: store.sftpConnecting === h.id }"
+          :class="{ busy: store.sftpConnecting === h.id || connectingId === h.id }"
           :style="{ '--host': h.color || 'var(--accent)' }"
           role="button"
           tabindex="0"

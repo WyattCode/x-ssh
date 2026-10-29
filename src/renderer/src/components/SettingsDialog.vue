@@ -245,6 +245,8 @@ async function removeOpener(ext: string): Promise<void> {
 // ---- custom accent color ('' = theme default) ----
 function onAccent(e: Event): void {
   store.accentColor = (e.target as HTMLInputElement).value
+}
+function commitAccent(): void {
   void store.saveSetting('accentColor', store.accentColor)
 }
 async function clearAccent(): Promise<void> {
@@ -986,7 +988,7 @@ async function resetMasterLock(): Promise<void> {
                 <div class="row">
                   <div class="r-text"><span class="r-title">{{ t('set.term.accent') }}</span></div>
                   <button v-if="store.accentColor" class="btn sm" @click="clearAccent">{{ t('set.term.accentReset') }}</button>
-                  <input type="color" class="color-in" :value="store.accentColor || '#6ea8fe'" @input="onAccent" />
+                  <input type="color" class="color-in" :value="store.accentColor || '#6ea8fe'" @input="onAccent" @change="commitAccent" />
                 </div>
               </div>
               <p class="foot-note">{{ t('set.term.fontHint', { keys: `${modKey}+= / ${modKey}+-` }) }}</p>

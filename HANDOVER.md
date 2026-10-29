@@ -1,3 +1,24 @@
+# 会话记录:连续改进 M3.93(2026-10-30,复核打磨:强调色拖动少写盘 + 传输全暂停粘滞 + 连接页双击双开 + Android 断开一次退出)
+
+功能清单已够,本轮按站立规则做开源复核打磨(不合并)。未动 PR #27 / #26–#12 与更早的 #4–#11。
+
+**核过已过时 / 已在未合并 PR(本轮不重做)**:
+1–15. 同 M3.92 所列 PR #12–#26。
+16. TransferPanel Esc/关闭文案 + 密钥导入删除 busy + 删主机清 reach + Android authMutex —— PR #27。
+17. TransferPanel 暂停响应性 —— PR #15;本轮只清 `allPaused` 粘滞。
+18. 强调色空值色板 —— PR #14;本轮只改拖动时少写 settings。
+19. 主题循环竞态 —— PR #19;本轮未动 `setPref`。
+
+**修了**:
+1. **Settings 强调色**:`@input` 只更新预览,`@change` 才 `saveSetting`(拖色板不再连写盘)。
+2. **TransferPanel**:队列清空时复位 `allPaused` / `pausedIds`,下一笔传输不再误显示「全部继续」。
+3. **HostsPage**:`connectingId` 闸 + busy 样式,卡片双击/连按不会开两个标签。
+4. **Android TerminalView**:`disconnectSession` / `leaveScreen` 一次退出,防双击连 pop 导航栈。
+
+**验证**:`typecheck` + vitest **334** / 30 文件全绿。未跑 Gradle。未合并。
+
+---
+
 # X-SSH 交接文档
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。

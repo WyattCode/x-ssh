@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useSessions } from '../stores/sessions'
 import { useI18n } from '../lib/i18n'
 import { canRevealHistory } from '../lib/transferHistory'
@@ -39,6 +39,15 @@ function togglePauseAll(): void {
 const active = computed(() =>
   store.transfers.filter((x) => !x.done && !x.error)
 )
+
+// Pause-all must not outlive the queue: when the last active job finishes,
+// clear the flag so the next transfer shows "Pause all", not a stale Resume.
+watch(active, (list) => {
+  if (list.length === 0 && allPaused.value) {
+    allPaused.value = false
+    pausedIds.clear()
+  }
+})
 
 // Recent finished transfers for the clean status badge.
 const recent = computed(() => store.transferHistory.slice(0, 12))

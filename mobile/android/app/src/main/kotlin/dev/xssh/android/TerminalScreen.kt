@@ -494,6 +494,19 @@ private fun TerminalView(
     onReconnect: () -> Unit,
 ) {
     val p = LocalXssh.current
+    // Disconnect / leave must be one-shot: a double-tap would pop the nav stack twice.
+    var exiting by remember { mutableStateOf(false) }
+    fun leaveScreen() {
+        if (exiting) return
+        exiting = true
+        onExit()
+    }
+    fun disconnectSession() {
+        if (exiting) return
+        exiting = true
+        SessionRegistry.close(host.id)
+        onExit()
+    }
     val density = LocalDensity.current
     val adaptive = LocalAdaptive.current
     val context = LocalContext.current
@@ -972,8 +985,7 @@ private fun TerminalView(
         }
         // 断开是危险操作,单独一颗、红色图标,放在最下面(和 ＋ / ✓ 同一个位置)。
         GlassButton(XIcons.Close, stringResource(R.string.term_disconnect_session), tint = p.danger) {
-                SessionRegistry.close(host.id)
-                onExit()
+            disconnectSession()
         }
     }
 
@@ -1041,12 +1053,11 @@ private fun TerminalView(
                 Spacer(Modifier.width(4.dp))
                 if (dead) {
                     // 对端断了(服务器重启、网络掉了):最常见的下一步是重连,放在最显眼的位置。
-                    ToolbarTextButton(stringResource(R.string.term_close), p.textDim) { onExit() }
+                    ToolbarTextButton(stringResource(R.string.term_close), p.textDim) { leaveScreen() }
                     ToolbarTextButton(stringResource(R.string.term_reconnect), p.accent, bold = true) { onReconnect() }
                 } else {
                     ToolbarTextButton(stringResource(R.string.term_disconnect), p.danger) {
-                        SessionRegistry.close(host.id)
-                        onExit()
+                        disconnectSession()
                     }
                 }
             }
