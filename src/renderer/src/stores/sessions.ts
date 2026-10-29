@@ -1519,7 +1519,9 @@ export const useSessions = defineStore('sessions', {
                   ? viaJump
                     ? t('app.keyChangedJumpMsg', { host: keyWhere })
                     : t('app.keyChangedMsg', { host: keyWhere })
-                  : (result.error ?? t('app.connectFail'))
+                  : result.error === 'channel-closed' || result.error === '已关闭'
+                    ? t('app.channelClosed')
+                    : (result.error ?? t('app.connectFail'))
         live.pane.message = msg
         live.pane.errorCode = result.code
         // Host-key rejection: stash what the user is being asked to trust —
@@ -1640,14 +1642,19 @@ export const useSessions = defineStore('sessions', {
       // also makes any trailing `closed` for this session a no-op.
       pane.sshSessionId = undefined
       pane.status = 'error'
-      if (message) pane.message = message
+      // A multiplexed bridge that was already closed reports a machine code
+      // (older builds sent the Chinese literal); show it in the UI language
+      // instead of leaking either into the pane / toast / notification.
+      const lostMsg =
+        message === 'channel-closed' || message === '已关闭' ? t('app.channelClosed') : message
+      if (lostMsg) pane.message = lostMsg
       // When auto-reconnect is on, the "reconnecting…" banner communicates the
       // drop without us flooding a toast per attempt.
-      if (!this.autoReconnect) toast(message ?? t('app.sessionLost'), 'error')
+      if (!this.autoReconnect) toast(lostMsg ?? t('app.sessionLost'), 'error')
       if (this.notifications) {
         window.api.notify(
           t('app.sessionDisconnected'),
-          `${pane.params.username}@${pane.params.host}${pane.params.port !== 22 ? `:${pane.params.port}` : ''}\n${message ?? t('app.sessionLost')}`,
+          `${pane.params.username}@${pane.params.host}${pane.params.port !== 22 ? `:${pane.params.port}` : ''}\n${lostMsg ?? t('app.sessionLost')}`,
           true
         )
       }
