@@ -1,3 +1,20 @@
+# 会话记录:连续改进 M3.100(2026-10-30,复核打磨:SFTP 新建/重命名失败还原编辑器 + 终端日志失败提示 + 滑动删除无障碍两步确认)
+
+功能清单已够,本轮按站立规则做开源复核打磨(不合并)。未动 PR #34 / #33–#12 与更早的 #4–#11。本轮优先实质逻辑/状态/无障碍/i18n,未再堆 busy 闸。
+
+**核过已过时 / 已在未合并 PR(本轮不重做)**:
+1–22. 同 M3.99 所列 PR #12–#33。
+23. checkForUpdates finally + local SFTP delete busy + Snippets deleteOnce —— PR #34。
+
+**修了**:
+1. **SftpDrawer** `commitCreate` / `commitRename`:API 失败时还原 inline 编辑器与已输入名并 `focusEdit`(避免只剩横幅、名字丢光)。
+2. **TerminalView** `toggleLog`:非取消失败 toast;`term.logFail` 三语补齐。
+3. **Android HomeScreen SwipeActions**:TalkBack 删除与视觉一致两步确认(第一下 `confirming`,第二下才 `onDelete`)。
+
+**验证**:`typecheck` + `lint:i18n` + vitest **334** / 30 文件全绿。未跑 Gradle。未合并。
+
+---
+
 # X-SSH 交接文档
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。

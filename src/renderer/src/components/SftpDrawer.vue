@@ -1103,7 +1103,16 @@ async function commitRename(entry: FileEntry, e?: Event): Promise<void> {
     posixJoin(path.value, entry.name),
     posixJoin(path.value, next)
   )
-  if (!r.ok) error.value = r.error ?? tt('sfp.renameFail')
+  if (!r.ok) {
+    // Keep the editor open with what the user typed: a failed rename (name
+    // taken, permission denied) is fixed by editing the name, not by starting
+    // over from the context menu.
+    error.value = r.error ?? tt('sfp.renameFail')
+    renameInput.value = next
+    renamingName.value = entry.name
+    focusEdit()
+    return
+  }
   await load(path.value)
 }
 function startCreate(kind: 'folder' | 'file'): void {
@@ -1123,7 +1132,16 @@ async function commitCreate(e?: Event): Promise<void> {
     kind === 'folder'
       ? await window.api.sftp.mkdir(props.sessionId, target)
       : await window.api.sftp.createFile(props.sessionId, target)
-  if (!r.ok) error.value = r.error ?? tt('sfp.createFail')
+  if (!r.ok) {
+    // Same as rename: a failed mkdir/createFile (already exists, no write
+    // permission) leaves the row in place with the typed name so it can be
+    // corrected and retried, instead of vanishing into a banner.
+    error.value = r.error ?? tt('sfp.createFail')
+    newName.value = name
+    creatingKind.value = kind
+    focusEdit()
+    return
+  }
   await load(path.value)
 }
 // ---- selection-aware operations (used by menu + shortcuts) ----

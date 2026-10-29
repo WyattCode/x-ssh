@@ -8,6 +8,7 @@ import { SearchAddon } from '@xterm/addon-search'
 import { useTheme } from '../composables/theme'
 import { useFontSize } from '../composables/fontSize'
 import { useConfirm } from '../composables/confirm'
+import { useToast } from '../composables/toast'
 import { themeFor } from '../lib/terminalThemes'
 import { useI18n } from '../lib/i18n'
 import { isImeKey } from '../lib/ime'
@@ -91,6 +92,7 @@ const imeAbort = new AbortController()
 
 // ---- Clipboard actions ----
 const { confirm } = useConfirm()
+const { toast } = useToast()
 async function copySelection(): Promise<void> {
   const sel = term?.getSelection()
   if (sel) window.api.clipboard.writeText(sel)
@@ -181,9 +183,17 @@ async function toggleLog(): Promise<void> {
   if (logOn.value) {
     window.api.ssh.stopLog(props.sessionId)
     logOn.value = false
-  } else {
-    const res = await window.api.ssh.startLog(props.sessionId)
-    if (res.ok) logOn.value = true
+    return
+  }
+  // Starting the log can fail (no writable path, or the log manager is not
+  // ready yet and answers a bare { ok: false }). Without a toast the menu item
+  // just looks like it did nothing — the state stays "off" with no explanation.
+  const res: { ok: boolean; canceled?: boolean; error?: string } =
+    await window.api.ssh.startLog(props.sessionId)
+  if (res.ok) {
+    logOn.value = true
+  } else if (!res.canceled) {
+    toast(res.error ? String(res.error) : t('term.logFail'), 'error')
   }
 }
 

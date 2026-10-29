@@ -998,9 +998,19 @@ private fun SwipeActions(
             .height(IntrinsicSize.Min)
             .semantics {
                 // 读屏用户做不了滑动手势,给同样的两个操作。
+                // 删除要和视觉上的两步确认一致:第一下只是亮出「确认删除」,
+                // 第二下才真的删 —— 主机记录里有已信任的指纹和加密存着的密码。
                 customActions = listOf(
                     CustomAccessibilityAction(editLabel) { onEdit(); true },
-                    CustomAccessibilityAction(deleteLabel) { onDelete(); true },
+                    CustomAccessibilityAction(deleteLabel) {
+                        if (!confirming) {
+                            confirming = true
+                            true
+                        } else {
+                            onDelete()
+                            true
+                        }
+                    },
                 )
             },
     ) {
