@@ -13,12 +13,40 @@ const { t } = useI18n()
 const svEl = ref<HTMLElement>()
 useFocusTrap(svEl, () => state.open)
 
+/** The value fields, in render order. */
+function inputs(): HTMLInputElement[] {
+  return [...(svEl.value?.querySelectorAll<HTMLInputElement>('.sv-input') ?? [])]
+}
+
+/** Focuses the first field still empty — defaults may have filled the early
+ *  ones, and landing on a filled field makes the user tab past it. Falls back
+ *  to the first field when every one has a value. */
+function focusFirstEmpty(): void {
+  const list = inputs()
+  const target = list.find((el) => !el.value.trim()) ?? list[0]
+  target?.focus()
+}
+
 watch(
   () => state.open,
   (open, old) => {
-    if (open && !old) {
-      nextTick(() => (document.querySelector('.sv-input') as HTMLInputElement | null)?.focus())
-    }
+    if (open && !old) nextTick(focusFirstEmpty)
+  }
+)
+// A second prompt while the dialog is already open swaps the fields out from
+// under the focus; put it back on the first empty one.
+watch(
+  () => state.vars,
+  () => {
+    if (state.open) nextTick(focusFirstEmpty)
+  }
+)
+// A rejected submit names the field to fix: move the caret there.
+watch(
+  () => state.error,
+  (name) => {
+    if (!name) return
+    nextTick(() => svEl.value?.querySelector<HTMLInputElement>('.sv-input.bad')?.focus())
   }
 )
 
@@ -26,8 +54,11 @@ function onKey(e: KeyboardEvent): void {
   // While an IME is composing, Enter picks a candidate, not "run" — this box
   // exists precisely to type variable values (often Chinese).
   if (isImeKey(e)) return
-  if (e.key === 'Enter') submit()
-  else if (e.key === 'Escape') cancel()
+  if (e.key === 'Enter') {
+    // The dialog owns Enter: don't let it also trigger the default action.
+    e.preventDefault()
+    submit()
+  } else if (e.key === 'Escape') cancel()
 }
 </script>
 
@@ -48,6 +79,7 @@ function onKey(e: KeyboardEvent): void {
             class="sv-input"
             :class="{ bad: state.error === v.name }"
             :placeholder="v.name"
+            @input="state.error = null"
           />
         </label>
         <p v-if="state.error" class="sv-error">{{ t('snip.varsRequired', { name: state.error }) }}</p>

@@ -1,3 +1,27 @@
+# 会话记录:连续改进 M3.86(2026-10-30,复核打磨:TooltipLayer 失焦粘滞 + 片段变量重入/焦点 + 改地址清 reach)
+
+功能清单已够,本轮按站立规则做开源复核打磨(不合并)。未动 PR #20 / #19 / #18 / #17 / #16 / #15 / #14 / #13 / #12 与更早的 #4–#11。
+
+**核过已过时 / 已在未合并 PR(本轮不重做)**:
+1. TransferPanel 失败原因 / ETA + Android 罚分地板 —— PR #12。
+2. 桌面重连中途罚分地板 + local/SOCKS `forwardOut` 超时 —— PR #13。
+3. HostEditor 密钥小层陷阱 / 命令面板遮罩回退 / 强调色样本 / 分组标签按下 —— PR #14。
+4. TransferPanel 暂停图标响应式 / Android 坏 SFTP 句柄丢弃 / ForwardDialog Enter —— PR #15。
+5. sendSnippet 活会话复核 / known_hosts·片段删除确认 / ForwardsPage 切 mode 清错 —— PR #16。
+6. 快照恢复确认 + 关闭其他尊重 confirmClose + 侧栏按下缩小 —— PR #17。
+7. OSC52 空白 base64 + 主锁 Enter/busy + 离线点透明度 —— PR #18。
+8. 主题循环竞态 + 关闭全部确认 + 连接日志 disconnect/滚动 —— PR #19。
+9. ZoomHud 失焦粘滞 + 窗格失焦 blur + keyManager IPC 错误码 —— PR #20。
+
+**修了**:
+1. **TooltipLayer 失焦粘滞**:`lib/tooltipDismiss.ts` `shouldDismissTooltip`;`TooltipLayer` 在 `window.blur` / `visibilitychange→hidden` 时 `release()` —— Alt-Tab 时延迟/已显示的 tip 不会永远挂着,title 也不会一直被摘掉。
+2. **片段变量对话框**:`prompt` 重入时完整拆掉上一次(resolve=null + 关窗),避免挂死的 Promise;无占位符的后续调用也不会留下空壳对话框。`fillSnippetText` 抽出可测;`SnippetVarsDialog` Enter `preventDefault`、打开聚焦第一个空框、校验失败聚焦 `.bad`、输入清 error。
+3. **改地址 / 删主机清 reach**:`sessions.clearReach`;HostsPage 在地址/端口变更后先清再探,避免还亮着旧 IP 的绿点;删除主机顺手丢掉孤儿 reach。
+
+**验证**:`typecheck` + `lint:i18n` + vitest **342** 全绿(原 334;+`tooltipDismiss` 4 + `snippetVars` 4)。Android 本轮未改。未合并。
+
+---
+
 # X-SSH 交接文档
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。
