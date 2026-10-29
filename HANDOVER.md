@@ -2,6 +2,24 @@
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。
 
+## HANDOVER M3.134 — layout preset confirmClose + lang persist + sftpRecent rollback (PR open, NOT merged)
+
+Branch: `fix/review-polish-m3134` from `origin/main`. Do **not** merge; do **not** touch open PRs #4–#68.
+
+### Shipped
+1. **applyLayoutPreset honors confirmClose** — confirm + send `exit` + `cancelReconnect` before disconnecting other panes when any is connected.
+2. **Language persist fail-closed** — removed fire-and-forget `watch(pref)`; `setLang` writes first, only then flips `pref`; toasts `app.langFail` on refuse/throw.
+3. **addSftpRecent silent rollback** — memory restored when `settings.set` refuses/throws (no toast).
+
+### Verify
+- `npm run typecheck` / `lint:i18n` / `test` (expect ≥334).
+- Manual: confirm-on-close + multi-pane → layout preset dialog; refuse lang write → UI stays; SFTP browse with refused sftpRecent → MRU unchanged.
+
+### Not in this PR
+openSnapshot/closeOthers/saveSetting (#68), theme/transfer clears (#67), bookmarks (#65), SettingsStore (#64), zoom/fontSize/sftpShowHidden, queueUpload, TabBar.vue.
+
+---
+
 ## 项目概述
 - 极简、键盘优先的 SSH 客户端。Electron + Vue 3 (Vite) + TypeScript。
 - 平台: Windows (`win32`)。目录: `D:\Documents\Claude Code\X-SSH`。

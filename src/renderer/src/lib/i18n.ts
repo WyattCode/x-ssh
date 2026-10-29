@@ -1,5 +1,8 @@
 import { computed, ref, watch, readonly, type Ref } from 'vue'
 import { langFromLocales, parseLangPref, type LangPref, type UiLang } from '../../../shared/lang'
+import { useToast } from '../composables/toast'
+
+const { toast } = useToast()
 
 /** 'zh' = Simplified Chinese, 'zh-TW' = Traditional Chinese (Taiwan), 'en' = English. */
 export type Lang = UiLang
@@ -72,6 +75,7 @@ const zh: Dict = {
   'app.reconnectFail': '多次自动重连失败,请手动重连',
   'app.autoRetrySoon': '将自动重试',
   'app.networkOffline': '网络已断开,离线中',
+  'app.langFail': '语言设置未能保存',
   'app.networkOnline': '网络已恢复',
   'app.reconnecting': '连接已断开 · 第 {attempt} 次自动重连…',
   'app.closeTabConfirm': '标签「{title}」仍有活跃会话,确定关闭吗?关闭前会先发送 exit。',
@@ -712,6 +716,7 @@ const zh: Dict = {
   'tabbar.splitAction': '左右分屏',
   'tabbar.splitColAction': '上下分屏',
   'tabbar.layout': '分屏与布局',
+  'tabbar.layoutConfirm': '应用此布局会关闭其他活跃面板。关闭前会先发送 exit。继续吗?',
   'tabbar.preset': '布局：{n} 格',
   'tabbar.sftp': '文件传输 (SFTP)',
   'tabbar.settings': '设置 ({key})',
@@ -854,6 +859,7 @@ const en: Dict = {
   'app.reconnectFail': 'Auto-reconnect failed after multiple tries; reconnect manually',
   'app.autoRetrySoon': 'Will retry automatically',
   'app.networkOffline': 'Network disconnected — offline',
+  'app.langFail': 'Could not save language',
   'app.networkOnline': 'Network restored',
   'app.reconnecting': 'Connection lost · auto-reconnect #{attempt}…',
   'app.closeTabConfirm': 'Tab "{title}" still has an active session. Close it? An `exit` is sent first.',
@@ -1484,6 +1490,7 @@ const en: Dict = {
   'tabbar.splitAction': 'Split left/right',
   'tabbar.splitColAction': 'Split top/bottom',
   'tabbar.layout': 'Split & layout',
+  'tabbar.layoutConfirm': 'This layout will close other live panes. An exit is sent first. Continue?',
   'tabbar.preset': 'Layout: {n} panes',
   'tabbar.sftp': 'File transfer (SFTP)',
   'tabbar.settings': 'Settings ({key})',
@@ -1629,6 +1636,7 @@ const zhTW: Dict = {
   'app.reconnectFail': '多次自動重新連線失敗,請手動重新連線',
   'app.autoRetrySoon': '將自動重試',
   'app.networkOffline': '網路已中斷,離線中',
+  'app.langFail': '語言設定未能儲存',
   'app.networkOnline': '網路已恢復',
   'app.reconnecting': '連線已中斷 · 第 {attempt} 次自動重新連線…',
   'app.closeTabConfirm': '分頁「{title}」仍有作用中的工作階段,確定要關閉嗎?關閉前會先傳送 exit。',
@@ -2270,6 +2278,7 @@ const zhTW: Dict = {
   'tabbar.splitAction': '左右分割',
   'tabbar.splitColAction': '上下分割',
   'tabbar.layout': '分割與版面配置',
+  'tabbar.layoutConfirm': '套用此版面會關閉其他作用中的窗格。關閉前會先傳送 exit。要繼續嗎?',
   'tabbar.preset': '版面配置：{n} 格',
   'tabbar.sftp': '檔案傳輸 (SFTP)',
   'tabbar.settings': '設定 ({key})',
@@ -2381,9 +2390,6 @@ document.documentElement.lang = htmlLang(lang.value)
 watch(lang, (v) => {
   document.documentElement.lang = htmlLang(v)
 })
-watch(pref, (v) => {
-  void window.api.settings.set('lang', v)
-})
 
 /** BCP 47 tag for <html lang>, so fonts / line breaking pick the right variant. */
 function htmlLang(l: Lang): string {
@@ -2413,7 +2419,19 @@ export function useI18n(): {
     lang,
     langPref: readonly(pref),
     setLang: (l: LangPref) => {
-      pref.value = l
+      if (l === pref.value) return
+      void (async () => {
+        try {
+          const r = await window.api.settings.set('lang', l)
+          if (r && r.ok === false) {
+            toast(translate(lang.value, 'app.langFail'), 'error')
+            return
+          }
+          pref.value = l
+        } catch {
+          toast(translate(lang.value, 'app.langFail'), 'error')
+        }
+      })()
     },
     t: (key: string, vars?: Vars) => translate(lang.value, key, vars)
   }
