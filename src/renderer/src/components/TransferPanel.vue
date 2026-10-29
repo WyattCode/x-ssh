@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useSessions } from '../stores/sessions'
 import { useI18n } from '../lib/i18n'
 import { canRevealHistory } from '../lib/transferHistory'
@@ -14,6 +14,15 @@ import Icon from './Icon.vue'
 
 const store = useSessions()
 const { t } = useI18n()
+
+// Esc closes the panel, like the other overlays (HistorySearch, palette).
+function onPanelKey(e: KeyboardEvent): void {
+  if (e.key !== 'Escape' || !store.transferPanelOpen) return
+  e.preventDefault()
+  store.toggleTransferPanel(false)
+}
+onMounted(() => window.addEventListener('keydown', onPanelKey))
+onUnmounted(() => window.removeEventListener('keydown', onPanelKey))
 
 // Paused job ids (in-memory, main-driven). Tracked here so the resume button
 // shows only for paused rows, and a global "resume all" reflects the state.
@@ -79,7 +88,7 @@ function fmtSpeed(id: string): string {
     <section class="tpanel">
       <header class="tp-head">
         <span class="tp-title">{{ t('tpanel.title') }}</span>
-        <button class="tp-x" title="Close" @click="store.toggleTransferPanel(false)">
+        <button class="tp-x" :title="t('fileDiff.close')" @click="store.toggleTransferPanel(false)">
           <Icon name="close" :size="16" />
         </button>
       </header>

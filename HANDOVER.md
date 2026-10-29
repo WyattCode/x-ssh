@@ -1,3 +1,25 @@
+# 会话记录:连续改进 M3.92(2026-10-30,复核打磨:传输面板 Esc/关闭文案 + 密钥导入删除 busy + 删主机清 reach + Android 生物识别串行)
+
+功能清单已够,本轮按站立规则做开源复核打磨(不合并)。未动 PR #26 / #25–#12 与更早的 #4–#11。
+
+**核过已过时 / 已在未合并 PR(本轮不重做)**:
+1–14. 同 M3.91 所列 PR #12–#25。
+15. 快照删除/空布局保存 + 跟随药丸恢复跟随 + 日志失败 toast + Android Name/Confirm 双提交 —— PR #26。
+16. TransferPanel 暂停响应性(`pausedIds` Set→响应式)—— PR #15;本轮只做 Esc/关闭 title。
+17. Settings 强调色色板空值显示 —— PR #14;本轮未改 accent 写入。
+18. 改地址清 reach —— PR #21;本轮补删主机清 reach。
+19. keyGen busy —— PR #25;本轮只补 import/delete busy。
+
+**修了**:
+1. **TransferPanel**:关闭按钮 `title="Close"` → `:title="t('fileDiff.close')"`;Esc 关面板(与 HistorySearch 等一致)。
+2. **HostEditor 密钥库**(keyModal 之外):`importKey` / `deleteKey` 加 `importing` / `deletingId` 闸 + 按钮 disabled,防双开系统对话框 / 叠确认双删。
+3. **HostsPage reach**:`removeHost` 从 `reach` 丢掉已删 id(改地址清 reach 之外的泄漏)。
+4. **Android SecretUnlock**:`authMutex` 串行生物识别;拿锁后再试一次直读,避免双击连接 / 主机+跳板叠两张系统解锁框。
+
+**验证**:`typecheck` + vitest **334** / 30 文件全绿。未跑 Gradle。未合并。
+
+---
+
 # X-SSH 交接文档
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。

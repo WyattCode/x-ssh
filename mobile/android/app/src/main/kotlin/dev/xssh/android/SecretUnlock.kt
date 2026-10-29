@@ -8,7 +8,12 @@ import android.util.Log
 import kotlin.coroutines.resume
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+
+/** Serialize prompts so a double-tap / host+jump unlock cannot stack two system sheets. */
+private val authMutex = Mutex()
 
 /**
  * 读一条加锁的凭据,不够就先弹一次解锁。
@@ -38,11 +43,15 @@ suspend fun unlockSecret(activity: Activity, sealed: String): String? {
         Log.w(TAG, "locked secret unreadable: ${cause?.javaClass?.simpleName} ${cause?.message} / cause=${cause?.cause}")
         return null
     }
-    if (!authenticate(activity)) return null
-    return withContext(Dispatchers.IO) {
-        runCatching { Secrets.readLocked(sealed) }
-            .onFailure { Log.w(TAG, "unlock read failed: ${it.javaClass.simpleName} ${it.message} / cause=${it.cause}") }
-            .getOrNull()
+    return authMutex.withLock {
+        // Another coroutine may have just authenticated while we waited.
+        runCatching { Secrets.readLocked(sealed) }.getOrNull()?.let { return@withLock it }
+        if (!authenticate(activity)) return@withLock null
+        withContext(Dispatchers.IO) {
+            runCatching { Secrets.readLocked(sealed) }
+                .onFailure { Log.w(TAG, "unlock read failed: ${it.javaClass.simpleName} ${it.message} / cause=${it.cause}") }
+                .getOrNull()
+        }
     }
 }
 
@@ -56,7 +65,7 @@ suspend fun unlockForWrite(activity: Activity): Boolean {
         Log.w(TAG, "unlockForWrite: SDK too old")
         return false
     }
-    return authenticate(activity)
+    return authMutex.withLock { authenticate(activity) }
 }
 
 /**

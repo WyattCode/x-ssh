@@ -1217,6 +1217,12 @@ export const useSessions = defineStore('sessions', {
     },
     async removeHost(id: string): Promise<void> {
       this.hosts = await window.api.hosts.delete(id)
+      // Drop the deleted host's probe result too — nothing else ever removes an
+      // id from `reach`, so it would sit there for the life of the process.
+      if (id in this.reach) {
+        const { [id]: _gone, ...rest } = this.reach
+        this.reach = rest
+      }
     },
     /** A copy under a fresh id. Saved passwords stay with the original (they're
      *  keyed by id); the copy asks on first connect. */
