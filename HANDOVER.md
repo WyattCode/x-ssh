@@ -2,6 +2,27 @@
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。
 
+# 会话记录:连续改进 M3.81(2026-10-30,复核打磨:snippet 发送前活会话复核 + known_hosts/片段删除确认 + ForwardsPage 切 mode 清错)
+
+功能清单已够,本轮按站立规则做开源复核打磨(不合并)。未动 PR #15 / #14 / #13 / #12 与更早的 #4–#11。
+
+**核过已过时 / 已在未合并 PR(本轮不重做)**:
+1. TransferPanel 失败原因 / ETA —— PR #12。
+2. Android PerSourcePenalties 30s 罚分地板 —— PR #12。
+3. 桌面重连中途罚分地板 + local/SOCKS `forwardOut` 超时 —— PR #13。
+4. HostEditor 密钥小层陷阱 / 命令面板遮罩回退 / 强调色样本 / 分组标签按下 —— PR #14。
+5. TransferPanel 暂停图标响应式 / Android 坏 SFTP 句柄丢弃 / ForwardDialog Enter —— PR #15。
+
+**修了**:
+1. **桌面 sendSnippet 对话框后仍往死会话打字**:确认 / 填变量 `await` 之后用 `liveSnippetSessionId` + `paneBySession` 复核原 `sid` 仍是 connected 且匹配,否则 toast `app.needLiveSession`;`lib/snippetSession.ts` + 5 条单测。
+2. **设置 → 安全 known_hosts 删除无确认**:`forgetKnownHost` 先 `confirm(set.sec.forgetConfirm)`(danger)。
+3. **设置 → 常规片段删除无确认**:`deleteSnippet` 先 `confirm(set.gen.snipDeleteConfirm)`(danger,带标题)。
+4. **端口转发页切 mode 残留坏端口错**:`watch(() => form.mode, …)` 清 `err`(与 #15 ForwardDialog 同口径)。
+
+**验证**:`typecheck` + `lint:i18n` + vitest **339** 全绿(原 334;+`snippetSession` 5)。Android 本轮未改。未合并。
+
+---
+
 ## 项目概述
 - 极简、键盘优先的 SSH 客户端。Electron + Vue 3 (Vite) + TypeScript。
 - 平台: Windows (`win32`)。目录: `D:\Documents\Claude Code\X-SSH`。

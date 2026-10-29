@@ -108,6 +108,7 @@ watch(formOpen, (open) => {
   }
   err.value = ''
 })
+watch(() => form.mode, () => { err.value = '' })
 const targetIsSaved = computed(() => form.target.startsWith('h:'))
 
 async function add(): Promise<void> {

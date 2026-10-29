@@ -6,6 +6,7 @@ import { useConfirm } from '../composables/confirm'
 import { useSnippetVars } from '../composables/snippetVars'
 import { clampConcurrency } from '../../../shared/fsUtils'
 import { decideStatusEvent, retryDelayMs, shouldReviveOnOnline } from '../lib/reconnect'
+import { liveSnippetSessionId } from '../lib/snippetSession'
 import {
   buildFlatTree,
   buildGrid,
@@ -658,8 +659,17 @@ export const useSessions = defineStore('sessions', {
       }
       const text = await useSnippetVars().prompt(snippet)
       if (text == null) return
+      // The dialogs above awaited: the session may have dropped, its pane
+      // closed, or the user switched away in the meantime. Re-check that the
+      // captured id is still the live session of a connected pane before typing
+      // into it — otherwise the snippet lands in a dead (or reused) session.
+      const live = liveSnippetSessionId(sid, this.paneBySession(sid))
+      if (!live) {
+        toast(t('app.needLiveSession'), 'info')
+        return
+      }
       const send = text.endsWith('\n') ? text : text + '\n'
-      window.api.ssh.input(sid, send)
+      window.api.ssh.input(live, send)
     },
 
     async loadKnownHosts(): Promise<void> {
