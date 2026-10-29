@@ -97,6 +97,12 @@
 - **`settings:set` 只接受白名单里的键**(`shared/settingsKeys.ts`)。渲染层被拒时 `store.saveSetting` 会 `console.error` —— "界面说存好了、其实没写进去"是这一类里最贵的 bug。
 - **主进程里没有非空断言了**。需要 SSH 管理器的地方用 `requireSshManager()`(只有晚于窗口创建的 handler 才可以用);能在窗口创建前被调用到的(如 `sessionLog`、fire-and-forget 的 `send`)必须自己判空。
 
+## M3.76 Windows Hello 私钥门禁（桌面）
+
+- Windows 可选：连接使用私钥前经 `UserConsentVerifier`（powershell.exe）做系统验证；会话缓存 5 分钟；锁屏/`suspend` 清除。
+- **不是**私钥文件加密（`userData/keys/*` 仍是 0600 明文）；与安卓 M3.72 Keystore 生物识别不是同一强度。
+- 门禁关或非 Windows：无行为变化。Hello 未配置时 fail-open 并记连接日志 `userVerifyUnavailable`。
+
 ## 下一步(如果继续)
 - **待亲眼看的**(都只过了 typecheck / 单测):
   - ~~设置 → 常规 → 语言那一排四个按钮排不排得下~~、~~繁体界面整体过一遍~~ 已在应用内点过(第二十三次会话:四个按钮 285px / 容器 296px 不溢出,繁體各页无截断);剩下 Codex 里右键「复制」和菜单靠底部时收进窗口仍未验。

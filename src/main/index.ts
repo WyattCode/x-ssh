@@ -21,12 +21,14 @@ import { SettingsStore } from './settings'
 import { friendlyError } from './friendlyError'
 import { KeyManager } from './keyManager'
 import { MasterLock } from './lock'
+import { registerUserVerifyIpc, gateKeyConnect, userVerifyBlocksQuiet } from './userVerifyIpc'
 
 const store = new HostStore()
 const knownHosts = new KnownHosts()
 const settings = new SettingsStore()
 const keyManager = new KeyManager(app.getPath('userData'))
 const masterLock = new MasterLock(settings)
+const userVerify = registerUserVerifyIpc({ settings })
 const activeEdits = new Set<string>()
 // Cache of drag-out downloads keyed by session:paths, so files prefetched on
 // mousedown are ready by the time the drag gesture reaches startDrag.
@@ -520,6 +522,13 @@ async function withTempHosts(
           params.jump = jump
         }
       }
+      {
+        const gate = await gateKeyConnect(userVerify, params)
+        if (!gate.proceed) {
+          results.push({ host: hostLabel, ok: false, error: gate.result.error ?? '系统验证失败' })
+          continue
+        }
+      }
       const r = await requireSshManager().connect(params)
       if (!r.ok || !r.sessionId) {
         results.push({ host: hostLabel, ok: false, error: r.error ?? '连接失败' })
@@ -832,6 +841,7 @@ async function detectMissingOs(onlineIds: string[]): Promise<void> {
         try {
           const params = await quietParams(h)
           if (!params) continue // nothing to log in with (yet): try again once there is
+          if (await userVerifyBlocksQuiet(userVerify)) continue
           osTried.add(key(h))
           const out = await sshManager.quietExec(params, OS_PROBE_COMMAND)
           log('connect')
@@ -1370,6 +1380,20 @@ function registerIpc(): void {
       }
     }
     if (params.multiplex === undefined) params.multiplex = (await settings.get<boolean>('connectionMultiplex')) === true
+    {
+      const gate = await gateKeyConnect(userVerify, params)
+      if (!gate.proceed) return gate.result
+      if (gate.warned) {
+        void pushConnLog({
+          at: Date.now(),
+          event: 'error',
+          host: params.host,
+          port: params.port,
+          username: params.username,
+          detail: 'userVerifyUnavailable'
+        }).catch(() => undefined)
+      }
+    }
     const result = await sshManager.connect(params)
     if (result.ok && params.hostId) {
       await store.touch(params.hostId)
@@ -2002,6 +2026,7 @@ function registerIpc(): void {
   })
   ipcMain.handle(IPC.lockLockNow, () => {
     masterLock.lock()
+    userVerify.clearSession()
     store.setLocked(masterLock.locked)
     // Locking can also close any sessions that used saved secrets? No — leave
     // live sessions running; the door is just shut for new discovery.
@@ -2282,6 +2307,12 @@ app.whenReady().then(async () => {
     for (const w of BrowserWindow.getAllWindows()) {
       if (!w.isDestroyed()) w.webContents.send(IPC.appOnlineChanged, true)
     }
+  })
+  powerMonitor.on('lock-screen', () => {
+    userVerify.clearSession()
+  })
+  powerMonitor.on('suspend', () => {
+    userVerify.clearSession()
   })
 
   app.on('activate', () => {

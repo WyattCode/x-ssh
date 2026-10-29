@@ -103,6 +103,22 @@ const api = {
     reset: (passphrase: string): Promise<{ ok: boolean; enabled: boolean; locked: boolean }> =>
       ipcRenderer.invoke(IPC.lockReset, passphrase)
   },
+  userVerify: {
+    status: (): Promise<{
+      supported: boolean
+      enabled: boolean
+      available: 'available' | 'unavailable' | 'unsupported'
+      sessionUnlocked: boolean
+    }> => ipcRenderer.invoke(IPC.userVerifyStatus),
+    setEnabled: (on: boolean): Promise<{
+      supported: boolean
+      enabled: boolean
+      available: 'available' | 'unavailable' | 'unsupported'
+      sessionUnlocked: boolean
+    }> => ipcRenderer.invoke(IPC.userVerifySetEnabled, on),
+    test: (): Promise<{ outcome: 'verified' | 'canceled' | 'unavailable' | 'failed' | 'unsupported'; detail?: string }> =>
+      ipcRenderer.invoke(IPC.userVerifyTest)
+  },
   snippets: {
     list: (): Promise<Snippet[]> => ipcRenderer.invoke(IPC.snippetsList),
     save: (snippet: Snippet): Promise<Snippet[]> =>

@@ -9,6 +9,10 @@
 export const isMac =
   typeof window !== 'undefined' && window.api?.platform === 'darwin'
 
+/** True on Windows — gates Windows Hello (UserVerify) UI. */
+export const isWin =
+  typeof window !== 'undefined' && window.api?.platform === 'win32'
+
 /** True when the platform's app-level modifier is held: ⌘ on macOS, Ctrl elsewhere. */
 export function appMod(e: { ctrlKey: boolean; metaKey: boolean }): boolean {
   return isMac ? e.metaKey : e.ctrlKey

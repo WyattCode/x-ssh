@@ -120,6 +120,11 @@ export const IPC = {
   lockLockNow: 'lock:lockNow',
   lockReset: 'lock:reset',
 
+  // Windows Hello user verification (invoke/handle)
+  userVerifyStatus: 'userVerify:status',
+  userVerifySetEnabled: 'userVerify:setEnabled',
+  userVerifyTest: 'userVerify:test',
+
   // Misc
   pickKeyFile: 'dialog:pickKey',
   pickExecutable: 'dialog:pickExecutable',

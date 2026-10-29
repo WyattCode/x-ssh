@@ -2629,3 +2629,4 @@ md5 `c07a2398…`(1054 字节)。**主机密钥指纹是空的**(重建主机时
   第七次会话**改了 Rust 核心和 FFI**(`input_modes`、选区、私钥、生成密钥、SFTP),`.so` 与 Kotlin 绑定都已重新生成;别的设备上的旧 APK 要重装。
   SFTP live 测试:`XSSH_TEST_HOST=127.0.0.1 XSSH_TEST_PORT=2222 XSSH_TEST_USER=user XSSH_TEST_KEY=%LOCALAPPDATA%\Temp\opencode\xssh-sshd\id_xssh_dev`
   + `cargo test -p xssh-core --test live_ssh -- --ignored`(2 个都过)。
+- 桌面 M3.76：Windows Hello 仅为 UI/会话门禁（弱于安卓 Keystore 生物识别锁）。
