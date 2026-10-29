@@ -387,7 +387,14 @@ async function remove(): Promise<void> {
     danger: true
   })
   if (!ok) return
-  store.hosts = await window.api.hosts.delete(props.host.id)
+  try {
+    store.hosts = await window.api.hosts.delete(props.host.id)
+  } catch {
+    // Main rejects when the hosts file cannot be written (disk full, unreadable
+    // file). Without this the panel just sat there with nothing said.
+    toast(t('hosts.deleteFail'), 'error')
+    return
+  }
   emit('close')
 }
 </script>

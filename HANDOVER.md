@@ -2,6 +2,15 @@
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。
 
+## HANDOVER M3.129 — 设置写失败不再假装成功 / 快照回滚 / 删除主机失败提示
+
+分支 `fix/review-polish-m3129`(从 `origin/main` 切出),**不合并**;跳过 #4–#63 的开放 PR(尤其 #63 writeLabels / knownHostsForget / ForwardsPage、#62 matchesRejectedKey / trustFail / ForwardDialog、#61 AutoBackupResult、#60 logWrite / tmuxList、#59 forwards / updateOpenFail、#58 linkOpenFail / revealLocal / tmuxAttach、#57 localList / openExternal、#55/#56/#47/#44/#43 TransferPanel reveal)。只做实质缺陷与 UI 打磨,不加功能。
+
+- **A(P0)设置写盘失败不再被吞**:`SettingsStore.set` 原来把写失败 `.catch` 成一条日志、返回的 promise 照样 resolve,IPC `settings:set` 于是回 `{ ok: true }` —— 渲染层乐观更新、用户以为存住了,下次启动又变回旧值。现在 `set` 返回的 `op` 会 reject(调用方 / IPC 看得到),队列本身用 `op.catch(...)` 续上,一次磁盘错误不会堵死后面所有键;`settings:set` 捕获后回 `{ ok: false, error: 'settings-write-failed' }`(不让 invoke 直接 reject,渲染层本来就按 `ok` 分支)。主进程两处 fire-and-forget(`windowBounds`、`sessionHistory`)补 `.catch(() => undefined)`,避免变成未处理的 rejection。`settings.test.ts` 新增一条:写失败时 reject、之后 `set` 仍能成功、`flush()` 不重抛(用可切换的 `writeDurable` 桩 —— chmod 在 Windows 上对目录无效,不能拿它造失败)。
+- **B(P1)快照保存 / 删除失败回滚**:`saveSnapshot` / `deleteSnapshot` 先改内存再写盘、且不看返回值 —— 主进程拒绝该键或写失败时界面照样显示快照。现在记下旧列表,`ok === false` 就回滚并 toast(`pal.snapFail` / `pal.snapDeleteFail`)。
+- **C(P1)删除主机失败有提示**:`HostEditor.remove` 确认后直接 `await hosts.delete`,写盘失败时面板不关也没有任何说明。现在 try/catch,失败 toast `hosts.deleteFail` 并留在面板里(与 `save` 的 `ed.saveFail` 一致)。
+- i18n 三个字典各加 3 个键(`pal.snapFail` / `pal.snapDeleteFail` / `hosts.deleteFail`),`npm.cmd run lint:i18n` 需保持对称。
+
 ## 项目概述
 - 极简、键盘优先的 SSH 客户端。Electron + Vue 3 (Vite) + TypeScript。
 - 平台: Windows (`win32`)。目录: `D:\Documents\Claude Code\X-SSH`。
