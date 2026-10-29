@@ -7,9 +7,11 @@ import { useSessions } from '../stores/sessions'
 import { useI18n } from '../lib/i18n'
 import { isImeKey } from '../lib/ime'
 import Icon from './Icon.vue'
+import { useToast } from '../composables/toast'
 
 const store = useSessions()
 const { t } = useI18n()
+const { toast } = useToast()
 
 const query = ref('')
 const inputEl = ref<HTMLInputElement>()
@@ -98,7 +100,9 @@ function exportLog(): void {
 }
 
 function pick(hit: Hit): void {
-  store.focusSession(hit.sessionId)
+  if (!store.focusSession(hit.sessionId)) {
+    toast(t('hist.sessionGone'), 'info')
+  }
   store.toggleHistory(false)
 }
 function copy(hit: Hit): void {
