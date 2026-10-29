@@ -575,9 +575,17 @@ function fmtBytes(n: number): string {
   return `${(n / 1024 ** i).toFixed(i ? 1 : 0)} ${u[i]}`
 }
 async function importSshConfig(): Promise<void> {
-  await window.api.hosts.importSshConfig()
+  const r = await window.api.hosts.importSshConfig()
+  if (!r.ok) {
+    toast(
+      r.error === 'ssh-config-missing' ? t('set.sec.sshConfigMissing') : (r.error ?? t('set.sec.importFail')),
+      'error'
+    )
+    return
+  }
   await store.loadHosts()
   await store.loadKnownHosts()
+  toast(`${t('set.sec.imported')} ${r.count ?? 0} ${t('set.sec.hosts')}`, 'success')
 }
 async function exportHostsJson(): Promise<void> {
   const r = await window.api.hosts.exportJson()

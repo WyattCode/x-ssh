@@ -42,7 +42,7 @@ let sshManager: SshManager | null = null
  * handler instead of failing cleanly.
  */
 function requireSshManager(): SshManager {
-  if (!sshManager) throw new Error('窗口尚未就绪')
+  if (!sshManager) throw new Error('window-not-ready')
   return sshManager
 }
 
@@ -483,7 +483,7 @@ async function withTempHosts(
     const h = (await store.list()).find((x) => x.id === hostId)
     const hostLabel = h ? `${h.username}@${h.host}${h.port && h.port !== 22 ? `:${h.port}` : ''}` : hostId
     if (!h) {
-      results.push({ host: hostLabel, ok: false, error: '主机不存在' })
+      results.push({ host: hostLabel, ok: false, error: 'host-missing' })
       continue
     }
     const params: ConnectParams = {
@@ -497,7 +497,7 @@ async function withTempHosts(
     }
     try {
       if (store.isLocked && !params.password && !params.passphrase) {
-        results.push({ host: hostLabel, ok: false, error: '应用已锁定' })
+        results.push({ host: hostLabel, ok: false, error: 'app-locked' })
         continue
       }
       if (h.auth === 'password' && !params.password) params.password = await store.getPassword(h.id)
@@ -522,7 +522,7 @@ async function withTempHosts(
       }
       const r = await requireSshManager().connect(params)
       if (!r.ok || !r.sessionId) {
-        results.push({ host: hostLabel, ok: false, error: r.error ?? '连接失败' })
+        results.push({ host: hostLabel, ok: false, error: r.error ?? 'connect-failed' })
         continue
       }
       const sid = r.sessionId
@@ -660,7 +660,7 @@ async function importSshConfig(): Promise<{ ok: boolean; count: number; error?: 
   try {
     raw = await readFile(cfgPath, 'utf8')
   } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return { ok: false, count: 0, error: '未找到 ~/.ssh/config' }
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return { ok: false, count: 0, error: 'ssh-config-missing' }
     return { ok: false, count: 0, error: friendlyError((e as Error).message) }
   }
   const parsed = parseSshConfig(raw)
@@ -1313,7 +1313,7 @@ function registerIpc(): void {
 
   // ---- SSH lifecycle ----
   ipcMain.handle(IPC.sshConnect, async (_e, params: ConnectParams) => {
-    if (!sshManager) return { ok: false, error: '窗口尚未就绪' }
+    if (!sshManager) return { ok: false, error: 'window-not-ready' }
     // Resolve a saved password when connecting to a stored host. When the app
     // is locked, don't auto-fill a saved secret — return a clear 'locked' error
     // so the renderer surfaces the unlock prompt instead of failing obscurely.
@@ -1435,7 +1435,7 @@ function registerIpc(): void {
       if (res.canceled || !res.filePath) return { ok: false, canceled: true }
       // `sshManager` is null until the window is created; a non-null assertion
       // here would throw inside the IPC handler instead of failing cleanly.
-      if (!sshManager) return { ok: false, error: '窗口尚未就绪' }
+      if (!sshManager) return { ok: false, error: 'window-not-ready' }
       const ok = sshManager.startLog(sessionId, res.filePath)
       return { ok, canceled: false, path: res.filePath }
     }
@@ -1464,17 +1464,17 @@ function registerIpc(): void {
     return { ok: true }
   })
   ipcMain.handle(IPC.sshForwardAdd, (_e, sessionId: string, rule: HostForward) => {
-    if (!sshManager) return { ok: false, error: '窗口未就绪' }
+    if (!sshManager) return { ok: false, error: 'window-not-ready' }
     return sshManager.addForward(sessionId, rule)
   })
   ipcMain.handle(IPC.sshForwardRemove, (_e, sessionId: string, rule: { mode?: ForwardMode; localPort: number }) => {
-    if (!sshManager) return { ok: false, error: '窗口未就绪' }
+    if (!sshManager) return { ok: false, error: 'window-not-ready' }
     return sshManager.removeForward(sessionId, rule)
   })
 
   // ---- SFTP ----
   ipcMain.handle(IPC.sftpList, (_e, sessionId: string, path?: string) => {
-    if (!sshManager) throw new Error('窗口未就绪')
+    if (!sshManager) throw new Error('window-not-ready')
     return sshManager.listDir(sessionId, path)
   })
   ipcMain.handle(
@@ -1504,7 +1504,7 @@ function registerIpc(): void {
   ipcMain.handle(
     IPC.sftpUpload,
     async (_e, sessionId: string, remoteDir: string, concurrency?: number, overwrite?: UploadOverwrite) => {
-      if (!sshManager) return { ok: false, error: '窗口未就绪', count: 0 }
+      if (!sshManager) return { ok: false, error: 'window-not-ready', count: 0 }
       const res = await dialog.showOpenDialog({
         properties: ['openFile', 'multiSelections']
       })
@@ -1531,7 +1531,7 @@ function registerIpc(): void {
        *  there would hang every unattended call. */
       overwriteLocal?: boolean
     ) => {
-      if (!sshManager) return { ok: false, error: '窗口未就绪' }
+      if (!sshManager) return { ok: false, error: 'window-not-ready' }
       const res = await dialog.showOpenDialog({
         title: await dl('pickDownloadDir'),
         properties: ['openDirectory']
@@ -1577,7 +1577,7 @@ function registerIpc(): void {
       /** See sftp:downloadMany — resume must not ask again. */
       overwriteLocal?: boolean
     ) => {
-      if (!sshManager) return { ok: false, error: '窗口未就绪' }
+      if (!sshManager) return { ok: false, error: 'window-not-ready' }
       // Confirmation before overwriting existing local files in the target dir.
       if (!overwriteLocal && !(await confirmOverwriteLocal(items.map((it) => join(targetDir, it.name))))) {
         return { ok: false, canceled: true }
@@ -1595,7 +1595,7 @@ function registerIpc(): void {
   ipcMain.handle(
     IPC.sftpUploadDir,
     async (_e, sessionId: string, remoteDir: string, concurrency?: number, overwrite?: UploadOverwrite) => {
-      if (!sshManager) return { ok: false, error: '窗口未就绪', count: 0 }
+      if (!sshManager) return { ok: false, error: 'window-not-ready', count: 0 }
       const res = await dialog.showOpenDialog({
         title: await dl('pickUploadDir'),
         properties: ['openDirectory', 'multiSelections']
@@ -1615,7 +1615,7 @@ function registerIpc(): void {
   ipcMain.handle(
     IPC.sftpUploadPaths,
     async (_e, sessionId: string, remoteDir: string, paths: string[], concurrency?: number, overwrite?: UploadOverwrite) => {
-      if (!sshManager) return { ok: false, error: '窗口未就绪', count: 0 }
+      if (!sshManager) return { ok: false, error: 'window-not-ready', count: 0 }
       try {
         const policy = await resolveUploadOverwrite(sessionId, remoteDir, paths.map((p) => basename(p)), overwrite)
         if (policy === 'cancel') return { ok: false, canceled: true, count: 0 }
@@ -1638,7 +1638,7 @@ function registerIpc(): void {
       deleteExtras: boolean,
       concurrency?: number
     ) => {
-      if (!sshManager) return { ok: false, error: '窗口未就绪', count: 0 }
+      if (!sshManager) return { ok: false, error: 'window-not-ready', count: 0 }
       try {
         await sshManager.syncJob(sessionId, localDir, remoteDir, mode, deleteExtras, randomUUID(), concurrency, await defaultTransferRate())
         return { ok: true, count: 0 }
@@ -1658,7 +1658,7 @@ function registerIpc(): void {
       deleteExtras: boolean,
       intervalSec: number
     ) => {
-      if (!sshManager) return { ok: false, error: '窗口未就绪' }
+      if (!sshManager) return { ok: false, error: 'window-not-ready' }
       try {
         const watchId = await sshManager.startWatchSync(sessionId, localDir, remoteDir, mode, deleteExtras, intervalSec)
         return { ok: true, watchId }
@@ -1674,7 +1674,7 @@ function registerIpc(): void {
   ipcMain.handle(
     IPC.sftpDiffDirs,
     async (_e, sessionId: string, localDir: string, remoteDir: string) => {
-      if (!sshManager) return { ok: false, error: '窗口未就绪' }
+      if (!sshManager) return { ok: false, error: 'window-not-ready' }
       try {
         const r = await sshManager.diffDirs(sessionId, localDir, remoteDir)
         return { ok: true, ...r }
@@ -1691,7 +1691,7 @@ function registerIpc(): void {
       items: { path: string; name: string; isDir: boolean }[],
       archiveName?: string
     ) => {
-      if (!sshManager) return { ok: false, error: '窗口未就绪' }
+      if (!sshManager) return { ok: false, error: 'window-not-ready' }
       const res = await dialog.showOpenDialog({
         title: await dl('pickPackDir'),
         properties: ['openDirectory']
@@ -1714,7 +1714,7 @@ function registerIpc(): void {
   ipcMain.handle(
     IPC.sftpUploadExtract,
     async (_e, sessionId: string, remoteDir: string, concurrency?: number, overwrite?: UploadOverwrite) => {
-      if (!sshManager) return { ok: false, error: '窗口未就绪' }
+      if (!sshManager) return { ok: false, error: 'window-not-ready' }
       const res = await dialog.showOpenDialog({
         title: await dl('pickArchive'),
         properties: ['openFile'],
@@ -2109,7 +2109,7 @@ function registerIpc(): void {
       return { ok: false, error: friendlyError((e as Error).message) }
     }
     if (!pub) return { ok: false, error: '该密钥没有可用的公钥' }
-    if (!sshManager) return { ok: false, error: '窗口未就绪' }
+    if (!sshManager) return { ok: false, error: 'window-not-ready' }
     const results = await withTempHosts(hostIds, async (sid) => {
       const cmd = `umask 077; mkdir -p ~/.ssh && chmod 700 ~/.ssh\ncat >> ~/.ssh/authorized_keys <<'XSSH'\n${pub}\nXSSH\ntouch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys`
       await requireSshManager().execCommand(sid, cmd)
@@ -2129,7 +2129,7 @@ function registerIpc(): void {
       return { ok: false, error: friendlyError((e as Error).message) }
     }
     if (!pub) return { ok: false, error: '该密钥没有可用的公钥' }
-    if (!sshManager) return { ok: false, error: '窗口未就绪' }
+    if (!sshManager) return { ok: false, error: 'window-not-ready' }
     const keyPart = pub.split(/\s+/).slice(0, 2).join(' ')
     const results = await withTempHosts(hostIds, async (sid) => {
       // if/fi (not a bare &&-chain) so a host without authorized_keys exits 0

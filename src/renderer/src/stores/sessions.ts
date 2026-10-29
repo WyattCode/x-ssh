@@ -50,6 +50,7 @@ function forwardError(r: { error?: string; code?: ForwardErrorCode }): string {
     case 'in-use':
       return t('fw.errInUse')
     default:
+      if (r.error === 'window-not-ready') return t('app.windowNotReady')
       return r.error || t('fw.fail')
   }
 }

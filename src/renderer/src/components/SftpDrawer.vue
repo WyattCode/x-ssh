@@ -30,6 +30,12 @@ const { t: tt } = useI18n()
 const { toast } = useToast()
 const store = useSessions()
 
+/** IPC failures arrive as codes; render the ones the UI knows in its language. */
+function sftpErr(err: string | undefined, fallbackKey: string): string {
+  if (err === 'window-not-ready') return tt('app.windowNotReady')
+  return err ?? tt(fallbackKey)
+}
+
 // `page`: the SFTP sidebar page shows this full-size (no resize edge, no close)
 // instead of as the drawer on the terminal page.
 const props = defineProps<{ sessionId?: string; open: boolean; terminalCwd?: string; reloadKey?: number; page?: boolean }>()
@@ -254,7 +260,7 @@ async function localDelete(): Promise<void> {
   const ok = await confirm(tt('sfp.confirmDel', { name: t.name }))
   if (!ok) return
   const r = await window.api.local.del(localPath.value, t.name, t.isDir)
-  if (!r.ok) toast(r.error ?? tt('sfp.delFail'), 'error')
+  if (!r.ok) toast(sftpErr(r.error, 'sfp.delFail'), 'error')
   else await refreshLocal()
 }
 async function localDelSelected(): Promise<void> {
@@ -268,7 +274,7 @@ async function localDelSelected(): Promise<void> {
     const r = await window.api.local.del(localPath.value, e.name, e.isDir)
     if (!r.ok) {
       failed = true
-      toast(r.error ?? tt('sfp.delFail'), 'error')
+      toast(sftpErr(r.error, 'sfp.delFail'), 'error')
     }
   }
   localSelSet.value = new Set()
@@ -306,7 +312,7 @@ async function localSubmit(e?: Event): Promise<void> {
   if (localModal.action === 'new') {
     const r = await window.api.local.create(localPath.value, name, localModal.kind)
     if (!r.ok) {
-      localModal.error = r.error ?? tt('sfp.createFail')
+      localModal.error = sftpErr(r.error, 'sfp.createFail')
       return
     }
   } else {
@@ -314,7 +320,7 @@ async function localSubmit(e?: Event): Promise<void> {
     if (!t) return
     const r = await window.api.local.rename(localPath.value, t.name, name)
     if (!r.ok) {
-      localModal.error = r.error ?? tt('sfp.renameFail')
+      localModal.error = sftpErr(r.error, 'sfp.renameFail')
       return
     }
   }
@@ -340,7 +346,7 @@ async function resumePending(): Promise<void> {
       // Don't abort the whole resume on the first failure — skip this op and
       // keep trying the remaining queued uploads.
       failed++
-      lastErr = r.error ?? tt('sfp.uploadFail')
+      lastErr = sftpErr(r.error, 'sfp.uploadFail')
       continue
     }
   }
@@ -707,7 +713,7 @@ async function uploadLocalSelection(): Promise<void> {
   if (!props.sessionId || !localSelCount.value) return
   const paths = localSelectedNames().map((n) => localJoin(localPath.value, n))
   const r = await window.api.sftp.uploadPaths(props.sessionId, path.value, paths, store.transferConcurrency)
-  if (!r.ok && !r.canceled) error.value = r.error ?? tt('sfp.uploadFail')
+  if (!r.ok && !r.canceled) error.value = sftpErr(r.error, 'sfp.uploadFail')
 }
 async function downloadSelectionToLocal(): Promise<void> {
   if (!props.sessionId || !localPath.value || !selected.value.size) return
@@ -956,14 +962,14 @@ async function diffWithLocal(entry: FileEntry): Promise<void> {
   if (!props.sessionId) return
   const remote = await window.api.sftp.readText(props.sessionId, posixJoin(path.value, entry.name))
   if (!remote.ok) {
-    error.value = remote.error ?? tt('sfp.diffFail')
+    error.value = sftpErr(remote.error, 'sfp.diffFail')
     return
   }
   const picked = await window.api.local.pickFile()
   if (!picked.ok || !picked.path) return
   const local = await window.api.local.readText(picked.path)
   if (!local.ok || local.content === undefined) {
-    error.value = local.error ?? tt('sfp.diffFail')
+    error.value = sftpErr(local.error, 'sfp.diffFail')
     return
   }
   diff.remoteName = entry.name
@@ -991,7 +997,7 @@ async function runDeploy(): Promise<void> {
       toast(tt('sfp.deployDone'), 'success')
       deploy.open = false
     } else if (!up.canceled) {
-      error.value = up.error ?? tt('sfp.deployFail')
+      error.value = sftpErr(up.error, 'sfp.deployFail')
     }
   } finally {
     deploy.busy = false
@@ -1042,7 +1048,7 @@ async function uploadPick(): Promise<void> {
   busy.value = true
   try {
     const r = await window.api.sftp.upload(props.sessionId, path.value, store.transferConcurrency)
-    if (!r.ok && !r.canceled) error.value = r.error ?? tt('sfp.uploadFail')
+    if (!r.ok && !r.canceled) error.value = sftpErr(r.error, 'sfp.uploadFail')
   } finally {
     busy.value = false
   }
@@ -1052,7 +1058,7 @@ async function uploadDirPick(): Promise<void> {
   busy.value = true
   try {
     const r = await window.api.sftp.uploadDir(props.sessionId, path.value, store.transferConcurrency)
-    if (!r.ok && !r.canceled) error.value = r.error ?? tt('sfp.uploadFail')
+    if (!r.ok && !r.canceled) error.value = sftpErr(r.error, 'sfp.uploadFail')
   } finally {
     busy.value = false
   }
@@ -1083,7 +1089,7 @@ async function onDrop(e: DragEvent): Promise<void> {
   // Don't gate on `busy` here — dropping a second folder mid-upload is fine —
   // but do surface failures, or a drop that never starts looks like a no-op.
   const r = await window.api.sftp.uploadPaths(props.sessionId, path.value, paths, store.transferConcurrency)
-  if (!r.ok && !r.canceled) error.value = r.error ?? tt('sfp.uploadFail')
+  if (!r.ok && !r.canceled) error.value = sftpErr(r.error, 'sfp.uploadFail')
 }
 function startRename(entry: FileEntry): void {
   renamingName.value = entry.name
@@ -1103,7 +1109,7 @@ async function commitRename(entry: FileEntry, e?: Event): Promise<void> {
     posixJoin(path.value, entry.name),
     posixJoin(path.value, next)
   )
-  if (!r.ok) error.value = r.error ?? tt('sfp.renameFail')
+  if (!r.ok) error.value = sftpErr(r.error, 'sfp.renameFail')
   await load(path.value)
 }
 function startCreate(kind: 'folder' | 'file'): void {
@@ -1123,7 +1129,7 @@ async function commitCreate(e?: Event): Promise<void> {
     kind === 'folder'
       ? await window.api.sftp.mkdir(props.sessionId, target)
       : await window.api.sftp.createFile(props.sessionId, target)
-  if (!r.ok) error.value = r.error ?? tt('sfp.createFail')
+  if (!r.ok) error.value = sftpErr(r.error, 'sfp.createFail')
   await load(path.value)
 }
 // ---- selection-aware operations (used by menu + shortcuts) ----
@@ -1155,7 +1161,7 @@ async function downloadSelected(): Promise<void> {
     isDir: e.isDir
   }))
   const r = await window.api.sftp.downloadMany(props.sessionId, payload, store.transferConcurrency)
-  if (!r.ok && !r.canceled) error.value = r.error ?? tt('sfp.downloadFail')
+  if (!r.ok && !r.canceled) error.value = sftpErr(r.error, 'sfp.downloadFail')
 }
 async function packDownloadSelected(): Promise<void> {
   if (!props.sessionId) return
@@ -1169,7 +1175,7 @@ async function packDownloadSelected(): Promise<void> {
   busy.value = true
   try {
     const r = await window.api.sftp.packDownload(props.sessionId, payload)
-    if (!r.ok && !r.canceled) error.value = r.error ?? tt('sfp.packFail')
+    if (!r.ok && !r.canceled) error.value = sftpErr(r.error, 'sfp.packFail')
     else if (r.ok) await load(path.value)
   } finally {
     busy.value = false
@@ -1180,7 +1186,7 @@ async function uploadExtractPick(): Promise<void> {
   busy.value = true
   try {
     const r = await window.api.sftp.uploadExtract(props.sessionId, path.value, store.transferConcurrency)
-    if (!r.ok && !r.canceled) error.value = r.error ?? tt('sfp.extractFail')
+    if (!r.ok && !r.canceled) error.value = sftpErr(r.error, 'sfp.extractFail')
     else if (r.ok) await load(path.value)
   } finally {
     busy.value = false
@@ -1198,7 +1204,7 @@ async function delSelected(): Promise<void> {
   if (!ok) return
   for (const it of items) {
     const r = await window.api.sftp.remove(props.sessionId, posixJoin(path.value, it.name), it.isDir)
-    if (!r.ok) error.value = r.error ?? tt('sfp.delFail')
+    if (!r.ok) error.value = sftpErr(r.error, 'sfp.delFail')
   }
   selected.value = new Set()
   await load(path.value)
@@ -1253,11 +1259,11 @@ async function startSync(): Promise<void> {
       props.sessionId, sync.local, sync.remote, sync.mode, sync.del, sync.interval
     )
     if (r.ok) watchActive.value = true
-    else error.value = r.error ?? tt('sfp.syncFail')
+    else error.value = sftpErr(r.error, 'sfp.syncFail')
     return
   }
   const r = await window.api.sftp.sync(props.sessionId, sync.local, sync.remote, sync.mode, sync.del, store.transferConcurrency)
-  if (!r.ok) error.value = r.error ?? tt('sfp.syncFail')
+  if (!r.ok) error.value = sftpErr(r.error, 'sfp.syncFail')
 }
 async function stopWatch(): Promise<void> {
   if (!props.sessionId) return
@@ -1293,7 +1299,7 @@ async function retryHistory(h: TransferHistoryItem): Promise<void> {
     h.localDir,
     store.transferConcurrency
   )
-  if (!r.ok && !r.canceled) toast(r.error ?? tt('sfp.retryFail'), 'error')
+  if (!r.ok && !r.canceled) toast(sftpErr(r.error, 'sfp.retryFail'), 'error')
 }
 // Open a finished transfer in the OS file manager: a download reveals its local
 // destination, an upload reveals its local source file.
@@ -1307,7 +1313,7 @@ async function revealHistory(h: TransferHistoryItem): Promise<void> {
   if (!target) return
   historyMenu.open = false
   const r = await window.api.sftp.revealLocal(target)
-  if (!r.ok) toast(r.error ?? tt('sfp.revealFail'), 'error')
+  if (!r.ok) toast(sftpErr(r.error, 'sfp.revealFail'), 'error')
 }
 // Finished downloads reveal their dest; finished uploads reveal their source.
 function canReveal(h: TransferHistoryItem): boolean {
