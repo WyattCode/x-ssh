@@ -108,8 +108,12 @@ fun HostEditorScreen(
     val importKey = rememberKeyImporter(draft) { keyMessage = it }
 
     val context = LocalContext.current
+    // 保存要验口令 / 走密钥库,几百毫秒里按钮还能再按一次(Ctrl+S 也一样)——
+    // 不挡住的话会存两遍、弹两次生物识别。
+    var saving by remember { mutableStateOf(false) }
 
     fun save() {
+        if (saving) return
         // 用私钥登录时要验一次口令(解私钥要几百毫秒)、加锁开关要用密钥库并可能弹一次
         // 解锁,都放到 IO 之外由 buildHostForSave 自己安排;这里只管收结果。
         val activity = hostActivity(context)
@@ -117,9 +121,14 @@ fun HostEditorScreen(
             draft.error = UiText(R.string.edit_err_no_page)
             return
         }
+        saving = true
         scope.launch {
-            val host = buildHostForSave(activity, draft)
-            host?.let(onSave)
+            try {
+                val host = buildHostForSave(activity, draft)
+                host?.let(onSave)
+            } finally {
+                saving = false
+            }
         }
     }
 

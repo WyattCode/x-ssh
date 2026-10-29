@@ -603,18 +603,34 @@ async function exportSshConfig(): Promise<void> {
 // ---- full data backup (hosts + secrets + snippets + snapshots + history) ----
 const backupBusy = ref(false)
 async function exportAllData(): Promise<void> {
-  const r = await window.api.data.exportAll()
-  if (!r.ok && !r.canceled) toast(r.error ?? t('set.sec.exportFail'), 'error')
-  else if (r.ok) toast(t('set.sec.exportedAll'), 'success')
+  if (backupBusy.value) return
+  backupBusy.value = true
+  try {
+    const r = await window.api.data.exportAll()
+    if (!r.ok && !r.canceled) toast(r.error ?? t('set.sec.exportFail'), 'error')
+    else if (r.ok) toast(t('set.sec.exportedAll'), 'success')
+  } finally {
+    backupBusy.value = false
+  }
 }
 async function importAllData(): Promise<void> {
+  if (backupBusy.value) return
   const res = await confirm(t('set.sec.importAllConfirm'))
   if (!res) return
-  const r = await window.api.data.importAll()
-  if (!r.ok && !r.canceled) toast(r.error ?? t('set.sec.importFail'), 'error')
-  else if (r.ok) {
-    await Promise.all([store.loadHosts(), store.loadSnippets(), store.loadSnapshots(), store.loadTransferHistory()])
-    toast(t('set.sec.importedAll'), 'success')
+  backupBusy.value = true
+  try {
+    const r = await window.api.data.importAll()
+    if (!r.ok && !r.canceled) {
+      toast(
+        r.error === 'invalid-backup' ? t('set.sec.invalidBackup') : (r.error ?? t('set.sec.importFail')),
+        'error'
+      )
+    } else if (r.ok) {
+      await Promise.all([store.loadHosts(), store.loadSnippets(), store.loadSnapshots(), store.loadTransferHistory()])
+      toast(t('set.sec.importedAll'), 'success')
+    }
+  } finally {
+    backupBusy.value = false
   }
 }
 function toggleAutoBackup(): void {
@@ -1207,8 +1223,8 @@ async function resetMasterLock(): Promise<void> {
                     <span class="r-title">{{ t('set.sec.fullBackup') }}</span>
                     <span class="r-desc">{{ t('set.sec.fullBackupDesc') }}</span>
                   </div>
-                  <button class="btn sm" @click="exportAllData">{{ t('set.sec.exportAll') }}</button>
-                  <button class="btn sm" @click="importAllData">{{ t('set.sec.importAll') }}</button>
+                  <button class="btn sm" :disabled="backupBusy" @click="exportAllData">{{ t('set.sec.exportAll') }}</button>
+                  <button class="btn sm" :disabled="backupBusy" @click="importAllData">{{ t('set.sec.importAll') }}</button>
                 </div>
                 <label class="row toggle" @click="toggleAutoBackup">
                   <div class="r-text">
