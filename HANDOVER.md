@@ -1,3 +1,21 @@
+# 会话记录:连续改进 M3.94(2026-10-30,复核打磨:自动重连按钮禁用 + 转发对话框 busy + Android 死态重连一次)
+
+功能清单已够,本轮按站立规则做开源复核打磨(不合并)。未动 PR #28 / #27–#12 与更早的 #4–#11。
+
+**核过已过时 / 已在未合并 PR(本轮不重做)**:
+1–16. 同 M3.93 所列 PR #12–#27。
+17. 强调色 `@change` / TransferPanel `allPaused` 复位 / HostsPage `connectingId` / Android `leaveScreen` —— PR #28。
+18. TransferPanel Esc/关闭 + 密钥导入删除 busy + 删主机清 reach + Android authMutex —— PR #27。
+
+**修了**:
+1. **PaneNode 错误卡重连**:`reconnectAttempt` 期间禁用按钮并显示 `app.reconnecting`(自动退避窗口内避免与罚时重试竞态);补 `.idle-connect:disabled`。
+2. **ForwardDialog**:`add()` 加 `busy` 重入闸 + `try/finally`;`remove()` 加 `removing` 闸 + await + `:disabled`,补 `.fw-del:disabled`。
+3. **Android TerminalView 死态重连**:`requestReconnect()` 一次点击闸,防双击叠开握手(与 #28 leaveScreen 对称,未动 disconnect)。
+
+**验证**:`typecheck` + vitest **334** / 30 文件全绿。未跑 Gradle。未合并。
+
+---
+
 # X-SSH 交接文档
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。

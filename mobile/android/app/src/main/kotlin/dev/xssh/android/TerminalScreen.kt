@@ -498,6 +498,14 @@ private fun TerminalView(
     val adaptive = LocalAdaptive.current
     val context = LocalContext.current
     val prefs = remember(context) { UiPrefs(context) }
+    // Dead-state Reconnect must be one-shot; a double-tap bumps attempt twice and
+    // cancels the first open mid-handshake.
+    var reconnectTapped by remember { mutableStateOf(false) }
+    fun requestReconnect() {
+        if (reconnectTapped) return
+        reconnectTapped = true
+        onReconnect()
+    }
     val scope = rememberCoroutineScope()
     val keyboard = LocalSoftwareKeyboardController.current
     val focusRequester = remember { FocusRequester() }
@@ -1042,7 +1050,7 @@ private fun TerminalView(
                 if (dead) {
                     // 对端断了(服务器重启、网络掉了):最常见的下一步是重连,放在最显眼的位置。
                     ToolbarTextButton(stringResource(R.string.term_close), p.textDim) { onExit() }
-                    ToolbarTextButton(stringResource(R.string.term_reconnect), p.accent, bold = true) { onReconnect() }
+                    ToolbarTextButton(stringResource(R.string.term_reconnect), p.accent, bold = true) { requestReconnect() }
                 } else {
                     ToolbarTextButton(stringResource(R.string.term_disconnect), p.danger) {
                         SessionRegistry.close(host.id)
