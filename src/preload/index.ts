@@ -332,22 +332,22 @@ const api = {
     ipcRenderer.invoke(IPC.pickDirectory),
   keys: {
     list: (): Promise<ManagedKey[]> => ipcRenderer.invoke(IPC.keysList),
-    generate: (opts: { name: string; type?: string; passphrase?: string; bits?: number }): Promise<{ ok: boolean; key?: ManagedKey; error?: string }> =>
+    generate: (opts: { name: string; type?: string; passphrase?: string; bits?: number }): Promise<{ ok: boolean; key?: ManagedKey; error?: string; code?: string }> =>
       ipcRenderer.invoke(IPC.keysGenerate, opts),
-    import: (): Promise<{ ok: boolean; key?: ManagedKey; error?: string; canceled?: boolean }> =>
+    import: (): Promise<{ ok: boolean; key?: ManagedKey; error?: string; code?: string; canceled?: boolean }> =>
       ipcRenderer.invoke(IPC.keysImport),
-    del: (id: string): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke(IPC.keysDelete, id),
-    publicKey: (id: string): Promise<{ ok: boolean; text?: string; error?: string }> =>
+    del: (id: string): Promise<{ ok: boolean; error?: string; code?: string }> => ipcRenderer.invoke(IPC.keysDelete, id),
+    publicKey: (id: string): Promise<{ ok: boolean; text?: string; error?: string; code?: string }> =>
       ipcRenderer.invoke(IPC.keysPublicKey, id),
     publish: (
       keyId: string,
       hostIds: string[]
-    ): Promise<{ ok: boolean; results?: { host: string; ok: boolean; error?: string }[]; error?: string }> =>
+    ): Promise<{ ok: boolean; results?: { host: string; ok: boolean; error?: string }[]; error?: string; code?: string }> =>
       ipcRenderer.invoke(IPC.keysPublish, keyId, hostIds),
     revoke: (
       keyId: string,
       hostIds: string[]
-    ): Promise<{ ok: boolean; results?: { host: string; ok: boolean; error?: string }[]; error?: string }> =>
+    ): Promise<{ ok: boolean; results?: { host: string; ok: boolean; error?: string }[]; error?: string; code?: string }> =>
       ipcRenderer.invoke(IPC.keysRevoke, keyId, hostIds)
   },
   /** Resolve a dropped File's absolute path (File.path was removed in Electron 32+). */

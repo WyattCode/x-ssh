@@ -6,6 +6,7 @@ const dialogEl = ref<HTMLElement>()
 useFocusTrap(dialogEl, () => store.publishOpen)
 import { useSessions } from '../stores/sessions'
 import { useI18n } from '../lib/i18n'
+import { keyErrorMessage } from '../lib/keyError'
 import type { ManagedKey, Host } from '../../../shared/types'
 import Icon from './Icon.vue'
 
@@ -48,7 +49,7 @@ async function publish(): Promise<void> {
   const r = await window.api.keys.publish(keyId.value, [...selected])
   busy.value = false
   if (!r.ok) {
-    err.value = r.error ?? t('keyPub.fail')
+    err.value = r.code || r.error ? keyErrorMessage(r, t) : t('keyPub.fail')
     return
   }
   results.value = r.results ?? []
@@ -60,7 +61,7 @@ async function revoke(): Promise<void> {
   const r = await window.api.keys.revoke(keyId.value, [...selected])
   revokeBusy.value = false
   if (!r.ok) {
-    err.value = r.error ?? t('keyPub.revokeFail')
+    err.value = r.code || r.error ? keyErrorMessage(r, t) : t('keyPub.revokeFail')
     return
   }
   revokeResults.value = r.results ?? []

@@ -620,6 +620,10 @@ watch(
   () => props.visible,
   (v) => {
     if (v) nextTick(() => { doFit(); if (props.focused) term?.focus() })
+    // Hidden behind another page (v-show) but still mounted: without this the
+    // xterm textarea keeps document.activeElement and swallows typing meant
+    // for the page now on screen.
+    else term?.blur()
   }
 )
 
@@ -628,6 +632,9 @@ watch(
   () => props.focused,
   (f) => {
     if (f && props.visible) nextTick(() => term?.focus())
+    // Leaving this pane (another pane clicked, or the terminal page left):
+    // drop DOM focus so keystrokes don't keep going to this live SSH session.
+    else term?.blur()
   }
 )
 

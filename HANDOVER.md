@@ -1,3 +1,26 @@
+# 会话记录:连续改进 M3.85(2026-10-30,复核打磨:ZoomHud 失焦粘滞 + 窗格失焦 blur + keyManager IPC 错误码)
+
+功能清单已够,本轮按站立规则做开源复核打磨(不合并)。未动 PR #19 / #18 / #17 / #16 / #15 / #14 / #13 / #12 与更早的 #4–#11。
+
+**核过已过时 / 已在未合并 PR(本轮不重做)**:
+1. TransferPanel 失败原因 / ETA + Android 罚分地板 —— PR #12。
+2. 桌面重连中途罚分地板 + local/SOCKS `forwardOut` 超时 —— PR #13。
+3. HostEditor 密钥小层陷阱 / 命令面板遮罩回退 / 强调色样本 / 分组标签按下 —— PR #14。
+4. TransferPanel 暂停图标响应式 / Android 坏 SFTP 句柄丢弃 / ForwardDialog Enter —— PR #15。
+5. sendSnippet 活会话复核 / known_hosts·片段删除确认 / ForwardsPage 切 mode 清错 —— PR #16。
+6. 快照恢复确认 + 关闭其他尊重 confirmClose + 侧栏按下缩小 —— PR #17。
+7. OSC52 空白 base64 + 主锁 Enter/busy + 离线点透明度 —— PR #18。
+8. 主题循环竞态 + 关闭全部确认 + 连接日志 disconnect/滚动 —— PR #19。
+
+**修了**:
+1. **ZoomHud 失焦粘滞**:`lib/zoomHud.ts` `shouldReleaseZoomHover`;`composables/zoom.ts` 在 `window.blur` / `visibilitychange→hidden` 时清掉 `hovering` 并重新计时隐藏 —— Alt-Tab 时指针还停在药丸上不会再永远挂着。
+2. **窗格 / 离页焦点**:`TerminalView` 在 `focused` 或 `visible` 变 false 时 `term.blur()`。终端页是 `v-show` 常挂,切到连接 / SFTP / 设置后 xterm textarea 以前仍占着 `document.activeElement`,按键会打进还活着的 SSH。
+3. **keyManager IPC 错误码**:抛 `invalid-key` / `bad-id` 稳定标记;`KeyErrorCode` + 主进程 `keyFail`;渲染层 `keyErrorMessage` 翻译。顺手给 HostEditor 生成/导入加 `keyBusy`,防双击生两把钥匙。
+
+**验证**:`typecheck` + `lint:i18n` + vitest **343** 全绿(原 334;+`zoomHud` 4 + `keyError` 5)。Android 本轮未改。未合并。
+
+---
+
 # X-SSH 交接文档
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。

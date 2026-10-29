@@ -7,6 +7,7 @@ import { useI18n } from '../lib/i18n'
 import { useToast } from '../composables/toast'
 import { useConfirm } from '../composables/confirm'
 import { isImeKey } from '../lib/ime'
+import { keyErrorMessage } from '../lib/keyError'
 import Icon from './Icon.vue'
 import OsIcon from './OsIcon.vue'
 import { PRESETS } from '../lib/terminalThemes'
@@ -202,6 +203,8 @@ async function pickKey(): Promise<void> {
 
 // ---- SSH key library ----
 const managedKeys = ref<ManagedKey[]>([])
+/** Guards generate/import: a double Enter or double click used to spawn two keypairs. */
+const keyBusy = ref(false)
 const keyModal = reactive({ open: false, name: '', type: 'ed25519', passphrase: '', error: '' })
 async function loadKeys(): Promise<void> {
   managedKeys.value = await window.api.keys.list()
@@ -237,36 +240,49 @@ async function generateKey(e?: Event): Promise<void> {
   // it here would generate a key named after the half-typed text.
   if (isImeKey(e)) return
   if (e) e.preventDefault()
+  // A double Enter / double click must not spawn two keypairs.
+  if (keyBusy.value) return
   keyModal.error = ''
   const name = keyModal.name.trim()
   if (!name) {
     keyModal.error = t('host.keyNameReq')
     return
   }
-  const r = await window.api.keys.generate({
-    name,
-    type: keyModal.type,
-    passphrase: keyModal.passphrase || undefined
-  })
-  if (!r.ok || !r.key) {
-    keyModal.error = r.error ?? t('host.keyGenFail')
-    return
+  keyBusy.value = true
+  try {
+    const r = await window.api.keys.generate({
+      name,
+      type: keyModal.type,
+      passphrase: keyModal.passphrase || undefined
+    })
+    if (!r.ok || !r.key) {
+      keyModal.error = r.code || r.error ? keyErrorMessage(r, t) : t('host.keyGenFail')
+      return
+    }
+    keyModal.open = false
+    form.keyPath = r.key.path
+    await loadKeys()
+    if (r.key.passphraseProtected === false) toast(t('host.keyUnprotected'), 'info')
+  } finally {
+    keyBusy.value = false
   }
-  keyModal.open = false
-  form.keyPath = r.key.path
-  await loadKeys()
-  if (r.key.passphraseProtected === false) toast(t('host.keyUnprotected'), 'info')
 }
 async function importKey(): Promise<void> {
-  const r = await window.api.keys.import()
-  if (r.canceled) return
-  if (!r.ok || !r.key) {
-    toast(r.error ?? t('host.keyImportFail'), 'error')
-    return
+  if (keyBusy.value) return
+  keyBusy.value = true
+  try {
+    const r = await window.api.keys.import()
+    if (r.canceled) return
+    if (!r.ok || !r.key) {
+      toast(r.code || r.error ? keyErrorMessage(r, t) : t('host.keyImportFail'), 'error')
+      return
+    }
+    form.keyPath = r.key.path
+    await loadKeys()
+    if (r.key.passphraseProtected === false) toast(t('host.keyUnprotected'), 'info')
+  } finally {
+    keyBusy.value = false
   }
-  form.keyPath = r.key.path
-  await loadKeys()
-  if (r.key.passphraseProtected === false) toast(t('host.keyUnprotected'), 'info')
 }
 async function deleteKey(k: ManagedKey): Promise<void> {
   const res = await confirm(t('host.keyDeleteConfirm', { name: k.name }))
@@ -275,8 +291,8 @@ async function deleteKey(k: ManagedKey): Promise<void> {
   if (r.ok) {
     if (form.keyPath === k.path) form.keyPath = ''
     await loadKeys()
-  } else if (r.error) {
-    toast(r.error, 'error')
+  } else {
+    toast(keyErrorMessage(r, t), 'error')
   }
   panelEl.value?.focus()
 }
@@ -699,7 +715,7 @@ async function remove(): Promise<void> {
             <p v-if="keyModal.error" class="err">{{ keyModal.error }}</p>
             <div class="key-actions">
               <button type="button" class="btn" @click="closeKeySheet">{{ t('host.cancel') }}</button>
-              <button type="button" class="btn btn-primary" @click="generateKey">{{ t('host.save') }}</button>
+              <button type="button" class="btn btn-primary" :disabled="keyBusy" @click="generateKey">{{ t('host.save') }}</button>
             </div>
           </div>
         </div>
