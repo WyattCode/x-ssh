@@ -115,6 +115,12 @@
     <string name="files_terminal">Terminal</string>
     <string name="files_time_this_year">MMM d HH:mm</string>
     <string name="files_transfer_busy">A transfer is still in progress</string>
+    <string name="files_share">Share</string>
+    <string name="files_share_failed">Couldn\'t share: %1$s</string>
+    <string name="files_nothing_to_share">Nothing to share</string>
+    <string name="files_drag_cached_only">Download it first (Share or Open), then drag</string>
+    <string name="files_cancel_all">Cancel all</string>
+    <string name="files_queue_n">+%1$d queued</string>
     <string name="files_up">Up one level</string>
     <string name="files_upload">Upload</string>
     <string name="files_upload_failed">Upload failed: %1$s</string>
@@ -321,6 +327,14 @@
     <string name="term_snippets">Snippets</string>
     <string name="term_unlock_subtitle">Use biometrics or your screen lock to continue</string>
     <string name="term_unlock_title">Unlock saved credentials</string>
+    <plurals name="files_transfer_queued">
+        <item quantity="one">Queued · #%1$d in line</item>
+        <item quantity="other">Queued · #%1$d in line</item>
+    </plurals>
+    <plurals name="files_queue_cleared">
+        <item quantity="one">Cleared %1$d queued transfer</item>
+        <item quantity="other">Cleared %1$d queued transfers</item>
+    </plurals>
     <plurals name="files_cancelled_downloaded">
         <item quantity="one">Cancelled (%d downloaded)</item>
         <item quantity="other">Cancelled (%d downloaded)</item>
