@@ -2,6 +2,25 @@
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。
 
+## HANDOVER M3.124 — review polish (connect-time forward bind fail-closed / remote addForward / update open toast)
+
+**Branch:** `fix/review-polish-m3124` (from origin/main). **Do NOT merge.** Open PR (see report).
+**Skipped / do not redo:** PR #58 `fix/review-polish-m3123` (tmuxAttach boolean / revealLocal access / term.linkOpenFail) and #57–#12, #4–#11. Features / intentional deferrals / M3.77–M3.123 done items. Do not change `waitForListen` body (#53 owns timeout).
+
+### Fixes shipped
+1. **Connect-time port forwards silent success** — `openForwards` now awaits local/dynamic `waitForListen` and remote `forwardIn`; failed binds are closed/dropped (not concatenated into `forwardServers`). SSH still connects; `ConnectResult.code = 'forward:in-use'` + `error` = failed ports; renderer toasts `fw.connectBindFail`.
+2. **Runtime remote `addForward` always ok** — remote mode returned `[]` from `openRule`, so `forwardIn` failures were swallowed and `runtimeRules` still recorded. Now awaits `openRemoteForward` and returns `in-use` on failure.
+3. **Settings update download ignores openExternal fail** — toast `set.gen.updateOpenFail` when `openExternal` returns false.
+
+### Verify
+- typecheck OK; lint:i18n OK (751/751/751 desktop); vitest **334**/30 green.
+- Model: DeepSeek-V4.1-Flash-1017 via ds.py; thinking=off medium; 16/16 HAND_APPLY first try. No hand-fix. Incidents: none.
+
+### Next
+Continue continuous-improve from origin/main on a new branch; do **not** touch/merge this PR or #58–#12 / #4–#11. Prefer substantive P0/P1 over busy-gates.
+
+---
+
 ## 项目概述
 - 极简、键盘优先的 SSH 客户端。Electron + Vue 3 (Vite) + TypeScript。
 - 平台: Windows (`win32`)。目录: `D:\Documents\Claude Code\X-SSH`。
