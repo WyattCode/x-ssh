@@ -2,6 +2,16 @@
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。
 
+## HANDOVER M3.130 — 主机删除/保存失败提示 + SFTP 书签回滚
+
+> 分支 `fix/review-polish-m3130`(自 `origin/main`)。**不要合并**;跳过 #4–#64 的开放 PR(尤其 #64 的 SettingsStore.set / settings-write-failed / snapshot rollback / HostEditor.deleteFail、#63 的 writeLabels / knownHostsForget / ForwardsPage.removeFail)。
+
+- **A) `store.removeHost` 不再静默**:`window.api.hosts.delete` 在主进程写 hosts 文件失败时 reject,连接页菜单的删除原来没有 try/catch —— 卡片留着、什么都不说(未处理的 rejection)。现在 catch 后 toast `hosts.deleteFail`。`HostEditor.vue`(#64)未动。
+- **B) `store.saveHost` 不再静默**:写失败时 toast `hosts.saveFail` 并 `throw new Error('hosts-save-failed')`,让已经 try/catch 的调用方(端口转发页删除)照常中止,`duplicateHost` 也不会假装副本已存在。
+- **C) SFTP 书签回滚**:`toggleSftpBookmark` 原来是乐观更新 + 不看 `settings.set` 的返回值,主进程拒绝该键(或 #64 落地后持久化写失败)时星星照样翻,下次启动书签却没了。现在保存 `prev`,返回 `ok === false` 就回滚并 toast `sfp.bookmarkFail`。`addSftpRecent`(后台 MRU)有意不动。
+- **D) i18n**:三份字典各加 `hosts.deleteFail` / `hosts.saveFail` / `sfp.bookmarkFail`(zh / en / zh-TW 对称)。
+- 未动:`SettingsStore.set`、`settings.ts`、`IPC.settingsSet`、`saveSnapshot` / `deleteSnapshot`、`HostEditor.vue`、`ForwardsPage.remove`、`writeLabels`、`knownHostsForget`、`openExternal`、`localList`、`TerminalView` 的 openLink。未合并、未碰 MCode。
+
 ## 项目概述
 - 极简、键盘优先的 SSH 客户端。Electron + Vue 3 (Vite) + TypeScript。
 - 平台: Windows (`win32`)。目录: `D:\Documents\Claude Code\X-SSH`。
