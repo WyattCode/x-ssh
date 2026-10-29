@@ -1594,7 +1594,10 @@ export const useSessions = defineStore('sessions', {
         const host = hostKeyHost ?? found.pane.params.host
         const r = await window.api.ssh.trustHostKey(host, hostKeyPort ?? (found.pane.params.port || 22), hostKey)
         if (!r?.ok) {
-          await this.reconnect(paneId)
+          // The key was not written (stale rejection, persist failure, bad
+          // args). Reconnecting here would look like the trust worked and then
+          // bring the rejection card back with no explanation.
+          toast(t('app.trustFail'), 'error')
           return
         }
       }

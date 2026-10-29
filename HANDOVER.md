@@ -2,6 +2,17 @@
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。
 
+## HANDOVER M3.127 — 主机密钥信任 / 转发移除的失败处理
+
+分支 `fix/review-polish-m3127`(自 `origin/main`),**不合并**,跳过 #4–#61。
+
+- **A(P0)信任主机密钥不再吞掉拒绝记录**:`SshManager` 新增非消费式 `matchesRejectedKey`;`IPC.sshTrustHostKey` 先用它做闸门,`knownHosts.load/set` 包进 try/catch(失败返回 `{ ok: false }`,不再抛成未处理的 IPC 错误),只有写入成功后才 `takeRejectedKey` 消费。之前先消费再写,写盘失败后第二次点「信任」只会得到 `{ ok: false }`,必须重连才能重新记录。
+- **B(P0)「信任并重连」不再在信任失败时重连**:`sessions.trustAndReconnect` 在 `{ ok: false }` 时改为 toast `app.trustFail` 并直接返回;无 `hostKey` 的路径仍照旧重连,以便卡片刷新。
+- **C(P1)状态栏转发对话框移除失败会提示**:`ForwardDialog.vue` 的 `remove` 改为 `await store.removeForward(...)`,失败时 toast `fw.removeFail`(与 `ForwardsPage` 一致),不再 fire-and-forget。
+- **D** i18n 三语补齐 `app.trustFail` / `fw.removeFail`(zh / en / zh-TW 保持对称)。
+
+未改动:`writeAutoBackupSync`、`scheduleAutoBackup`、`applyGlobalShowHideFromSettings`、`startLog`/`stopLog`、`tmuxListSessions`、`openForwards`/`addForward`/`waitForListen`、`localList`、`openExternal`、`revealLocal`、`tmuxAttachOrCreate`。
+
 ## 项目概述
 - 极简、键盘优先的 SSH 客户端。Electron + Vue 3 (Vite) + TypeScript。
 - 平台: Windows (`win32`)。目录: `D:\Documents\Claude Code\X-SSH`。
