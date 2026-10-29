@@ -7,6 +7,7 @@ useFocusTrap(dialogEl, () => store.forwardOpen)
 import { useSessions } from '../stores/sessions'
 import { useI18n } from '../lib/i18n'
 import { useConfirm } from '../composables/confirm'
+import { isImeKey } from '../lib/ime'
 import type { ForwardMode } from '../../../shared/types'
 import Icon from './Icon.vue'
 
@@ -33,6 +34,15 @@ const modeLabel = (m?: ForwardMode): string =>
 const form = reactive({ mode: 'local' as ForwardMode, localPort: '', host: '', remotePort: '' })
 const busy = ref(false)
 const err = ref('')
+
+// Switching local/remote/dynamic changes which fields are validated, so a
+// "bad port" from the previous mode is stale — drop it.
+watch(
+  () => form.mode,
+  () => {
+    err.value = ''
+  }
+)
 
 function ruleText(m: ForwardMode, lp: number, host: string, rp: number): string {
   if (m === 'dynamic') return `SOCKS 127.0.0.1:${lp}`
@@ -66,6 +76,15 @@ async function add(): Promise<void> {
   }
 }
 
+// Enter in any of the form's text fields adds the rule, like the forwards page.
+// Bound plainly (no `.prevent`) so an IME candidate key is never cancelled.
+function submitOnEnter(e: KeyboardEvent): void {
+  if (isImeKey(e)) return
+  e.preventDefault()
+  if (busy.value) return
+  void add()
+}
+
 async function remove(mode: ForwardMode | undefined, localPort: number): Promise<void> {
   // Same destructive action as the forwards page, which confirms first.
   const rule = list.value.find((f) => f.mode === mode && f.localPort === localPort)
@@ -96,9 +115,9 @@ async function remove(mode: ForwardMode | undefined, localPort: number): Promise
             <option value="remote">{{ t('status.fwRemote') }}</option>
             <option value="dynamic">{{ t('status.fwDynamic') }}</option>
           </select>
-          <input v-model="form.localPort" class="fw-in" :placeholder="t('fw.localPort')" spellcheck="false" />
-          <input v-if="form.mode !== 'dynamic'" v-model="form.host" class="fw-in grow" :placeholder="t('fw.remoteHost')" spellcheck="false" />
-          <input v-if="form.mode !== 'dynamic'" v-model="form.remotePort" class="fw-in" :placeholder="t('fw.remotePort')" spellcheck="false" />
+          <input v-model="form.localPort" class="fw-in" :placeholder="t('fw.localPort')" spellcheck="false" @keydown.enter="submitOnEnter" />
+          <input v-if="form.mode !== 'dynamic'" v-model="form.host" class="fw-in grow" :placeholder="t('fw.remoteHost')" spellcheck="false" @keydown.enter="submitOnEnter" />
+          <input v-if="form.mode !== 'dynamic'" v-model="form.remotePort" class="fw-in" :placeholder="t('fw.remotePort')" spellcheck="false" @keydown.enter="submitOnEnter" />
           <button class="fw-add" :disabled="busy" @click="add">{{ t('fw.add') }}</button>
         </div>
         <p v-if="err" class="fw-err">{{ err }}</p>

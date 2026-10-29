@@ -2,6 +2,27 @@
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。
 
+
+# 会话记录:连续改进 M3.80(2026-10-30,复核打磨:TransferPanel 暂停图标响应式 + Android 坏 SFTP 通道丢弃 + ForwardDialog Enter)
+
+功能清单已够,本轮按站立规则做开源复核打磨(不合并)。未动 PR #14 / #13 / #12 与更早的 #4–#11。
+
+**核过已过时 / 已在未合并 PR(本轮不重做)**:
+1. TransferPanel 失败原因 / ETA —— PR #12。
+2. Android PerSourcePenalties 30s 罚分地板 —— PR #12。
+3. 桌面重连中途罚分地板 + local/SOCKS `forwardOut` 超时 —— PR #13。
+4. HostEditor 密钥小层陷阱 / 命令面板遮罩回退 / 强调色样本 / 分组标签按下 —— PR #14。
+5. M3.79 HANDOVER 里桌面「遗留」多数已在 main 或上述 PR。
+
+**修了**:
+1. **桌面 TransferPanel 暂停图标不更新**:`pausedIds` 原是普通 `Set`,Vue 3 不追踪;现 `ref<Set>` + `lib/transferPause.ts`(`toggleId` / `allPausedFlag` / `prunePaused`)每次替换 Set;`allPaused` 改 computed(有新任务或跑完即翻回);离开 active 的 id 会 prune;关闭按钮 `title` 改 `t('sfp.close')`。
+2. **Android RemoteFiles 坏通道复用**:`withSftp` 在 `block` 抛错时若句柄仍是当前实例则清空并按 `reset()` 方式释放,下次重开。**手修**:换目录 cancel 上一次 `list` 的 `CancellationException` 不丢通道。
+3. **桌面 ForwardDialog**:端口/主机框 Enter 提交(IME 守卫);切 mode 清掉过期 `err`。
+
+**验证**:`typecheck` + vitest **343** 全绿(原 334;+`transferPause` 9)。Android:新增 `SftpHandle.kt` + `SftpHandleTest.kt`(本机无 SDK,未跑 `testDebugUnitTest`;CI / 有 SDK 时再跑)。未合并。
+
+---
+
 ## 项目概述
 - 极简、键盘优先的 SSH 客户端。Electron + Vue 3 (Vite) + TypeScript。
 - 平台: Windows (`win32`)。目录: `D:\Documents\Claude Code\X-SSH`。
