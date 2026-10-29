@@ -2,6 +2,27 @@
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。
 
+# 会话记录:连续改进 M3.82(2026-10-30,复核打磨:快照恢复确认 + 关闭其他尊重 confirmClose + 侧栏按下缩小)
+
+功能清单已够,本轮按站立规则做开源复核打磨(不合并)。未动 PR #16 / #15 / #14 / #13 / #12 与更早的 #4–#11。
+
+**核过已过时 / 已在未合并 PR(本轮不重做)**:
+1. TransferPanel 失败原因 / ETA —— PR #12。
+2. Android PerSourcePenalties 30s 罚分地板 —— PR #12。
+3. 桌面重连中途罚分地板 + local/SOCKS `forwardOut` 超时 —— PR #13。
+4. HostEditor 密钥小层陷阱 / 命令面板遮罩回退 / 强调色样本 / 分组标签按下 —— PR #14。
+5. TransferPanel 暂停图标响应式 / Android 坏 SFTP 句柄丢弃 / ForwardDialog Enter —— PR #15。
+6. sendSnippet 活会话复核 / known_hosts·片段删除确认 / ForwardsPage 切 mode 清错 —— PR #16。
+
+**修了**:
+1. **命令面板恢复快照静默掐断活会话**:`openSnapshot` 在任一 pane `connected` 时先 `confirm(pal.snapRestoreConfirm)`(danger),取消则不动;`lib/snapshotGuard.ts` `hasLiveConnectedPane` + 单测。
+2. **标签栏「关闭其他」绕过 confirmClose**:`closeOthers` 改 async,`closeOthersNeedsConfirm` 为真时一次确认并先对各活会话发 `exit`(与 `closeTabSafe` 同口径)。
+3. **侧栏 nav / 底栏按钮缺按下缩小**:`AppSidebar` `.nav-item:active` / `.foot-btn:active` 补 `transform: scale(0.97)`(+ transition)。分组标签按下仍在未合并的 #14,本轮不碰 HostsPage。
+
+**验证**:`typecheck` + `lint:i18n` + vitest **345** 全绿(原 334;+`snapshotGuard` 11)。Android 本轮未改。未合并。
+
+---
+
 ## 项目概述
 - 极简、键盘优先的 SSH 客户端。Electron + Vue 3 (Vite) + TypeScript。
 - 平台: Windows (`win32`)。目录: `D:\Documents\Claude Code\X-SSH`。

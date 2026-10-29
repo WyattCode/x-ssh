@@ -232,7 +232,10 @@ const themeName = computed(
   font-size: 14px;
   color: var(--text-dim);
   white-space: nowrap;
-  transition: background 0.16s var(--ease), color 0.16s var(--ease);
+  transition:
+    background 0.16s var(--ease),
+    color 0.16s var(--ease),
+    transform 0.16s var(--ease);
 }
 .nav-item:hover,
 .foot-btn:hover {
@@ -242,6 +245,7 @@ const themeName = computed(
 .nav-item:active,
 .foot-btn:active {
   background: var(--selected);
+  transform: scale(0.97);
 }
 /* macOS 27: the selected row is a soft fill and its icon takes the color —
    no marker bar. */
