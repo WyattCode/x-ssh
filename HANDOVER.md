@@ -2,6 +2,27 @@
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。
 
+
+# 会话记录:连续改进 M3.79(2026-10-30,复核打磨:密钥生成层焦点陷阱 + 命令面板遮罩回退 + 强调色样本 + 分组标签按下反馈)
+
+功能清单已够,本轮按站立规则做开源复核打磨(不合并)。未动 PR #12 / #13 与更早的 #4–#11。
+
+**核过已过时(本轮不重做)**:
+1. SftpDrawer IME Enter / 本机 `localSeq` —— main 已有。
+2. `recordChord` RESERVED_CHORDS(Mod+1..9 / Mod+c/v/f) —— main 已有。
+3. 声明的模态 `useFocusTrap` + `focusTrapCoverage` —— main 已有(批量 14/15)。
+4. 跳板 `forwardOut` 超时 / 下载取消 `ok:false` —— main 已有。
+
+**修了**:
+1. **HostEditor 生成密钥小层缺自己的焦点陷阱**:面板陷阱把 Tab 圈进整块 aside,用户在密钥名框里 Tab 会走进背后的主机表单。`keySheetEl` + `useFocusTrap(..., () => keyModal.open)` + `tabindex="-1"`(陷阱栈顶层生效)。
+2. **CommandPalette 遮罩在密码/广播步骤直接关面板**:与 Esc「回退到搜索」不一致、误点丢流程。`onOverlayDown` 在 pending/broadcast 时清步骤并回焦搜索,否则才关面板。
+3. **设置强调色样本在浅色主题仍显示暗色默认 `#6ea8fe`**:`accentSwatch` 按 `themeMode` 选 `#2f6fed` / `#6ea8fe`。
+4. **连接页分组标签缺按下缩小**:`.gtabs button:active { transform: scale(0.97) }`。
+
+**验证**:`typecheck` + vitest **334** 全绿(无新增用例)。未合并。
+
+---
+
 ## 项目概述
 - 极简、键盘优先的 SSH 客户端。Electron + Vue 3 (Vite) + TypeScript。
 - 平台: Windows (`win32`)。目录: `D:\Documents\Claude Code\X-SSH`。
