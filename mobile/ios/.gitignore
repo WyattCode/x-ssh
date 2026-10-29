@@ -1,0 +1,5 @@
+Core/
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
