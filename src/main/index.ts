@@ -660,7 +660,7 @@ async function importSshConfig(): Promise<{ ok: boolean; count: number; error?: 
   try {
     raw = await readFile(cfgPath, 'utf8')
   } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return { ok: false, count: 0, error: '未找到 ~/.ssh/config' }
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return { ok: false, count: 0, error: 'missing-config' }
     return { ok: false, count: 0, error: friendlyError((e as Error).message) }
   }
   const parsed = parseSshConfig(raw)

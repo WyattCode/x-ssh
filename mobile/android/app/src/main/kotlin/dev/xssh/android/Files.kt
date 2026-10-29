@@ -1807,8 +1807,12 @@ private fun NameDialog(
     val focus = remember { FocusRequester() }
     val name = field.text.trim()
     val valid = name.isNotEmpty() && (isPath || ('/' !in name && name != "." && name != ".."))
+    // 回车和按钮都会调 submit():对话框还没关掉时连按两下会建两个文件夹 / 改两次名。
+    var submitted by remember { mutableStateOf(false) }
     fun submit() {
-        if (valid) onConfirm(name)
+        if (!valid || submitted) return
+        submitted = true
+        onConfirm(name)
     }
     Dialog(onDismissRequest = onDismiss) {
         Column(

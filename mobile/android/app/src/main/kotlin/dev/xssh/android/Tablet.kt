@@ -1538,6 +1538,13 @@ fun ConfirmDialog(
 ) {
     val p = LocalXssh.current
     val focus = remember { FocusRequester() }
+    // 回车和按钮都会调 onConfirm():对话框还没撤掉时连按两下,删除 / 覆盖会跑两遍。
+    var done by remember { mutableStateOf(false) }
+    fun confirmOnce() {
+        if (done) return
+        done = true
+        onConfirm()
+    }
     Dialog(onDismissRequest = onDismiss) {
         Column(
             Modifier
@@ -1549,7 +1556,7 @@ fun ConfirmDialog(
                     val e = event.nativeKeyEvent
                     if (e.action != AndroidKeyEvent.ACTION_DOWN) return@onPreviewKeyEvent false
                     when (e.keyCode) {
-                        AndroidKeyEvent.KEYCODE_ENTER, AndroidKeyEvent.KEYCODE_NUMPAD_ENTER -> onConfirm()
+                        AndroidKeyEvent.KEYCODE_ENTER, AndroidKeyEvent.KEYCODE_NUMPAD_ENTER -> confirmOnce()
                         AndroidKeyEvent.KEYCODE_ESCAPE -> onDismiss()
                         else -> return@onPreviewKeyEvent false
                     }
@@ -1571,7 +1578,7 @@ fun ConfirmDialog(
                     confirm,
                     Modifier.weight(1f),
                     kind = if (danger) ButtonKind.Danger else ButtonKind.Primary,
-                ) { onConfirm() }
+                ) { confirmOnce() }
             }
         }
         LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
