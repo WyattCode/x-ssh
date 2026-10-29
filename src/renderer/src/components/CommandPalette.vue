@@ -5,6 +5,7 @@ const trapEl = ref<HTMLElement>()
 useFocusTrap(trapEl, () => store.paletteOpen)
 import { useSessions } from '../stores/sessions'
 import { fuzzyScore, fuzzyMatch } from '../lib/fuzzy'
+import { paletteHostScore } from '../lib/paletteHostScore'
 import { parseTarget } from '../lib/target'
 import { isImeKey } from '../lib/ime'
 import { useI18n } from '../lib/i18n'
@@ -32,6 +33,9 @@ type Item =
 
 const query = ref('')
 const selected = ref(0)
+// Highlighting must use the same trimmed query as scoring, or a trailing space
+// makes the marks disagree with what actually matched.
+const qTrim = computed(() => query.value.trim())
 const inputEl = ref<HTMLInputElement>()
 const listEl = ref<HTMLDivElement>()
 
@@ -104,9 +108,7 @@ const sections = computed<{ id: string; title: string; items: Item[] }[]>(() => 
   const scored = store.hosts
     .map((h) => ({
       h,
-      score: q
-        ? Math.max(fuzzyScore(q, h.label), fuzzyScore(q, `${h.username}@${h.host}`))
-        : (h.lastUsedAt ?? 0) / 1e13
+      score: q ? paletteHostScore(q, h) : (h.lastUsedAt ?? 0) / 1e13
     }))
     .filter((r) => r.score > (q ? -1 : -Infinity))
     .sort((a, b) => b.score - a.score)
@@ -256,6 +258,12 @@ const sectionStarts = computed<number[]>(() => {
 
 watch(items, () => {
   if (selected.value >= items.value.length) selected.value = 0
+})
+
+// A new query reorders the list; keep the highlight on the top match instead
+// of leaving it on whatever row happened to be selected before.
+watch(query, () => {
+  selected.value = 0
 })
 
 /** Imports hosts from ~/.ssh/config, then refreshes the list + security cache. */
@@ -517,13 +525,13 @@ function onKey(e: KeyboardEvent): void {
               </span>
               <span class="text">
                 <span class="title">
-                  <template v-for="(seg, sk) in highlight(item.title, query)" :key="'t' + sk">
+                  <template v-for="(seg, sk) in highlight(item.title, qTrim)" :key="'t' + sk">
                     <mark v-if="seg.hit" class="match">{{ seg.text }}</mark>
                     <template v-else>{{ seg.text }}</template>
                   </template>
                 </span>
                 <span class="sub">
-                  <template v-for="(seg, sk) in highlight(item.sub, query)" :key="'s' + sk">
+                  <template v-for="(seg, sk) in highlight(item.sub, qTrim)" :key="'s' + sk">
                     <mark v-if="seg.hit" class="match">{{ seg.text }}</mark>
                     <template v-else>{{ seg.text }}</template>
                   </template>

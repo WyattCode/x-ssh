@@ -38,10 +38,21 @@ const content = ref('')
 const original = ref('')
 const loading = ref(false)
 const saving = ref(false)
-const error = ref('')
+// A failed read blocks the textarea (there is nothing to edit); a failed write
+// must not — the unsaved text stays editable and the error shows as a banner.
+const loadError = ref('')
+const saveError = ref('')
 const taEl = ref<HTMLTextAreaElement>()
 const preEl = ref<HTMLPreElement>()
 const highlightOn = ref(true)
+
+// The session the file was opened on. `props.sessionId` is live-bound to the
+// active pane, so switching tabs while the editor is open would otherwise read
+// from / write to the wrong session. Freeze it on open and use only this.
+const frozenSessionId = ref('')
+// Bumped on every open-load; a response whose seq no longer matches (or that
+// arrives after the editor closed) is stale and must be ignored.
+let loadSeq = 0
 
 const dirty = computed(() => content.value !== original.value)
 
@@ -61,36 +72,45 @@ function syncScroll(): void {
 watch(
   () => props.open,
   async (o) => {
-    if (!o || !props.sessionId) return
+    if (!o) return
+    const seq = ++loadSeq
+    frozenSessionId.value = props.sessionId ?? ''
     loading.value = true
-    error.value = ''
+    loadError.value = ''
+    saveError.value = ''
     content.value = ''
     original.value = ''
+    if (!frozenSessionId.value) {
+      loading.value = false
+      loadError.value = t('ed.loadFail')
+      return
+    }
     const [hl, r] = await Promise.all([
       window.api.settings.get<boolean>('syntaxHighlight'),
-      window.api.sftp.readText(props.sessionId, props.path)
+      window.api.sftp.readText(frozenSessionId.value, props.path)
     ])
+    if (seq !== loadSeq || !props.open) return
     highlightOn.value = hl !== false
     loading.value = false
     if (r.ok) {
       content.value = r.content ?? ''
       original.value = content.value
     } else {
-      error.value = r.error ?? t('ed.loadFail')
+      loadError.value = r.error ?? t('ed.loadFail')
     }
   }
 )
 
 async function save(): Promise<void> {
-  if (!props.sessionId || saving.value || !dirty.value) return
+  if (!frozenSessionId.value || saving.value || !dirty.value) return
   saving.value = true
-  error.value = ''
-  const r = await window.api.sftp.writeText(props.sessionId, props.path, content.value)
+  saveError.value = ''
+  const r = await window.api.sftp.writeText(frozenSessionId.value, props.path, content.value)
   saving.value = false
   if (r.ok) {
     original.value = content.value
     emit('saved')
-  } else error.value = r.error ?? t('ed.saveFail')
+  } else saveError.value = r.error ?? t('ed.saveFail')
 }
 
 async function close(): Promise<void> {
@@ -107,10 +127,21 @@ async function close(): Promise<void> {
   emit('close')
 }
 
+function onInput(): void {
+  // Editing after a failed save means the user is still working: lift the
+  // error so it doesn't look like the new text is also unsaved/failed.
+  if (saveError.value) saveError.value = ''
+}
+
 function onKeydown(e: KeyboardEvent): void {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
     e.preventDefault()
     void save()
+  } else if (e.key === 'Escape') {
+    // Esc rarely needs an IME, but never close mid-composition.
+    if (e.isComposing || e.keyCode === 229) return
+    e.preventDefault()
+    void close()
   } else if (e.key === 'Tab') {
     e.preventDefault()
     const ta = taEl.value
@@ -142,20 +173,24 @@ function onKeydown(e: KeyboardEvent): void {
       </div>
 
       <div v-if="loading" class="state">{{ t('ed.loading') }}</div>
-      <div v-else-if="error" class="state err">{{ error }}</div>
-      <div v-else class="area-wrap">
-        <pre v-show="highlightOn" ref="preEl" class="area highlight" aria-hidden="true" v-html="highlighted"></pre>
-        <textarea
-          ref="taEl"
-          v-model="content"
-          class="area input"
-          :class="{ 'hl-on': highlightOn }"
-          spellcheck="false"
-          autocomplete="off"
-          wrap="off"
-          @scroll="syncScroll"
-        />
-      </div>
+      <div v-else-if="loadError" class="state err">{{ loadError }}</div>
+      <template v-else>
+        <div v-if="saveError" class="save-err">{{ saveError }}</div>
+        <div class="area-wrap">
+          <pre v-show="highlightOn" ref="preEl" class="area highlight" aria-hidden="true" v-html="highlighted"></pre>
+          <textarea
+            ref="taEl"
+            v-model="content"
+            class="area input"
+            :class="{ 'hl-on': highlightOn }"
+            spellcheck="false"
+            autocomplete="off"
+            wrap="off"
+            @scroll="syncScroll"
+            @input="onInput"
+          />
+        </div>
+      </template>
 
       <div class="foot">
         <span>{{ t('ed.chars', { n: content.length }) }}</span>
@@ -315,6 +350,16 @@ function onKeydown(e: KeyboardEvent): void {
   font-size: 12px;
   padding: 20px;
   text-align: center;
+}
+.save-err {
+  padding: 7px 14px;
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  border-bottom: 1px solid var(--border);
+  color: var(--danger);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 .foot {
   display: flex;
