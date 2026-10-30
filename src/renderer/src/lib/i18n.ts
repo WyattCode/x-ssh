@@ -724,6 +724,7 @@ const zh: Dict = {
   'hist.exportFail': '导出失败',
   'hist.exported': '已导出',
   'hist.untitled': '会话',
+  'hist.sessionGone': '该会话已关闭,无法跳转',
 
   // host editor
   'host.titleNew': '新建主机',
@@ -1613,6 +1614,7 @@ const en: Dict = {
   'hist.exportFail': 'Export failed',
   'hist.exported': 'Exported',
   'hist.untitled': 'Session',
+  'hist.sessionGone': 'That session is already closed',
 
   'host.titleNew': 'New host',
   'host.titleEdit': 'Edit host',
@@ -2511,6 +2513,7 @@ const zhTW: Dict = {
   'hist.exportFail': '匯出失敗',
   'hist.exported': '已匯出',
   'hist.untitled': '工作階段',
+  'hist.sessionGone': '該工作階段已關閉,無法跳轉',
 
   // host editor
   'host.titleNew': '新增主機',

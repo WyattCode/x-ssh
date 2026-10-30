@@ -843,6 +843,15 @@ Branch: `fix/review-polish-m3134` from `origin/main`. Do **not** merge; do **not
 openSnapshot/closeOthers/saveSetting (#68), theme/transfer clears (#67), bookmarks (#65), SettingsStore (#64), zoom/fontSize/sftpShowHidden, queueUpload, TabBar.vue.
 
 ---
+## M3.137(分支 `fix/review-polish-m3137`,**未合并**)
+
+- 分支 `fix/review-polish-m3137` 从 `origin/main` 切出,**未合并**。
+- 修复(都是既有行为的小缺陷,不加新功能):
+  - **历史「转到会话」不落盘 / 死会话静默无反应**:`focusSession` 改为返回 `boolean`,只有活动标签 / 面板真的变了才 `persistTabs()`(原来直接改 `activeId` / `activePaneId`、从不落盘,开着「启动恢复上次标签」时退出会把跳转前的标签恢复回来);`HistorySearch.pick` 在会话已关闭时 toast `hist.sessionGone`(原来照样关窗、什么都不发生)。
+  - **SFTP 页「连接」失败无提示 / 面板焦点错**:`openSftpFor` 成功路径补 `setActivePane`(多面板标签不再把 SFTP 绑到第一个面板);连接失败时切回终端页并 toast 失败原因(原来停在 SFTP 选择页,错误卡片看不见)。
+  - **`splitPane` 空面板崩溃**:加 `if (!src) return`(与 `applyLayoutPreset` 一致)。
+  - i18n 新增 `hist.sessionGone`(zh / en / zh-TW 三份对称)。
+- **未合并**:#71–#12、#4–#11 等开放 PR 均**未合并**;本分支不重做它们的内容(`setActivePane` / `persistTabs` 失败提示 / `splitPane` 的 `persistTabs` / `queue*` 静默回滚 / `removeTransferHistory` / `localList` / `isCancelled` 等仍归各自 PR)。
 
 ## 项目概述
 - 极简、键盘优先的 SSH 客户端。Electron + Vue 3 (Vite) + TypeScript。

@@ -1425,8 +1425,18 @@ export const useSessions = defineStore('sessions', {
       const pane = tab?.panes[0]
       if (tab && pane?.status === 'connected') {
         this.setActive(tab.id)
+        this.setActivePane(tab.id, pane.id)
         this.setPage('sftp')
+        return
       }
+      // Connect failed (or tab vanished): surface it — stay:true kept us off the
+      // terminal page, so the error card would otherwise be invisible.
+      if (tab && pane) {
+        this.setActive(tab.id)
+        this.setActivePane(tab.id, pane.id)
+        this.setPage('terminal')
+      }
+      toast(pane?.message ?? t('app.connectFail'), 'error')
     },
     /** Saves a host's profile fields (tags, forward rules…) without touching its secrets. */
     async saveHost(host: Host): Promise<void> {
@@ -1539,17 +1549,21 @@ export const useSessions = defineStore('sessions', {
         detail: `add ${rule.mode ?? 'local'} ${rule.localPort}`
       })
     },
-    /** Focuses the tab/pane owning a live session id (history-result jump). */
-    focusSession(sessionId: string): void {
+    /** Focuses the tab/pane owning a live session id (history-result jump).
+     *  Returns false when the session is already closed (nothing to jump to). */
+    focusSession(sessionId: string): boolean {
       for (const tab of this.tabs) {
         const p = tab.panes.find((x) => x.sshSessionId === sessionId)
         if (p) {
+          const changed = this.activeId !== tab.id || tab.activePaneId !== p.id
           this.activeId = tab.id
           tab.activePaneId = p.id
           this.setPage('terminal')
-          return
+          if (changed) this.persistTabs()
+          return true
         }
       }
+      return false
     },
 
     /** Opens a tab (single pane) and connects it. Returns the new tab id.
@@ -1586,6 +1600,7 @@ export const useSessions = defineStore('sessions', {
       const tab = this.tabs.find((t) => t.id === tabId)
       if (!tab || tab.panes.length >= 8) return
       const src = tab.panes.find((p) => p.id === tab.activePaneId) ?? tab.panes[0]
+      if (!src) return
       const paneId = uid('pane')
       tab.layout = splitLeaf(tab.layout, src.id, dir, paneId)
       tab.panes.push({ id: paneId, status: 'connecting', params: { ...toRaw(src.params) } })

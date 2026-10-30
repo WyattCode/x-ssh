@@ -8,6 +8,7 @@ import { useI18n } from '../lib/i18n'
 import { useToast } from '../composables/toast'
 import { isImeKey } from '../lib/ime'
 import Icon from './Icon.vue'
+import { useToast } from '../composables/toast'
 
 const store = useSessions()
 const { t } = useI18n()
@@ -18,6 +19,7 @@ function displayLabel(label: string): string {
   if (!label || label === '会话') return t('hist.untitled')
   return label
 }
+
 
 const query = ref('')
 const inputEl = ref<HTMLInputElement>()
@@ -112,7 +114,9 @@ function exportLog(): void {
 }
 
 function pick(hit: Hit): void {
-  store.focusSession(hit.sessionId)
+  if (!store.focusSession(hit.sessionId)) {
+    toast(t('hist.sessionGone'), 'info')
+  }
   store.toggleHistory(false)
 }
 function copy(hit: Hit): void {
