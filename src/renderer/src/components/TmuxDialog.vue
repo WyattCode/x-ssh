@@ -5,10 +5,12 @@ const trapEl = ref<HTMLElement>()
 useFocusTrap(trapEl, () => store.tmuxOpen)
 import { useSessions } from '../stores/sessions'
 import { useI18n } from '../lib/i18n'
+import { useToast } from '../composables/toast'
 import Icon from './Icon.vue'
 
 const store = useSessions()
 const { t } = useI18n()
+const { toast } = useToast()
 
 const sessions = ref<string[]>([])
 const newName = ref('')
@@ -25,17 +27,24 @@ async function list(): Promise<void> {
   sessions.value = await window.api.ssh.tmuxList(id)
 }
 
-function attach(name: string): void {
+async function attach(name: string): Promise<void> {
   const id = sid()
   if (!id) return
   if (busy.value) return
+  if (!id || busy.value) return
   // Attaching types into the terminal: show it.
   store.setPage('terminal')
   busy.value = true
-  void window.api.ssh.tmuxAttach(id, name).finally(() => {
-    busy.value = false
+  try {
+    const r = await window.api.ssh.tmuxAttach(id, name)
+    if (!r.ok) {
+      toast(t('tmux.attachFail'), 'error')
+      return
+    }
     store.toggleTmux(false)
-  })
+  } finally {
+    busy.value = false
+  }
 }
 
 function submit(): void {

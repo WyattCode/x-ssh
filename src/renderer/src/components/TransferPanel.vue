@@ -127,6 +127,11 @@ function histStatus(h: TransferHistoryItem): string {
   return histStatusLabel(h.status, t)
   if (h.status === 'cancelled') return t('sfp.cancelled')
   if (h.status === 'error') return h.error ? formatTransferError(h.error, t) : t('sfp.failed')
+  if (h.status === 'error') {
+    const sm = h.error && /^sync-items-failed:(\d+)$/.exec(h.error)
+    if (sm) return t('sfp.syncItemsFailed', { n: Number(sm[1]) })
+    return h.error || t('sfp.failed')
+  }
   return t('sfp.done')
 }
 function residualLabel(x: SftpProgress): string {

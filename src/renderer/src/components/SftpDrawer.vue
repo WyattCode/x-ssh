@@ -40,6 +40,11 @@ function sftpErr(err: string | undefined, fallbackKey: string): string {
 /** IPC failures arrive as codes; render the ones the UI knows in its language. */
 function sftpErr(err: string | undefined, fallbackKey: string): string {
   if (err === 'window-not-ready') return tt('app.windowNotReady')
+/** Turns a machine error code from main into UI text (falls back to `err`). */
+function sftpErr(err: string | undefined, fallbackKey: string): string {
+  const m = err && /^delete-failed:(\d+)$/.exec(err)
+  if (m) return tt('sfp.deletePartial', { n: Number(m[1]) })
+  if (err === 'extract-failed') return tt('sfp.extractFail')
   return err ?? tt(fallbackKey)
 }
 
