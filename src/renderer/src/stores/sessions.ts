@@ -75,6 +75,8 @@ function forwardError(r: { error?: string; code?: ForwardErrorCode }): string {
 let probeRoundBusy = false
 // loadHosts: toast only on the first failure in a streak (boot + onChanged).
 let hostsLoadFailToasted = false
+// secretsStatus: toast only once per launch when the vault is unreadable.
+let secretsLoadFailToasted = false
 let lastFullProbe = 0
 let probeSeq = 0
 const probeSeqOf = new Map<string, number>()
@@ -578,6 +580,18 @@ export const useSessions = defineStore('sessions', {
           toast(t('hosts.loadFail'), 'error')
         }
         console.error('hosts: load failed', e)
+      }
+    },
+
+    async loadSecretsStatus(): Promise<void> {
+      try {
+        const s = await window.api.hosts.secretsStatus()
+        if (s === 'bad' && !secretsLoadFailToasted) {
+          secretsLoadFailToasted = true
+          toast(t('app.secretsLoadFail'), 'error')
+        }
+      } catch (e) {
+        console.error('hosts: secretsStatus failed', e)
       }
     },
 
@@ -1888,6 +1902,13 @@ export const useSessions = defineStore('sessions', {
               : result.code === 'locked'
                 ? t('app.locked')
                 : result.code === 'host_key_unknown'
+              : result.code === 'secrets_load_failed'
+                ? t('app.secretsLoadFail')
+                : result.code === 'host_key_unknown'
+                ? viaJump
+                  ? t('app.keyUnknownJumpMsg', { host: keyWhere })
+                  : t('app.keyUnknownMsg', { host: keyWhere })
+                : result.code === 'host_key_changed'
                   ? viaJump
                     ? t('app.keyUnknownJumpMsg', { host: keyWhere })
                     : t('app.keyUnknownMsg', { host: keyWhere })

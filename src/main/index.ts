@@ -1196,6 +1196,7 @@ function createWindow(saved?: SavedBounds, prefs: UiPrefs = {}): void {
 function registerIpc(): void {
   // ---- Host store ----
   ipcMain.handle(IPC.hostsList, () => store.list())
+  ipcMain.handle(IPC.hostsSecretsStatus, () => store.secretsStatus())
   ipcMain.handle(
     IPC.hostsSave,
     (_e, host: Host, password?: string, passphrase?: string) =>
@@ -1494,9 +1495,24 @@ function registerIpc(): void {
       return { ok: false, code: 'locked', error: '应用已锁定，请先解锁' }
     }
     if (params.hostId && params.auth === 'password' && !params.password) {
+      // Corrupt secrets.bin: don't dial with an empty password (looks like auth_failed).
+      if ((await store.secretsStatus()) === 'bad') {
+        return {
+          ok: false,
+          code: 'secrets_load_failed',
+          error: '已保存的密码无法读取(密钥库不可用或 secrets.bin 来自另一台设备)。请重新输入密码,或从备份恢复。'
+        }
+      }
       params.password = await store.getPassword(params.hostId)
     }
     if (params.hostId && params.auth === 'key' && !params.passphrase) {
+      if ((await store.secretsStatus()) === 'bad') {
+        return {
+          ok: false,
+          code: 'secrets_load_failed',
+          error: '已保存的密钥口令无法读取(密钥库不可用或 secrets.bin 来自另一台设备)。请重新输入口令,或从备份恢复。'
+        }
+      }
       params.passphrase = await store.getPassphrase(params.hostId)
     }
     // Pull port-forwards and jump-host spec from the saved profile when the
