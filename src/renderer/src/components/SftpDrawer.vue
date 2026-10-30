@@ -1355,6 +1355,11 @@ async function packDownloadSelected(): Promise<void> {
         r.error === 'nothing-to-pack' ? tt('sfp.nothingToPack') : (r.error ?? tt('sfp.packFail'))
     if (!r.ok && !r.canceled) error.value = sftpErr(r.error, 'sfp.packFail')
     else if (r.ok) await load(path.value)
+    if (!r.ok && !r.canceled) {
+      // Main reports a failed tar as the machine code `pack-failed`; show the
+      // localized wording rather than the raw token.
+      error.value = r.error === 'pack-failed' ? tt('sfp.packFail') : (r.error ?? tt('sfp.packFail'))
+    } else if (r.ok) await load(path.value)
   } finally {
     busy.value = false
   }

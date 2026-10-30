@@ -11,6 +11,7 @@ import { decideStatusEvent, retryDelayMs, shouldReviveOnOnline } from '../lib/re
 import { liveSnippetSessionId } from '../lib/snippetSession'
 import { hasLiveConnectedPane, closeOthersNeedsConfirm } from '../lib/snapshotGuard'
 import { closeAllNeedsConfirm } from '../lib/tabCloseGuard'
+import { formatTransferName } from '../lib/transferFormat'
 import {
   buildFlatTree,
   buildGrid,
@@ -1029,6 +1030,10 @@ export const useSessions = defineStore('sessions', {
         // Audit the transfer for the security log (who moved what, if the pane
         // maps back to a host). Only terminal events (done/error) are recorded.
         if (p.done || p.error) {
+          // Main may emit a machine token (a sync job reports `sync`); the audit
+          // log and the notifications show the translated label, while the
+          // history entry below keeps the raw token so it stays stable.
+          const displayName = formatTransferName(p.name, t)
           const owner = p.sessionId ? this.paneBySession(p.sessionId) : undefined
           if (owner) {
             void window.api.connLog.push({
@@ -1039,20 +1044,23 @@ export const useSessions = defineStore('sessions', {
               username: owner.params.username,
               detail: p.error ? `${p.name} · ${formatTransferError(p.error, t)}` : p.name,
               detail: p.error ? `${p.name} · ${xferErr(p.error)}` : p.name,
+              detail: p.error ? `${displayName} · ${p.error}` : displayName,
               bytes: p.transferred
             })
           }
         }
         if (p.done || p.error) {
           if (!cancelled) {
+            const displayName = formatTransferName(p.name, t)
             window.api.notify(
               p.error ? t('sfp.notifyError') : t('sfp.notifyDone'),
               `${p.name}\n${p.direction === 'up' ? t('sfp.up') : t('sfp.down')}${p.error ? ` · ${formatTransferError(p.error, t)}` : ''}`,
               `${p.name}\n${p.direction === 'up' ? t('sfp.up') : t('sfp.down')}${p.error ? ` · ${xferErr(p.error)}` : ''}`,
+              `${displayName}\n${p.direction === 'up' ? t('sfp.up') : t('sfp.down')}${p.error ? ` · ${p.error}` : ''}`,
               !p.error
             )
             toast(
-              p.error ? `${p.name} · ${t('sfp.failed')}` : `${p.name} · ${t('sfp.done')}`,
+              p.error ? `${displayName} · ${t('sfp.failed')}` : `${displayName} · ${t('sfp.done')}`,
               p.error ? 'error' : 'success'
             )
           }

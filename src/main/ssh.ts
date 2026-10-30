@@ -1665,7 +1665,9 @@ export class SshManager {
     else if (errors) emit('', 'up', false, `sync-items-failed:${errors}`)
     else {
       const t = bytesDone || 1
-      this.emitProgress({ id: jobId, name: '同步', direction: 'up', transferred: t, total: t, count: totalPlanned, done: true })
+      // A machine token, not display text: the renderer translates it
+      // (formatTransferName), so an English UI no longer shows 同步.
+      this.emitProgress({ id: jobId, name: 'sync', direction: 'up', transferred: t, total: t, count: totalPlanned, done: true })
     }
     this.cancelledJobs.delete(jobId)
     this.pausedJobs.delete(jobId)
@@ -2648,7 +2650,14 @@ export class SshManager {
     const tmp = `/tmp/xssh-${randomUUID().slice(0, 8)}.tar.gz`
     const names = items.map((i) => i.name)
     // `cd <parent> && tar czf <tmp> <relative names>` — see buildPackCommand.
-    await this.execRemote(sessionId, buildPackCommand(parent, tmp, names))
+    // A non-zero exit means tar failed (missing file, no space, no tar at all):
+    // the archive is absent or truncated, so downloading it would hand the user
+    // a broken file that still looked like a success.
+    const packed = await this.execRemote(sessionId, buildPackCommand(parent, tmp, names))
+    if (packed.code !== 0) {
+      await this.execRemote(sessionId, `rm -f "${tmp}"`).catch(() => {})
+      return { ok: false, error: 'pack-failed' }
+    }
     const name = archiveName || (items.length === 1 ? items[0].name : 'archive') + '.tar.gz'
     const outPath = resolve(localDir, name).replace(/\.tar\.gz$/, '.tar.gz')
     try {
@@ -2764,8 +2773,10 @@ export class SshManager {
         stream.on('exit', (code: unknown) => {
           if (typeof code === 'number') exitCode = code
         })
+        // A machine code, not display text: callers that show it to the user
+        // (publish / revoke) translate it, so the wording isn't baked in here.
         stream.on('close', () =>
-          settle(exitCode !== null && exitCode !== 0 ? new Error(`远程命令退出码 ${exitCode}`) : undefined)
+          settle(exitCode !== null && exitCode !== 0 ? new Error(`remote-exit:${exitCode}`) : undefined)
         )
         stream.on('error', (e: Error) => settle(e))
       })

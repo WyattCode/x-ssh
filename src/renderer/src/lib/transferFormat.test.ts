@@ -6,12 +6,13 @@ import {
   formatSpeed,
   formatAgo,
   formatEta,
+  formatTransferName,
   transferStatusText,
   histStatusLabel,
   CANCELLED_MARKER
 } from './transferFormat'
 
-const tr = (key: string, vars?: Record<string, number>): string =>
+const tr = (key: string, vars?: Record<string, string | number>): string =>
   vars ? `${key}:${JSON.stringify(vars)}` : key
 
 describe('isCancelled', () => {
@@ -125,6 +126,17 @@ describe('formatEta', () => {
     expect(formatEta(60 * 1024, 1024, tr)).toBe('sfp.etaMin:{"n":1}')
     expect(formatEta(90 * 1024, 1024, tr)).toBe('sfp.etaMin:{"n":2}')
     expect(formatEta(10 * 60 * 1024, 1024, tr)).toBe('sfp.etaMin:{"n":10}')
+describe('formatTransferName', () => {
+  it('translates the sync job token main emits', () => {
+    expect(formatTransferName('sync', tr)).toBe('sfp.sync')
+  })
+
+  it('still maps the legacy Chinese token', () => {
+    expect(formatTransferName('同步', tr)).toBe('sfp.sync')
+  })
+
+  it('passes a real file name through untouched', () => {
+    expect(formatTransferName('report.tar.gz', tr)).toBe('report.tar.gz')
   })
 })
 

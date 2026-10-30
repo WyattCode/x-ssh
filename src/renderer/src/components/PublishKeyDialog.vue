@@ -58,6 +58,12 @@ function hostOpError(err?: string): string {
   if (err === 'app-locked') return t('keyPub.appLocked')
   if (err === 'connect-failed') return t('keyPub.connectFailed')
   return err ?? ''
+/** Main reports a failed remote command as `remote-exit:N`; show it in the UI
+ *  language instead of the raw machine code. Anything else passes through. */
+function mapError(msg: string | undefined): string {
+  const m = /^remote-exit:(\d+)$/.exec(msg ?? '')
+  if (m) return t('keyPub.remoteExit', { n: Number(m[1]) })
+  return msg ?? ''
 }
 
 async function publish(): Promise<void> {
@@ -73,6 +79,7 @@ async function publish(): Promise<void> {
     err.value =
       r.error === 'no-public-key' ? t('keyPub.noPublicKey') : (r.error ?? t('keyPub.fail'))
     err.value = pubErr(r.error) || t('keyPub.fail')
+    err.value = mapError(r.error) || t('keyPub.fail')
     return
   try {
     const r = await window.api.keys.publish(keyId.value, [...selected])
@@ -99,6 +106,7 @@ async function revoke(): Promise<void> {
     err.value =
       r.error === 'no-public-key' ? t('keyPub.noPublicKey') : (r.error ?? t('keyPub.revokeFail'))
     err.value = pubErr(r.error) || t('keyPub.revokeFail')
+    err.value = mapError(r.error) || t('keyPub.revokeFail')
     return
   if (busy.value || revokeBusy.value) return
   revokeBusy.value = true
@@ -166,6 +174,7 @@ watch(
             <span class="kp-host-label">{{ r.host }}</span>
             <span v-if="!r.ok" class="kp-err">{{ hostOpError(r.error) }}</span>
             <span v-if="!r.ok" class="kp-err">{{ pubErr(r.error) }}</span>
+            <span v-if="!r.ok" class="kp-err">{{ mapError(r.error) }}</span>
           </div>
         </div>
         <div v-if="revokeResults.length" class="kp-results">
@@ -175,6 +184,7 @@ watch(
             <span class="kp-host-label">{{ r.host }}</span>
             <span v-if="!r.ok" class="kp-err">{{ hostOpError(r.error) }}</span>
             <span v-if="!r.ok" class="kp-err">{{ pubErr(r.error) }}</span>
+            <span v-if="!r.ok" class="kp-err">{{ mapError(r.error) }}</span>
           </div>
         </div>
       </div>
