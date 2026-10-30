@@ -318,6 +318,14 @@
     <string name="term_show_keyboard">调出键盘</string>
     <string name="term_show_keys">显示快捷键</string>
     <string name="term_snippets">命令片段</string>
+    <string name="term_split_open">在右侧打开</string>
+    <string name="term_split_pick">选择右侧会话</string>
+    <string name="term_split_swap">交换左右</string>
+    <string name="term_split_close">关闭此窗格</string>
+    <string name="term_split_unavailable">没有其他活动会话。先连上另一台主机,再在右侧打开。</string>
+    <string name="term_pane_left">左窗格</string>
+    <string name="term_pane_right">右窗格</string>
+    <string name="term_pane_focused">已聚焦</string>
     <string name="term_unlock_subtitle">用生物识别或锁屏密码继续</string>
     <string name="term_unlock_title">解锁已保存的凭据</string>
     <plurals name="files_cancelled_downloaded">

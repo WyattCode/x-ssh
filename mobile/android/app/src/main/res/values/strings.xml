@@ -319,6 +319,14 @@
     <string name="term_show_keyboard">Show keyboard</string>
     <string name="term_show_keys">Show shortcut keys</string>
     <string name="term_snippets">Snippets</string>
+    <string name="term_split_open">Open on the right</string>
+    <string name="term_split_pick">Choose right-hand session</string>
+    <string name="term_split_swap">Swap left and right</string>
+    <string name="term_split_close">Close this pane</string>
+    <string name="term_split_unavailable">No other live sessions. Connect another host first, then open it on the right.</string>
+    <string name="term_pane_left">Left pane</string>
+    <string name="term_pane_right">Right pane</string>
+    <string name="term_pane_focused">Focused</string>
     <string name="term_unlock_subtitle">Use biometrics or your screen lock to continue</string>
     <string name="term_unlock_title">Unlock saved credentials</string>
     <plurals name="files_cancelled_downloaded">

@@ -219,6 +219,12 @@ fun App(devTarget: DevTarget? = null) {
     // 分屏进出的某些路径都会重建)。重建之后 SSH 会话在 SessionRegistry 里还活着,
     // 丢的只是"我刚才在哪一屏" —— 表现就是正敲着命令突然被踢回主机列表。
     var termHostId by rememberSaveable { mutableStateOf<String?>(null) }
+    // 折叠屏双终端的右侧会话 id。合上外屏**不清** —— 会话仍在 SessionRegistry,展开后原样配对。
+    var termCompanionId by rememberSaveable { mutableStateOf<String?>(null) }
+    // 双终端当前收键盘的那一侧。
+    var paneFocusSide by rememberSaveable { mutableStateOf(PaneSide.Left.name) }
+    val paneFocus = runCatching { PaneSide.valueOf(paneFocusSide) }.getOrDefault(PaneSide.Left)
+    fun setPaneFocus(side: PaneSide) { paneFocusSide = side.name }
     // 正开着设置页。在设置里换了语言,系统会重建整个界面 —— 不记着的话,一换语言就被踢回主机页。
     var onSettings by rememberSaveable { mutableStateOf(false) }
     var screen by remember {
@@ -336,7 +342,15 @@ fun App(devTarget: DevTarget? = null) {
                     hosts = hosts,
                     selectedId = selectedId,
                     onSelect = { selectedId = it },
-                    onTerminalHost = { termHostId = it },
+                    onTerminalHost = { id ->
+                        termHostId = id
+                        // 显式切到单会话(首页点连接 / 返回清掉)时副窗格一起清。
+                        if (id == null) termCompanionId = null
+                    },
+                    termCompanionId = termCompanionId,
+                    onTerminalCompanion = { termCompanionId = it },
+                    paneFocus = paneFocus,
+                    onPaneFocus = { setPaneFocus(it) },
                     persist = ::persist,
                 )
             }
@@ -356,6 +370,11 @@ private fun PhoneFlow(
     selectedId: String?,
     onSelect: (String?) -> Unit,
     onTerminalHost: (String?) -> Unit,
+    /** 双终端右侧会话;null = 单窗格。 */
+    termCompanionId: String?,
+    onTerminalCompanion: (String?) -> Unit,
+    paneFocus: PaneSide,
+    onPaneFocus: (PaneSide) -> Unit,
     persist: (List<Host>) -> Unit,
 ) {
     // 返回手势的协程里要读"现在"是哪一屏,不是开始拖动那一刻的参数值。
@@ -416,6 +435,32 @@ private fun PhoneFlow(
     fun land(target: Screen): Screen = resolve(target).also { arrive(target) }
     PredictiveBackHandler(enabled = screen != Screen.Home) { gesture ->
         dragging.value = true
+        // 双终端:第一次返回先收成单窗格(两个会话都还活着),第二次才离开终端。
+        val dualNow = currentScreen is Screen.Terminal && wide &&
+            termCompanionId != null &&
+            termCompanionId != (currentScreen as Screen.Terminal).host.id
+        if (dualNow) {
+            try {
+                var startX = Float.NaN
+                gesture.collect { event ->
+                    if (startX.isNaN()) startX = event.touchX
+                    val width = windowInfo.containerSize.width.coerceAtLeast(1)
+                    // 不换页,只跟手一点反馈:进度到了就收副窗格。
+                    seek.seekTo(((event.touchX - startX) / width).coerceIn(0f, 1f), currentScreen)
+                }
+                onTerminalCompanion(null)
+                onPaneFocus(PaneSide.Left)
+                seek.snapTo(currentScreen)
+                dragging.value = false
+            } catch (e: CancellationException) {
+                scope.launch {
+                    seek.animateTo(seek.currentState, Motion.page())
+                    dragging.value = false
+                }
+                throw e
+            }
+            return@PredictiveBackHandler
+        }
         val parent = currentScreen.parent()
         val target = resolve(parent)
         try {
@@ -460,6 +505,8 @@ private fun PhoneFlow(
             onConnect = {
                 // 从双栏连出去:回来再合上时回列表,不停在详情页。
                 viewingDetail = false
+                onTerminalCompanion(null)
+                onPaneFocus(PaneSide.Left)
                 onTerminalHost(it.id)
                 onScreen(Screen.Terminal(it))
             },
@@ -487,6 +534,8 @@ private fun PhoneFlow(
                     host = host,
                     onBack = { onScreen(land(Screen.Home)) },
                     onConnect = {
+                        onTerminalCompanion(null)
+                        onPaneFocus(PaneSide.Left)
                         onTerminalHost(it.id)
                         onScreen(Screen.Terminal(it, back = current))
                     },
@@ -521,35 +570,106 @@ private fun PhoneFlow(
             },
         )
 
-        is Screen.Terminal -> TerminalScreen(
-            host = current.host,
-            onExit = {
-                onTerminalHost(null)
-                onScreen(land(current.back))
-            },
-            onTrustKey = { fingerprint ->
-                // 换一个 Host 实例 → 终端屏的 remember(host) 失效 → 带着新指纹重连。
-                val trusted = current.host.copy(keyFingerprint = fingerprint)
+        is Screen.Terminal -> {
+            val panes = resolveDualPanes(wide, current.host.id, termCompanionId, paneFocus)
+            var pickingBeside by remember(current.host.id) { mutableStateOf(false) }
+            fun hostOf(id: String?): Host? = id?.let { hid ->
+                hosts.firstOrNull { it.id == hid }
+                    ?: SessionRegistry[hid]?.host
+                    ?: current.host.takeIf { it.id == hid }
+            }
+            fun trustKey(host: Host, fingerprint: String) {
+                val trusted = host.copy(keyFingerprint = fingerprint)
                 if (hosts.any { it.id == trusted.id }) {
                     persist(hosts.map { if (it.id == trusted.id) it.copy(keyFingerprint = fingerprint) else it })
                 }
-                onScreen(current.copy(host = trusted))
-            },
-            // 跳板机的指纹存到跳板机那台上;主机表一变,终端屏拿到新的跳板机实例,随之重连。
-            onTrustJumpKey = { jump, fingerprint ->
-                persist(hosts.map { if (it.id == jump.id) it.copy(keyFingerprint = fingerprint) else it })
-            },
-            onFiles = { onScreen(Screen.Files(current)) },
-            // 连上 / 接管的那一刻记一笔"最近使用"(失败和自动重连不算)。
-            onConnected = { id ->
+                // 主窗格指纹变了要换 Screen 里的 Host 实例以触发重连。
+                if (current.host.id == trusted.id) onScreen(current.copy(host = trusted))
+            }
+            fun connected(id: String) {
                 persist(hosts.map { if (it.id == id) it.copy(lastUsed = System.currentTimeMillis()) else it })
-            },
-            onEditHost = {
-                onTerminalHost(null)
-                // 填完回到进终端之前的那一页(详情页或主机页),再点连接就是用新密码连。
-                onScreen(Screen.Editor(current.host, back = current.back))
-            },
-        )
+            }
+            if (pickingBeside) {
+                PickBesideSessionDialog(
+                    excludeId = current.host.id,
+                    hosts = hosts,
+                    onPick = { picked ->
+                        val next = openBeside(current.host.id, termCompanionId, picked.id)
+                        onTerminalHost(next.first)
+                        onTerminalCompanion(next.second)
+                        onPaneFocus(next.third)
+                        pickingBeside = false
+                    },
+                    onDismiss = { pickingBeside = false },
+                )
+            }
+            if (panes.dual) {
+                val left = hostOf(panes.leftId)
+                val right = hostOf(panes.rightId)
+                if (left != null && right != null) {
+                    DualTerminalPanes(
+                        left = left,
+                        right = right,
+                        focus = panes.focus,
+                        onFocus = onPaneFocus,
+                        onExitPane = { side ->
+                            // 关掉这一侧的会话,另一侧留下。
+                            val closing = if (side == PaneSide.Left) left.id else right.id
+                            SessionRegistry.close(closing)
+                            val next = closeFocusedPane(current.host.id, termCompanionId, side)
+                            onTerminalHost(next.first)
+                            onTerminalCompanion(next.second)
+                            onPaneFocus(next.third)
+                            if (next.first == null) onScreen(land(current.back))
+                            else {
+                                val keep = hostOf(next.first) ?: return@onExitPane
+                                onScreen(Screen.Terminal(keep, back = current.back))
+                            }
+                        },
+                        onSwap = {
+                            val (a, b) = swapPanes(current.host.id, termCompanionId)
+                            onTerminalHost(a)
+                            onTerminalCompanion(b)
+                            onPaneFocus(if (paneFocus == PaneSide.Left) PaneSide.Right else PaneSide.Left)
+                            hostOf(a)?.let { onScreen(Screen.Terminal(it, back = current.back)) }
+                        },
+                        onOpenBeside = { pickingBeside = true },
+                        onTrustKey = ::trustKey,
+                        onTrustJumpKey = { jump, fingerprint ->
+                            persist(hosts.map { if (it.id == jump.id) it.copy(keyFingerprint = fingerprint) else it })
+                        },
+                        onFiles = { h ->
+                            onScreen(Screen.Files(Screen.Terminal(h, back = current.back)))
+                        },
+                        onEditHost = { h ->
+                            onTerminalHost(null)
+                            onScreen(Screen.Editor(h, back = current.back))
+                        },
+                        onConnected = ::connected,
+                    )
+                }
+            } else {
+                val shown = hostOf(panes.leftId) ?: current.host
+                TerminalScreen(
+                    host = shown,
+                    onExit = {
+                        onTerminalHost(null)
+                        onScreen(land(current.back))
+                    },
+                    onTrustKey = { fingerprint -> trustKey(shown, fingerprint) },
+                    onTrustJumpKey = { jump, fingerprint ->
+                        persist(hosts.map { if (it.id == jump.id) it.copy(keyFingerprint = fingerprint) else it })
+                    },
+                    onFiles = { onScreen(Screen.Files(Screen.Terminal(shown, back = current.back))) },
+                    onConnected = ::connected,
+                    onEditHost = {
+                        onTerminalHost(null)
+                        onScreen(Screen.Editor(shown, back = current.back))
+                    },
+                    onOpenBeside = { pickingBeside = true },
+                )
+            }
+        }
 
         is Screen.Files -> {
             val session = SessionRegistry.sessions.collectAsState().value[current.host.id]
@@ -578,7 +698,7 @@ private fun PhoneFlow(
                 is Screen.HostInfo -> "info:" + it.hostId
                 Screen.Fonts -> "fonts"
                 is Screen.Editor -> "editor"
-                is Screen.Terminal -> "term:" + it.host.id
+                is Screen.Terminal -> "term:" + it.host.id + ":" + (termCompanionId ?: "")
                 is Screen.Files -> "files:" + it.host.id
             }
         },

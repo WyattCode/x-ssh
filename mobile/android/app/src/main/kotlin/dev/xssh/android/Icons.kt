@@ -360,4 +360,18 @@ object XIcons {
         lineTo(6f, 15f)
         moveTo(9.8f, 11.2f); lineTo(6f, 15f); lineTo(9.8f, 18.8f)
     }
+
+    /** 分屏 / 在右侧打开:两个并排窗格。 */
+    val Split = icon("split") {
+        moveTo(4.5f, 5.5f); lineTo(10.5f, 5.5f); lineTo(10.5f, 18.5f); lineTo(4.5f, 18.5f); close()
+        moveTo(13.5f, 5.5f); lineTo(19.5f, 5.5f); lineTo(19.5f, 18.5f); lineTo(13.5f, 18.5f); close()
+    }
+
+    /** 交换左右窗格。 */
+    val Swap = icon("swap") {
+        moveTo(7f, 8f); lineTo(3.5f, 12f); lineTo(7f, 16f)
+        moveTo(3.5f, 12f); lineTo(10.5f, 12f)
+        moveTo(17f, 8f); lineTo(20.5f, 12f); lineTo(17f, 16f)
+        moveTo(20.5f, 12f); lineTo(13.5f, 12f)
+    }
 }

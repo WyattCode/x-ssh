@@ -124,6 +124,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -176,6 +177,19 @@ fun TerminalScreen(
     onEditHost: (() -> Unit)? = null,
     /** 连上 / 接管到活会话的那一刻回调(主机 id):首页按"最近使用"排序就靠它。 */
     onConnected: (String) -> Unit = {},
+    /**
+     * 折叠屏双终端里嵌在某一侧时为 true:本窗格不独占整窗 chrome 语义,
+     * 轨道只在 [focused] 时画(同一时刻整窗只有一条 EdgeRail)。
+     */
+    embedded: Boolean = false,
+    /** 双终端时是否是当前收键盘 / 快捷键的那一窗格;单终端保持默认 true。 */
+    focused: Boolean = true,
+    /** 点到本窗格时通知上层把焦点挪过来(双终端用)。 */
+    onFocusRequest: () -> Unit = {},
+    /** 轨道「在右侧打开」:挑选另一条活会话并排(仅折叠屏双终端入口)。 */
+    onOpenBeside: (() -> Unit)? = null,
+    /** 轨道「交换左右」(仅已是双窗格时非 null)。 */
+    onSwapPanes: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     // 跳板机从主机表里现查:信任了它的密钥、改了它的密码,这里拿到的就是新的那份,随之重连。
@@ -480,6 +494,11 @@ fun TerminalScreen(
                 live = null
                 attempt++
             },
+            embedded = embedded,
+            focused = focused,
+            onFocusRequest = onFocusRequest,
+            onOpenBeside = onOpenBeside,
+            onSwapPanes = onSwapPanes,
         )
     }
 }
@@ -492,6 +511,11 @@ private fun TerminalView(
     tablet: TabletTerminalChrome?,
     onFiles: (() -> Unit)?,
     onReconnect: () -> Unit,
+    embedded: Boolean = false,
+    focused: Boolean = true,
+    onFocusRequest: () -> Unit = {},
+    onOpenBeside: (() -> Unit)? = null,
+    onSwapPanes: (() -> Unit)? = null,
 ) {
     val p = LocalXssh.current
     val density = LocalDensity.current
@@ -548,8 +572,14 @@ private fun TerminalView(
         modePillTick++
     }
     // 插着实体键盘就直接能打字:焦点不在输入框上(直通)时不会弹软键盘。
-    LaunchedEffect(hardKeyboard) {
-        if (hardKeyboard) focusInput()
+    // 双终端非聚焦窗格不抢焦点 —— 否则一重组就把 IME 从另一侧抢走。
+    LaunchedEffect(hardKeyboard, focused) {
+        if (hardKeyboard && focused) focusInput()
+    }
+    LaunchedEffect(focused) {
+        // 非聚焦侧**不要** clearFocus —— 那会把另一侧刚拿到的焦点一起清掉。
+        // 不请求焦点即可;点到本侧时由 onFocusRequest → 上层改 focused → 再走 focusInput。
+        if (focused && hardKeyboard) focusInput()
     }
     // 平板:外面(关浮层、退出搜索、点侧边栏的会话)要求把焦点还给终端。
     LaunchedEffect(tablet?.focusRequest) {
@@ -970,6 +1000,13 @@ private fun TerminalView(
                 tint = if (imeOn) p.accent else null,
             ) { toggleIme(imeOn) }
         }
+        // 折叠屏双终端:「在右侧打开」/「交换左右」。只在上层接了回调时出现。
+        GlassReveal(onOpenBeside != null) {
+            GlassButton(XIcons.Split, stringResource(R.string.term_split_open)) { onOpenBeside?.invoke() }
+        }
+        GlassReveal(onSwapPanes != null) {
+            GlassItem(XIcons.Swap, stringResource(R.string.term_split_swap)) { onSwapPanes?.invoke() }
+        }
         // 断开是危险操作,单独一颗、红色图标,放在最下面(和 ＋ / ✓ 同一个位置)。
         GlassButton(XIcons.Close, stringResource(R.string.term_disconnect_session), tint = p.danger) {
                 SessionRegistry.close(host.id)
@@ -1117,8 +1154,11 @@ private fun TerminalView(
                 AnimatedVisibility(showKeys, enter = Motion.keyboardIn, exit = Motion.keyboardOut) { keys() }
             }
         }
-        CompositionLocalProvider(LocalBackdrop provides backdrop) {
-            EdgeRail(Modifier.align(Alignment.BottomEnd), content = actions)
+        // 双终端非聚焦窗格不画轨道 —— 整窗同一时刻只留一条。
+        if (focused) {
+            CompositionLocalProvider(LocalBackdrop provides backdrop) {
+                EdgeRail(Modifier.align(Alignment.BottomEnd), content = actions)
+            }
         }
         }
         return
@@ -1126,7 +1166,18 @@ private fun TerminalView(
 
     // 终端铺满整宽,右侧轨道悬浮在上面(玻璃按钮,底下的字透出来)—— 用户要的是最宽的终端。
     // 只有快捷键面板给轨道让位(它和轨道同一条底边、并排),见 FloatingKeys。
-    Box(Modifier.fillMaxSize().background(p.termBg).then(keyModifier)) {
+    // 点到这一侧就向双终端上层要焦点(不消费事件,终端手势照常)。
+    val focusTap = if (embedded) {
+        Modifier.pointerInput(Unit) {
+            awaitPointerEventScope {
+                while (true) {
+                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                    if (event.changes.any { it.pressed }) onFocusRequest()
+                }
+            }
+        }
+    } else Modifier
+    Box(Modifier.fillMaxSize().background(p.termBg).then(focusTap).then(keyModifier)) {
         Column(
             Modifier
                 .fillMaxSize()
@@ -1147,11 +1198,13 @@ private fun TerminalView(
             // 左下角空着,不是按钮:在文件页连点 ‹ 退回来,多点的那一下落在这里,无害。
             // 按钮和别的页一样大(56dp)、离底一样远:用户要的是从文件页退回来按钮不跳。
             // 代价是终端少一行左右,用户选了统一。
-            if (bottomBar) {
+            // 双终端非聚焦侧不占底栏按钮(避免两套操作)。
+            if (bottomBar && focused) {
                 BottomBar(insets = false, end = { actions() })
             }
         }
-        if (!bottomBar && tablet == null) {
+        // 聚焦窗格才画轨道:单终端 focused 恒 true;双终端同一时刻只有一侧为 true。
+        if (!bottomBar && tablet == null && focused) {
             CompositionLocalProvider(LocalBackdrop provides backdrop) {
                 EdgeRail(Modifier.align(Alignment.BottomEnd), content = actions)
             }

@@ -62,7 +62,7 @@ SFTP 已做(上传/下载/重命名/删除,上传是"先写临时文件再改名
 3. **产品优先级(第十二次会话和用户定的,折叠屏视角)**:P0 ~~断线自动重连 + tmux 续接~~(M3.60)→
    P0 ~~跳板机~~ → P1 ~~命令片段~~(都在 M3.61)→ **首页改成"工作台"四步(第十六次会话开工):
    ① ~~置顶 + 最近使用~~(M3.66,模拟器已验)→ ② ~~首页「会话」区(接管语义)~~(M3.67,真机已验)→
-   ③ ~~双栏右栏会话实时预览~~(M3.67,真机已验)→ ④ P1 多会话 / 内屏左右两个终端** →
+   ③ ~~双栏右栏会话实时预览~~(M3.67,真机已验)→ ④ P1 ~~多会话 / 内屏左右两个终端~~(M3.69,真机待验)** →
    P1 内屏「终端 + 文件」并排 → 片段的内屏常驻面板(现在是弹出面板) →
    P2 端口转发、与桌面版互通主机配置、通知、外屏小组件、配色 / 读屏(~~英文~~ 三种语言已做,M3.62)。
    不做:照搬桌面版全部设置和快照;mosh(要服务端装东西,先靠自动重连 + tmux)。
@@ -2629,3 +2629,36 @@ md5 `c07a2398…`(1054 字节)。**主机密钥指纹是空的**(重建主机时
   第七次会话**改了 Rust 核心和 FFI**(`input_modes`、选区、私钥、生成密钥、SFTP),`.so` 与 Kotlin 绑定都已重新生成;别的设备上的旧 APK 要重装。
   SFTP live 测试:`XSSH_TEST_HOST=127.0.0.1 XSSH_TEST_PORT=2222 XSSH_TEST_USER=user XSSH_TEST_KEY=%LOCALAPPDATA%\Temp\opencode\xssh-sshd\id_xssh_dev`
   + `cargo test -p xssh-core --test live_ssh -- --ignored`(2 个都过)。
+
+### M3.69 折叠屏内屏双终端 + 多会话(2026-10-29,编译/单测待本机;真机未验)
+
+首页工作台四步的第 ④ 步(P1):**内屏左右两个活终端**。双窗格是渲染形态,不加 `Screen.DualTerminal`。
+
+**状态模型**(`App` / `PhoneFlow`):
+- `termHostId` = 左/主窗格;`termCompanionId` = 右/副窗格(可空);`paneFocus` = 哪一侧收键盘。
+- `resolveDualPanes(wide, primary, companion, focus)` 推导这一帧画什么:
+  够宽且副存在且不同 → 双;否则只画聚焦侧那一台。**合上外屏不清 `termCompanionId`**,
+  会话仍在 `SessionRegistry`,展开后原样配对。
+- 首页点连接 / 详情页连接:清副窗格,回到单会话语义。返回手势:双 → 先收成单(清副 id)→ 再回首页。
+
+**入口**:
+- 单终端轨道「在右侧打开」→ `PickBesideSessionDialog` 挑另一条活会话(没有则提示先连一台)。
+- 双终端轨道「交换左右」;`swapPanes` / `closeFocusedPane` / `openBeside` 都是纯函数(见 `DualPanes.kt`)。
+
+**Chrome**:
+- 两侧都是 `TerminalScreen(embedded=true)`;**只有 `focused` 那一侧画 EdgeRail / 底栏**,
+  整窗同一时刻一条轨道。点窗格 → `onFocusRequest`。非聚焦侧不 `clearFocus`(会把另一侧焦点清掉)。
+
+**文件**:
+- 新增 `DualPanes.kt` + `DualPanesTest`(10 条);`DualTerminal.kt`(`DualTerminalPanes` / 挑选对话框)。
+- 改 `MainActivity.kt`、`TerminalScreen.kt`(加法参数,默认值保持旧行为)、`Icons.kt`(`Split` / `Swap`)。
+- i18n:`term_split_*` / `term_pane_*` 三份资源对称。
+
+**本机未做 / 真机必验(Xiaomi 18 Fold 内屏横)**:
+- 分栏线压折痕;`bookFold.sizeDp` 半折缝宽。
+- 只有聚焦侧弹 IME;点另一侧后输入跟过去。
+- 合上/展开中途有输出:registry 仍是 2,无重连、无 scrollback 丢。
+- 预测返回 双→单→Home;从右窗格进 Files 再返回仍是双。
+- M3.67 回归:退回首页「会话」区仍显示两条活会话、点按仍是接管。
+- 本 CI 箱无 Android SDK,未跑 `compileDebugKotlin` / 仪器;`DualPanesTest` 需 user 本机 `./gradlew :app:testDebugUnitTest`。
+

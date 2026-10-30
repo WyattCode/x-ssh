@@ -318,6 +318,14 @@
     <string name="term_show_keyboard">叫出鍵盤</string>
     <string name="term_show_keys">顯示快捷鍵</string>
     <string name="term_snippets">指令片段</string>
+    <string name="term_split_open">在右側開啟</string>
+    <string name="term_split_pick">選擇右側工作階段</string>
+    <string name="term_split_swap">交換左右</string>
+    <string name="term_split_close">關閉此窗格</string>
+    <string name="term_split_unavailable">沒有其他作用中的工作階段。請先連上另一部主機,再在右側開啟。</string>
+    <string name="term_pane_left">左窗格</string>
+    <string name="term_pane_right">右窗格</string>
+    <string name="term_pane_focused">已聚焦</string>
     <string name="term_unlock_subtitle">使用生物辨識或螢幕鎖定密碼繼續</string>
     <string name="term_unlock_title">解鎖已儲存的憑證</string>
     <plurals name="files_cancelled_downloaded">
