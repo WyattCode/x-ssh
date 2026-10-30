@@ -2076,6 +2076,11 @@ export const useSessions = defineStore('sessions', {
           // args). Reconnecting here would look like the trust worked and then
           // bring the rejection card back with no explanation.
           toast(t('app.trustFail'), 'error')
+          toast(
+            r?.code === 'corrupt' ? t('app.trustFailCorrupt') : t('app.trustFail'),
+            'error'
+          )
+          await this.reconnect(paneId)
           return
       // Ignore re-entry: the second click would find the rejection already
       // consumed and reconnect on top of the first call's in-flight write.

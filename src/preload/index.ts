@@ -153,9 +153,13 @@ const api = {
       ipcRenderer.invoke(IPC.sshConnect, params),
     disconnect: (sessionId: string): Promise<void> =>
       ipcRenderer.invoke(IPC.sshDisconnect, sessionId),
-    forgetHostKey: (host: string, port: number): Promise<void> =>
+    forgetHostKey: (host: string, port: number): Promise<{ ok: boolean; error?: string }> =>
       ipcRenderer.invoke(IPC.sshForgetHostKey, host, port),
-    trustHostKey: (host: string, port: number, fingerprint: string): Promise<{ ok: boolean }> =>
+    trustHostKey: (
+      host: string,
+      port: number,
+      fingerprint: string
+    ): Promise<{ ok: boolean; code?: 'corrupt' | 'rejected' | 'error'; error?: string }> =>
       ipcRenderer.invoke(IPC.sshTrustHostKey, host, port, fingerprint),
     input: (sessionId: string, data: string): void =>
       ipcRenderer.send(IPC.sshInput, sessionId, data),

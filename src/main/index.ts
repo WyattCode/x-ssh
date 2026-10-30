@@ -15,7 +15,7 @@ import { SshManager } from './ssh'
 import { probeHosts } from './reachability'
 import { OS_PROBE_COMMAND, parseOsProbe } from '../shared/hostOs'
 import { HostStore } from './store'
-import { KnownHosts } from './knownHosts'
+import { KnownHosts, KnownHostsCorruptError } from './knownHosts'
 import { isFingerprintHex } from '../shared/hostKey'
 import { SettingsStore } from './settings'
 import { friendlyError } from './friendlyError'
@@ -1641,17 +1641,29 @@ function registerIpc(): void {
   ipcMain.handle(
     IPC.sshForgetHostKey,
     async (_e, host: string, port: number) => {
-      await knownHosts.load()
-      await knownHosts.forget(host, port)
+      try {
+        await knownHosts.load()
+        await knownHosts.forget(host, port)
+        return { ok: true as const }
+      } catch (e) {
+        return { ok: false as const, error: friendlyError((e as Error).message) }
+      }
     }
   )
   ipcMain.handle(
     IPC.sshTrustHostKey,
-    async (_e, host: unknown, port: unknown, fingerprint: unknown): Promise<{ ok: boolean }> => {
+    async (
+      _e,
+      host: unknown,
+      port: unknown,
+      fingerprint: unknown
+    ): Promise<{ ok: boolean; code?: 'corrupt' | 'rejected' | 'error'; error?: string }> => {
       // Only a key a connection actually presented and we refused — and only
       // for the host:port it came from. Anything else is refused, so a buggy
       // or hostile renderer can't write keys into known_hosts.
-      if (typeof host !== 'string' || !host || !isFingerprintHex(fingerprint)) return { ok: false }
+      if (typeof host !== 'string' || !host || !isFingerprintHex(fingerprint)) {
+        return { ok: false, code: 'rejected' }
+      }
       const p = typeof port === 'number' && Number.isInteger(port) && port > 0 && port < 65536 ? port : 22
       // Gate on a non-consuming check: the pending rejection is only consumed
       // once the key is actually persisted. Consuming it first meant a failed
@@ -1668,8 +1680,22 @@ function registerIpc(): void {
       }
       // Written: now consume the rejection so it can't be trusted twice.
       mgr.takeRejectedKey(host, p, fingerprint)
+      if (!sshManager?.takeRejectedKey(host, p, fingerprint)) return { ok: false, code: 'rejected' }
+      try {
+        await knownHosts.load()
+        await knownHosts.set(host, p, fingerprint.toLowerCase())
+      } catch (e) {
+        // A corrupt known_hosts.json is refused rather than overwritten, so the
+        // user's other trusted fingerprints survive; tell the renderer which.
+        const corrupt = e instanceof KnownHostsCorruptError || knownHosts.status().loadFailed
+        return {
+          ok: false as const,
+          code: corrupt ? ('corrupt' as const) : ('error' as const),
+          error: friendlyError((e as Error).message)
+        }
+      }
       void pushConnLog({ at: Date.now(), event: 'connect', host, port: p, username: '', detail: 'trust-host-key' }).catch(() => undefined)
-      return { ok: true }
+      return { ok: true as const }
     }
   )
 
