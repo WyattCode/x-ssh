@@ -189,6 +189,7 @@
     <string name="host_unreadable_2">%1$s, %2$s unreadable</string>
     <string name="host_unreadable_3">%1$s, %2$s, %3$s unreadable</string>
     <string name="host_username">Username</string>
+    <string name="hosts_load_failed">Some saved hosts could not be read. The file on disk was left untouched — restore a backup if hosts are missing.</string>
     <string name="main_sc_close_session">Disconnect current session</string>
     <string name="main_sc_edit_host">Edit host</string>
     <string name="main_sc_ime">Terminal: switch input method / direct English</string>

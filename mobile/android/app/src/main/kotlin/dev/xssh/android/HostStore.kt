@@ -169,7 +169,22 @@ class HostStore(context: Context) {
         JSONArray(prefs.getString(KEY_LIST, "[]")).length()
     }.getOrDefault(0)
 
+    /**
+     * 磁盘上是否还有值得保护的数据:能解析出记录,或原文非空却解析不了(坏 JSON)。
+     * 解析失败时 [diskCount] 会变成 0,不能再用它挡空表落盘。
+     */
+    fun hasProtectedDiskData(): Boolean {
+        val raw = prefs.getString(KEY_LIST, null) ?: return false
+        if (raw.isBlank()) return false
+        return runCatching { JSONArray(raw).length() > 0 }.getOrDefault(true)
+    }
+
+    /** 上次 [load] 是否丢了记录(整段解析失败,或个别记录坏了)。只在内存里。 */
+    var loadFailed: Boolean = false
+        private set
+
     fun load(): List<Host> {
+        loadFailed = false
         val raw = prefs.getString(KEY_LIST, null) ?: return emptyList()
         return runCatching {
             val array = JSONArray(raw)
@@ -220,9 +235,13 @@ class HostStore(context: Context) {
                     )
                 }.getOrNull()
             }
-            if (loaded.size < array.length()) keepCorruptCopy(raw)
+            if (loaded.size < array.length()) {
+                loadFailed = true
+                keepCorruptCopy(raw)
+            }
             loaded
         }.getOrElse {
+            loadFailed = true
             keepCorruptCopy(raw)
             emptyList()
         }

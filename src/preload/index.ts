@@ -48,6 +48,8 @@ const api = {
   prefs: initialPrefs(),
   hosts: {
     list: (): Promise<Host[]> => ipcRenderer.invoke(IPC.hostsList),
+    secretsStatus: (): Promise<'ok' | 'missing' | 'bad'> =>
+      ipcRenderer.invoke(IPC.hostsSecretsStatus),
     /** Online / offline for the given saved hosts (all when omitted). */
     probe: (ids?: string[]): Promise<Record<string, Reachability>> => ipcRenderer.invoke(IPC.hostsProbe, ids),
     onChanged: (cb: () => void): (() => void) => {

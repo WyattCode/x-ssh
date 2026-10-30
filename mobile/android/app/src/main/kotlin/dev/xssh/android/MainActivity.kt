@@ -213,6 +213,16 @@ fun App(devTarget: DevTarget? = null) {
     val store = remember { HostStore(context) }
     var hosts by remember { mutableStateOf(orderHosts(store.load())) }
 
+    LaunchedEffect(Unit) {
+        if (store.loadFailed) {
+            android.widget.Toast.makeText(
+                context,
+                R.string.hosts_load_failed,
+                android.widget.Toast.LENGTH_LONG,
+            ).show()
+        }
+    }
+
     // 正开着的是哪条会话 —— 这一项要活过 Activity 重建。
     //
     // `configChanges` 挡掉了折叠、旋转、改字号这些,但挡不掉全部(系统语言、
@@ -265,7 +275,7 @@ fun App(devTarget: DevTarget? = null) {
         // 此时绝不能把空表落盘:2026-10-10 真机上发生过一次,一次普通的"确认删除"
         // 就把用户全部主机抹掉了(靠会话开头的备份才恢复)。正常删掉最后一台主机
         // 不走这里 —— 那时内存里还有 1 台,不会命中这个条件。
-        if (sorted.isEmpty() && hosts.isEmpty() && store.diskCount() > 0) {
+        if (sorted.isEmpty() && hosts.isEmpty() && store.hasProtectedDiskData()) {
             android.util.Log.e("XsshData", "refusing to persist an empty host list over existing data")
             return
         }

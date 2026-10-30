@@ -2,6 +2,7 @@
 export const IPC = {
   // Host store (invoke/handle)
   hostsList: 'hosts:list',
+  hostsSecretsStatus: 'hosts:secretsStatus',
   hostsSave: 'hosts:save',
   hostsDelete: 'hosts:delete',
   hostsProbe: 'hosts:probe',

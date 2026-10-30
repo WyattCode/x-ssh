@@ -79,6 +79,7 @@ const zh: Dict = {
   'app.closeExitTitle': '关闭活跃会话',
   'app.closeExitOk': '发送 exit 并关闭',
   'app.jumpNeedsPassword': '跳板机需要密码,但没有已保存的密码。请在「主机」编辑页为跳板主机设置密码后重试,或改用密钥认证。',
+  'app.secretsLoadFail': '已保存的密码无法读取(密钥库不可用或 secrets.bin 来自另一台设备),本次不会覆盖原文件;请重新输入密码,或从备份恢复。',
 
   // settings tabs
   'tab.general': '通用',
@@ -861,6 +862,7 @@ const en: Dict = {
   'app.closeExitTitle': 'Close active session',
   'app.closeExitOk': 'Send exit & close',
   'app.jumpNeedsPassword': 'The jump host requires a password, but none is saved. Set one on the jump host profile (or switch to key auth) and retry.',
+  'app.secretsLoadFail': 'Saved passwords could not be read (OS key store unavailable, or secrets.bin came from another machine). The file is left untouched; re-enter passwords or restore a backup.',
 
   'tab.general': 'General',
   'tab.terminal': 'Terminal',
@@ -1636,6 +1638,7 @@ const zhTW: Dict = {
   'app.closeExitTitle': '關閉作用中的工作階段',
   'app.closeExitOk': '傳送 exit 並關閉',
   'app.jumpNeedsPassword': '跳板機需要密碼,但沒有已儲存的密碼。請在「主機」編輯頁為跳板主機設定密碼後重試,或改用金鑰驗證。',
+  'app.secretsLoadFail': '已儲存的密碼無法讀取(金鑰庫不可用或 secrets.bin 來自另一台裝置),本次不會覆蓋原檔;請重新輸入密碼,或從備份還原。',
 
   // settings tabs
   'tab.general': '一般',

@@ -90,6 +90,15 @@ export class HostStore {
     return this.locked
   }
 
+  /** Whether the OS-encrypted secrets vault could be read this launch.
+   *  'missing' = no safeStorage (tests / unsupported) — not an error.
+   *  'bad' = secrets.bin existed but could not be decrypted (left untouched). */
+  async secretsStatus(): Promise<'ok' | 'missing' | 'bad'> {
+    await this.ensureLoaded()
+    if (!safeStorage.isEncryptionAvailable()) return 'missing'
+    return this.secretsLoadFailed ? 'bad' : 'ok'
+  }
+
   async list(): Promise<Host[]> {
     await this.ensureLoaded()
     return [...this.hosts]

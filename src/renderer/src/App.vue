@@ -349,6 +349,7 @@ onMounted(async () => {
   if (Number.isFinite(storedZoom) && storedZoom !== zoom.level.value) zoom.restore(storedZoom)
   await Promise.all([
     store.loadHosts(),
+    store.loadSecretsStatus(),
     store.loadSettings(),
     store.loadSnippets(),
     store.loadKnownHosts(),
