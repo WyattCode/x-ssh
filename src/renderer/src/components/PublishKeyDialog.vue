@@ -45,6 +45,7 @@ function toggleHost(h: Host): void {
 
 async function publish(): Promise<void> {
   if (!keyId.value || !selected.size) return
+  if (busy.value || revokeBusy.value) return
   busy.value = true
   err.value = ''
   results.value = []
@@ -53,8 +54,16 @@ async function publish(): Promise<void> {
   if (!r.ok) {
     err.value = r.code || r.error ? keyErrorMessage(r, t) : t('keyPub.fail')
     return
+  try {
+    const r = await window.api.keys.publish(keyId.value, [...selected])
+    if (!r.ok) {
+      err.value = r.error ?? t('keyPub.fail')
+      return
+    }
+    results.value = r.results ?? []
+  } finally {
+    busy.value = false
   }
-  results.value = r.results ?? []
 }
 async function revoke(): Promise<void> {
   if (!keyId.value || !selected.size) return
@@ -68,8 +77,19 @@ async function revoke(): Promise<void> {
   if (!r.ok) {
     err.value = r.code || r.error ? keyErrorMessage(r, t) : t('keyPub.revokeFail')
     return
+  if (busy.value || revokeBusy.value) return
+  revokeBusy.value = true
+  revokeResults.value = []
+  try {
+    const r = await window.api.keys.revoke(keyId.value, [...selected])
+    if (!r.ok) {
+      err.value = r.error ?? t('keyPub.revokeFail')
+      return
+    }
+    revokeResults.value = r.results ?? []
+  } finally {
+    revokeBusy.value = false
   }
-  revokeResults.value = r.results ?? []
 }
 
 watch(
