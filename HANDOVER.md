@@ -1,3 +1,17 @@
+# 会话记录:M3.149(静默失败收尾:历史导出 / SFTP 打包·解压·同步 / 多选下载)
+
+> 分支 `fix/review-polish-m3149`(自 `origin/main`)。**不要合并**;开放 PR #4–#83 一律未动(尤其 #83 needs_passphrase / #82 keyRequired / #81 withTempHosts / #80 上传 toast / #79 auth_failed / #77 rename-create-delete / #76 单文件下载)。
+
+这一轮只收「失败看起来和成功一样」的静默失败,不加功能。
+
+- **历史搜索导出**(`HistorySearch.exportLog`):原来 `void window.api.history.export(text)`,主进程写盘失败(磁盘满 / 无权限)返回 `{ ok:false, error }` 时界面与成功完全一样 —— 保存对话框已经关了,屏幕上没有任何提示。现在 await 结果,`!ok && !canceled` 时 toast `r.error ?? hist.exportFail`;取消 / 成功不提示。三字典新增 `hist.exportFail`(导出失败 / Export failed / 匯出失敗)。
+- **SFTP 打包下载 / 上传解压 / 增量同步**:失败原来只写 `error.value`,并发的 `load()` 会把它清掉(或用户根本没在看横幅),看着像没反应。现在与 #80 的上传一致:设 error 的同时 toast(`sfp.packFail` / `sfp.extractFail` / `sfp.syncFail`);持续同步的 `watchStart` 失败同样提示,成功不提示。
+- **SFTP 多选下载**:`downloadMany` 的失败分支补 toast(`sfp.downloadFail`),与 `downloadSelectionToLocal` / `onLocalDrop` 一致。单文件 Save-As 分支(#76)未动。
+
+验证:`npm run typecheck`、`npm run lint:i18n`、`npx vitest run`(≥334;`vitest.config.ts` 的 `singleFork` 未改)。
+
+---
+
 # X-SSH 交接文档
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。
