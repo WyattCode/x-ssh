@@ -732,6 +732,7 @@ async function unlockNow(): Promise<void> {
     toast(t('lock.passReq'), 'error')
     return
   }
+  if (!currentPass.value || lockBusy.value) return
   lockBusy.value = true
   try {
     const ok = await store.unlockApp(currentPass.value)
@@ -757,6 +758,7 @@ async function disableMasterLock(): Promise<void> {
     toast(t('lock.passReq'), 'error')
     return
   }
+  if (lockBusy.value) return
   lockBusy.value = true
   try {
     const ok = await store.disableMasterLock(currentPass.value)
@@ -784,6 +786,11 @@ async function resetMasterLock(): Promise<void> {
   try {
     const res = await confirm(t('lock.resetConfirm'))
     if (!res) return
+  if (lockBusy.value) return
+  const res = await confirm(t('lock.resetConfirm'))
+  if (!res) return
+  lockBusy.value = true
+  try {
     const ok = await store.resetMasterLock(currentPass.value)
     if (ok) {
       currentPass.value = ''
@@ -1270,6 +1277,7 @@ function onLockPassEnter(e: KeyboardEvent): void {
                   <div class="row actions-row">
                     <button v-if="store.lockLocked" class="btn sm btn-primary" :disabled="lockBusy" @click="unlockNow">{{ t('lock.unlock') }}</button>
                     <button class="btn sm" :disabled="lockBusy" @click="lockApp">{{ t('lock.lockNow') }}</button>
+                    <button class="btn sm" @click="lockApp">{{ t('lock.lockNow') }}</button>
                     <button class="btn sm" :disabled="lockBusy" @click="disableMasterLock">{{ t('lock.disable') }}</button>
                     <span class="spacer" />
                     <button class="btn sm btn-danger" :disabled="lockBusy" @click="resetMasterLock">{{ t('lock.reset') }}</button>

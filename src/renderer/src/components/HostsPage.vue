@@ -226,13 +226,21 @@ async function connect(h: Host): Promise<void> {
 function openSftp(h: Host): Promise<void> {
   return store.openSftpFor(h)
 }
+const removing = ref(false)
 async function remove(h: Host): Promise<void> {
+  if (removing.value) return
   const ok = await confirm(t('hosts.deleteConfirm', { name: h.label }), {
     title: t('hosts.delete'),
     confirmText: t('hosts.delete'),
     danger: true
   })
-  if (ok) await store.removeHost(h.id)
+  if (!ok) return
+  removing.value = true
+  try {
+    await store.removeHost(h.id)
+  } finally {
+    removing.value = false
+  }
 }
 
 // ---- Card menu ----

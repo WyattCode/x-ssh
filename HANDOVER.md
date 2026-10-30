@@ -209,6 +209,18 @@
 1. **SettingsDialog** `backupNow`:重入闸 + try/finally(抛错不再卡死备份按钮)。
 2. **SftpDrawer** `uploadLocalSelection` / `downloadSelectionToLocal`:busy 闸 + try/finally(跨栏箭头;未动 downloadSelected/pack/del/sync)。
 3. **Android HomeScreen SwipeActions**:确认删除 `deleteOnce` + 关合重置,防双删。
+# 会话记录:连续改进 M3.98(2026-10-30,复核打磨:主机删除 busy + 主锁 unlock/disable/reset lockBusy + 编辑页确认删除一次)
+
+功能清单已够,本轮按站立规则做开源复核打磨(不合并)。未动 PR #32 / #31–#12 与更早的 #4–#11。
+
+**核过已过时 / 已在未合并 PR(本轮不重做)**:
+1–20. 同 M3.97 所列 PR #12–#31。
+21. backupNow finally + SftpDrawer 跨栏 upload/download busy + HomeScreen SwipeActions deleteOnce —— PR #32。
+
+**修了**:
+1. **HostsPage** `remove`:removing 闸 + try/finally(未动 connectingId / connect / duplicate)。
+2. **SettingsDialog** `unlockNow` / `disableMasterLock` / `resetMasterLock`:共用 lockBusy + unlock/reset 按钮 disabled(未动 backupNow / accent / saveMasterLock)。
+3. **Android HostEditorScreen**:确认删除 `deleteOnce`(Sessions 在 swipe/HostActions 之外)。
 
 **验证**:`typecheck` + vitest **334** / 30 文件全绿。未跑 Gradle。未合并。
 
