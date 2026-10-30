@@ -610,6 +610,12 @@ typecheck / lint:i18n(桌面 752/752/752) / vitest **334** / 30 全绿。未在�
 - SessionReplayDialog: 读失败 toast(replay.readFail);不碰 #40/#43 的 code→i18n 映射。
 - ForwardsPage add: 直播绑定失败 toast(fw.fail);校验分支仍只写 page err;不碰 #76 saveHost catch。
 - 未合并。未动 #4–#106。
+# M3.173 — 复核打磨(分支 `fix/review-polish-m3173`,基于 main @ 5946b1f,**勿合并**)
+
+- SftpDrawer load(): 目录 list 失败在 banner 之外再 toast(sfp.readDirFail / e.message)。
+- previewFile: 预览失败 toast(同一字符串);不碰 #85 的 previewFail i18n 映射。
+- refreshLocal: 本机目录读失败 toast(sfp.localErr);不碰 #94 local.home / #105 localSubmit。
+- 未合并。未动 #4–#107。
 
 ---
 

@@ -104,6 +104,10 @@ async function previewFile(entry: FileEntry): Promise<void> {
       err === 'preview-too-large' ? tt('sfp.previewTooLarge') : (err ?? tt('sfp.previewFail'))
   }
   else preview.value.error = r.error ?? tt('sfp.previewFail')
+    const msg = r.error ?? '无法预览'
+    preview.value.error = msg
+    toast(msg, 'error')
+  }
 }
 
 // ---- local (dual-panel) pane: browse the machine's own filesystem ----
@@ -138,6 +142,7 @@ async function refreshLocal(dir?: string): Promise<void> {
   } catch {
     if (seq !== localSeq) return
     localError.value = tt('sfp.localErr')
+    toast(tt('sfp.localErr'), 'error')
   } finally {
     if (seq === localSeq) localLoading.value = false
   }
@@ -712,6 +717,9 @@ async function load(p?: string): Promise<void> {
   } catch (e) {
     if (seq !== loadSeq || sidAtCall !== props.sessionId) return
     error.value = sftpErr((e as Error).message || undefined, 'sfp.readDirFail')
+    const msg = (e as Error).message || tt('sfp.readDirFail')
+    error.value = msg
+    toast(msg, 'error')
   } finally {
     if (seq === loadSeq && sidAtCall === props.sessionId) loading.value = false
   }
