@@ -741,6 +741,8 @@ const zh: Dict = {
   'hist.untitled': '会话',
   'hist.sessionGone': '该会话已关闭,无法跳转',
 
+  'hist.loadFail': '无法读取历史记录',
+  'hist.retry': '重试',
 
   // host editor
   'host.titleNew': '新建主机',
@@ -778,6 +780,8 @@ const zh: Dict = {
   'host.keyOpFail': '密钥操作失败',
   'host.invalidPrivateKey': '所选文件不是有效的私钥',
   'host.illegalKeyId': '非法密钥标识',
+  'host.keyListFail': '无法读取密钥列表',
+  'host.retry': '重试',
   'host.keyUnprotected': '该密钥未设置密码短语,建议为其添加密码短语以加密私钥文件',
   'host.deleteKey': '删除该密钥',
   'host.keyDeleteConfirm': '删除密钥“{name}”？该操作不可撤销',
@@ -1655,6 +1659,8 @@ const en: Dict = {
   'hist.untitled': 'Session',
   'hist.sessionGone': 'That session is already closed',
 
+  'hist.loadFail': 'Could not load history',
+  'hist.retry': 'Retry',
 
   'host.titleNew': 'New host',
   'host.titleEdit': 'Edit host',
@@ -1691,6 +1697,8 @@ const en: Dict = {
   'host.keyOpFail': 'Key operation failed',
   'host.invalidPrivateKey': 'Selected file is not a valid private key',
   'host.illegalKeyId': 'Invalid key id',
+  'host.keyListFail': 'Could not load the key list',
+  'host.retry': 'Retry',
   'host.keyUnprotected': 'This key has no passphrase — consider adding one to encrypt the private key file',
   'host.deleteKey': 'Delete this key',
   'host.keyDeleteConfirm': 'Delete key "{name}"? This cannot be undone',
@@ -2578,6 +2586,8 @@ const zhTW: Dict = {
   'hist.untitled': '工作階段',
   'hist.sessionGone': '該工作階段已關閉,無法跳轉',
 
+  'hist.loadFail': '無法讀取歷程記錄',
+  'hist.retry': '重試',
 
   // host editor
   'host.titleNew': '新增主機',
@@ -2615,6 +2625,8 @@ const zhTW: Dict = {
   'host.keyOpFail': '金鑰操作失敗',
   'host.invalidPrivateKey': '所選檔案不是有效的私鑰',
   'host.illegalKeyId': '非法金鑰識別碼',
+  'host.keyListFail': '無法讀取金鑰清單',
+  'host.retry': '重試',
   'host.keyUnprotected': '此金鑰未設定密碼短語,建議為其加上密碼短語以加密私鑰檔案',
   'host.deleteKey': '刪除此金鑰',
   'host.keyDeleteConfirm': '要刪除金鑰「{name}」嗎？此操作無法復原',

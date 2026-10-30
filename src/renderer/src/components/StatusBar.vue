@@ -2,6 +2,7 @@
 import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import { useSessions } from '../stores/sessions'
 import { useI18n } from '../lib/i18n'
+import { liveForwardCount } from '../lib/forwards'
 import Icon from './Icon.vue'
 
 const store = useSessions()
@@ -42,7 +43,10 @@ const uptime = computed(() => {
   const ss = String(s % 60).padStart(2, '0')
   return mm > 0 ? `${mm}m${ss}s` : `${s}s`
 })
-const forwards = computed(() => pane.value?.params.portForwards?.length ?? 0)
+// Saved host rules are opened by main on connect and never land in
+// pane.params.portForwards — count the running rows of the forward groups
+// instead, so the badge matches the 端口转发 page.
+const forwards = computed(() => liveForwardCount(store.forwardGroups, pane.value))
 /** Link state of the tracked pane. The dot next to the host name follows this,
  *  never the host colour — a green host colour must not read as "connected"
  *  while the pane is sitting on a failed-connection card. Mirrors the four

@@ -491,6 +491,15 @@
 1. **桌面终端复制失败静默**(`TerminalView.vue`)。`copySelection` / `copyFromMenu` / `copyOnSelect` 的 `clipboard.writeText` 原先无 try/catch;剪贴板锁住或超大时抛错 → 快捷键/右键复制/选中即复制看起来没反应。现在 try/catch + toast `term.copyFail`(三语言)。OSC 52 路径原本就有 catch,未动。
 2. **桌面 SFTP「复制路径」失败静默**(`SftpDrawer.vue` 的 `copySelectedPaths`)。同样包 try/catch + toast `sfp.copyFail`。
 3. **桌面终端粘贴 `readText` 失败静默**(`TerminalView.vue` 的 `pasteClipboard`)。`clipboard.readText` 抛错时 toast `term.pasteFail` 并返回;空剪贴板仍静默。
+# M3.158 — HistorySearch/HostEditor 列表失败提示 + StatusBar 实时转发计数 (2026-10-30)
+
+> 分支 `fix/review-polish-m3158`(从 `origin/main` 切出)。**未合并**;PR #4–#92 一律没碰。
+
+## 修了什么
+
+1. **桌面历史搜索加载失败静默**(`HistorySearch.vue`)。`history.list` 拒绝时对话框空列表读成「无匹配」。现 try/catch + toast `hist.loadFail`，空态可点 `hist.retry`。
+2. **桌面主机编辑密钥列表失败静默**(`HostEditor.vue`)。`keys.list` 拒绝时下拉像「没有密钥」。现 try/catch + toast `host.keyListFail`，失败态可点重试。
+3. **StatusBar 端口转发角标少计**(`StatusBar.vue` + `lib/forwards.ts`)。原先用 `pane.params.portForwards.length`（仅临时规则）；主机已保存规则由主进程连上时打开，从不进 params。现按 `forwardGroups` 的 `running` 行计数（`liveForwardCount`）。
 
 ## 验证
 
@@ -516,6 +525,10 @@ typecheck / lint:i18n(桌面 752/752/752) / vitest **334** / 30 全绿。未在�
 - 未触碰 `/workspace/MCode`。
 - 未触碰的开放 PR:#4–#90(尤其 #90 HistorySearch.copyFail / Android paste SecurityException / Snippet commit;#87 Android copyText;#88 paste CM-null;#89 HostStore seal)。
 - 未触碰 `/workspace/MCode`。未改 preload 剪贴板签名。
+## 注意
+
+- **不要合并**:这一批是 review 修复,等人工过一遍再合。
+- 未触碰的开放 PR:#4–#92。未触碰 `/workspace/MCode`。未改 Android。
 
 ---
 

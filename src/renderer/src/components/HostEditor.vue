@@ -244,6 +244,9 @@ async function pickKey(): Promise<void> {
 const managedKeys = ref<ManagedKey[]>([])
 /** Guards generate/import: a double Enter or double click used to spawn two keypairs. */
 const keyBusy = ref(false)
+/** The key list could not be read: show a retry instead of the "browse"
+ *  button, which would look like "you have no keys". */
+const keysFailed = ref(false)
 const keyModal = reactive({ open: false, name: '', type: 'ed25519', passphrase: '', error: '' })
 // The generate-key sheet is a modal of its own inside the panel: without its
 // own trap, Tab walked out of the sheet into the host form behind it.
@@ -255,7 +258,14 @@ const keyModal = reactive({ open: false, name: '', type: 'ed25519', passphrase: 
 const importing = ref(false)
 const deletingId = ref<string | null>(null)
 async function loadKeys(): Promise<void> {
-  managedKeys.value = await window.api.keys.list()
+  try {
+    managedKeys.value = await window.api.keys.list()
+    keysFailed.value = false
+  } catch {
+    managedKeys.value = []
+    keysFailed.value = true
+    toast(t('host.keyListFail'), 'error')
+  }
 }
 // Dropdown text identifies a key: friendly label + algorithm (and a short SHA
 // fingerprint when present), so several keys aren't confused by name alone.
@@ -634,6 +644,9 @@ async function remove(): Promise<void> {
                     </select>
                     <Icon name="chevron-down" :size="14" class="caret" />
                   </div>
+                  <button v-else-if="keysFailed" type="button" class="r-pick" :title="t('host.keyListFail')" @click="loadKeys">
+                    <span class="dim">{{ t('host.keyListFail') }} · {{ t('host.retry') }}</span>
+                  </button>
                   <button v-else type="button" class="r-pick" :title="form.keyPath || t('host.browse')" @click="pickKey">
                     <span :class="{ dim: !form.keyPath }">{{ form.keyPath || t('host.noKey') }}</span>
                   </button>
