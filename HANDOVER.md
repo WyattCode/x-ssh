@@ -645,6 +645,22 @@ Continue continuous-improve from origin/main on a new branch; do **not** touch/m
 ---
 
 Continue continuous-improve from origin/main on a new branch; do **not** touch/merge this PR or #54–#12 / #4–#11. Prefer substantive P0/P1 over busy-gates. Stale HANDOVER notes (download cancel unfixed / click.self overlay / recordChord reserved) are obsolete where covered by #12–#54.
+## HANDOVER M3.121 — review polish (dragCache fail / dialog filter i18n / spawnDetached)
+
+**Branch:** `fix/review-polish-m3121` (from origin/main). **Do NOT merge.** Open PR (see report).
+**Skipped / do not redo:** PR #55 `fix/review-polish-m3120` (external-edit save notify / cleanup race / openPath fail) and #54–#12, #4–#11. Features / intentional deferrals / M3.77–M3.120 done items.
+
+### Fixes shipped
+1. **drag-out prefetch poison + temp leak** — failed `downloadTree` left a rejected promise in `dragCache` for 60s (retry blocked) and never `rm`'d the half-downloaded `xssh-drag-*` dir. Now try/catch `rm`s on failure, evicts the cache entry immediately, and identity-guards the expiry timer.
+2. **Dialog filter labels hardcoded Chinese** — upload-extract `归档文件` and pick-executable `程序` → `NL`/`dl` (`filterArchive` / `filterExecutable`).
+3. **spawn(external editor / open-with) ignored launch failure** — missing binary returned `{ ok: true }` (and edit still watched). New `spawnDetached` settles on `spawn`/`error`; cleans temp and returns `{ ok: false }`. Did **not** change openPath handling (#55) or App.vue toasts (#42).
+
+### Verify
+- typecheck OK; lint:i18n OK; vitest **334**/30 green.
+- Model: DeepSeek-V4.1-Flash-1017 via ds.py; thinking=off medium; 7/7 HAND_APPLY first try. No hand-fix. Incidents: none.
+
+### Next
+Continue continuous-improve from origin/main on a new branch; do **not** touch/merge this PR or #55–#12 / #4–#11. Prefer substantive P0/P1 over busy-gates.
 
 ---
 
