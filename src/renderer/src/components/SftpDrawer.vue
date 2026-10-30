@@ -1496,6 +1496,8 @@ function onSyncEnter(e: KeyboardEvent): void {
   }
   const r = await window.api.sftp.sync(props.sessionId, sync.local, sync.remote, sync.mode, sync.del, store.transferConcurrency)
   if (!r.ok) error.value = sftpErr(r.error, 'sfp.syncFail')
+  // Cancel is reported via the transfer row (CANCELLED_TEXT); don't toast syncFail.
+  if (!r.ok && !r.canceled) error.value = r.error ?? tt('sfp.syncFail')
 }
 async function stopWatch(): Promise<void> {
   if (!props.sessionId) return

@@ -6,6 +6,7 @@ import {
   formatSpeed,
   formatAgo,
   formatEta,
+
   formatTransferName,
   transferStatusText,
   histStatusLabel,
@@ -13,6 +14,9 @@ import {
 } from './transferFormat'
 
 const tr = (key: string, vars?: Record<string, string | number>): string =>
+  vars ? `${key}:${JSON.stringify(vars)}` : key
+
+const trName = (key: string, vars?: Record<string, string | number>): string =>
   vars ? `${key}:${JSON.stringify(vars)}` : key
 
 describe('isCancelled', () => {
@@ -137,6 +141,18 @@ describe('formatTransferName', () => {
 
   it('passes a real file name through untouched', () => {
     expect(formatTransferName('report.tar.gz', tr)).toBe('report.tar.gz')
+describe('formatTransferName', () => {
+  it('maps the machine token to a localized item count', () => {
+    expect(formatTransferName('items:3', trName)).toBe('sfp.nItems:{"n":3}')
+  })
+
+  it('maps the legacy Chinese label too', () => {
+    expect(formatTransferName('3 项', trName)).toBe('sfp.nItems:{"n":3}')
+  })
+
+  it('passes a plain filename through unchanged', () => {
+    expect(formatTransferName('report.txt', trName)).toBe('report.txt')
+    expect(formatTransferName('同步', trName)).toBe('同步')
   })
 })
 

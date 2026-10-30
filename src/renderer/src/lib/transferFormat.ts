@@ -123,6 +123,18 @@ export function formatTransferError(
   const cm = /^checksum-mismatch:(\d+)$/.exec(err)
   if (cm) return translate('sfp.checksumMismatch', { n: Number(cm[1]) })
   return err
+ * Job display name. Main may emit a machine token for a multi-item job
+ * (`items:N`) instead of a pre-formatted label, so the count is localized here;
+ * the legacy Chinese `N 项` form is still mapped for older main builds.
+ * Sync jobs (`同步`) are deliberately left alone — their naming is owned elsewhere.
+ */
+export function formatTransferName(
+  name: string,
+  translate: (key: string, vars?: Record<string, string | number>) => string
+): string {
+  const m = /^items:(\d+)$/.exec(name) || /^(\d+) 项$/.exec(name)
+  if (m) return translate('sfp.nItems', { n: Number(m[1]) })
+  return name
 }
 
 /** The status label for a running or finished transfer. */

@@ -719,14 +719,21 @@ export class SshManager {
   private waitForListen(server: Server): Promise<boolean> {
     return new Promise((resolve) => {
       if (server.listening) return resolve(true)
-      const onListening = (): void => {
-        server.removeListener('error', onError)
-        resolve(true)
-      }
-      const onError = (): void => {
+      let settled = false
+      const done = (ok: boolean): void => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
         server.removeListener('listening', onListening)
-        resolve(false)
+        server.removeListener('error', onError)
+        resolve(ok)
       }
+      const onListening = (): void => done(true)
+      const onError = (): void => done(false)
+      // listen() almost always settles quickly; without a cap a stuck bind leaves
+      // addForward hanging and the Forwards UI spinner forever.
+      const timer = setTimeout(() => done(false), 5_000)
+      timer.unref?.()
       server.once('listening', onListening)
       server.once('error', onError)
     })
@@ -1562,7 +1569,7 @@ export class SshManager {
     concurrency?: number,
     rateBytesPerSec = 0,
     quiet = false
-  ): Promise<void> {
+  ): Promise<{ cancelled: boolean; errors: number }> {
     this.jobSession.set(jobId, sessionId)
     if (quiet) this.quietJobs.add(jobId)
     if (rateBytesPerSec > 0) this.jobRate.set(jobId, rateBytesPerSec)
@@ -1689,6 +1696,11 @@ export class SshManager {
 
     if (this.cancelledJobs.has(jobId)) emit('', 'up', false, SshManager.CANCELLED_TEXT)
     else if (errors) emit('', 'up', false, `sync-items-failed:${errors}`)
+    // Read the cancel flag before the job state is torn down below: the caller
+    // (IPC) must be able to answer "cancelled" instead of a blanket ok.
+    const cancelled = this.cancelledJobs.has(jobId)
+    if (cancelled) emit('', 'up', false, SshManager.CANCELLED_TEXT)
+    else if (errors) emit('', 'up', false, `${errors} 项失败`)
     else {
       const t = bytesDone || 1
       // A machine token, not display text: the renderer translates it
@@ -1701,6 +1713,7 @@ export class SshManager {
     this.lastProgressAt.delete(jobId)
     this.jobSession.delete(jobId)
     this.quietJobs.delete(jobId)
+    return { cancelled, errors }
   }
 
   // ---- Continuous sync (watch) ----
@@ -1948,7 +1961,9 @@ export class SshManager {
       throw e
     })
     const conc = clampConcurrency(concurrency ?? SshManager.CONCURRENCY, SshManager.CONCURRENCY)
-    const label = items.length === 1 ? items[0].name : `${items.length} 项`
+    // A machine token, not display text: the renderer localizes it (sfp.nItems),
+    // so an English UI no longer shows the Chinese "N 项".
+    const label = items.length === 1 ? items[0].name : `items:${items.length}`
     // The target folder is not guaranteed to exist: a resumed queue may point at
     // a directory the user deleted, and dragging onto a new folder passes one
     // that was never made. Without this every write failed with ENOENT and the
@@ -2204,7 +2219,8 @@ export class SshManager {
     this.jobSession.set(jobId, sessionId)
     if (rateBytesPerSec > 0) this.jobRate.set(jobId, rateBytesPerSec)
     const conc = clampConcurrency(concurrency ?? SshManager.CONCURRENCY, SshManager.CONCURRENCY)
-    const label = localPaths.length === 1 ? basename(localPaths[0]) : `${localPaths.length} 项`
+    // Machine token (see downloadJob): localized by the renderer.
+    const label = localPaths.length === 1 ? basename(localPaths[0]) : `items:${localPaths.length}`
     let bytesDone = 0
     let filesDone = 0
     let discovered = 0

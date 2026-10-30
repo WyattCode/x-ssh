@@ -11,6 +11,7 @@ import { decideStatusEvent, retryDelayMs, shouldReviveOnOnline } from '../lib/re
 import { liveSnippetSessionId } from '../lib/snippetSession'
 import { hasLiveConnectedPane, closeOthersNeedsConfirm } from '../lib/snapshotGuard'
 import { closeAllNeedsConfirm } from '../lib/tabCloseGuard'
+
 import { formatTransferName } from '../lib/transferFormat'
 import {
   buildFlatTree,
@@ -1045,6 +1046,7 @@ export const useSessions = defineStore('sessions', {
               detail: p.error ? `${p.name} · ${formatTransferError(p.error, t)}` : p.name,
               detail: p.error ? `${p.name} · ${xferErr(p.error)}` : p.name,
               detail: p.error ? `${displayName} · ${p.error}` : displayName,
+              detail: p.error ? `${formatTransferName(p.name, t)} · ${p.error}` : formatTransferName(p.name, t),
               bytes: p.transferred
             })
           }
@@ -1061,6 +1063,13 @@ export const useSessions = defineStore('sessions', {
             )
             toast(
               p.error ? `${displayName} · ${t('sfp.failed')}` : `${displayName} · ${t('sfp.done')}`,
+              `${formatTransferName(p.name, t)}\n${p.direction === 'up' ? t('sfp.up') : t('sfp.down')}${p.error ? ` · ${p.error}` : ''}`,
+              !p.error
+            )
+            toast(
+              p.error
+                ? `${formatTransferName(p.name, t)} · ${t('sfp.failed')}`
+                : `${formatTransferName(p.name, t)} · ${t('sfp.done')}`,
               p.error ? 'error' : 'success'
             )
           }

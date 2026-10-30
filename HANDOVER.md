@@ -600,6 +600,25 @@ Continue continuous-improve from origin/main on a new branch; do **not** touch/m
 ---
 
 
+## HANDOVER M3.118 — review polish (sync cancel return / waitForListen timeout / multi-item transfer name)
+
+**Branch:** `fix/review-polish-m3118` (from origin/main). **Do NOT merge.** Open PR (see report).
+**Skipped / do not redo:** PR #52 `fix/review-polish-m3117` (upload cancel return / -R dest.connect 30s / channel-closed) and #51–#12, #4–#11. Features / intentional deferrals / M3.77–M3.117 done items.
+
+### Fixes shipped
+1. **Cancelled sync returned ok:true** — `syncJob` now returns `{ cancelled, errors }` (cancel flag read before job-id cleanup). IPC `sftp:sync` returns `{ ok: false, canceled: true }` on cancel. `SftpDrawer.startSync` ignores cancel (same pattern as upload/download) so the drawer does not toast `sfp.syncFail`. Did **not** remap the `${errors} 项失败` progress emit (#47) or the `同步` job name (#51).
+2. **addForward waitForListen hang** — `waitForListen` now settles false after 5s if neither `listening` nor `error` fires, so a stuck bind cannot leave the Forwards UI spinner forever. Does **not** touch `forwardOutTimeoutMs` (PR #13).
+3. **Multi-file transfer name showed Chinese `N 项` on EN UI** — download/upload multi-item labels emit `items:N`; renderer `formatTransferName` (+ legacy `N 项`) localizes via `sfp.nItems` in TransferPanel + sessions toasts; history keeps the raw token. Sync name left alone (#51).
+
+### Verify
+- typecheck OK; lint:i18n OK; vitest **337**/30 green (+3 `formatTransferName`).
+- Model: DeepSeek-V4.1-Flash-1017 via ds.py; thinking=off medium; 20/20 HAND_APPLY first try + 1 companion hand edit (`startSync` canceled gate). No hand-fix. Incidents: none.
+
+### Next
+Continue continuous-improve from origin/main on a new branch; do **not** touch/merge this PR or #52–#12 / #4–#11. Prefer substantive P0/P1 over busy-gates.
+
+---
+
 ## 项目概述
 - 极简、键盘优先的 SSH 客户端。Electron + Vue 3 (Vite) + TypeScript。
 - 平台: Windows (`win32`)。目录: `D:\Documents\Claude Code\X-SSH`。

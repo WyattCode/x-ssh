@@ -15,6 +15,7 @@ import {
   histStatusLabel,
   isCancelled
   formatTransferError
+
   formatTransferName
 } from '../lib/transferFormat'
 import { allPausedFlag, prunePaused, toggleId } from '../lib/transferPause'
@@ -156,6 +157,11 @@ function timeAgo(at: number): string {
   return formatAgo(at, t)
 }
 
+/** Main may send a machine token (items:N) for multi-item jobs. */
+function fmtName(name: string): string {
+  return formatTransferName(name, t)
+}
+
 function fmtBytes(n: number): string {
   return formatBytes(n)
 }
@@ -223,6 +229,7 @@ function eta(x: SftpProgress): string {
                   </div>
                 </template>
                 <div class="tp-name">{{ formatTransferName(x.name, t) }}</div>
+                <div class="tp-name">{{ fmtName(x.name) }}</div>
                 <div class="tp-track">
                   <div class="tp-fill" :style="{ width: pct(x) + '%' }"></div>
                 </div>
@@ -252,6 +259,7 @@ function eta(x: SftpProgress): string {
               <Icon :name="h.direction === 'up' ? 'upload' : 'download'" :size="14" class="tp-dir" />
               <div class="tp-main">
                 <div class="tp-name">{{ formatTransferName(h.name, t) }}</div>
+                <div class="tp-name">{{ fmtName(h.name) }}</div>
                 <div class="tp-meta">
                   <span class="tp-badge" :class="h.status">{{ histStatus(h) }}</span>
                   <span>{{ fmtBytes(h.bytes) }}</span>
