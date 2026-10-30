@@ -398,13 +398,33 @@ function toggleShell(): void {
   store.shellIntegration = !store.shellIntegration
   void store.saveSetting('shellIntegration', store.shellIntegration)
 }
-function toggleRestore(): void {
-  store.restoreTabs = !store.restoreTabs
-  void store.saveSetting('restoreTabs', store.restoreTabs)
+async function toggleRestore(): Promise<void> {
+  const next = !store.restoreTabs
+  store.restoreTabs = next
+  try {
+    const r = await window.api.settings.set('restoreTabs', next)
+    if (r && r.ok === false) {
+      store.restoreTabs = !next
+      toast(t('set.gen.writeFail'), 'error')
+    }
+  } catch {
+    store.restoreTabs = !next
+    toast(t('set.gen.writeFail'), 'error')
+  }
 }
-function toggleAutoReconnect(): void {
-  store.autoReconnect = !store.autoReconnect
-  void store.saveSetting('autoReconnect', store.autoReconnect)
+async function toggleAutoReconnect(): Promise<void> {
+  const next = !store.autoReconnect
+  store.autoReconnect = next
+  try {
+    const r = await window.api.settings.set('autoReconnect', next)
+    if (r && r.ok === false) {
+      store.autoReconnect = !next
+      toast(t('set.gen.writeFail'), 'error')
+    }
+  } catch {
+    store.autoReconnect = !next
+    toast(t('set.gen.writeFail'), 'error')
+  }
 }
 function toggleRestoreConnect(): void {
   store.restoreConnect = !store.restoreConnect
@@ -414,17 +434,37 @@ function toggleRestoreCwd(): void {
   store.restoreCwd = !store.restoreCwd
   void store.saveSetting('restoreCwd', store.restoreCwd)
 }
-function toggleNotifications(): void {
-  store.notifications = !store.notifications
-  void store.saveSetting('notifications', store.notifications)
+async function toggleNotifications(): Promise<void> {
+  const next = !store.notifications
+  store.notifications = next
+  try {
+    const r = await window.api.settings.set('notifications', next)
+    if (r && r.ok === false) {
+      store.notifications = !next
+      toast(t('set.gen.writeFail'), 'error')
+    }
+  } catch {
+    store.notifications = !next
+    toast(t('set.gen.writeFail'), 'error')
+  }
 }
 function toggleNotifySound(): void {
   store.notifySound = !store.notifySound
   void store.saveSetting('notifySound', store.notifySound)
 }
-function toggleConfirmClose(): void {
-  store.confirmClose = !store.confirmClose
-  void store.saveSetting('confirmClose', store.confirmClose)
+async function toggleConfirmClose(): Promise<void> {
+  const next = !store.confirmClose
+  store.confirmClose = next
+  try {
+    const r = await window.api.settings.set('confirmClose', next)
+    if (r && r.ok === false) {
+      store.confirmClose = !next
+      toast(t('set.gen.writeFail'), 'error')
+    }
+  } catch {
+    store.confirmClose = !next
+    toast(t('set.gen.writeFail'), 'error')
+  }
 }
 function toggleMinimizeToTray(): void {
   store.minimizeToTray = !store.minimizeToTray

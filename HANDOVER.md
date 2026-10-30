@@ -861,6 +861,17 @@ openSnapshot/closeOthers/saveSetting (#68), theme/transfer clears (#67), bookmar
 - **SFTP 抽屉宽度持久化失败静默(P1)**:`onResizeEnd` 拖完就 `void settings.set('sftpWidth', …)`,被拒时面板停在下次启动会跳回去的宽度。新增 `savedWidth`(最后一次确认落盘的值,初值 = 启动宽度),写入失败**静默回滚**(后台动作,不弹 toast)。`onResizeStart` / `onResizeMove` / `onWindowResize` 未动。
 - 未触碰:`focusSession` / `openSftpFor` / `splitPane` 主体 / `setActive` / `setActivePane` / `persistTabs` / `nextTab` / `closeOthers` / `openSnapshot` / `applyLayoutPreset` / `queue*` / `clearTransfer*` / `removeTransferHistory` / `theme` / `setLang` / `addSftpRecent` / `saveSetting` / `zoom` / `fontSize` / `openExternal` / `localList` / `local.home` / `TerminalView` / `HostEditor` / `HostsPage` / `SettingsDialog` / `PaneNode` / `HistorySearch`。
 - 仍按原计划搁置(归别处):`fontSize` 未使用、`zoom` 不持久化、`local.home` 静默、StatusBar 的 configured-vs-live 转发、`setWindowOpenHandler`、预览「无法预览」。
+## M3.139(分支 `fix/review-polish-m3139`,**未合并**)
+
+> 只做缺陷 / 界面打磨,不加功能。**#73–#12、#4–#11 的 PR 都还没合并**,这一批也不含它们。
+
+- **侧栏 / 主机视图偏好写盘失败会撒谎(P1)**:`setSidebarCollapsed` / `setTermSidebarHidden` / `setHostsView` / `setHostsSort` 原来先改内存再 `void saveSetting`,主进程拒键或写盘失败时开关一直停在错的状态,直到重启才回退。现在直接 `settings.set`,失败回滚并 toast `set.gen.writeFail`。`setSidebarWidth` 松手落盘同理,失败**静默回滚**到 `savedSidebarWidth`(与 M3.138 的 `sftpWidth` 同款,不弹 toast)。`saveSetting` 本身未动(#68)。
+- **传输面板「在文件管理器中打开」吞失败(P1)**:`TransferPanel.reveal` 原来 `void revealLocal` 不管 `{ ok: false }`(SftpDrawer 的同款按钮已经 toast)。现在 await,失败 toast `sfp.revealFail`(已有键)。
+- **连接/启动开关写盘失败会撒谎(P1)**:设置里「启动恢复上次标签」「自动重连」「关闭前确认」「桌面通知」四个开关同样先翻再 `void saveSetting`。改为 `settings.set` 直写,失败回滚 + toast `set.gen.writeFail`。其它开关 / 片段 / 编辑器 / 连接日志仍归 #66 等,未动。
+- i18n 新增 `set.gen.writeFail`(zh / en / zh-TW;文案与 #66/#68 对齐便于并行合并)。
+- 未触碰:`closePane` / `focusSession` / `openSftpFor` / `splitPane` / `setActive*` / `persistTabs` / `nextTab` / `closeOthers` / `openSnapshot` / `applyLayoutPreset` / `queue*` / `clearTransfer*` / `theme` / `setLang` / `addSftpRecent` / `saveSetting` / `trustAndReconnect` / `zoom` / `fontSize` / `SftpDrawer` / `HostEditor` / `HostsPage` / `PaneNode` / `HistorySearch`。
+- 仍按原计划搁置:`fontSize` 未使用、`zoom` 不持久化、`local.home` 静默、StatusBar configured-vs-live、`setWindowOpenHandler`、预览「无法预览」。
+
 
 ## 项目概述
 - 极简、键盘优先的 SSH 客户端。Electron + Vue 3 (Vite) + TypeScript。
