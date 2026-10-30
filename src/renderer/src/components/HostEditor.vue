@@ -249,7 +249,10 @@ async function generateKey(e?: Event): Promise<void> {
     passphrase: keyModal.passphrase || undefined
   })
   if (!r.ok || !r.key) {
-    keyModal.error = r.error ?? t('host.keyGenFail')
+    // Match importKey: modal error alone is easy to miss; toast the same string.
+    const msg = r.error ?? t('host.keyGenFail')
+    keyModal.error = msg
+    toast(msg, 'error')
     return
   }
   keyModal.open = false

@@ -1,3 +1,12 @@
+# M3.171 — 复核打磨(分支 `fix/review-polish-m3171`,基于 main @ 5946b1f,**勿合并**)
+
+- PublishKeyDialog: publish/revoke 失败在 dialog err 之外再 toast(keyPub.fail / revokeFail);不碰 #94 listFail。
+- HostEditor generateKey: 失败 toast,与 importKey 对齐(保留 keyModal.error)。
+- ForwardDialog add: 绑定失败 toast(fw.fail);badPort 仍只写 dialog err。
+- 未合并。未动 #4–#105。
+
+---
+
 # X-SSH 交接文档
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。

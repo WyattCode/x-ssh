@@ -6,11 +6,13 @@ const dialogEl = ref<HTMLElement>()
 useFocusTrap(dialogEl, () => store.publishOpen)
 import { useSessions } from '../stores/sessions'
 import { useI18n } from '../lib/i18n'
+import { useToast } from '../composables/toast'
 import type { ManagedKey, Host } from '../../../shared/types'
 import Icon from './Icon.vue'
 
 const store = useSessions()
 const { t } = useI18n()
+const { toast } = useToast()
 // Mounted for the app's lifetime and shown by its own v-if, so an onMounted
 // focus ran once at startup with no element and never again.
 watch(
@@ -48,7 +50,10 @@ async function publish(): Promise<void> {
   const r = await window.api.keys.publish(keyId.value, [...selected])
   busy.value = false
   if (!r.ok) {
-    err.value = r.error ?? t('keyPub.fail')
+    // Dialog is dismissible; banner alone is lost on close — same class as #94 listFail.
+    const msg = r.error ?? t('keyPub.fail')
+    err.value = msg
+    toast(msg, 'error')
     return
   }
   results.value = r.results ?? []
@@ -60,7 +65,9 @@ async function revoke(): Promise<void> {
   const r = await window.api.keys.revoke(keyId.value, [...selected])
   revokeBusy.value = false
   if (!r.ok) {
-    err.value = r.error ?? t('keyPub.revokeFail')
+    const msg = r.error ?? t('keyPub.revokeFail')
+    err.value = msg
+    toast(msg, 'error')
     return
   }
   revokeResults.value = r.results ?? []
