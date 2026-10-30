@@ -14,12 +14,30 @@ object ReconnectPolicy {
     /** 最多试几次。按 [delayMillis] 的间隔加起来大约五分钟,够走出电梯、等地铁出隧道。 */
     const val MAX_ATTEMPTS = 12
 
-    /** 第 [attempt] 次(从 1 起)之前等多久:1、2、4、8、16 秒,之后每次 30 秒。 */
-    fun delayMillis(attempt: Int): Long {
+    /**
+     * 第 [attempt] 次(从 1 起)之前等多久:1、2、4、8、16 秒,之后每次 30 秒。
+     *
+     * [lastError] 是上一次失败的原因:被 OpenSSH 的 PerSourcePenalties 挡住时,
+     * 基础间隔会被抬到至少 30 秒(见 [penaltyRetryDelayMs])。
+     */
+    fun delayMillis(attempt: Int, lastError: Throwable? = null): Long {
         require(attempt >= 1) { "attempt starts at 1" }
         val seconds = if (attempt <= 5) 1L shl (attempt - 1) else 30L
-        return seconds * 1000
+        return maxOf(seconds * 1000, penaltyRetryDelayMs(lastError) ?: 0L)
     }
+
+    /**
+     * 服务器是不是在按 OpenSSH 的 PerSourcePenalties 拒绝我们。
+     *
+     * 连错几次之后 sshd 会在一段时间里直接拒绝这个来源的握手,报 "not allowed at this time"。
+     * 在这段时间里继续重试只会**喂大**惩罚窗口 —— 越试越久。桌面版早就按 30 秒起步了,这里跟上。
+     */
+    fun isRateLimited(error: Throwable?): Boolean =
+        error?.message?.contains("not allowed at this time", ignoreCase = true) == true
+
+    /** 被 PerSourcePenalties 挡住时的重试下限;其余情况 null。和桌面版一致。 */
+    fun penaltyRetryDelayMs(error: Throwable?): Long? =
+        if (isRateLimited(error)) 30_000L else null
 
     /**
      * 这次失败再试也没用吗。
@@ -60,10 +78,17 @@ fun isRetryableInitialFailure(error: Throwable): Boolean =
         error !is SessionRegistry.Cancelled &&
         !ReconnectPolicy.isPermanent(error)
 
-/** 跑 [block],遇到可重试的失败就按 [delayMillis] 等一下再来,最多 [attempts] 次;最后一次的异常原样抛出。 */
+/**
+ * 跑 [block],遇到可重试的失败就按 [delayMillis] 等一下再来,最多 [attempts] 次;最后一次的异常原样抛出。
+ *
+ * [delayMillis] 拿到的是(第几次, 上一次的异常):被 PerSourcePenalties 挡住时,
+ * 默认实现会把等待抬到至少 30 秒,别在惩罚窗口里越试越久。
+ */
 suspend fun <T> retryInitialConnect(
     attempts: Int = INITIAL_CONNECT_ATTEMPTS,
-    delayMillis: (Int) -> Long = ::initialRetryDelayMillis,
+    delayMillis: (Int, Throwable) -> Long = { attempt, error ->
+        maxOf(initialRetryDelayMillis(attempt), ReconnectPolicy.penaltyRetryDelayMs(error) ?: 0L)
+    },
     onRetry: (attempt: Int, error: Throwable) -> Unit = { _, _ -> },
     block: () -> T,
 ): T {
@@ -74,7 +99,7 @@ suspend fun <T> retryInitialConnect(
         } catch (e: Throwable) {
             if (attempt >= attempts || !isRetryableInitialFailure(e)) throw e
             onRetry(attempt, e)
-            kotlinx.coroutines.delay(delayMillis(attempt))
+            kotlinx.coroutines.delay(delayMillis(attempt, e))
             attempt++
         }
     }

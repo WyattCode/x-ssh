@@ -77,6 +77,28 @@ export function formatAgo(
   return tr('sfp.dayAgo', { n: Math.floor(seconds / 86400) })
 }
 
+/**
+ * Remaining time for a running transfer, e.g. `~12s` or `~3 min`. Returns ''
+ * when the rate or the remaining byte count is unknown, or when less than a
+ * second is left (a countdown that reads "0s" is noise).
+ *
+ * Like [formatAgo], the translator is typed loosely so this module stays
+ * decoupled from i18n's `Vars` type.
+ */
+export function formatEta(
+  remainingBytes: number | undefined,
+  bytesPerSec: number | undefined,
+  t: (key: string, vars?: never) => string
+): string {
+  if (!remainingBytes || remainingBytes <= 0) return ''
+  if (!bytesPerSec || bytesPerSec <= 0.5) return ''
+  const seconds = remainingBytes / bytesPerSec
+  if (!Number.isFinite(seconds) || seconds < 1) return ''
+  const tr = t as unknown as (key: string, vars?: Record<string, number>) => string
+  if (seconds < 60) return tr('sfp.etaSec', { n: Math.round(seconds) })
+  return tr('sfp.etaMin', { n: Math.ceil(seconds / 60) })
+}
+
 /** The status label for a running or finished transfer. */
 export function transferStatusText(
   t: Partial<Pick<SftpProgress, 'error' | 'done' | 'total' | 'transferred'>> & Cancellable,
@@ -86,4 +108,17 @@ export function transferStatusText(
   if (t.error) return t.error
   if (t.done) return translate('sfp.done')
   return `${pct({ total: t.total ?? 0, transferred: t.transferred ?? 0, done: t.done })}%`
+}
+
+/**
+ * Short status label for a finished transfer's history badge. The error body is
+ * shown on its own wrapping line (it can be long), so this never returns it.
+ */
+export function histStatusLabel(
+  status: string,
+  translate: (key: string) => string
+): string {
+  if (status === 'cancelled') return translate('sfp.cancelled')
+  if (status === 'error') return translate('sfp.failed')
+  return translate('sfp.done')
 }

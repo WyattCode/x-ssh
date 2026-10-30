@@ -7,7 +7,10 @@ import {
   pct as pctOf,
   formatBytes,
   formatSpeed,
-  formatAgo
+  formatAgo,
+  formatEta,
+  histStatusLabel,
+  isCancelled
 } from '../lib/transferFormat'
 import type { SftpProgress, TransferHistoryItem } from '../../../shared/types'
 import Icon from './Icon.vue'
@@ -20,6 +23,13 @@ const { t } = useI18n()
 const pausedIds = new Set<string>()
 const allPaused = ref(false)
 
+// A row that has already failed or been cancelled. Main keeps these in
+// `store.transfers` for a few seconds before cleanup, so they can still show
+// their reason here instead of only in history.
+function isResidual(x: SftpProgress): boolean {
+  return !!x.error || isCancelled(x)
+}
+
 function togglePause(id: string): void {
   const paused = !pausedIds.has(id)
   if (paused) pausedIds.add(id)
@@ -28,25 +38,37 @@ function togglePause(id: string): void {
 }
 function togglePauseAll(): void {
   allPaused.value = !allPaused.value
-  // Bulk pause mirrors the main process's set: pause adds every active id,
-  // resume clears them, so per-row icons stay truthful.
-  if (allPaused.value) for (const x of active.value) pausedIds.add(x.id)
+  // Bulk pause mirrors the main process's set: pause adds every running id,
+  // resume clears them, so per-row icons stay truthful. Residual rows are
+  // already finished — pausing them would be meaningless.
+  if (allPaused.value) for (const x of running.value) pausedIds.add(x.id)
   else pausedIds.clear()
   window.api.sftp.pauseAll(allPaused.value)
 }
 
-// Live rows (all sessions), kept in arrival order.
+// Live rows (all sessions), kept in arrival order. Failed/cancelled transfers
+// linger in `store.transfers` for a few seconds before cleanup — keep them here
+// so the reason is visible instead of only in history.
 const active = computed(() =>
-  store.transfers.filter((x) => !x.done && !x.error)
+  // Running rows, plus residual failed/cancelled ones still lingering in the
+  // store (sessions keeps them a few seconds so the reason can be shown here).
+  store.transfers.filter((x) => !x.done || !!x.error || isCancelled(x))
 )
+
+// Rows that are still running (pause/cancel apply only to these).
+const running = computed(() => active.value.filter((x) => !isResidual(x)))
 
 // Recent finished transfers for the clean status badge.
 const recent = computed(() => store.transferHistory.slice(0, 12))
 
 function histStatus(h: TransferHistoryItem): string {
-  if (h.status === 'cancelled') return t('sfp.cancelled')
-  if (h.status === 'error') return h.error || t('sfp.failed')
-  return t('sfp.done')
+  return histStatusLabel(h.status, t)
+}
+function residualLabel(x: SftpProgress): string {
+  return isCancelled(x) ? t('sfp.cancelled') : t('sfp.failed')
+}
+function residualClass(x: SftpProgress): string {
+  return isCancelled(x) ? 'cancelled' : 'error'
 }
 function reveal(h: TransferHistoryItem): void {
   const target =
@@ -72,6 +94,11 @@ function pct(t2: SftpProgress): number {
 function fmtSpeed(id: string): string {
   return formatSpeed(store.transferSpeeds[id])
 }
+
+function eta(x: SftpProgress): string {
+  const remaining = x.total ? x.total - x.transferred : 0
+  return formatEta(remaining, store.transferSpeeds[x.id], t)
+}
 </script>
 
 <template>
@@ -89,7 +116,7 @@ function fmtSpeed(id: string): string {
           <div class="tp-label">
             {{ t('tpanel.active') }}
             <button
-              v-if="active.length"
+              v-if="running.length"
               class="tp-pauseall"
               :title="allPaused ? t('tpanel.resumeAll') : t('tpanel.pauseAll')"
               @click="togglePauseAll"
@@ -103,21 +130,33 @@ function fmtSpeed(id: string): string {
               <Icon :name="x.direction === 'up' ? 'upload' : 'download'" :size="14" class="tp-dir" />
               <div class="tp-main">
                 <div class="tp-name">{{ x.name }}</div>
-                <div class="tp-track">
-                  <div class="tp-fill" :style="{ width: pct(x) + '%' }"></div>
-                </div>
-                <div class="tp-meta">
-                  <span>{{ fmtBytes(x.transferred) }}<template v-if="x.total"> / {{ fmtBytes(x.total) }}</template></span>
-                  <span v-if="x.direction === 'down' && x.count && x.count > 1 && x.index">{{ x.index }}/{{ x.count }} · </span>
-                  <span>{{ fmtSpeed(x.id) }}</span>
-                </div>
+                <template v-if="isResidual(x)">
+                  <div class="tp-meta">
+                    <span class="tp-badge" :class="residualClass(x)">{{ residualLabel(x) }}</span>
+                    <span>{{ fmtBytes(x.transferred) }}<template v-if="x.total"> / {{ fmtBytes(x.total) }}</template></span>
+                  </div>
+                  <div v-if="x.error && !isCancelled(x)" class="tp-err">{{ x.error }}</div>
+                </template>
+                <template v-else>
+                  <div class="tp-track">
+                    <div class="tp-fill" :style="{ width: pct(x) + '%' }"></div>
+                  </div>
+                  <div class="tp-meta">
+                    <span>{{ fmtBytes(x.transferred) }}<template v-if="x.total"> / {{ fmtBytes(x.total) }}</template></span>
+                    <span v-if="x.direction === 'down' && x.count && x.count > 1 && x.index">{{ x.index }}/{{ x.count }} · </span>
+                    <span>{{ fmtSpeed(x.id) }}</span>
+                    <span v-if="eta(x)">· {{ eta(x) }}</span>
+                  </div>
+                </template>
               </div>
+              <template v-if="!isResidual(x)">
                 <button class="tp-cancel" :title="t('sfp.pause')" @click="togglePause(x.id)">
-                <Icon :name="pausedIds.has(x.id) ? 'play' : 'pause'" :size="14" />
-              </button>
+                  <Icon :name="pausedIds.has(x.id) ? 'play' : 'pause'" :size="14" />
+                </button>
                 <button class="tp-cancel" :title="t('sfp.cancelTransfer')" @click="store.cancelTransfer(x.id)">
-                <Icon name="close" :size="14" />
-              </button>
+                  <Icon name="close" :size="14" />
+                </button>
+              </template>
             </div>
           </div>
           <div v-else class="tp-none">{{ t('tpanel.none') }}</div>
@@ -135,6 +174,7 @@ function fmtSpeed(id: string): string {
                   <span>{{ fmtBytes(h.bytes) }}</span>
                   <span class="tp-ago">· {{ timeAgo(h.at) }}</span>
                 </div>
+                <div v-if="h.status === 'error' && h.error" class="tp-err">{{ h.error }}</div>
               </div>
               <button v-if="canReveal(h)" class="tp-cancel" :title="t('sfp.reveal')" @click="reveal(h)">
                 <Icon name="folder" :size="14" />
@@ -245,6 +285,7 @@ function fmtSpeed(id: string): string {
   display: flex;
   gap: 8px;
   align-items: center;
+  flex-wrap: wrap;
   font-size: 11px;
   color: var(--text-dim);
   margin-top: 3px;
@@ -254,4 +295,12 @@ function fmtSpeed(id: string): string {
 .tp-badge.done { color: var(--ok, #3fb950); }
 .tp-badge.error { color: var(--danger); }
 .tp-badge.cancelled { color: var(--text-dim); }
+.tp-err {
+  font-size: 11px;
+  color: var(--danger);
+  margin-top: 3px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
 </style>
