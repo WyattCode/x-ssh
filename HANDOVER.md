@@ -2,6 +2,18 @@
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。
 
+## M3.139(分支 `fix/review-polish-m3139`,**未合并**)
+
+> 只做缺陷 / 界面打磨,不加功能。**#73–#12、#4–#11 的 PR 都还没合并**,这一批也不含它们。
+
+- **侧栏 / 主机视图偏好写盘失败会撒谎(P1)**:`setSidebarCollapsed` / `setTermSidebarHidden` / `setHostsView` / `setHostsSort` 原来先改内存再 `void saveSetting`,主进程拒键或写盘失败时开关一直停在错的状态,直到重启才回退。现在直接 `settings.set`,失败回滚并 toast `set.gen.writeFail`。`setSidebarWidth` 松手落盘同理,失败**静默回滚**到 `savedSidebarWidth`(与 M3.138 的 `sftpWidth` 同款,不弹 toast)。`saveSetting` 本身未动(#68)。
+- **传输面板「在文件管理器中打开」吞失败(P1)**:`TransferPanel.reveal` 原来 `void revealLocal` 不管 `{ ok: false }`(SftpDrawer 的同款按钮已经 toast)。现在 await,失败 toast `sfp.revealFail`(已有键)。
+- **连接/启动开关写盘失败会撒谎(P1)**:设置里「启动恢复上次标签」「自动重连」「关闭前确认」「桌面通知」四个开关同样先翻再 `void saveSetting`。改为 `settings.set` 直写,失败回滚 + toast `set.gen.writeFail`。其它开关 / 片段 / 编辑器 / 连接日志仍归 #66 等,未动。
+- i18n 新增 `set.gen.writeFail`(zh / en / zh-TW;文案与 #66/#68 对齐便于并行合并)。
+- 未触碰:`closePane` / `focusSession` / `openSftpFor` / `splitPane` / `setActive*` / `persistTabs` / `nextTab` / `closeOthers` / `openSnapshot` / `applyLayoutPreset` / `queue*` / `clearTransfer*` / `theme` / `setLang` / `addSftpRecent` / `saveSetting` / `trustAndReconnect` / `zoom` / `fontSize` / `SftpDrawer` / `HostEditor` / `HostsPage` / `PaneNode` / `HistorySearch`。
+- 仍按原计划搁置:`fontSize` 未使用、`zoom` 不持久化、`local.home` 静默、StatusBar configured-vs-live、`setWindowOpenHandler`、预览「无法预览」。
+
+
 ## 项目概述
 - 极简、键盘优先的 SSH 客户端。Electron + Vue 3 (Vite) + TypeScript。
 - 平台: Windows (`win32`)。目录: `D:\Documents\Claude Code\X-SSH`。

@@ -252,6 +252,8 @@ export type HostsSort = 'recent' | 'name' | 'address'
  *  later from settings painted the defaults first and then jumped. */
 const bootPrefs = (typeof window !== 'undefined' ? window.api?.prefs : undefined) ?? {}
 const bootWidth = Number(bootPrefs.sidebarWidth)
+/** Last sidebar width known on disk (or the startup default). Drag/persist failures roll back here. */
+let savedSidebarWidth = bootWidth > 0 ? clampSidebarWidth(bootWidth) : SIDEBAR_DEFAULT_W
 
 interface State {
   hosts: Host[]
@@ -1132,13 +1134,31 @@ export const useSessions = defineStore('sessions', {
       this.paletteOpen = false
     },
     setSidebarCollapsed(v: boolean): void {
+      const prev = this.sidebarCollapsed
       this.sidebarCollapsed = v
-      void this.saveSetting('sidebarCollapsed', v)
+      void window.api.settings.set('sidebarCollapsed', v).then((r) => {
+        if (r && r.ok === false) {
+          this.sidebarCollapsed = prev
+          toast(t('set.gen.writeFail'), 'error')
+        }
+      }).catch(() => {
+        this.sidebarCollapsed = prev
+        toast(t('set.gen.writeFail'), 'error')
+      })
     },
     /** Live while dragging (`persist` false), saved on release. */
     setSidebarWidth(w: number, persist = true): void {
       this.sidebarWidth = clampSidebarWidth(w)
-      if (persist) void this.saveSetting('sidebarWidth', this.sidebarWidth)
+      if (!persist) return
+      const next = this.sidebarWidth
+      if (next === savedSidebarWidth) return
+      // Keep settings.set('sidebarWidth' on one line for settingsKeys allowlist scan.
+      void window.api.settings.set('sidebarWidth', next).then((r) => {
+        if (r && r.ok === false) this.sidebarWidth = savedSidebarWidth
+        else savedSidebarWidth = next
+      }).catch(() => {
+        this.sidebarWidth = savedSidebarWidth
+      })
     },
     /** 设置 → 常规 → 重置边栏: default width, expanded, out of 专注模式. */
     resetSidebar(): void {
@@ -1147,16 +1167,43 @@ export const useSessions = defineStore('sessions', {
       this.setTermSidebarHidden(false)
     },
     setTermSidebarHidden(v: boolean): void {
+      const prev = this.termSidebarHidden
       this.termSidebarHidden = v
-      void this.saveSetting('termSidebarHidden', v)
+      void window.api.settings.set('termSidebarHidden', v).then((r) => {
+        if (r && r.ok === false) {
+          this.termSidebarHidden = prev
+          toast(t('set.gen.writeFail'), 'error')
+        }
+      }).catch(() => {
+        this.termSidebarHidden = prev
+        toast(t('set.gen.writeFail'), 'error')
+      })
     },
     setHostsView(v: HostsView): void {
+      const prev = this.hostsView
       this.hostsView = v
-      void this.saveSetting('hostsView', v)
+      void window.api.settings.set('hostsView', v).then((r) => {
+        if (r && r.ok === false) {
+          this.hostsView = prev
+          toast(t('set.gen.writeFail'), 'error')
+        }
+      }).catch(() => {
+        this.hostsView = prev
+        toast(t('set.gen.writeFail'), 'error')
+      })
     },
     setHostsSort(v: HostsSort): void {
+      const prev = this.hostsSort
       this.hostsSort = v
-      void this.saveSetting('hostsSort', v)
+      void window.api.settings.set('hostsSort', v).then((r) => {
+        if (r && r.ok === false) {
+          this.hostsSort = prev
+          toast(t('set.gen.writeFail'), 'error')
+        }
+      }).catch(() => {
+        this.hostsSort = prev
+        toast(t('set.gen.writeFail'), 'error')
+      })
     },
     /** Probes the given saved hosts (all when omitted) and merges the results. */
     async probeReach(ids?: string[], opts: { maxAge?: number } = {}): Promise<void> {

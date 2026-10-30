@@ -11,9 +11,11 @@ import {
 } from '../lib/transferFormat'
 import type { SftpProgress, TransferHistoryItem } from '../../../shared/types'
 import Icon from './Icon.vue'
+import { useToast } from '../composables/toast'
 
 const store = useSessions()
 const { t } = useI18n()
+const { toast } = useToast()
 
 // Paused job ids (in-memory, main-driven). Tracked here so the resume button
 // shows only for paused rows, and a global "resume all" reflects the state.
@@ -48,10 +50,12 @@ function histStatus(h: TransferHistoryItem): string {
   if (h.status === 'error') return h.error || t('sfp.failed')
   return t('sfp.done')
 }
-function reveal(h: TransferHistoryItem): void {
+async function reveal(h: TransferHistoryItem): Promise<void> {
   const target =
     h.direction === 'down' ? h.localDir : h.localPaths?.[0]
-  if (target) void window.api.sftp.revealLocal(target)
+  if (!target) return
+  const r = await window.api.sftp.revealLocal(target)
+  if (!r.ok) toast(r.error ?? t('sfp.revealFail'), 'error')
 }
 // History rows only expose "reveal" for finished down/up transfers.
 function canReveal(h: TransferHistoryItem): boolean {
