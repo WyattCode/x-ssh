@@ -141,10 +141,17 @@ const splitEl = ref<HTMLElement>()
         </div>
         <button
           class="idle-connect"
+          :disabled="!!pane.reconnectAttempt"
           @click.stop="hostKeyRejected ? store.trustAndReconnect(pane.id) : store.reconnect(pane.id)"
         >
           <Icon name="refresh" :size="15" />
-          <span>{{ hostKeyRejected ? (pane.errorCode === 'host_key_unknown' ? t('app.trustKey') : t('app.trustReconnect')) : t('app.reconnect') }}</span>
+          <span>{{
+            pane.reconnectAttempt
+              ? t('app.reconnecting', { attempt: pane.reconnectAttempt })
+              : hostKeyRejected
+                ? (pane.errorCode === 'host_key_unknown' ? t('app.trustKey') : t('app.trustReconnect'))
+                : t('app.reconnect')
+          }}</span>
         </button>
         <button
           class="idle-close"
@@ -461,6 +468,11 @@ const splitEl = ref<HTMLElement>()
 .idle-connect:hover {
   border-color: var(--accent);
   background: var(--bg-elev-2);
+}
+.idle-connect:disabled {
+  opacity: 0.55;
+  cursor: default;
+  pointer-events: none;
 }
 .idle-close {
   margin-top: 8px;

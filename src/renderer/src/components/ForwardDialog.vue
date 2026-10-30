@@ -33,6 +33,7 @@ const modeLabel = (m?: ForwardMode): string =>
 
 const form = reactive({ mode: 'local' as ForwardMode, localPort: '', host: '', remotePort: '' })
 const busy = ref(false)
+const removing = ref(false)
 const err = ref('')
 
 // Switching local/remote/dynamic changes which fields are validated, so a
@@ -61,18 +62,22 @@ async function add(): Promise<void> {
     return
   }
   err.value = ''
+  if (busy.value) return
   busy.value = true
-  const r = await store.addForward({
-    mode: form.mode,
-    localPort: lp,
-    remoteHost: form.host.trim() || '127.0.0.1',
-    remotePort: form.mode === 'dynamic' ? 0 : rp
-  })
-  busy.value = false
-  if (!r.ok) err.value = r.error ?? t('fw.fail')
-  else {
-    form.localPort = ''
-    form.remotePort = ''
+  try {
+    const r = await store.addForward({
+      mode: form.mode,
+      localPort: lp,
+      remoteHost: form.host.trim() || '127.0.0.1',
+      remotePort: form.mode === 'dynamic' ? 0 : rp
+    })
+    if (!r.ok) err.value = r.error ?? t('fw.fail')
+    else {
+      form.localPort = ''
+      form.remotePort = ''
+    }
+  } finally {
+    busy.value = false
   }
 }
 
@@ -86,11 +91,17 @@ function submitOnEnter(e: KeyboardEvent): void {
 }
 
 async function remove(mode: ForwardMode | undefined, localPort: number): Promise<void> {
+  if (removing.value) return
   // Same destructive action as the forwards page, which confirms first.
   const rule = list.value.find((f) => f.mode === mode && f.localPort === localPort)
   const label = rule ? ruleText(rule.mode ?? 'local', rule.localPort, rule.remoteHost, rule.remotePort) : ''
   if (!(await confirm(t('fwp.removeConfirm', { rule: label }), { danger: true, confirmText: t('fw.remove') }))) return
-  void store.removeForward(mode, localPort)
+  removing.value = true
+  try {
+    await store.removeForward(mode, localPort)
+  } finally {
+    removing.value = false
+  }
 }
 </script>
 
@@ -107,7 +118,7 @@ async function remove(mode: ForwardMode | undefined, localPort: number): Promise
         <div v-for="(f, i) in list" :key="i" class="fw-row">
           <span class="fw-mode">{{ modeLabel(f.mode) }}</span>
           <span class="fw-rule">{{ ruleText(f.mode ?? 'local', f.localPort!, f.remoteHost || '127.0.0.1', f.remotePort!) }}</span>
-          <button class="fw-del" :title="t('fw.remove')" @click="void remove(f.mode, f.localPort!)"><Icon name="close" :size="13" /></button>
+          <button class="fw-del" :title="t('fw.remove')" :disabled="removing" @click="void remove(f.mode, f.localPort!)"><Icon name="close" :size="13" /></button>
         </div>
         <div class="fw-form">
           <select v-model="form.mode" class="fw-in">
@@ -243,6 +254,10 @@ async function remove(mode: ForwardMode | undefined, localPort: number): Promise
 }
 .fw-add:disabled {
   opacity: 0.5;
+}
+.fw-del:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 .fw-err {
   color: var(--danger);
