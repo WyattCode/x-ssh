@@ -813,6 +813,21 @@ Branch: `fix/review-polish-m3133` from `origin/main`. Do **not** merge; do **not
 
 ### Not in this PR
 theme/transfer (#67), snippets/connLog/editor (#66), hosts/bookmark (#65), SettingsStore/snapshots save (#64), addSftpRecent, lang/zoom/fontSize, applyLayoutPreset, TabBar.vue.
+## HANDOVER M3.134 — layout preset confirmClose + lang persist + sftpRecent rollback (PR open, NOT merged)
+
+Branch: `fix/review-polish-m3134` from `origin/main`. Do **not** merge; do **not** touch open PRs #4–#68.
+
+### Shipped
+1. **applyLayoutPreset honors confirmClose** — confirm + send `exit` + `cancelReconnect` before disconnecting other panes when any is connected.
+2. **Language persist fail-closed** — removed fire-and-forget `watch(pref)`; `setLang` writes first, only then flips `pref`; toasts `app.langFail` on refuse/throw.
+3. **addSftpRecent silent rollback** — memory restored when `settings.set` refuses/throws (no toast).
+
+### Verify
+- `npm run typecheck` / `lint:i18n` / `test` (expect ≥334).
+- Manual: confirm-on-close + multi-pane → layout preset dialog; refuse lang write → UI stays; SFTP browse with refused sftpRecent → MRU unchanged.
+
+### Not in this PR
+openSnapshot/closeOthers/saveSetting (#68), theme/transfer clears (#67), bookmarks (#65), SettingsStore (#64), zoom/fontSize/sftpShowHidden, queueUpload, TabBar.vue.
 
 ---
 

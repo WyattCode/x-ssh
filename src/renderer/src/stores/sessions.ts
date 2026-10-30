@@ -704,8 +704,14 @@ export const useSessions = defineStore('sessions', {
     async addSftpRecent(path: string): Promise<void> {
       const next = [path, ...this.sftpRecent.filter((p) => p !== path)].slice(0, 10)
       if (JSON.stringify(next) === JSON.stringify(this.sftpRecent)) return
+      const prev = this.sftpRecent
       this.sftpRecent = next
-      await window.api.settings.set('sftpRecent', next)
+      try {
+        const r = await window.api.settings.set('sftpRecent', next)
+        if (r && r.ok === false) this.sftpRecent = prev
+      } catch {
+        this.sftpRecent = prev
+      }
     },
     /** Adds/removes a remote dir from the SFTP bookmarks (capped at 20). */
     async toggleSftpBookmark(path: string): Promise<void> {
@@ -1566,10 +1572,25 @@ export const useSessions = defineStore('sessions', {
       if (!src) return
       const cells = Math.min(rows * cols, 8)
       if (cells <= 0) return
-      // Close every pane except the source so the grid is clean.
       const keep = src.id
-      for (const pane of [...tab.panes]) {
-        if (pane.id === keep) continue
+      const victims = tab.panes.filter((p) => p.id !== keep)
+      const live = victims.some((p) => p.status === 'connected')
+      if (live && this.confirmClose) {
+        const ok = await confirm(t('tabbar.layoutConfirm'), {
+          title: t('app.closeExitTitle'),
+          confirmText: t('app.closeExitOk'),
+          cancelText: t('confirm.cancel')
+        })
+        if (!ok) return
+        for (const p of victims) {
+          if (p.status === 'connected' && p.sshSessionId) {
+            void window.api.ssh.input(p.sshSessionId, 'exit\n')
+          }
+        }
+      }
+      // Close every pane except the source so the grid is clean.
+      for (const pane of victims) {
+        this.cancelReconnect(pane)
         if (pane.sshSessionId) void window.api.ssh.disconnect(pane.sshSessionId)
       }
       tab.panes = tab.panes.filter((p) => p.id === keep)
