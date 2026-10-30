@@ -2955,14 +2955,19 @@ export class SshManager {
   }
 
   /** Attaches to a tmux session in the live shell, creating it if absent
-   *  (`new -A`). Writes to the interactive stream so tmux takes over the pane. */
-  tmuxAttachOrCreate(sessionId: string, name: string): void {
+   *  (`new -A`). Writes to the interactive stream so tmux takes over the pane.
+   *  Returns false when there is no live shell to write to, so the caller can
+   *  report the failure instead of a silent no-op that looks like success. */
+  tmuxAttachOrCreate(sessionId: string, name: string): boolean {
     const session = this.sessions.get(sessionId)
+    const stream = session?.stream
+    if (!stream) return false
     // Single-quote the name so host labels/settings with spaces (or quotes) don't
     // split the shell token — tmux would otherwise create a wrongly-named window.
     const safe = name ? `'${name.replace(/'/g, `'\\''`)}'` : ''
     const cmd = name ? `tmux new -A -s ${safe}` : 'tmux new -A'
-    session?.stream?.write(cmd + '\n')
+    stream.write(cmd + '\n')
+    return true
   }
 }
 

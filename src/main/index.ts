@@ -2,7 +2,7 @@ import { app, shell, BrowserWindow, ipcMain, dialog, nativeImage, nativeTheme, s
 import { join, dirname, basename, isAbsolute } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { tmpdir, homedir } from 'node:os'
-import { mkdtemp, rm, readFile, stat, readdir, mkdir, unlink, rename, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm, readFile, stat, readdir, mkdir, unlink, rename, writeFile, access } from 'node:fs/promises'
 import { watchFile, unwatchFile } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { IPC, PREFS_ARG } from '../shared/ipc'
@@ -1528,8 +1528,7 @@ function registerIpc(): void {
   })
   ipcMain.handle(IPC.sshTmuxAttach, (_e, sessionId: string, name: string) => {
     if (!sshManager) return { ok: false }
-    sshManager.tmuxAttachOrCreate(sessionId, name)
-    return { ok: true }
+    return { ok: sshManager.tmuxAttachOrCreate(sessionId, name) }
   })
   ipcMain.handle(IPC.sshForwardAdd, (_e, sessionId: string, rule: HostForward) => {
     if (!sshManager) return { ok: false, error: 'window-not-ready' }
@@ -1624,9 +1623,13 @@ function registerIpc(): void {
   // Reveal a finished transfer's local path in the OS file manager.
   ipcMain.handle(
     IPC.sftpRevealLocal,
-    (_e, target: string) => {
+    async (_e, target: string) => {
       try {
         if (!target || !isAbsolute(target)) return { ok: false, error: 'path-invalid' }
+        if (!target || !isAbsolute(target)) return { ok: false, error: '路径不合法' }
+        // showItemInFolder does not throw for a missing path — it just opens the
+        // parent (or does nothing useful). Fail closed so the drawer toast fires.
+        await access(target)
         shell.showItemInFolder(target)
         return { ok: true }
       } catch (e) {

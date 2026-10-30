@@ -670,6 +670,15 @@ Continue continuous-improve from origin/main on a new branch; do **not** touch/m
 1. **localList swallows FS errors → empty pane** — `IPC.localList` catch returned `{ path, entries: [] }` on EACCES/ENOENT, so the drawer looked empty with no banner. Rethrow so `refreshLocal` catch shows `sfp.localErr`. Early `!resolved` / `!st.isDirectory()` returns unchanged.
 2. **openExternal false success** — handler returned `true` before `shell.openExternal` settled and swallowed rejections. Now `async`, `await`, fail-closed (`false` on reject). http/https allow-list unchanged.
 3. **historyList fallback label hardcoded Chinese** — `s.label ?? '会话'` leaked into EN UI (HistorySearch host filter / rows / export). Machine missing-label is `''`; display uses new `hist.untitled` (zh/en/zh-TW) via `displayLabel`, mapping legacy `'会话'` too. Filter `:value` stays raw.
+## HANDOVER M3.123 — review polish (tmuxAttach fail-closed / reveal access / link open toast)
+
+**Branch:** `fix/review-polish-m3123` (from origin/main). **Do NOT merge.** Open PR (see report).
+**Skipped / do not redo:** PR #57 `fix/review-polish-m3122` (localList rethrow / openExternal fail-closed / hist.untitled) and #56–#12, #4–#11. Features / intentional deferrals / M3.77–M3.122 done items.
+
+### Fixes shipped
+1. **tmuxAttach false success** — `tmuxAttachOrCreate` returned void and IPC always `{ ok: true }` when sshManager existed, even with no session/stream (silent no-op). Now returns `boolean`; IPC propagates so #47's `tmux.attachFail` toast can fire.
+2. **revealLocal missing path** — `showItemInFolder` does not throw for deleted downloads; handler now `access`es first and fail-closes so SftpDrawer history reveal toast fires.
+3. **Terminal link open silent fail** — `openLink` ignored `openExternal` false/reject. Toast `term.linkOpenFail` (zh/en/zh-TW).
 
 ### Verify
 - typecheck OK; lint:i18n OK (750/750/750 desktop); vitest **334**/30 green.
@@ -677,6 +686,7 @@ Continue continuous-improve from origin/main on a new branch; do **not** touch/m
 
 ### Next
 Continue continuous-improve from origin/main on a new branch; do **not** touch/merge this PR or #56–#12 / #4–#11. Prefer substantive P0/P1 over busy-gates.
+Continue continuous-improve from origin/main on a new branch; do **not** touch/merge this PR or #57–#12 / #4–#11. Prefer substantive P0/P1 over busy-gates.
 
 ---
 

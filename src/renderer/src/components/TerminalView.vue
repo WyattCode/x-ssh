@@ -43,6 +43,7 @@ const { mode } = useTheme()
 const { size: fontSize } = useFontSize()
 const store = useSessions()
 const { t } = useI18n()
+const { toast } = useToast()
 
 // Per-host terminal overrides (fall back to the global settings).
 const host = computed(() => {
@@ -351,9 +352,12 @@ function doFit(): void {
 }
 
 /** Opens a link clicked in the output. Main restricts this to http/https, so a
- *  URL the remote host printed can't launch a local protocol handler. */
+ *  URL the remote host printed can't launch a local protocol handler. A refusal
+ *  (bad scheme / no OS handler) is surfaced instead of silently doing nothing. */
 function openLink(uri: string): void {
-  window.api.openExternal(uri).catch(() => undefined)
+  void window.api.openExternal(uri).then((ok) => {
+    if (!ok) toast(t('term.linkOpenFail'), 'error')
+  })
 }
 
 onMounted(() => {
