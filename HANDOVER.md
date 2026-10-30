@@ -852,6 +852,15 @@ openSnapshot/closeOthers/saveSetting (#68), theme/transfer clears (#67), bookmar
   - **`splitPane` 空面板崩溃**:加 `if (!src) return`(与 `applyLayoutPreset` 一致)。
   - i18n 新增 `hist.sessionGone`(zh / en / zh-TW 三份对称)。
 - **未合并**:#71–#12、#4–#11 等开放 PR 均**未合并**;本分支不重做它们的内容(`setActivePane` / `persistTabs` 失败提示 / `splitPane` 的 `persistTabs` / `queue*` 静默回滚 / `removeTransferHistory` / `localList` / `isCancelled` 等仍归各自 PR)。
+## M3.138(分支 `fix/review-polish-m3138`,**未合并**)
+
+> 只做缺陷 / 界面打磨,不加功能。**#72–#12、#4–#11 的 PR 都还没合并**,这一批也不含它们。
+
+- **`closePane` 的 confirmClose 绕过(P1)**:原来只有「标签里只剩一个面板」时才确认 + 发 `exit`,多面板分屏下 Ctrl+Shift+W / 面板 × 直接杀掉活会话,既没有对话框也没有优雅退出(只 `disconnect`)。现在只要 `confirmClose` 开着且该面板 `connected` 就确认,确认后先发 `exit\n` 再断开。设置里 `set.conn.confirmCloseDesc` 的文案本来就写的是「标签/面板」,代码现在才对齐。`closeTab` / `closeTabSafe` / `closeOthers` / `openSnapshot` / `applyLayoutPreset` 未动。
+- **SFTP「显示隐藏文件」写盘失败会撒谎(P1)**:`toggleHidden` 原来是 `showHidden` 先翻、`void settings.set(...)` 不管结果 —— 主进程拒键或写盘失败时眼睛图标一直停在错的状态,直到重启才回退。现在 `async`,失败(`ok === false` 或抛错)回滚并 toast `sfp.showHiddenFail`(三字典新增)。
+- **SFTP 抽屉宽度持久化失败静默(P1)**:`onResizeEnd` 拖完就 `void settings.set('sftpWidth', …)`,被拒时面板停在下次启动会跳回去的宽度。新增 `savedWidth`(最后一次确认落盘的值,初值 = 启动宽度),写入失败**静默回滚**(后台动作,不弹 toast)。`onResizeStart` / `onResizeMove` / `onWindowResize` 未动。
+- 未触碰:`focusSession` / `openSftpFor` / `splitPane` 主体 / `setActive` / `setActivePane` / `persistTabs` / `nextTab` / `closeOthers` / `openSnapshot` / `applyLayoutPreset` / `queue*` / `clearTransfer*` / `removeTransferHistory` / `theme` / `setLang` / `addSftpRecent` / `saveSetting` / `zoom` / `fontSize` / `openExternal` / `localList` / `local.home` / `TerminalView` / `HostEditor` / `HostsPage` / `SettingsDialog` / `PaneNode` / `HistorySearch`。
+- 仍按原计划搁置(归别处):`fontSize` 未使用、`zoom` 不持久化、`local.home` 静默、StatusBar 的 configured-vs-live 转发、`setWindowOpenHandler`、预览「无法预览」。
 
 ## 项目概述
 - 极简、键盘优先的 SSH 客户端。Electron + Vue 3 (Vite) + TypeScript。

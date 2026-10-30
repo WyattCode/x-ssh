@@ -2061,15 +2061,16 @@ export const useSessions = defineStore('sessions', {
       const found = this.findPane(paneId)
       if (!found) return
       const { tab, pane } = found
-      // Closing the only pane of a live session is destructive; confirm first.
-      if (tab.panes.length === 1 && this.confirmClose && pane.status === 'connected') {
+      // Closing any connected pane is destructive when confirmClose is on
+      // (setting copy covers tab/pane; last-pane-only was a confirmClose bypass
+      // for splits). Send exit first so the remote shell winds down.
+      if (this.confirmClose && pane.status === 'connected') {
         const ok = await confirm(t('app.closePaneConfirm', { title: tab.title }), {
           title: t('app.closeExitTitle'),
           confirmText: t('app.closeExitOk'),
           cancelText: t('confirm.cancel')
         })
         if (!ok) return
-        // Let the remote shell wind down gracefully before dropping the link.
         // Re-read the id: `confirm` awaited, and the session may have dropped in
         // the meantime — asserting it here would send `undefined` over IPC.
         const live = pane.sshSessionId
