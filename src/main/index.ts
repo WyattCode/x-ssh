@@ -305,7 +305,12 @@ async function confirmOverwriteLocal(targets: string[]): Promise<boolean> {
     targets.map((p) =>
       stat(p)
         .then((s) => (s.isDirectory() ? null : p))
-        .catch(() => null)
+        .catch((e) => {
+          // Only a genuinely absent file is "nothing to overwrite". Any other
+          // error (EACCES/EPERM on a locked file) means it exists but we can't
+          // stat it — treat it as existing so the prompt still fires.
+          return (e as NodeJS.ErrnoException)?.code === 'ENOENT' ? null : p
+        })
     )
   )).filter((p): p is string => !!p)
   if (!existing.length) return true
@@ -337,7 +342,15 @@ async function resolveUploadOverwrite(
 ): Promise<UploadOverwrite | 'cancel'> {
   if (overwrite) return overwrite
   if (!names.length) return 'overwrite'
-  const conflicts = await requireSshManager().remoteConflicts(sessionId, remoteDir, names)
+  let conflicts: string[]
+  try {
+    conflicts = await requireSshManager().remoteConflicts(sessionId, remoteDir, names)
+  } catch {
+    // The conflict check failed (dir unreadable / link dropped). Fail closed:
+    // treating it as "nothing conflicts" would overwrite remote files the user
+    // was never asked about.
+    return 'cancel'
+  }
   if (!conflicts.length) return 'overwrite'
   const { response } = await dialog.showMessageBox({
     type: 'warning',
