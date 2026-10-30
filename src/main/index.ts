@@ -2172,9 +2172,20 @@ function registerIpc(): void {
   })
   ipcMain.handle(IPC.themeSet, async (_e, pref: unknown) => {
     const value: ThemePref = pref === 'light' || pref === 'dark' ? pref : 'system'
+    // Persist first: pinning the native theme before the write means a refused
+    // or failed write still flips the title bar / scrollbars, and the renderer
+    // would show a theme that the next launch silently reverts.
+    try {
+      await settings.set('theme', value)
+    } catch (e) {
+      return {
+        ok: false as const,
+        dark: nativeTheme.shouldUseDarkColors,
+        error: (e as Error).message || 'theme-write-failed'
+      }
+    }
     applyThemeSource(value)
-    await settings.set('theme', value)
-    return { dark: nativeTheme.shouldUseDarkColors }
+    return { ok: true as const, dark: nativeTheme.shouldUseDarkColors }
   })
   ipcMain.handle(IPC.connLogList, async () => (await settings.get<ConnLogEntry[]>('connectionLog')) ?? [])
   ipcMain.handle(IPC.connLogPush, async (_e, entry: ConnLogEntry) => {
