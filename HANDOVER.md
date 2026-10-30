@@ -798,6 +798,21 @@ Branch: `fix/review-polish-m3132` from `origin/main`. Do **not** merge; do **not
 
 ### Not in this PR
 SettingsStore.set (#64), snippets/connLog/editor (#66), removeHost/saveHost/bookmark (#65), addSftpRecent, zoom/fontSize/lang, knownHostsForget, Terminal linkOpenFail, previewFail.
+## HANDOVER M3.133 — snapshot/closeOthers confirmClose + saveSetting toast (PR open, NOT merged)
+
+Branch: `fix/review-polish-m3133` from `origin/main`. Do **not** merge; do **not** touch open PRs #4–#67.
+
+### Shipped
+1. **openSnapshot honors confirmClose** — if any pane is connected, confirm once, send `exit`, then replace tabs.
+2. **closeOthers honors confirmClose** — same for other tabs; async (TabBar `run` already tolerates it).
+3. **saveSetting** toasts `set.gen.writeFail` and returns `boolean`; **setGlobalShowHide** rolls back in-memory accel + restores previous OS shortcut when persist fails.
+
+### Verify
+- `npm run typecheck` / `lint:i18n` / `test` (expect ≥334).
+- Manual: enable confirm-on-close → open snapshot / close others with live tabs → dialog; refuse a settings key → toast; fail persist of global hotkey → field + OS shortcut revert.
+
+### Not in this PR
+theme/transfer (#67), snippets/connLog/editor (#66), hosts/bookmark (#65), SettingsStore/snapshots save (#64), addSftpRecent, lang/zoom/fontSize, applyLayoutPreset, TabBar.vue.
 
 ---
 

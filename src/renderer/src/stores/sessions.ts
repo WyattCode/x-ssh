@@ -726,13 +726,21 @@ export const useSessions = defineStore('sessions', {
       }
     },
 
-    async saveSetting(key: string, value: unknown): Promise<void> {
+    async saveSetting(key: string, value: unknown): Promise<boolean> {
       // Main refuses keys outside its allowlist. Swallowing that would recreate
-      // the "interface said it saved but nothing was written" bug class, so log
-      // it loudly instead — a rejected key means the key list is out of date.
-      const r = await window.api.settings.set(key, toPlain(value))
-      if (r && r.ok === false) {
-        console.error(`settings: not saved — main refused key "${key}": ${r.error ?? ''}`)
+      // the "interface said it saved but nothing was written" bug class — toast
+      // so the user sees it (a rejected key usually means the allowlist is stale).
+      try {
+        const r = await window.api.settings.set(key, toPlain(value))
+        if (r && r.ok === false) {
+          console.error(`settings: not saved — main refused key "${key}": ${r.error ?? ''}`)
+          toast(t('set.gen.writeFail'), 'error')
+          return false
+        }
+        return true
+      } catch {
+        toast(t('set.gen.writeFail'), 'error')
+        return false
       }
     },
 
@@ -740,8 +748,16 @@ export const useSessions = defineStore('sessions', {
     async setGlobalShowHide(accel: string): Promise<{ ok: boolean; error?: string }> {
       const r = await window.api.setGlobalShortcut(accel)
       if (!r.ok) return r
+      const prev = this.globalShowHide
       this.globalShowHide = accel.trim()
-      await this.saveSetting('globalShowHideAccel', this.globalShowHide)
+      const saved = await this.saveSetting('globalShowHideAccel', this.globalShowHide)
+      if (!saved) {
+        this.globalShowHide = prev
+        // Best-effort: put the OS hotkey back so this session matches what will
+        // load on the next launch.
+        await window.api.setGlobalShortcut(prev)
+        return { ok: false, error: t('set.gen.writeFail') }
+      }
       return { ok: true }
     },
 
@@ -1194,6 +1210,21 @@ export const useSessions = defineStore('sessions', {
           cancelText: t('confirm.cancel')
         })
         if (!ok) return
+      const live = this.tabs.some((t) => t.panes.some((p) => p.status === 'connected'))
+      if (live && this.confirmClose) {
+        const ok = await confirm(t('pal.snapOpenConfirm'), {
+          title: t('app.closeExitTitle'),
+          confirmText: t('app.closeExitOk'),
+          cancelText: t('confirm.cancel')
+        })
+        if (!ok) return
+        for (const tab of this.tabs) {
+          for (const p of tab.panes) {
+            if (p.status === 'connected' && p.sshSessionId) {
+              void window.api.ssh.input(p.sshSessionId, 'exit\n')
+            }
+          }
+        }
       }
       const ids = this.tabs.map((t) => t.id)
       ids.forEach((tid) => this.closeTab(tid))
@@ -2017,6 +2048,10 @@ export const useSessions = defineStore('sessions', {
       if (closeOthersNeedsConfirm(this.confirmClose, this.tabs, id)) {
         const ok = await confirm(t('tabbar.closeOthersConfirm'), {
           danger: true,
+      const otherTabs = this.tabs.filter((t) => t.id !== id)
+      const live = otherTabs.some((t) => t.panes.some((p) => p.status === 'connected'))
+      if (live && this.confirmClose) {
+        const ok = await confirm(t('tabbar.closeOthersConfirm', { n: otherTabs.length }), {
           title: t('app.closeExitTitle'),
           confirmText: t('app.closeExitOk'),
           cancelText: t('confirm.cancel')
@@ -2031,6 +2066,15 @@ export const useSessions = defineStore('sessions', {
       }
       const others = this.tabs.filter((t) => t.id !== id).map((t) => t.id)
       others.forEach((oid) => this.closeTab(oid))
+        for (const tab of otherTabs) {
+          for (const p of tab.panes) {
+            if (p.status === 'connected' && p.sshSessionId) {
+              void window.api.ssh.input(p.sshSessionId, 'exit\n')
+            }
+          }
+        }
+      }
+      otherTabs.forEach((t) => this.closeTab(t.id))
       this.activeId = id
     },
 

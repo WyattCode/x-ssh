@@ -704,6 +704,7 @@ const zh: Dict = {
   'pal.snapEmpty': '当前没有标签,无法保存快照',
   'pal.snapFail': '快照保存失败',
   'pal.snapDeleteFail': '快照删除失败',
+  'pal.snapOpenConfirm': '当前有活跃会话,打开快照会关闭它们。关闭前会先发送 exit。继续吗?',
 
   // history search
   'hist.placeholder': '搜索所有会话输出…',
@@ -899,6 +900,7 @@ const zh: Dict = {
   'tabbar.closeOthersConfirm': '其他标签仍有活跃会话,确定全部关闭吗?关闭前会先发送 exit。'
   'tabbar.closeAll': '关闭全部',
   'tabbar.closeAllConfirm': '关闭全部标签？仍在连接的会话会先收到 exit。'
+  'tabbar.closeOthersConfirm': '将关闭另外 {n} 个标签(含活跃会话)。关闭前会先发送 exit。继续吗?'
 }
 
 const en: Dict = {
@@ -1588,6 +1590,7 @@ const en: Dict = {
   'pal.snapEmpty': 'No tabs open — nothing to snapshot',
   'pal.snapFail': 'Could not save snapshot',
   'pal.snapDeleteFail': 'Could not delete snapshot',
+  'pal.snapOpenConfirm': 'Live sessions are open. Opening a snapshot will close them (exit is sent first). Continue?',
 
   // history search
   'hist.placeholder': 'Search all session output…',
@@ -1781,6 +1784,7 @@ const en: Dict = {
   'tabbar.closeOthersConfirm': 'Other tabs still have active sessions. Close them all? An `exit` is sent first.'
   'tabbar.closeAll': 'Close all',
   'tabbar.closeAllConfirm': 'Close all tabs? Live sessions will receive exit first.'
+  'tabbar.closeOthersConfirm': 'Close the other {n} tab(s), including any live sessions? An exit is sent first.'
 }
 
 /** Traditional Chinese, Taiwan usage. Keys missing here fall back to `zh`. */
@@ -2481,6 +2485,7 @@ const zhTW: Dict = {
   'pal.snapEmpty': '目前沒有分頁,無法儲存快照',
   'pal.snapFail': '快照儲存失敗',
   'pal.snapDeleteFail': '快照刪除失敗',
+  'pal.snapOpenConfirm': '目前有作用中的工作階段,開啟快照會關閉它們。關閉前會先傳送 exit。要繼續嗎?',
 
   // history search
   'hist.placeholder': '搜尋所有工作階段的輸出…',
@@ -2676,6 +2681,7 @@ const zhTW: Dict = {
   'tabbar.closeOthersConfirm': '其他分頁仍有作用中的工作階段,確定要全部關閉嗎?關閉前會先傳送 exit。'
   'tabbar.closeAll': '關閉全部分頁',
   'tabbar.closeAllConfirm': '關閉全部分頁？仍在連線的工作階段會先收到 exit。'
+  'tabbar.closeOthersConfirm': '將關閉另外 {n} 個分頁(含作用中的工作階段)。關閉前會先傳送 exit。要繼續嗎?'
 }
 
 const dicts: Record<Lang, Dict> = { zh, 'zh-TW': zhTW, en }
