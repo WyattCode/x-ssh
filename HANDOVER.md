@@ -376,6 +376,16 @@
 3. **桌面 `jump_needs_key`**:`ssh:connect` 在密钥跳板无 keyPath 时提前返回(对齐 Android `term_err_jump_no_key`);`sessions`/`i18n`/`types`/`reconnect.test` 一并接上。未改 #78 的 `jump_missing` 分支。
 
 **验证**:`typecheck` + `lint:i18n`(桌面 751/751/751,移动端对称) + vitest **334** / 30 文件全绿。未跑 Gradle。未合并。本地 DeepSeek via ds.py tag `xssh-m3146-a`,HAND_APPLY 14/14,无 hand-fix。
+# 会话记录:连续改进 M3.147(2026-10-30,复核打磨:HostEditor 密钥必选 + needs_key/needs_password + quietJump keyPath)
+
+功能清单已够,本轮按站立规则做开源复核打磨(不合并)。未动 PR #4–#81(尤其 #81 withTempHosts / jumpCandidates / jump_needs_key;#80 SFTP 上传 toast / trustingPanes / 删除跳板警告;#79 auth_failed;#78 jump_missing;#67 桌面主题持久化;#65/#64 主机存删 toast;#63/#62 转发移除)。
+
+**修了**:
+1. **HostEditor 密钥认证必须先有私钥(对齐 Android `edit_err_no_key`)**:`canSave` / `saveBlockReason` 在 `auth === 'key'` 且无 `keyPath` 时禁用保存并提示 `host.keyRequired`;Enter 进 `save()` 时同样 toast,避免存下「看起来能连、一点就炸」的配置。
+2. **桌面 `needs_key` / `needs_password`**:`ssh:connect` 在目标主机缺私钥或缺密码时提前返回(对齐 Android `term_err_no_key` / `term_err_no_password`),不再落到硬编码中文「未选择私钥文件」或笼统认证失败;`sessions` / `i18n` / `types` / `reconnect.test` 一并接上。未改 #81 的 `jump_needs_key` / #78 的 `jump_missing`。
+3. **`quietJumpConfig` 密钥跳板无 keyPath 直接 null**:后台 OS 探测不再对缺私钥的跳板做一次必败登录并给地址记一周退避。
+
+**验证**:`typecheck` + `lint:i18n`(桌面 752/752/752,移动端对称) + vitest **334** / 30 文件全绿。未跑 Gradle。未合并。本地 DeepSeek via ds.py tag `xssh-m3147-a`,HAND_APPLY 14/14,无 hand-fix。
 
 ---
 

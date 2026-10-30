@@ -108,6 +108,7 @@ describe('shouldReviveOnOnline', () => {
       'auth_failed'
     ]) {
     for (const code of ['locked', 'host_key_changed', 'jump_needs_password', 'jump_needs_key']) {
+    for (const code of ['locked', 'host_key_changed', 'jump_needs_password', 'needs_key', 'needs_password']) {
       expect(shouldReviveOnOnline({ ...dropped, errorCode: code }), code).toBe(false)
     }
   })

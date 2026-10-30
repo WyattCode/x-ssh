@@ -312,6 +312,8 @@ export interface ConnectResult {
    *  'host_key_changed', 'auth_failed', 'jump_needs_password', 'locked',
    *  'host_key_changed', 'jump_needs_password', 'jump_needs_key', 'locked',
    *  'forward:*'. */
+   *  'host_key_changed', 'jump_needs_password', 'needs_key', 'needs_password',
+   *  'locked', 'forward:*'. */
   code?: string
   /** Fingerprint the server presented when a host-key rejection failed the
    *  connect — what the user is being asked to trust. */

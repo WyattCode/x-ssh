@@ -1899,6 +1899,21 @@ export const useSessions = defineStore('sessions', {
                     ? t('app.authFailed')
                     : (result.error ?? t('app.connectFail'))
 
+            : result.code === 'needs_key'
+              ? t('app.needsKey')
+              : result.code === 'needs_password'
+                ? t('app.needsPassword')
+                : result.code === 'locked'
+                  ? t('app.locked')
+                  : result.code === 'host_key_unknown'
+                    ? viaJump
+                      ? t('app.keyUnknownJumpMsg', { host: keyWhere })
+                      : t('app.keyUnknownMsg', { host: keyWhere })
+                    : result.code === 'host_key_changed'
+                      ? viaJump
+                        ? t('app.keyChangedJumpMsg', { host: keyWhere })
+                        : t('app.keyChangedMsg', { host: keyWhere })
+                      : (result.error ?? t('app.connectFail'))
         live.pane.message = msg
         live.pane.errorCode = result.code
         // A refusal that carries a retry delay (the server's connection-rate
