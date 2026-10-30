@@ -2,6 +2,12 @@
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。
 
+## M3.178(分支 `fix/review-polish-m3178`,**勿合并**)
+- **打包下载不再假成功**:`packAndDownload` 现在检查 tar 退出码与 `downloadJob` 的 `{files,failures,cancelled}`;tar 非零 / 下载有失败 / 被取消 / 一个文件都没下到,一律返回 `ok:false`(取消带 `canceled:true`),不再静默 `ok:true` 交回一个缺失或半截的归档。
+- **标签布局写盘失败会提示**:`persistTabs` 的 `openTabs` 写入被拒 / 抛错时,toast 一次 `app.tabsPersistFail`(同一段失败只提示一次,写成功即复位),不再让内存里的新布局和磁盘上的旧布局悄悄分叉。
+- **快照写盘失败回滚**:`saveSnapshot` / `deleteSnapshot` 写入被拒时回滚 `snapshots` 并 toast `app.snapPersistFail`,界面不再显示一个下次启动就消失的快照。
+- 新增 i18n 键:`app.tabsPersistFail`、`app.snapPersistFail`(zh / zh-TW / en 三份)。
+
 ## 项目概述
 - 极简、键盘优先的 SSH 客户端。Electron + Vue 3 (Vite) + TypeScript。
 - 平台: Windows (`win32`)。目录: `D:\Documents\Claude Code\X-SSH`。

@@ -156,6 +156,8 @@ let sftpProgressInit = false
 const sftpSpeedMeta = new Map<string, { bytes: number; time: number }>()
 // Timers that prune finished transfers from the live list.
 const sftpCleanupTimers = new Set<number>()
+// Whether a refused openTabs write has already been toasted this streak.
+let tabsPersistFailToasted = false
 
 /** One terminal session. A tab holds one or more panes (split view). */
 export interface Pane {
@@ -813,7 +815,21 @@ export const useSessions = defineStore('sessions', {
     /** Persists every tab (layout + panes, minus secrets) so it can be restored. */
     persistTabs(): void {
       if (!this.restoreTabs) return
-      void window.api.settings.set('openTabs', serializeTabs(this.tabs))
+      void (async () => {
+        try {
+          const r = await window.api.settings.set('openTabs', serializeTabs(this.tabs))
+          if (r && r.ok === false) throw new Error(r.error ?? 'refused')
+          tabsPersistFailToasted = false
+        } catch {
+          // A refused write leaves disk with the old layout while memory has the
+          // new one — the next launch silently loses splits/order. Toast once per
+          // streak so a burst of tab mutations doesn't spam.
+          if (!tabsPersistFailToasted) {
+            tabsPersistFailToasted = true
+            toast(t('app.tabsPersistFail'), 'error')
+          }
+        }
+      })()
     },
 
     /** Recreates last session's tabs (layout + splits). If `restoreConnect` is
@@ -1069,12 +1085,28 @@ export const useSessions = defineStore('sessions', {
         savedAt: Date.now(),
         tabs: serializeTabs(this.tabs)
       }
+      const prev = this.snapshots
       this.snapshots = [snap, ...this.snapshots].slice(0, 30)
-      await window.api.settings.set('snapshots', toPlain(this.snapshots))
+      try {
+        const r = await window.api.settings.set('snapshots', toPlain(this.snapshots))
+        if (r && r.ok === false) throw new Error(r.error ?? 'refused')
+      } catch {
+        // A refused write would leave the new snapshot in memory only — it
+        // vanishes on the next launch. Roll back and say so.
+        this.snapshots = prev
+        toast(t('app.snapPersistFail'), 'error')
+      }
     },
     async deleteSnapshot(id: string): Promise<void> {
+      const prev = this.snapshots
       this.snapshots = this.snapshots.filter((s) => s.id !== id)
-      await window.api.settings.set('snapshots', toPlain(this.snapshots))
+      try {
+        const r = await window.api.settings.set('snapshots', toPlain(this.snapshots))
+        if (r && r.ok === false) throw new Error(r.error ?? 'refused')
+      } catch {
+        this.snapshots = prev
+        toast(t('app.snapPersistFail'), 'error')
+      }
     },
     /** Replaces the current tabs with a saved snapshot (disconnected). */
     async openSnapshot(id: string): Promise<void> {
