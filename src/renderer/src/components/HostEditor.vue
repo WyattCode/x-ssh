@@ -281,7 +281,15 @@ async function deleteKey(k: ManagedKey): Promise<void> {
   panelEl.value?.focus()
 }
 
-const canSave = (): boolean => !!form.host && !!form.username
+/** Why the save button is disabled ('' when it isn't). Key auth needs a key
+ *  file: Android already refuses this with `edit_err_no_key`, but desktop let
+ *  the profile save and only failed later with a Chinese-only message. */
+const saveBlockReason = (): string => {
+  if (!form.host || !form.username) return t('host.saveDisabled')
+  if (form.auth === 'key' && !form.keyPath) return t('host.keyRequired')
+  return ''
+}
+const canSave = (): boolean => !saveBlockReason()
 
 // ---- Tags: type, Enter (or comma) adds; Backspace on an empty box removes the last ----
 const tagDraft = ref('')
@@ -309,7 +317,12 @@ function onTagKey(e: KeyboardEvent): void {
 
 async function save(): Promise<void> {
   splitHostInput()
-  if (!canSave()) return
+  if (!canSave()) {
+    // Enter in a field reaches save() even while the button is disabled; say
+    // why instead of doing nothing.
+    if (form.auth === 'key' && !form.keyPath) toast(t('host.keyRequired'), 'error')
+    return
+  }
   commitTag()
   const forwards = form.forwards
     .filter((f) => f.mode === 'dynamic' ? f.localPort > 0 : f.localPort > 0 && f.remotePort > 0)
@@ -673,7 +686,7 @@ async function remove(): Promise<void> {
           <button v-if="host" type="button" class="btn btn-danger" @click="remove">{{ t('host.delete') }}</button>
           <span class="spacer" />
           <button type="button" class="btn" @click="void requestClose()">{{ t('host.cancel') }}</button>
-          <button type="button" class="btn btn-primary" :disabled="!canSave()" :title="canSave() ? undefined : t('host.saveDisabled')" @click="save">{{ t('host.save') }}</button>
+          <button type="button" class="btn btn-primary" :disabled="!canSave()" :title="canSave() ? undefined : saveBlockReason()" @click="save">{{ t('host.save') }}</button>
         </footer>
 
         <!-- Generate a key: a small sheet over the panel. -->

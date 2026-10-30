@@ -763,7 +763,12 @@ async function quietJumpConfig(jumpId: string): Promise<JumpConfig | null> {
     jump.password = await store.getPassword(jh.id)
     if (!jump.password) return null
   }
-  if (jh.auth === 'key') jump.passphrase = await store.getPassphrase(jh.id)
+  if (jh.auth === 'key') {
+    // A key hop with no key file can't be used unattended: it would throw
+    // 「未选择私钥文件」 deep in the handshake and mark the address failed.
+    if (!jh.keyPath) return null
+    jump.passphrase = await store.getPassphrase(jh.id)
+  }
   return jump
 }
 
@@ -1367,6 +1372,24 @@ function registerIpc(): void {
             }
           }
         }
+      }
+    }
+    // A key-auth target with no key file, or a password-auth target with no
+    // usable secret, would otherwise fail deep in the handshake with a
+    // hard-coded Chinese message. Refuse early with a code the renderer can
+    // translate (Android already blocks both before connecting).
+    if (params.auth === 'key' && !params.keyPath) {
+      return {
+        ok: false,
+        code: 'needs_key',
+        error: '未选择私钥文件。请在「主机」编辑页导入或选择私钥后重试。'
+      }
+    }
+    if (params.auth === 'password' && !params.password) {
+      return {
+        ok: false,
+        code: 'needs_password',
+        error: '需要密码,但没有已保存的密码。请在连接时输入密码,或在「主机」编辑页保存密码后重试。'
       }
     }
     if (params.multiplex === undefined) params.multiplex = (await settings.get<boolean>('connectionMultiplex')) === true

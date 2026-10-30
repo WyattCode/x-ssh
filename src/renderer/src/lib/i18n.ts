@@ -79,6 +79,8 @@ const zh: Dict = {
   'app.closeExitTitle': '关闭活跃会话',
   'app.closeExitOk': '发送 exit 并关闭',
   'app.jumpNeedsPassword': '跳板机需要密码,但没有已保存的密码。请在「主机」编辑页为跳板主机设置密码后重试,或改用密钥认证。',
+  'app.needsKey': '未选择私钥文件。请在「主机」编辑页导入或选择私钥后重试。',
+  'app.needsPassword': '需要密码,但没有已保存的密码。请在连接时输入密码,或在「主机」编辑页保存密码后重试。',
 
   // settings tabs
   'tab.general': '通用',
@@ -702,6 +704,7 @@ const zh: Dict = {
   'host.cancel': '取消',
   'host.save': '保存',
   'host.saveDisabled': '请填写主机地址和用户名',
+  'host.keyRequired': '密钥认证需要先选择或导入私钥',
   'host.discardConfirm': '放弃未保存的修改?',
   'host.discard': '放弃修改',
   'host.pickKey': '选择私钥',
@@ -861,6 +864,8 @@ const en: Dict = {
   'app.closeExitTitle': 'Close active session',
   'app.closeExitOk': 'Send exit & close',
   'app.jumpNeedsPassword': 'The jump host requires a password, but none is saved. Set one on the jump host profile (or switch to key auth) and retry.',
+  'app.needsKey': 'No private key selected. Import or choose a key on the host profile and retry.',
+  'app.needsPassword': 'A password is required, but none is saved. Enter one when connecting, or save it on the host profile and retry.',
 
   'tab.general': 'General',
   'tab.terminal': 'Terminal',
@@ -1475,6 +1480,7 @@ const en: Dict = {
   'host.cancel': 'Cancel',
   'host.save': 'Save',
   'host.saveDisabled': 'Fill in the host address and username',
+  'host.keyRequired': 'Key authentication needs a private key selected or imported first',
   'host.discardConfirm': 'Discard unsaved changes?',
   'host.discard': 'Discard',
   'host.pickKey': 'Choose private key',
@@ -1636,6 +1642,8 @@ const zhTW: Dict = {
   'app.closeExitTitle': '關閉作用中的工作階段',
   'app.closeExitOk': '傳送 exit 並關閉',
   'app.jumpNeedsPassword': '跳板機需要密碼,但沒有已儲存的密碼。請在「主機」編輯頁為跳板主機設定密碼後重試,或改用金鑰驗證。',
+  'app.needsKey': '未選擇私鑰檔。請在「主機」編輯頁匯入或選擇私鑰後重試。',
+  'app.needsPassword': '需要密碼,但沒有已儲存的密碼。請在連線時輸入密碼,或在「主機」編輯頁儲存密碼後重試。',
 
   // settings tabs
   'tab.general': '一般',
@@ -2260,6 +2268,7 @@ const zhTW: Dict = {
   'host.cancel': '取消',
   'host.save': '儲存',
   'host.saveDisabled': '請填寫主機位址和使用者名稱',
+  'host.keyRequired': '金鑰驗證需要先選擇或匯入私鑰',
   'host.discardConfirm': '放棄未儲存的變更?',
   'host.discard': '放棄變更',
   'host.pickKey': '選擇私鑰',
