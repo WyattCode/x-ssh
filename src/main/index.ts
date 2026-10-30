@@ -1545,6 +1545,8 @@ function registerIpc(): void {
         if (policy === 'cancel') return { ok: false, canceled: true, count: 0 }
         const r = await sshManager.uploadJob(sessionId, res.filePaths, remoteDir, randomUUID(), concurrency, await defaultTransferRate(), policy)
         if (r.failures) return { ok: false, count: r.files, error: `files-failed:${r.failures}` }
+        if (r.cancelled) return { ok: false, canceled: true, count: r.files }
+        if (r.failures) return { ok: false, count: r.files, error: `${r.failures} 个文件失败` }
         return { ok: true, count: r.files }
       } catch (e) {
         return { ok: false, error: friendlyError((e as Error).message), count: 0 }
@@ -1637,6 +1639,8 @@ function registerIpc(): void {
         if (policy === 'cancel') return { ok: false, canceled: true, count: 0 }
         const r = await sshManager.uploadJob(sessionId, res.filePaths, remoteDir, randomUUID(), concurrency, await defaultTransferRate(), policy)
         if (r.failures) return { ok: false, count: r.files, error: `files-failed:${r.failures}` }
+        if (r.cancelled) return { ok: false, canceled: true, count: r.files }
+        if (r.failures) return { ok: false, count: r.files, error: `${r.failures} 个文件失败` }
         return { ok: true, count: r.files }
       } catch (e) {
         return { ok: false, error: friendlyError((e as Error).message), count: 0 }
@@ -1652,6 +1656,8 @@ function registerIpc(): void {
         if (policy === 'cancel') return { ok: false, canceled: true, count: 0 }
         const r = await sshManager.uploadJob(sessionId, paths, remoteDir, randomUUID(), concurrency, await defaultTransferRate(), policy)
         if (r.failures) return { ok: false, count: r.files, error: `files-failed:${r.failures}` }
+        if (r.cancelled) return { ok: false, canceled: true, count: r.files }
+        if (r.failures) return { ok: false, count: r.files, error: `${r.failures} 个文件失败` }
         return { ok: true, count: r.files }
       } catch (e) {
         return { ok: false, error: friendlyError((e as Error).message), count: 0 }
@@ -1760,6 +1766,9 @@ function registerIpc(): void {
         // Upload the archive into remoteDir, then extract it there.
         const r = await sshManager.uploadJob(sessionId, res.filePaths, remoteDir, randomUUID(), concurrency, await defaultTransferRate(), policy)
         if (r.failures) return { ok: false, error: `files-failed:${r.failures}` }
+        // A cancelled upload must not fall through to the extract below.
+        if (r.cancelled) return { ok: false, canceled: true }
+        if (r.failures) return { ok: false, error: `${r.failures} 个文件失败` }
         const name = basename(res.filePaths[0])
         return await sshManager.extractArchive(sessionId, remoteDir, name)
       } catch (e) {

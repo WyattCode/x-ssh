@@ -334,7 +334,7 @@ export class SshManager {
         channel.resume()
       },
       write(chunk, enc, cb) {
-        if (closed) return cb(new Error('已关闭'))
+        if (closed) return cb(new Error('channel-closed'))
         const ok = channel.write(chunk, enc as BufferEncoding)
         if (ok) cb()
         else channel.once('drain', () => cb())
@@ -783,10 +783,36 @@ export class SshManager {
     const destPort = rule.remotePort
     session.remoteForwards.set(rule.localPort, (inSock) => {
       const dest = new Socket()
+      let settled = false
+      // ssh2 imposes no connect timeout: a black-holed local destination would
+      // leave the accepted remote channel hanging for the life of the session.
+      const timer = setTimeout(() => {
+        if (settled) return
+        settled = true
+        dest.destroy()
+        inSock.destroy()
+      }, 30_000)
+      timer.unref?.()
       dest.connect(destPort, destHost)
-      dest.on('error', () => inSock.destroy())
-      inSock.on('error', () => dest.destroy())
-      dest.on('connect', () => inSock.pipe(dest).pipe(inSock))
+      dest.on('error', () => {
+        clearTimeout(timer)
+        if (settled) return
+        settled = true
+        inSock.destroy()
+      })
+      inSock.on('error', () => {
+        clearTimeout(timer)
+        dest.destroy()
+      })
+      dest.on('connect', () => {
+        clearTimeout(timer)
+        if (settled) {
+          dest.destroy()
+          return
+        }
+        settled = true
+        inSock.pipe(dest).pipe(inSock)
+      })
     })
     session.client.forwardIn('127.0.0.1', rule.localPort, (err) => {
       if (err) session.remoteForwards?.delete(rule.localPort)
@@ -2174,7 +2200,7 @@ export class SshManager {
     concurrency?: number,
     rateBytesPerSec = 0,
     overwrite: UploadOverwrite = 'overwrite'
-  ): Promise<{ files: number; failures: number }> {
+  ): Promise<{ files: number; failures: number; cancelled: boolean }> {
     this.jobSession.set(jobId, sessionId)
     if (rateBytesPerSec > 0) this.jobRate.set(jobId, rateBytesPerSec)
     const conc = clampConcurrency(concurrency ?? SshManager.CONCURRENCY, SshManager.CONCURRENCY)
@@ -2186,6 +2212,10 @@ export class SshManager {
     // Only the count is ever reported, and a tree can fail by the hundred
     // thousand — don't retain a name per failure.
     let failures = 0
+    // Captured before the job id is cleaned up in the finally blocks below, so
+    // the caller can tell a cancelled upload from a completed one (a cancelled
+    // job used to come back as ok, and a deploy/extract then ran anyway).
+    let cancelled = false
     const queue: { local: string; remote: string; name: string }[] = []
     let walkDone = false
     const emit = (name: string, done?: boolean, error?: string, withPaths = false): void =>
@@ -2336,7 +2366,8 @@ export class SshManager {
         )
         await walkP
         await workers
-        if (this.cancelledJobs.has(jobId)) {
+        cancelled = this.cancelledJobs.has(jobId)
+        if (cancelled) {
           emit(label, false, SshManager.CANCELLED_TEXT)
         } else if (walkError) {
           emit(label, false, friendlyError((walkError as Error).message), true)
@@ -2358,7 +2389,7 @@ export class SshManager {
     // Callers report these. A local path that could not even be stat'ed only
     // bumps `failures`, and both counts used to be dropped on the floor — so
     // uploading a path that does not exist answered "ok, 1 file".
-    return { files: filesDone, failures }
+    return { files: filesDone, failures, cancelled }
   }
 
   /** Windows caps ordinary paths at 260 chars, which a deep folder (node_modules

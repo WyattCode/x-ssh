@@ -385,6 +385,22 @@
 2. **local `-L` / SOCKS `-D` `forwardOut` 超时**:新字段 `forwardOutTimeoutMs`(默认 30s,`unref`);超时拆本地 socket(SOCKS 尽力回 `0x05 0x05`);晚到的回调不再 pipe。集成测:假 sshd 永不答 `tcpip`,`forwardOutTimeoutMs=200` 时本地客户端 5s 内被拆。
 
 **验证**:`typecheck` + vitest **339** 全绿(原先 334;+`nextReconnectFloorMs` 与 local forward 超时)。未合并。
+## HANDOVER M3.117 — review polish (upload cancel return / remote-forward dest timeout / channel-closed)
+
+**Branch:** `fix/review-polish-m3117` (from origin/main). **Do NOT merge.** Open PR (see report).
+**Skipped / do not redo:** PR #51 `fix/review-polish-m3116` (pack tar exit / sync name i18n / remote-exit) and #50–#12, #4–#11. Features / intentional deferrals / M3.77–M3.116 done items.
+
+### Fixes shipped
+1. **Cancelled upload returned ok:true** — `uploadJob` now returns `cancelled` (captured before job-id cleanup, same shape as `downloadJob`). All four IPC upload sites (`sftpUpload` / `uploadDir` / `uploadPaths` / `uploadExtract`) short-circuit on `r.cancelled`. Stops deploy toasting success and upload-extract falling through to `extractArchive` after the user cancelled mid-upload.
+2. **Remote-forward (-R) dest.connect hang** — accepted remote channels piped to a black-holed local destination never timed out. 30s timer (local constant; does **not** add `forwardOutTimeoutMs` — PR #13 owns that for local/SOCKS) destroys both ends.
+3. **Multiplex bridge write-after-close Chinese on EN UI** — `makeSocketBridge` throws `channel-closed` instead of `已关闭`; `sessions` maps it (and legacy Chinese) in `runConnect` + `applyEvent` error path; i18n `app.channelClosed` zh/en/zh-TW.
+
+### Verify
+- typecheck OK; lint:i18n OK (desktop 750/750/750); vitest **334**/30 green.
+- Model: DeepSeek-V4.1-Flash-1017 via ds.py; thinking=off medium; 15/15 HAND_APPLY first try. No hand-fix. Incidents: none.
+
+### Next
+Continue continuous-improve from origin/main on a new branch; do **not** touch/merge this PR or #51–#12 / #4–#11. Prefer substantive P0/P1 over busy-gates.
 
 ---
 
@@ -582,6 +598,7 @@ Continue continuous-improve from origin/main on a new branch; do **not** touch/m
 Continue continuous-improve from origin/main on a new branch; do **not** touch/merge this PR or #48–#12 / #4–#11. Prefer substantive P0/P1 over busy-gates.
 
 ---
+
 
 ## 项目概述
 - 极简、键盘优先的 SSH 客户端。Electron + Vue 3 (Vite) + TypeScript。
