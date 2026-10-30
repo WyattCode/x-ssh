@@ -103,6 +103,7 @@ export const IPC = {
   // Settings (invoke/handle)
   settingsGet: 'settings:get',
   settingsSet: 'settings:set',
+  settingsStatus: 'settings:status',
   themeSet: 'theme:set',
 
   // Connection audit log (invoke/handle)

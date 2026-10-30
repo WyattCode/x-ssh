@@ -2,6 +2,7 @@ package dev.xssh.android
 
 import android.content.Context
 import android.view.KeyEvent as AndroidKeyEvent
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -105,7 +106,28 @@ internal fun snippetsFor(all: List<Snippet>, hostId: String): List<Snippet> =
 class SnippetStore(context: Context) {
     private val prefs = context.getSharedPreferences("xssh_snippets", Context.MODE_PRIVATE)
 
+    /** 上次 load 是否解析失败。只在内存里。 */
+    var loadFailed: Boolean = false
+        private set
+
+    /**
+     * 磁盘上是否还有值得保护的片段数据:能解析出记录,或原文非空却解析不了。
+     * 解析失败时不能再用「空表」去覆盖 KEY_LIST。
+     */
+    fun hasProtectedDiskData(): Boolean {
+        val raw = prefs.getString(KEY_LIST, null) ?: return false
+        if (raw.isBlank()) return false
+        return runCatching { JSONArray(raw).length() > 0 }.getOrDefault(true)
+    }
+
+    private fun keepCorruptCopy(raw: String) {
+        if (prefs.getString(KEY_CORRUPT, null) == null) {
+            prefs.edit().putString(KEY_CORRUPT, raw).apply()
+        }
+    }
+
     fun load(): List<Snippet> {
+        loadFailed = false
         val raw = prefs.getString(KEY_LIST, null) ?: return emptyList()
         return runCatching {
             val array = JSONArray(raw)
@@ -120,10 +142,22 @@ class SnippetStore(context: Context) {
                     hostId = item.optString("hostId").ifEmpty { null },
                 )
             }
-        }.getOrDefault(emptyList())
+        }.getOrElse {
+            loadFailed = true
+            keepCorruptCopy(raw)
+            emptyList()
+        }
     }
 
-    fun save(list: List<Snippet>) {
+    /**
+     * 存盘。用 commit 而不是 apply,好让调用方知道写没写进去。
+     * 空表且磁盘上仍有受保护数据时拒绝覆盖(坏 JSON 被当成「没有片段」后再保存会抹掉唯一副本)。
+     */
+    fun save(list: List<Snippet>): Boolean {
+        if (list.isEmpty() && hasProtectedDiskData()) {
+            android.util.Log.e("XsshData", "refusing to persist an empty snippet list over existing data")
+            return false
+        }
         val array = JSONArray()
         list.forEach { s ->
             array.put(
@@ -136,11 +170,12 @@ class SnippetStore(context: Context) {
                     .put("hostId", s.hostId ?: ""),
             )
         }
-        prefs.edit().putString(KEY_LIST, array.toString()).apply()
+        return prefs.edit().putString(KEY_LIST, array.toString()).commit()
     }
 
     private companion object {
         const val KEY_LIST = "list"
+        const val KEY_CORRUPT = "list.corrupt"
     }
 }
 
@@ -160,6 +195,11 @@ fun SnippetSheet(
     val context = LocalContext.current
     val store = remember(context) { SnippetStore(context) }
     var all by remember { mutableStateOf(store.load()) }
+    LaunchedEffect(Unit) {
+        if (store.loadFailed) {
+            Toast.makeText(context, R.string.snip_load_failed, Toast.LENGTH_LONG).show()
+        }
+    }
     var editing by remember { mutableStateOf<Snippet?>(null) }
     var confirming by remember { mutableStateOf<Snippet?>(null) }
     val shown = snippetsFor(all, host.id)
@@ -249,14 +289,22 @@ fun SnippetSheet(
             tablet = tablet,
             onSave = { saved ->
                 val index = all.indexOfFirst { it.id == saved.id }
-                all = if (index >= 0) all.toMutableList().also { it[index] = saved } else all + saved
-                store.save(all)
-                editing = null
+                val next = if (index >= 0) all.toMutableList().also { it[index] = saved } else all + saved
+                if (store.save(next)) {
+                    all = next
+                    editing = null
+                } else {
+                    Toast.makeText(context, R.string.snip_save_failed, Toast.LENGTH_SHORT).show()
+                }
             },
             onDelete = { gone ->
-                all = all.filterNot { it.id == gone.id }
-                store.save(all)
-                editing = null
+                val next = all.filterNot { it.id == gone.id }
+                if (store.save(next)) {
+                    all = next
+                    editing = null
+                } else {
+                    Toast.makeText(context, R.string.snip_delete_failed, Toast.LENGTH_SHORT).show()
+                }
             },
             onDismiss = { editing = null },
         )

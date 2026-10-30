@@ -58,6 +58,7 @@ function forwardError(r: { error?: string; code?: ForwardErrorCode }): string {
 // that started before a newer probe of the same host are dropped.
 let probeRoundBusy = false
 let lastFullProbe = 0
+let settingsLoadFailToasted = false
 let probeSeq = 0
 const probeSeqOf = new Map<string, number>()
 
@@ -542,6 +543,14 @@ export const useSessions = defineStore('sessions', {
     },
 
     async loadSettings(): Promise<void> {
+      try {
+        if ((await window.api.settings.status()) === 'bad' && !settingsLoadFailToasted) {
+          settingsLoadFailToasted = true
+          toast(t('app.settingsLoadFail'), 'error')
+        }
+      } catch (e) {
+        console.error('settings: status failed', e)
+      }
       const [editor, ka, ct, cr, tc, vcs, ados, si, ff, cur, thm, rt, ar, rcn, rcw, nt, ns, cp, sp, tq, dq, tfh, abk, abd, abh] = await Promise.all([
         window.api.settings.get<string>('externalEditor'),
         window.api.settings.get<number>('keepaliveSec'),

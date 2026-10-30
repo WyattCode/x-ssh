@@ -1,3 +1,12 @@
+# M3.163 — 复核打磨(分支 `fix/review-polish-m3163`,基于 main @ 5946b1f,**勿合并**)
+
+> 两条 P0 修复;只动 Windows + Android,不碰 macOS / iOS。
+
+- **A(桌面)settings.json 损坏不再被空表覆盖**:`SettingsStore.loadFailed` + `status()` IPC;启动 toast `app.settingsLoadFail`;双方 durable 都坏时 `set()` 拒绝写入。
+- **B(Android)片段列表 JSON 解析失败不再被空表覆盖**:`hasProtectedDiskData()` + `loadFailed` toast `snip_load_failed`;`save` 改 commit 并拒空覆盖。
+
+---
+
 # X-SSH 交接文档
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。

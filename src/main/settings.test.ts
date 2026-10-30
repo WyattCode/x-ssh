@@ -50,6 +50,25 @@ describe('SettingsStore', () => {
     await expect(access(`${file()}.corrupt`)).resolves.toBeUndefined()
   })
 
+  it('both main and backup corrupt: status bad and set refuses overwrite', async () => {
+    const first = new SettingsStore(dir)
+    await first.set('externalEditor', 'code.exe')
+    await first.set('snippets', [{ id: '1', title: 'gpu', text: 'nvidia-smi' }])
+    // Corrupt BOTH durable copies so readDurable cannot recover.
+    await writeFile(file(), '{not-json', 'utf8')
+    await writeFile(bak(), '{also-bad', 'utf8')
+    const next = new SettingsStore(dir)
+    expect(await next.get('externalEditor')).toBeUndefined()
+    expect(await next.status()).toBe('bad')
+    const beforeMain = await readFile(file())
+    const beforeBak = await readFile(bak())
+    await next.set('openTabs', [])
+    await next.flush()
+    expect(await readFile(file())).toEqual(beforeMain)
+    expect(await readFile(bak())).toEqual(beforeBak)
+    expect(await next.status()).toBe('bad')
+  })
+
   it('an empty settings.json falls back to the backup too', async () => {
     const first = new SettingsStore(dir)
     await first.set('externalEditor', 'code.exe')
