@@ -1676,6 +1676,7 @@ export class SshManager {
     rateBytesPerSec = 0,
     quiet = false
   ): Promise<{ cancelled: boolean; errors: number }> {
+  ): Promise<{ errors: number }> {
     this.jobSession.set(jobId, sessionId)
     if (quiet) this.quietJobs.add(jobId)
     if (rateBytesPerSec > 0) this.jobRate.set(jobId, rateBytesPerSec)
@@ -1813,6 +1814,10 @@ export class SshManager {
       // (formatTransferName), so an English UI no longer shows 同步.
       this.emitProgress({ id: jobId, name: 'sync', direction: 'up', transferred: t, total: t, count: totalPlanned, done: true })
     }
+    // Report the per-file failure count so the IPC layer can fail closed: a sync
+    // that lost files used to answer "ok" and looked like a success. A cancelled
+    // job keeps its old answer (cancel handling is a separate concern).
+    const errorsCount = this.cancelledJobs.has(jobId) ? 0 : errors
     this.cancelledJobs.delete(jobId)
     this.pausedJobs.delete(jobId)
     this.jobRate.delete(jobId)
@@ -1820,6 +1825,7 @@ export class SshManager {
     this.jobSession.delete(jobId)
     this.quietJobs.delete(jobId)
     return { cancelled, errors }
+    return { errors: errorsCount }
   }
 
   // ---- Continuous sync (watch) ----
@@ -1930,7 +1936,7 @@ export class SshManager {
         SshManager.mapsDiffer(state.baselineRemote, remote)
       if (changed) {
         // Run silently (quiet): no progress/toasts for automatic syncs.
-        await this.syncJob(
+        const r = await this.syncJob(
           state.sessionId,
           state.localDir,
           state.remoteDir,
@@ -1940,7 +1946,11 @@ export class SshManager {
           undefined,
           0,
           true
-        ).catch(() => undefined)
+        ).catch(() => null)
+        // A thrown walk failure or a partial sync must not advance the baseline:
+        // the files it could not transfer would then look "in sync" and never be
+        // retried. Keep the previous baseline and try again on the next pass.
+        if (!r || r.errors) return
         // Re-baseline AFTER the sync, not from the stale pre-transfer snapshot.
         // SFTP uploads stamp the destination mtime with the transfer time, so a
         // pre-sync snapshot would report that file as "changed" on the next pass

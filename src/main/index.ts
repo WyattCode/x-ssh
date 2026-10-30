@@ -1941,6 +1941,9 @@ function registerIpc(): void {
         const r = await sshManager.syncJob(sessionId, localDir, remoteDir, mode, deleteExtras, randomUUID(), concurrency, await defaultTransferRate())
         // A cancelled sync used to answer ok:true, so the UI reported success.
         if (r.cancelled) return { ok: false, canceled: true, count: 0 }
+        // A sync that lost files must not answer ok — the drawer would show it as
+        // a success. The count travels in the error so the UI can localize it.
+        if (r.errors) return { ok: false, error: `sync-items-failed:${r.errors}`, count: 0 }
         return { ok: true, count: 0 }
       } catch (e) {
         return { ok: false, error: friendlyError((e as Error).message), count: 0 }
