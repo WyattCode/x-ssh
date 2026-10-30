@@ -71,6 +71,19 @@ export function retryDelayMs(attempt: number, random: () => number = Math.random
 }
 
 /**
+ * Floor for the next reconnect wait after a connect attempt.
+ * `fromResultMs` is ConnectResult.retryDelayMs (30_000 on "not allowed at this
+ * time", else undefined). Last attempt wins: a penalty raises the floor; a
+ * non-penalty transient clears it so we do not stick at 30s forever.
+ * Used by the established-session reconnect loop — the drop itself is not a
+ * penalty, but a mid-loop refusal that returns retryDelayMs must elevate the
+ * subsequent wait.
+ */
+export function nextReconnectFloorMs(fromResultMs: number | undefined): number | undefined {
+  return fromResultMs && fromResultMs > 0 ? fromResultMs : undefined
+}
+
+/**
  * Whether a pane should be revived when the network comes back.
  *
  * A pane whose last connect returned a `code` (bad credentials, changed host

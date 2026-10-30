@@ -3,7 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
-import { createConnection, type AddressInfo } from 'node:net'
+import { createConnection, createServer, type AddressInfo, type Socket } from 'node:net'
 import { Server, utils } from 'ssh2'
 import type { ConnectParams, JumpConfig } from '../shared/types'
 
@@ -330,6 +330,96 @@ describe('SshManager.connectJump (channel-open timeout)', () => {
     expect(res.ok).toBe(false)
     expect(res.error ?? '').toContain('跳板机')
     expect(Date.now() - started).toBeLessThan(5000)
+    mute.close()
+  })
+})
+
+describe('SshManager local forward (forwardOut timeout)', () => {
+  /** Connects to a local port, retrying while the forward listener is still
+   *  binding (it starts asynchronously once the shell is up). */
+  function connectWhenListening(p: number, deadlineMs = 3000): Promise<Socket> {
+    return new Promise((resolve, reject) => {
+      const started = Date.now()
+      const attempt = (): void => {
+        const sock = createConnection(p, '127.0.0.1')
+        const onError = (e: Error): void => {
+          sock.destroy()
+          if (Date.now() - started > deadlineMs) return reject(e)
+          setTimeout(attempt, 50)
+        }
+        sock.once('error', onError)
+        sock.once('connect', () => {
+          sock.removeListener('error', onError)
+          resolve(sock)
+        })
+      }
+      attempt()
+    })
+  }
+
+  it('drops the local client when the remote never answers the channel open', async () => {
+    // Accepts the SSH session, then holds every direct-tcpip open forever: what
+    // a remote that silently drops the target looks like. ssh2 has no timeout,
+    // so the accepted local TCP client used to hang for good.
+    const mute = new Server({ hostKeys: [hostKey.private] }, (client) => {
+      client.on('authentication', (ctx) => {
+        const ok = ctx.method === 'password' && ctx.username === 'u' && ctx.password === 'p'
+        ;(ok ? ctx.accept() : ctx.reject(['password'])) as unknown
+      })
+      client.on('ready', () => {
+        client.on('session', (accept) => {
+          const sess = accept()
+          sess.on('pty', (a) => a())
+          sess.on('shell', (a) => a().write('$ '))
+          sess.on('exec', (a) => a().end())
+        })
+        const raw = client as unknown as {
+          on: (
+            ev: 'tcpip',
+            fn: (accept: () => unknown, reject: () => void, data: unknown) => void
+          ) => void
+        }
+        raw.on('tcpip', (_accept, _reject, _data) => {
+          // Deliberately never answered.
+        })
+      })
+      client.on('error', () => undefined)
+    })
+    await new Promise<void>((r) => mute.listen(0, '127.0.0.1', () => r()))
+    const mutePort = (mute.address() as AddressInfo).port
+    // A local port that is free right now (bound, read, released).
+    const probe = createServer()
+    await new Promise<void>((r) => probe.listen(0, '127.0.0.1', () => r()))
+    const localPort = (probe.address() as AddressInfo).port
+    await new Promise<void>((r) => probe.close(() => r()))
+
+    const kh = await hosts({ [entry(mutePort)]: realFp })
+    const mgr = new SshManager(sender as never, kh)
+    mgr.forwardOutTimeoutMs = 200
+    const res = await mgr.connect(
+      target({
+        port: mutePort,
+        portForwards: [{ mode: 'local', localPort, remoteHost: '127.0.0.1', remotePort: 9 }]
+      })
+    )
+    expect(res, JSON.stringify(res)).toMatchObject({ ok: true })
+    const sock = await connectWhenListening(localPort)
+    const started = Date.now()
+    const closed = await new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => {
+        sock.destroy()
+        resolve(false)
+      }, 5000)
+      const done = (): void => {
+        clearTimeout(timer)
+        resolve(true)
+      }
+      sock.on('close', done)
+      sock.on('error', done)
+    })
+    expect(closed).toBe(true)
+    expect(Date.now() - started).toBeLessThan(5000)
+    void mgr.disconnect(res.sessionId!)
     mute.close()
   })
 })

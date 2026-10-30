@@ -5,7 +5,7 @@ import { useToast } from '../composables/toast'
 import { useConfirm } from '../composables/confirm'
 import { useSnippetVars } from '../composables/snippetVars'
 import { clampConcurrency } from '../../../shared/fsUtils'
-import { decideStatusEvent, retryDelayMs, shouldReviveOnOnline } from '../lib/reconnect'
+import { decideStatusEvent, nextReconnectFloorMs, retryDelayMs, shouldReviveOnOnline } from '../lib/reconnect'
 import {
   buildFlatTree,
   buildGrid,
@@ -177,6 +177,10 @@ export interface Pane {
   /** Auto-reconnect state (set while retrying after an unexpected drop). */
   reconnectAttempt?: number
   reconnectTimer?: number
+  /** Floor (ms) for the next reconnect wait, set when the last attempt was
+   *  refused by the server's connection-rate limiting (PerSourcePenalties).
+   *  Cleared on a successful connect or when the loop is cancelled. */
+  reconnectMinDelayMs?: number
   /** Last directory shown in the SFTP drawer, for path restore on reconnect. */
   lastSftpPath?: string
 }
@@ -1474,6 +1478,7 @@ export const useSessions = defineStore('sessions', {
         // A restore/unlock retry pre-set the attempt counter; leaving it set
         // would make the next real drop skip the 1s backoff tier.
         live.pane.reconnectAttempt = undefined
+        live.pane.reconnectMinDelayMs = undefined
         // A rejected first/changed key may have been confirmed since the error
         // card was drawn: drop the stale trust payload.
         live.pane.hostKey = undefined
@@ -1522,6 +1527,10 @@ export const useSessions = defineStore('sessions', {
                   : (result.error ?? t('app.connectFail'))
         live.pane.message = msg
         live.pane.errorCode = result.code
+        // A refusal that carries a retry delay (the server's connection-rate
+        // limiting) must raise the *next* wait, even mid-loop: the drop itself
+        // is not a penalty, but retrying inside the penalty window feeds it.
+        live.pane.reconnectMinDelayMs = nextReconnectFloorMs(result.retryDelayMs)
         // Host-key rejection: stash what the user is being asked to trust —
         // the presented fingerprint and which host it belongs to (a rejected
         // jump hop reports itself via keyHost; the target does not need one,
@@ -1552,6 +1561,10 @@ export const useSessions = defineStore('sessions', {
             live.pane.message = msg + ' — ' + t('app.autoRetrySoon')
             this.scheduleReconnect(paneId, { minDelayMs: result.retryDelayMs, keepError: !!result.retryDelayMs })
           }
+        } else if (live.pane.reconnectAttempt && live.pane.reconnectMinDelayMs) {
+          // Mid-loop refusal: the loop's own timer retries, but the wait is now
+          // the penalty floor — say so instead of leaving a bare error card.
+          live.pane.message = msg + ' — ' + t('app.autoRetrySoon')
         }
       }
     },
@@ -1669,6 +1682,7 @@ export const useSessions = defineStore('sessions', {
       if (pane.reconnectTimer) clearTimeout(pane.reconnectTimer)
       pane.reconnectTimer = undefined
       pane.reconnectAttempt = undefined
+      pane.reconnectMinDelayMs = undefined
     },
 
     /**
@@ -1676,7 +1690,9 @@ export const useSessions = defineStore('sessions', {
      * `minDelayMs` raises the first wait — the rate-limit refusal needs ~30s
      * so the server's penalty decays (retrying sooner feeds it); `keepError`
      * keeps the failure card up during that wait instead of flashing
-     * "reconnecting" over a wait the user cannot shorten.
+     * "reconnecting" over a wait the user cannot shorten. A floor recorded on
+     * the pane by a mid-loop refusal (`reconnectMinDelayMs`) does the same for
+     * every later attempt until one succeeds.
      */
     scheduleReconnect(paneId: string, opts: { minDelayMs?: number; keepError?: boolean } = {}): void {
       const found = this.findPane(paneId)
@@ -1685,19 +1701,24 @@ export const useSessions = defineStore('sessions', {
       const attempt = (pane.reconnectAttempt ?? 0) + 1
       if (attempt > this.connectRetries) {
         pane.reconnectAttempt = undefined
+        pane.reconnectMinDelayMs = undefined
         pane.status = 'error'
         pane.message = t('app.reconnectFail')
         return
       }
       pane.reconnectAttempt = attempt
-      if (!opts.keepError) {
+      // A penalty floor recorded by the last attempt (or passed in) raises the
+      // wait, and keeps the failure card up rather than flashing "reconnecting"
+      // over a wait the user cannot shorten.
+      const floor = Math.max(opts.minDelayMs ?? 0, pane.reconnectMinDelayMs ?? 0)
+      const keep = opts.keepError || !!pane.reconnectMinDelayMs
+      if (!keep) {
         pane.status = 'connecting'
         pane.message = t('app.reconnecting', { attempt })
       }
-      const base = Math.min(20000, 1000 * 2 ** (attempt - 1))
       // Add ~±20% jitter so simultaneous dropped sessions don't reconnect in
       // lockstep (which can hammer the network and stack server-side timeouts).
-      const delay = retryDelayMs(attempt, Math.random, opts.minDelayMs ?? 0)
+      const delay = retryDelayMs(attempt, Math.random, floor)
       pane.reconnectTimer = window.setTimeout(async () => {
         const cur = this.findPane(paneId)
         if (!cur) return
@@ -1705,12 +1726,16 @@ export const useSessions = defineStore('sessions', {
         await this.runConnect(paneId)
         const after = this.findPane(paneId)
         if (!after) return
-        if (after.pane.status === 'connected') after.pane.reconnectAttempt = undefined
+        if (after.pane.status === 'connected') {
+          after.pane.reconnectAttempt = undefined
+          after.pane.reconnectMinDelayMs = undefined
+        }
         // A refused host key won't fix itself by retrying: stop, and leave the
         // card (with its fingerprint) for the user to decide.
         else if (after.pane.errorCode === 'host_key_unknown' || after.pane.errorCode === 'host_key_changed') {
           after.pane.reconnectAttempt = undefined
-        } else this.scheduleReconnect(paneId, { minDelayMs: opts.minDelayMs })
+          after.pane.reconnectMinDelayMs = undefined
+        } else this.scheduleReconnect(paneId)
       }, delay)
     },
 

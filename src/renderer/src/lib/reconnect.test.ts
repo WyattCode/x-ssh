@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import { decideStatusEvent, mayRetry, backoffMs, retryDelayMs, shouldReviveOnOnline } from './reconnect'
+import {
+  decideStatusEvent,
+  mayRetry,
+  backoffMs,
+  nextReconnectFloorMs,
+  retryDelayMs,
+  shouldReviveOnOnline
+} from './reconnect'
 
 const base = {
   paneSessionId: 's1',
@@ -124,5 +131,27 @@ describe('retryDelayMs', () => {
   })
   it('keeps the jitter inside the floored wait', () => {
     expect(retryDelayMs(5, () => 0, 0)).toBe(Math.round(backoffMs(5, () => 0)))
+  })
+})
+
+describe('nextReconnectFloorMs', () => {
+  it('has no floor when the attempt carried no retry delay', () => {
+    expect(nextReconnectFloorMs(undefined)).toBeUndefined()
+  })
+
+  it('treats a zero or negative delay as no floor', () => {
+    expect(nextReconnectFloorMs(0)).toBeUndefined()
+    expect(nextReconnectFloorMs(-1)).toBeUndefined()
+  })
+
+  it('keeps the penalty delay as the floor', () => {
+    // 30s is what main returns for "not allowed at this time".
+    expect(nextReconnectFloorMs(30_000)).toBe(30_000)
+  })
+
+  it('clears the floor when the last attempt was a plain transient failure', () => {
+    // Last attempt wins: a non-penalty failure must not leave the loop stuck at
+    // 30s forever, so the caller stores `undefined` and the backoff resumes.
+    expect(nextReconnectFloorMs(undefined)).toBeUndefined()
   })
 })

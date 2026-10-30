@@ -646,7 +646,23 @@ export class SshManager {
     const rh = rule.remoteHost || '127.0.0.1'
     const rp = rule.remotePort
     const server = createServer((socket: Socket) => {
+      // ssh2 has no timeout on the channel open: a remote that silently drops
+      // the target would leave this accepted local client hanging forever.
+      let settled = false
+      const timer = setTimeout(() => {
+        if (settled) return
+        settled = true
+        socket.destroy()
+      }, this.forwardOutTimeoutMs)
+      timer.unref?.()
       session.client.forwardOut('127.0.0.1', lp, rh, rp, (err, channel) => {
+        clearTimeout(timer)
+        if (settled) {
+          // Timed out already: the local client is gone, so drop the channel.
+          channel?.destroy()
+          return
+        }
+        settled = true
         if (err) {
           socket.end()
           return
@@ -800,10 +816,34 @@ export class SshManager {
       const req = parseSocksRequest(buf)
       if (!req) return
       socket.removeListener('data', onData)
-      session.client.forwardOut('127.0.0.1', 0, req.host, req.port, (err, channel) => {
-        if (err) {
+      // Same channel-open timeout as the local (-L) forward: a remote that
+      // silently drops the target must not leave the SOCKS client waiting.
+      let settled = false
+      const failReply = (): void => {
+        try {
+          // General SOCKS server failure (0x05), best effort.
           socket.write(Buffer.from([0x05, 0x05, 0x00, 0x01, 0, 0, 0, 0, 0, 0]))
-          socket.end()
+        } catch {
+          /* socket already gone */
+        }
+        socket.end()
+      }
+      const timer = setTimeout(() => {
+        if (settled) return
+        settled = true
+        failReply()
+      }, this.forwardOutTimeoutMs)
+      timer.unref?.()
+      session.client.forwardOut('127.0.0.1', 0, req.host, req.port, (err, channel) => {
+        clearTimeout(timer)
+        if (settled) {
+          // Timed out already: the failure reply went out, drop the channel.
+          channel?.destroy()
+          return
+        }
+        settled = true
+        if (err) {
+          failReply()
           return
         }
         // Success reply (ATYP IPv4, bound 0.0.0.0:0).
@@ -1305,6 +1345,11 @@ export class SshManager {
    *  target. ssh2 imposes no limit, and a firewall dropping the target on the
    *  hop's side leaves connect() unsettled for good. */
   jumpForwardTimeoutMs = 30_000
+
+  /** How long a local/SOCKS forwardOut may take before the local socket is dropped.
+   *  ssh2 has no timeout; a remote that silently drops the target leaves the
+   *  accepted local TCP client hanging forever. */
+  forwardOutTimeoutMs = 30_000
 
   private emitProgress(p: SftpProgress): void {
     // Continuous-sync jobs run silently: no per-file progress, no UI toasts.

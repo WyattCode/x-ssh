@@ -11,6 +11,19 @@
 2. **Android PerSourcePenalties**:移植桌面 `penaltyRetryDelayMs` —— `ReconnectPolicy.isRateLimited` / `penaltyRetryDelayMs`(30s),`delayMillis(attempt, lastError)` 取 max;首连 `retryInitialConnect` 的 delay 签名改为 `(attempt, error)`;`Sessions.reconnect` 把上次错误喂给下一次等待。单测覆盖罚分地板与首连捕获。
 
 **验证**:桌面 `typecheck` + vitest(含 transferFormat);Android 单测文件已更新(本机若无 SDK 则 CI/`testDebugUnitTest` 再跑)。未合并。
+# 会话记录:连续改进 M3.78(2026-10-30,复核打磨:已建会话重连罚分地板 + local/SOCKS forwardOut 超时)
+
+功能清单已够,本轮按站立规则做开源复核打磨(不合并)。未动 PR #12 与更早的 #4–#11。
+
+**核过仍真**:
+1. 跳板机 `connectJump` 的 `forwardOut` 超时(**已在 main**,第十三批 `jumpForwardTimeoutMs`)——本轮不重做。HANDOVER「审核剩余未修」里那条过时。
+2. **已建会话掉线后的自动重连缺 30s 罚分地板**(二次复核原注)——仍真:中途 `runConnect` 失败被 `!reconnectAttempt` 挡住,`result.retryDelayMs` 进不了下一轮等待。
+
+**修了**:
+1. **桌面重连罚分地板(中途)**:`nextReconnectFloorMs` + `Pane.reconnectMinDelayMs`;每次失败都记下地板;`scheduleReconnect` 取 `max(opts, pane)` 并在有地板时 keepError;成功 / 取消 / 密钥拒 / 用尽次数都清。中途罚分只补「将自动重试」文案、不 toast、不双重调度。
+2. **local `-L` / SOCKS `-D` `forwardOut` 超时**:新字段 `forwardOutTimeoutMs`(默认 30s,`unref`);超时拆本地 socket(SOCKS 尽力回 `0x05 0x05`);晚到的回调不再 pipe。集成测:假 sshd 永不答 `tcpip`,`forwardOutTimeoutMs=200` 时本地客户端 5s 内被拆。
+
+**验证**:`typecheck` + vitest **339** 全绿(原先 334;+`nextReconnectFloorMs` 与 local forward 超时)。未合并。
 
 ---
 
