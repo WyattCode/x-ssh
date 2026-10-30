@@ -8,7 +8,6 @@ import { useI18n } from '../lib/i18n'
 import { useToast } from '../composables/toast'
 import { isImeKey } from '../lib/ime'
 import Icon from './Icon.vue'
-import { useToast } from '../composables/toast'
 
 const store = useSessions()
 const { t } = useI18n()
@@ -118,17 +117,13 @@ watch(results, (r) => {
 
 /** Writes the current (filtered) results to a plaintext log via the main process. */
 async function exportLog(): Promise<void> {
-  const text = results.value.map((h) => `[${h.label}] ${h.line}`).join('\n')
+  const text = results.value.map((h) => `[${displayLabel(h.label)}] ${h.line}`).join('\n')
   const r = await window.api.history.export(text)
+  // A failed write (disk full / permission) used to look identical to success:
+  // the save dialog had already closed, so nothing on screen said it failed.
   if (r.canceled) return
   if (!r.ok) toast(r.error ?? t('hist.exportFail'), 'error')
   else toast(t('hist.exported'), 'success')
-function exportLog(): void {
-  const text = results.value.map((h) => `[${displayLabel(h.label)}] ${h.line}`).join('\n')
-  void window.api.history.export(text)
-  // A failed write (disk full / permission) used to look identical to success:
-  // the save dialog had already closed, so nothing on screen said it failed.
-  if (!r.ok && !r.canceled) toast(r.error ?? t('hist.exportFail'), 'error')
 }
 
 function pick(hit: Hit): void {

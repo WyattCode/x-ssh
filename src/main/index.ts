@@ -173,7 +173,7 @@ const NL: Record<string, Record<UiLang, string>> = {
     zh: '无法把 {name} 写回远端',
     'zh-TW': '無法把 {name} 寫回遠端',
     en: 'Could not write {name} back to the remote host'
-  }
+  },
   filterArchive: { zh: '归档文件', 'zh-TW': '封存檔', en: 'Archives' },
   filterExecutable: { zh: '程序', 'zh-TW': '程式', en: 'Programs' }
 }
@@ -628,12 +628,13 @@ async function withTempHosts(
         if (jh.auth === 'key') jump.passphrase = store.isLocked ? undefined : await store.getPassphrase(jh.id)
         // Same fail-closed checks the interactive connect path makes: without
         // them the hop fails deep in the handshake (or throws late as a missing
-        // key file) and the per-host result says nothing actionable.
+        // key file) and the per-host result says nothing actionable. This is a
+        // batch loop, so record the failure against this host and move on.
         if (jh.auth === 'password' && !jump.password) {
           results.push({
             host: hostLabel,
             ok: false,
-            error: '跳板机需要密码,但没有已保存的密码。请在主机编辑页为跳板主机设置密码后重试。'
+            error: `跳板机 ${jh.host} 需要密码,但没有已保存的密码。请在「主机」编辑页为 ${jh.label} 设置密码后重试,或更换认证方式。`
           })
           continue
         }
@@ -641,7 +642,7 @@ async function withTempHosts(
           results.push({
             host: hostLabel,
             ok: false,
-            error: '跳板机未选择私钥文件,请在主机编辑页为跳板主机导入私钥后重试。'
+            error: `跳板机 ${jh.host} 未选择私钥文件。请在「主机」编辑页为 ${jh.label} 导入私钥后重试。`
           })
           continue
         }
@@ -1321,8 +1322,6 @@ function registerIpc(): void {
     const enabled = (await settings.get<boolean>('autoBackup')) === true
     const dir = await settings.get<string>('autoBackupDir')
     if (!enabled || !dir) return { ok: false, error: 'backup-not-configured' }
-    const ok = await writeAutoBackupSync()
-    return { ok, error: ok ? undefined : 'backup-failed' }
     const r = await writeAutoBackupSync()
     if (r.ok) return { ok: true }
     const key =
@@ -1575,15 +1574,15 @@ function registerIpc(): void {
               code: 'jump_needs_password',
               error: `跳板机 ${jh.host} 需要密码,但没有已保存的密码。请在「主机」编辑页为 ${jh.label} 设置密码后重试,或更换认证方式。`
             }
-            // A key jump host with no key file would throw late ("未选择私钥文件")
-            // after the target's handshake already started; refuse it up front
-            // with the same actionable wording Android uses.
-            if (jh.auth === 'key' && !jh.keyPath) {
-              return {
-                ok: false,
-                code: 'jump_needs_key',
-                error: `跳板机 ${jh.host} 未选择私钥文件。请在「主机」编辑页为 ${jh.label} 导入私钥后重试。`
-              }
+          }
+          // A key jump host with no key file would throw late ("未选择私钥文件")
+          // after the target's handshake already started; refuse it up front
+          // with the same actionable wording Android uses.
+          if (jh.auth === 'key' && !jh.keyPath) {
+            return {
+              ok: false,
+              code: 'jump_needs_key',
+              error: `跳板机 ${jh.host} 未选择私钥文件。请在「主机」编辑页为 ${jh.label} 导入私钥后重试。`
             }
           }
         }

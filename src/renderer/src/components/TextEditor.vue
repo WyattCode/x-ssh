@@ -98,13 +98,11 @@ watch(
       content.value = r.content ?? ''
       original.value = content.value
     } else {
-      loadError.value = r.error ?? t('ed.loadFail')
-      error.value =
+      loadError.value =
         r.error === 'file-too-large' ? t('sfp.fileTooLarge') : (r.error ?? t('ed.loadFail'))
-      error.value = r.error ?? t('ed.loadFail')
       // The inline line is the only signal and it goes away with the editor:
       // surface the same message as a toast so a failed SFTP read isn't silent.
-      toast(error.value, 'error')
+      toast(loadError.value, 'error')
     }
   }
 )
@@ -113,16 +111,19 @@ async function save(): Promise<void> {
   if (!frozenSessionId.value || saving.value || !dirty.value) return
   saving.value = true
   saveError.value = ''
-  const r = await window.api.sftp.writeText(frozenSessionId.value, props.path, content.value)
-  saving.value = false
-  if (r.ok) {
-    original.value = content.value
-    emit('saved')
-  } else saveError.value = r.error ?? t('ed.saveFail')
-  } else {
-    error.value = r.error ?? t('ed.saveFail')
-    // Same string as the inline error, but a failed write must not be missable.
-    toast(error.value, 'error')
+  try {
+    const r = await window.api.sftp.writeText(frozenSessionId.value, props.path, content.value)
+    if (r.ok) {
+      original.value = content.value
+      emit('saved')
+    } else {
+      saveError.value = r.error ?? t('ed.saveFail')
+      // Same string as the inline error, but a failed write must not be missable:
+      // the dialog is dismissible, and this is the only copy of the buffer.
+      toast(saveError.value, 'error')
+    }
+  } finally {
+    saving.value = false
   }
 }
 

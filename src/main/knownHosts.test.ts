@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile, mkdir, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -104,32 +104,37 @@ describe('KnownHosts multi-key trust', () => {
     const again = new KH2()
     await again.load()
     expect(again.getAll('h', 22)).toEqual([fpA, fpB])
-import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+  })
+})
 
-// KnownHosts takes its folder from app.getPath at construction; point it at a
-// fresh temp dir per test. The mock must be registered before the dynamic
-// import below, so the module sees it.
-let dir = ''
-vi.mock('electron', () => ({
-  app: { getPath: () => dir }
-}))
+// ---- corrupt-file fail-closed ----
+// A separate suite: these cases need the store to see a damaged file at load
+// time, so each test re-imports the module against a fresh temp dir rather than
+// reusing the suite above's long-lived instance.
 
-const { KnownHosts, KnownHostsCorruptError } = await import('./knownHosts')
-
-const file = (): string => join(dir, 'known_hosts.json')
 /** A truncated JSON document: parses as neither the main file nor a backup. */
 const CORRUPT = '{"a.example.com:22": {"fp": "aa'
 
-beforeEach(async () => {
-  dir = await mkdtemp(join(tmpdir(), 'xssh-known-'))
-})
-afterEach(async () => {
-  await rm(dir, { recursive: true, force: true })
-})
-
 describe('KnownHosts corrupt fail-closed', () => {
+  let dir: string
+  let KnownHosts: typeof import('./knownHosts').KnownHosts
+  let KnownHostsCorruptError: typeof import('./knownHosts').KnownHostsCorruptError
+
+  const file = (): string => join(dir, 'known_hosts.json')
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'xssh-known-'))
+    // The mock must be registered before the import so the module sees the dir.
+    vi.resetModules()
+    vi.doMock('electron', () => ({ app: { getPath: () => dir } }))
+    ;({ KnownHosts, KnownHostsCorruptError } = await import('./knownHosts'))
+  })
+
+  afterEach(async () => {
+    vi.doUnmock('electron')
+    await rm(dir, { recursive: true, force: true })
+  })
+
   // 旧实现只在 map 为空时跳过写入:信任一台新主机就会把 {那一台} 写回去,
   // 其余已信任的指纹全部消失。现在损坏时任何写入都拒绝。
   it('refuses set() on a corrupt file and leaves the bytes untouched', async () => {
@@ -157,8 +162,10 @@ describe('KnownHosts corrupt fail-closed', () => {
     expect(kh.status().loadFailed).toBe(true)
     await kh.importAll([{ host: 'c.example.com', port: 22, fingerprint: 'cc' }])
     expect(kh.status().loadFailed).toBe(false)
-    const saved = JSON.parse(await readFile(file(), 'utf8')) as Record<string, { fp: string }>
-    expect(saved['c.example.com:22'].fp).toBe('cc')
+    // The on-disk record is { fps: string[], firstSeen } — a host can carry
+    // several trusted keys.
+    const saved = JSON.parse(await readFile(file(), 'utf8')) as Record<string, { fps: string[] }>
+    expect(saved['c.example.com:22'].fps).toEqual(['cc'])
   })
 
   it('a good load lets set() write the fingerprint', async () => {
@@ -166,8 +173,8 @@ describe('KnownHosts corrupt fail-closed', () => {
     await kh.load()
     expect(kh.status().loadFailed).toBe(false)
     await kh.set('d.example.com', 2222, 'dd')
-    const saved = JSON.parse(await readFile(file(), 'utf8')) as Record<string, { fp: string }>
-    expect(saved['d.example.com:2222'].fp).toBe('dd')
+    const saved = JSON.parse(await readFile(file(), 'utf8')) as Record<string, { fps: string[] }>
+    expect(saved['d.example.com:2222'].fps).toEqual(['dd'])
     expect(kh.get('d.example.com', 2222)).toBe('dd')
   })
 })

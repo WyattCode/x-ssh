@@ -20,7 +20,6 @@ import { useTheme } from '../composables/theme'
 import type { SettingsTab } from '../stores/sessions'
 import type { KnownHostEntry } from '../../../shared/types'
 import { isMac, isWin } from '../composables/platform'
-import { isMac } from '../composables/platform'
 import { isImeKey } from '../lib/ime'
 
 const store = useSessions()
@@ -210,22 +209,9 @@ watch(
 
 async function pickEditor(): Promise<void> {
   const p = await window.api.pickExecutable()
-  if (p) {
-    const r = await window.api.settings.set('externalEditor', p)
-    if (r && r.ok === false) {
-      toast(t('set.gen.writeFail'), 'error')
-      return
-    }
-    store.externalEditor = p
-  }
-}
-async function clearEditor(): Promise<void> {
-  const r = await window.api.settings.set('externalEditor', '')
-  if (r && r.ok === false) {
-    toast(t('set.gen.writeFail'), 'error')
-    return
-  }
   if (!p) return
+  // Optimistic, with rollback: a refused write used to leave the input showing
+  // a program that was never stored.
   const prev = store.externalEditor
   store.externalEditor = p
   try {
@@ -248,19 +234,17 @@ async function clearEditor(): Promise<void> {
   }
 }
 
+
 // ---- per-extension default openers ----
 const openerForm = reactive({ ext: '', program: '' })
 async function upsertOpener(): Promise<void> {
   const ext = openerForm.ext.trim().toLowerCase().replace(/^\./, '')
   if (!ext) return
-  const prev = { ...store.fileOpeners }
   const prev = store.fileOpeners
   const next = { ...store.fileOpeners }
   if (openerForm.program) next[ext] = openerForm.program
   else delete next[ext]
   store.fileOpeners = next
-  const r = await window.api.settings.set('fileOpeners', next)
-  if (r && r.ok === false) {
   try {
     const r = await window.api.settings.set('fileOpeners', next)
     if (r && r.ok === false) throw new Error(r.error ?? '')
@@ -275,11 +259,6 @@ async function upsertOpener(): Promise<void> {
 async function setOpenerProgram(ext: string): Promise<void> {
   const p = await window.api.pickExecutable()
   if (!p) return
-  const prev = { ...store.fileOpeners }
-  const next = { ...store.fileOpeners, [ext]: p }
-  store.fileOpeners = next
-  const r = await window.api.settings.set('fileOpeners', next)
-  if (r && r.ok === false) {
   const prev = store.fileOpeners
   const next = { ...store.fileOpeners, [ext]: p }
   store.fileOpeners = next
@@ -292,12 +271,6 @@ async function setOpenerProgram(ext: string): Promise<void> {
   }
 }
 async function removeOpener(ext: string): Promise<void> {
-  const prev = { ...store.fileOpeners }
-  const next = { ...store.fileOpeners }
-  delete next[ext]
-  store.fileOpeners = next
-  const r = await window.api.settings.set('fileOpeners', next)
-  if (r && r.ok === false) {
   const prev = store.fileOpeners
   const next = { ...store.fileOpeners }
   delete next[ext]
@@ -698,37 +671,17 @@ async function checkForUpdates(): Promise<void> {
   try {
     const r = await window.api.checkUpdate()
     if (!r.ok) {
-      updateState.error = r.error ?? t('set.gen.updateErr')
+      updateState.error =
+        r.error === 'update-parse-failed' ? t('set.gen.updateParseFail') : (r.error ?? t('set.gen.updateErr'))
       return
     }
-    if (r.fresh) {
-      updateState.fresh = true
-      updateState.latest = r.latest ?? ''
-    } else {
-      updateState.fresh = false
-      updateState.latest = r.latest ?? ''
-      updateState.name = r.name ?? ''
-      updateState.url = r.url ?? ''
-      updateState.notes = r.notes ?? ''
-    }
-  } finally {
-    updateState.checking = false
-  const r = await window.api.checkUpdate()
-  updateState.checking = false
-  if (!r.ok) {
-    updateState.error =
-      r.error === 'update-parse-failed' ? t('set.gen.updateParseFail') : (r.error ?? t('set.gen.updateErr'))
-    return
-  }
-  if (r.fresh) {
-    updateState.fresh = true
-    updateState.latest = r.latest ?? ''
-  } else {
-    updateState.fresh = false
+    updateState.fresh = !!r.fresh
     updateState.latest = r.latest ?? ''
     updateState.name = r.name ?? ''
     updateState.url = r.url ?? ''
     updateState.notes = r.notes ?? ''
+  } finally {
+    updateState.checking = false
   }
 }
 function openUpdatePage(): void {
@@ -786,13 +739,6 @@ async function saveSnippet(): Promise<void> {
   if (savingSnippet.value || !snippetForm.title.trim() || !snippetForm.text.trim()) return
   savingSnippet.value = true
   try {
-    if (!snippetForm.id) {
-      snippetForm.id = `snip-${Date.now()}-${Math.floor(Math.random() * 1e6)}`
-    }
-    await store.saveSnippet({
-      id: snippetForm.id,
-  if (!snippetForm.title.trim() || !snippetForm.text.trim()) return
-  try {
     await store.saveSnippet({
       id: snippetForm.id || `snip-${Date.now()}-${Math.floor(Math.random() * 1e6)}`,
       title: snippetForm.title.trim(),
@@ -803,6 +749,8 @@ async function saveSnippet(): Promise<void> {
       hostId: snippetForm.hostId || undefined
     })
     snippetForm.open = false
+  } catch {
+    toast(t('snip.saveFail'), 'error')
   } finally {
     savingSnippet.value = false
   }
@@ -811,20 +759,12 @@ async function deleteSnippet(id: string): Promise<void> {
   // Deleting a snippet is one-way; confirm first, naming it so a misclick on
   // the wrong row is obvious. Fall back to the id if the row is already gone.
   const title = store.snippets.find((s) => s.id === id)?.title ?? id
-  const ok = await confirm(t('set.gen.snipDeleteConfirm', { title }), { danger: true })
-  const s = store.snippets.find((x) => x.id === id)
-  const ok = await confirm(t('set.gen.snipDeleteConfirm', { name: s?.title ?? id }), {
+  const ok = await confirm(t('set.gen.snipDeleteConfirm', { title }), {
     title: t('set.gen.delete'),
     confirmText: t('set.gen.delete'),
     danger: true
   })
   if (!ok) return
-  await store.deleteSnippet(id)
-  } catch {
-    toast(t('snip.saveFail'), 'error')
-  }
-}
-async function deleteSnippet(id: string): Promise<void> {
   try {
     await store.deleteSnippet(id)
   } catch {
@@ -838,21 +778,15 @@ function hostLabel(id: string): string {
   return store.hosts.find((h) => h.id === id)?.label ?? id
 }
 
-// ---- known hosts / SSH config ----
 async function forgetKnownHost(k: KnownHostEntry): Promise<void> {
   // Forgetting a trusted key is destructive: the next connect re-prompts (and
   // a changed key would otherwise be silently accepted). Confirm first.
-  const ok = await confirm(t('set.sec.forgetConfirm', { host: `${k.host}:${k.port}` }), { danger: true })
   const ok = await confirm(t('set.sec.forgetConfirm', { host: `${k.host}:${k.port}` }), {
     title: t('set.sec.delete'),
     confirmText: t('set.sec.delete'),
     danger: true
   })
   if (!ok) return
-  await window.api.knownHosts.forget(k.host, k.port)
-  const r = await window.api.knownHosts.forget(k.host, k.port)
-  if (!r.ok) {
-    toast(r.error ?? t('set.sec.forgetFail'), 'error')
   const r = await window.api.knownHosts.forget(k.host, k.port)
   if (!r?.ok) {
     toast(r?.error ?? t('set.sec.forgetFail'), 'error')
@@ -919,8 +853,9 @@ async function importSshConfig(): Promise<void> {
   const r = await window.api.hosts.importSshConfig()
   if (!r.ok) {
     toast(
-      r.error === 'missing-config' ? t('set.sec.importSshMissing') : (r.error ?? t('set.sec.importFail')),
-      r.error === 'ssh-config-missing' ? t('set.sec.sshConfigMissing') : (r.error ?? t('set.sec.importFail')),
+      r.error === 'ssh-config-missing'
+        ? t('set.sec.sshConfigMissing')
+        : (r.error ?? t('set.sec.importFail')),
       'error'
     )
     return
@@ -1126,7 +1061,6 @@ async function disableMasterLock(): Promise<void> {
     toast(t('lock.passReq'), 'error')
     return
   }
-  if (lockBusy.value) return
   lockBusy.value = true
   try {
     const ok = await store.disableMasterLock(currentPass.value)
@@ -1143,22 +1077,17 @@ async function disableMasterLock(): Promise<void> {
 async function resetMasterLock(): Promise<void> {
   if (lockBusy.value) return
   // Reset is verification-gated: enter the passphrase to confirm intent, so a
-  // casual user can't wipe the lock with one unguarded click.
+  // casual user cannot wipe the lock with one unguarded click.
   if (!currentPass.value) {
     toast(t('lock.passReq'), 'error')
     return
   }
-  // Busy is held across the confirm too, so a double-click can't stack two
+  // Busy is held across the confirm too, so a double-click cannot stack two
   // confirmation dialogs (and two resets) on top of each other.
   lockBusy.value = true
   try {
-    const res = await confirm(t('lock.resetConfirm'))
+    const res = await confirm(t('lock.resetConfirm'), { danger: true })
     if (!res) return
-  if (lockBusy.value) return
-  const res = await confirm(t('lock.resetConfirm'))
-  if (!res) return
-  lockBusy.value = true
-  try {
     const ok = await store.resetMasterLock(currentPass.value)
     if (ok) {
       currentPass.value = ''
@@ -1775,13 +1704,8 @@ function onLockPassEnter(e: KeyboardEvent): void {
                     <span class="mono grow ellipsis">{{ l.username }}@{{ l.host }}:{{ l.port }}</span>
                     <span v-if="l.detail" class="mono faint ellipsis log-detail">{{ l.detail }}<template v-if="l.bytes != null"> · {{ fmtBytes(l.bytes) }}</template></span>
                   </div>
-                <div v-if="connLogError" class="row empty err">{{ connLogError }}</div>
-                <div v-for="(l, i) in connLog" :key="i" class="row log">
-                  <span class="log-time">{{ connTime(l.at) }}</span>
-                  <span class="log-event" :class="l.event">{{ eventLabel(l.event) }}</span>
-                  <span class="mono grow ellipsis">{{ l.username }}@{{ l.host }}:{{ l.port }}</span>
-                  <span v-if="l.detail" class="mono faint ellipsis log-detail">{{ l.detail }}<template v-if="l.bytes != null"> · {{ fmtBytes(l.bytes) }}</template></span>
                 </div>
+                <div v-if="connLogError" class="row empty err">{{ connLogError }}</div>
                 <div v-if="!connLog.length && !connLogError" class="row empty">{{ t('set.sec.connLogEmpty') }}</div>
                 <div v-else-if="connLog.length" class="row actions-row">
                   <span class="spacer" />

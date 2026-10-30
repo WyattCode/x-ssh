@@ -27,9 +27,9 @@ import {
   friendlyError,
   isAuthConnectError,
   isTransientConnectError,
-  penaltyRetryDelayMs
+  penaltyRetryDelayMs,
+  passphraseConnectCode
 } from './friendlyError'
-import { friendlyError, isTransientConnectError, passphraseConnectCode, penaltyRetryDelayMs } from './friendlyError'
 import { posixJoin, parentOf, clampConcurrency, buildPackCommand, buildExtractCommand, treeDirMode } from '../shared/fsUtils'
 
 /** Streams a local file through SHA-256 and resolves its lowercase hex digest. */
@@ -240,15 +240,6 @@ export class SshManager {
       session.logWrite = ws
       session.logging = true
       ws.on('error', () => {
-        // A failed write (dir removed / disk full) shouldn't crash the session.
-        // Drop logWrite too — otherwise startLog stays permanently false until
-        // the user hits stop, and the UI can keep showing "on" after logging died.
-        session.logging = false
-        if (session.logWrite === ws) session.logWrite = undefined
-        try {
-          ws.end()
-        } catch {
-          /* already dead */
         // A failed write (dir removed / disk full) shouldn't crash the session;
         // stop logging and tell the renderer, so its "logging on" caption and
         // the next Start/Stop toggle don't lie. Clearing logWrite also lets a
@@ -1087,17 +1078,15 @@ export class SshManager {
       ;(config.sock as Duplex | Socket | undefined)?.destroy()
       this.sessions.delete(id)
       if (msg === 'no-private-key') return { ok: false, code: 'no-private-key', error: msg }
-      return { ok: false, error: friendlyError(msg) }
-      // A key that can't be read / parsed (or a missing key path) is a
+      // A key that cannot be read / parsed (or a missing key path) is a
       // credential failure, not a network one: tag it so the renderer stops the
-      // reconnect loop instead of retrying a key that will never load.
-      const raw = (err as Error).message
-      return { ok: false, error: friendlyError(raw), code: 'auth_failed' }
+      // reconnect loop instead of retrying a key that will never load. An
+      // encrypted key with no passphrase gets its own code so the UI can ask.
       const raw = (err as Error).message
       return {
         ok: false,
         error: friendlyError(raw),
-        code: passphraseConnectCode(raw, !!params.passphrase)
+        code: passphraseConnectCode(raw, !!params.passphrase) ?? 'auth_failed'
       }
     }
 
@@ -1245,10 +1234,8 @@ export class SshManager {
             ? keyUnknown
               ? 'host_key_unknown'
               : 'host_key_changed'
-            : isAuthConnectError(raw)
-              ? 'auth_failed'
-              : undefined,
-            : passphraseConnectCode(raw, !!params.passphrase),
+            : (passphraseConnectCode(raw, !!params.passphrase) ??
+              (isAuthConnectError(raw) ? 'auth_failed' : undefined)),
           key: keyRejected ? lastKey : undefined,
           keyHost: keyRejected ? params.host : undefined,
           keyPort: keyRejected ? port : undefined
@@ -1689,7 +1676,6 @@ export class SshManager {
     rateBytesPerSec = 0,
     quiet = false
   ): Promise<{ cancelled: boolean; errors: number }> {
-  ): Promise<{ errors: number }> {
     this.jobSession.set(jobId, sessionId)
     if (quiet) this.quietJobs.add(jobId)
     if (rateBytesPerSec > 0) this.jobRate.set(jobId, rateBytesPerSec)
@@ -1837,8 +1823,7 @@ export class SshManager {
     this.lastProgressAt.delete(jobId)
     this.jobSession.delete(jobId)
     this.quietJobs.delete(jobId)
-    return { cancelled, errors }
-    return { errors: errorsCount }
+    return { cancelled, errors: errorsCount }
   }
 
   // ---- Continuous sync (watch) ----
@@ -2373,8 +2358,7 @@ export class SshManager {
     concurrency?: number,
     rateBytesPerSec = 0,
     overwrite: UploadOverwrite = 'overwrite'
-  ): Promise<{ files: number; failures: number; cancelled: boolean }> {
-  ): Promise<{ files: number; failures: number; walkError?: string }> {
+  ): Promise<{ files: number; failures: number; cancelled: boolean; walkError?: string }> {
     this.jobSession.set(jobId, sessionId)
     if (rateBytesPerSec > 0) this.jobRate.set(jobId, rateBytesPerSec)
     const conc = clampConcurrency(concurrency ?? SshManager.CONCURRENCY, SshManager.CONCURRENCY)
@@ -2564,10 +2548,14 @@ export class SshManager {
     // Callers report these. A local path that could not even be stat'ed only
     // bumps `failures`, and both counts used to be dropped on the floor — so
     // uploading a path that does not exist answered "ok, 1 file".
-    return { files: filesDone, failures, cancelled }
+    // Callers report all three. A local path that could not even be stat'ed
+    // only bumps `failures`, and the counts used to be dropped on the floor —
+    // so uploading a path that does not exist answered "ok, 1 file". A walk
+    // error has to surface too, or an unreadable dir reads as "nothing to do".
     return {
       files: filesDone,
       failures,
+      cancelled,
       walkError: walkError ? friendlyError((walkError as Error).message) : undefined
     }
   }
@@ -2870,7 +2858,6 @@ export class SshManager {
     archiveName?: string
   ): Promise<{ ok: boolean; localPath?: string; error?: string; canceled?: boolean }> {
     if (!items.length) return { ok: false, error: 'nothing-to-pack' }
-    if (!items.length) return { ok: false, error: 'pack-empty' }
     const parent = this.parentOf(items[0].path)
     const tmp = `/tmp/xssh-${randomUUID().slice(0, 8)}.tar.gz`
     const names = items.map((i) => i.name)
@@ -2878,13 +2865,7 @@ export class SshManager {
     // A non-zero exit means tar failed (missing file, no space, no tar at all):
     // the archive is absent or truncated, so downloading it would hand the user
     // a broken file that still looked like a success.
-    const packed = await this.execRemote(sessionId, buildPackCommand(parent, tmp, names))
-    if (packed.code !== 0) {
-      await this.execRemote(sessionId, `rm -f "${tmp}"`).catch(() => {})
-      return { ok: false, error: 'pack-failed' }
     const pack = await this.execRemote(sessionId, buildPackCommand(parent, tmp, names))
-    // A non-zero tar exit means the archive was never (fully) written; downloading
-    // it anyway would hand back a missing or truncated file as "success".
     if (pack.code !== 0) {
       await this.execRemote(sessionId, `rm -f "${tmp}"`).catch(() => {})
       return { ok: false, error: pack.out.trim() || '打包失败' }
@@ -2900,16 +2881,12 @@ export class SshManager {
         1
       )
       await this.execRemote(sessionId, `rm -f "${tmp}"`).catch(() => {})
+      // downloadJob reports per-file failures / cancellation in its return value
+      // instead of throwing, so a partial archive used to come back as ok:true.
       if (dl.cancelled) return { ok: false, canceled: true }
       // Leave the Chinese failures string alone — PR #45 remaps files-failed:N.
       if (dl.failures) return { ok: false, error: `${dl.failures} 个文件失败` }
-      const r = await this.downloadJob(sessionId, [{ path: tmp, name, isDir: false }], localDir, randomUUID(), 1)
-      await this.execRemote(sessionId, `rm -f "${tmp}"`).catch(() => {})
-      // downloadJob reports per-file failures / cancellation in its return value
-      // instead of throwing, so a partial archive used to come back as ok:true.
-      if (r.cancelled) return { ok: false, canceled: true }
-      if (r.failures) return { ok: false, error: `${r.failures} 个文件失败` }
-      if (!r.files) return { ok: false, error: '打包/下载失败' }
+      if (!dl.files) return { ok: false, error: '打包/下载失败' }
       return { ok: true, localPath: outPath }
     } catch (e) {
       await this.execRemote(sessionId, `rm -f "${tmp}"`).catch(() => {})

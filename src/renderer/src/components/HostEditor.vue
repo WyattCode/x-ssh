@@ -165,20 +165,15 @@ watch(
 // others already tunnel through may not start a nest of its own (its existing
 // jump can still be cleared).
 const jumpOptions = computed(() => jumpSelectOptions(store.hosts, form.id || undefined, form.jumpHostId))
-const jumpBlocked = computed(() => jumpSelectBlocked(store.hosts, form.id || undefined, form.jumpHostId))
 const jumpBlockerLabel = computed(() => jumpUsedBy(store.hosts, form.id || undefined)[0]?.label ?? '')
-const jumpCandidates = computed(() => store.hosts.filter((h) => h.id !== form.id))
 const jumpGone = computed(
   () => !!form.jumpHostId && !store.hosts.some((h) => h.id === form.jumpHostId)
 )
 /** Hosts that use *this* profile as their jump — one hop only, same as Android. */
-const jumpUsedBy = computed(() =>
-  props.host ? store.hosts.filter((h) => h.jumpHostId === props.host!.id) : []
-)
 // Match Android JumpField: only block *adding* a jump when this host is
 // already someone else's hop (one hop only). A stale/legacy jumpHostId must
 // still be clearable.
-const jumpBlocked = computed(() => jumpUsedBy.value.length > 0 && !form.jumpHostId)
+const jumpBlocked = computed(() => jumpUsedBy(store.hosts, form.id || undefined).length > 0 && !form.jumpHostId)
 // One hop only (same rule as Android): a host that itself uses a jump can't be
 // picked, because core ignores the second hop and the connect then looks like a
 // mysterious network failure.
@@ -248,12 +243,11 @@ const keyBusy = ref(false)
  *  button, which would look like "you have no keys". */
 const keysFailed = ref(false)
 const labelsWarned = ref(false)
-const keyModal = reactive({ open: false, name: '', type: 'ed25519', passphrase: '', error: '' })
+const keyModal = reactive({ open: false, name: '', type: 'ed25519', passphrase: '', error: '', busy: false })
 // The generate-key sheet is a modal of its own inside the panel: without its
 // own trap, Tab walked out of the sheet into the host form behind it.
 const keySheetEl = ref<HTMLElement>()
 useFocusTrap(keySheetEl, () => keyModal.open)
-const keyModal = reactive({ open: false, name: '', type: 'ed25519', passphrase: '', error: '', busy: false })
 // In-flight guards: a double-clicked import opened two OS dialogs, and a
 // double-clicked trash stacked two confirms / two deletes.
 const importing = ref(false)
@@ -266,9 +260,6 @@ async function loadKeys(): Promise<void> {
     managedKeys.value = []
     keysFailed.value = true
     toast(t('host.keyListFail'), 'error')
-  } catch {
-    toast(t('host.keyListFail'), 'error')
-    return
   }
   try {
     const st = await window.api.keys.labelsStatus()
@@ -315,10 +306,9 @@ async function generateKey(e?: Event): Promise<void> {
   // it here would generate a key named after the half-typed text.
   if (isImeKey(e)) return
   if (e) e.preventDefault()
-  // A double Enter / double click must not spawn two keypairs.
-  if (keyBusy.value) return
-  // ssh-keygen takes a moment: a second Enter / click must not race the first.
-  if (keyModal.busy) return
+  // A double Enter / double click must not spawn two keypairs: ssh-keygen takes
+  // a moment, so both guards below cover the same window from two entry points.
+  if (keyBusy.value || keyModal.busy) return
   keyModal.error = ''
   const name = keyModal.name.trim()
   if (!name) {
@@ -334,104 +324,73 @@ async function generateKey(e?: Event): Promise<void> {
       passphrase: keyModal.passphrase || undefined
     })
     if (!r.ok || !r.key) {
-      keyModal.error = r.code || r.error ? keyErrorMessage(r, t) : t('host.keyGenFail')
-      keyModal.error = r.error ?? t('host.keyGenFail')
+      // Modal error alone is easy to miss; toast the same string (match importKey).
+      const msg = keyErrorMessage(r, t) || t('host.keyGenFail')
+      keyModal.error = msg
+      toast(msg, 'error')
       return
     }
     keyModal.open = false
     form.keyPath = r.key.path
+    // Keep the passphrase the user just typed for generation — otherwise
+    // canSave would still block a passphraseProtected key, and connect would
+    // fail late instead.
+    if (keyModal.passphrase) {
+      passphrase.value = keyModal.passphrase
+      keyModal.passphrase = ''
+    }
     await loadKeys()
     if (r.key.passphraseProtected === false) toast(t('host.keyUnprotected'), 'info')
   } finally {
     keyBusy.value = false
     keyModal.busy = false
-  const r = await window.api.keys.generate({
-    name,
-    type: keyModal.type,
-    passphrase: keyModal.passphrase || undefined
-  })
-  if (!r.ok || !r.key) {
-    // Match importKey: modal error alone is easy to miss; toast the same string.
-    const msg = r.error ?? t('host.keyGenFail')
-    keyModal.error = msg
-    toast(msg, 'error')
-    return
   }
-
-  keyModal.open = false
-  form.keyPath = r.key.path
-  // Keep the passphrase the user just typed for generation — otherwise canSave
-  // would still block a passphraseProtected key, and connect would fail late.
-  if (keyModal.passphrase) {
-    passphrase.value = keyModal.passphrase
-    keyModal.passphrase = ''
-  }
-  await loadKeys()
-  if (r.key.passphraseProtected === false) toast(t('host.keyUnprotected'), 'info')
 }
 async function importKey(): Promise<void> {
-  if (keyBusy.value) return
-  keyBusy.value = true
-  if (importing.value) return
+  // One OS file dialog at a time: a double-click used to open two.
+  if (keyBusy.value || importing.value) return
   importing.value = true
   try {
     const r = await window.api.keys.import()
     if (r.canceled) return
     if (!r.ok || !r.key) {
-      toast(r.code || r.error ? keyErrorMessage(r, t) : t('host.keyImportFail'), 'error')
-      toast(r.error ?? t('host.keyImportFail'), 'error')
+      toast(keyErrorMessage(r, t) || t('host.keyImportFail'), 'error')
       return
     }
     form.keyPath = r.key.path
     await loadKeys()
     if (r.key.passphraseProtected === false) toast(t('host.keyUnprotected'), 'info')
   } finally {
-    keyBusy.value = false
     importing.value = false
-  const r = await window.api.keys.import()
-  if (r.canceled) return
-  if (!r.ok || !r.key) {
-    toast(keyOpError(r.error), 'error')
-    return
   }
 }
 async function deleteKey(k: ManagedKey): Promise<void> {
   if (deletingId.value) return
-  const res = await confirm(t('host.keyDeleteConfirm', { name: k.name }))
+  const res = await confirm(t('host.keyDeleteConfirm', { name: k.name }), {
+    danger: true,
+    confirmText: t('host.deleteKey')
+  })
   if (!res) return
-  const r = await window.api.keys.del(k.id)
-  if (r.ok) {
-    if (form.keyPath === k.path) form.keyPath = ''
-    await loadKeys()
-  } else {
-    toast(keyErrorMessage(r, t), 'error')
   deletingId.value = k.id
   try {
     const r = await window.api.keys.del(k.id)
     if (r.ok) {
       if (form.keyPath === k.path) form.keyPath = ''
       await loadKeys()
-    } else if (r.error) {
-      toast(r.error, 'error')
+    } else {
+      toast(keyOpError(r.error ?? ''), 'error')
     }
   } finally {
     deletingId.value = null
+    // Focus goes back to the panel so Esc / Tab keep working after the row
+    // that owned focus is gone.
     panelEl.value?.focus()
-  } else if (r.error) {
-    toast(keyOpError(r.error), 'error')
-    toast(r.error ?? t('host.keyDeleteFail'), 'error')
   }
 }
 
 /** Why the save button is disabled ('' when it isn't). Key auth needs a key
  *  file: Android already refuses this with `edit_err_no_key`, but desktop let
  *  the profile save and only failed later with a Chinese-only message. */
-const saveBlockReason = (): string => {
-  if (!form.host || !form.username) return t('host.saveDisabled')
-  if (form.auth === 'key' && !form.keyPath) return t('host.keyRequired')
-  return ''
-}
-const canSave = (): boolean => !saveBlockReason()
 const selectedManagedKey = (): ManagedKey | undefined =>
   managedKeys.value.find((k) => k.path === form.keyPath)
 
@@ -479,7 +438,7 @@ function onTagKey(e: KeyboardEvent): void {
 
 async function save(): Promise<void> {
   splitHostInput()
-  if (!canSave() || saving.value) return
+  if (saving.value) return
   if (!canSave()) {
     // Enter in a field reaches save() even while the button is disabled; say
     // why instead of doing nothing.
@@ -574,14 +533,13 @@ async function remove(): Promise<void> {
   })
   if (!ok) return
   try {
-    store.hosts = await window.api.hosts.delete(props.host.id)
+    store.hosts = await window.api.hosts.delete(host.id)
   } catch {
     // Main rejects when the hosts file cannot be written (disk full, unreadable
     // file). Without this the panel just sat there with nothing said.
     toast(t('hosts.deleteFail'), 'error')
     return
   }
-  store.hosts = await window.api.hosts.delete(host.id)
   emit('close')
 }
 </script>
@@ -777,7 +735,7 @@ async function remove(): Promise<void> {
               </div>
               <p v-if="jumpBlocked" class="sub-hint jump-hint">{{ t('host.jumpBlocked', { label: jumpBlockerLabel }) }}</p>
               <p v-if="jumpGone || jumpBlocked" class="sub-hint jump-hint">
-                {{ jumpGone ? t('host.jumpGone') : t('host.jumpBlocked', { name: jumpUsedBy[0].label }) }}
+                {{ jumpGone ? t('host.jumpGone') : t('host.jumpBlocked', { name: jumpBlockerLabel }) }}
               </p>
               <p v-if="jumpNested" class="sub-hint jump-hint">{{ t('host.jumpNested') }}</p>
 

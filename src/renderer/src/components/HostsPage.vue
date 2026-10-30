@@ -229,10 +229,9 @@ function openSftp(h: Host): Promise<void> {
 const removing = ref(false)
 async function remove(h: Host): Promise<void> {
   if (removing.value) return
-  const ok = await confirm(t('hosts.deleteConfirm', { name: h.label }), {
   // Deleting a host that others use as their jump host breaks every one of
-  // them (connecting through a deleted jump fails closed since M3.143), so say
-  // so before it happens instead of leaving them looking broken afterwards.
+  // them (connecting through a deleted jump fails closed), so say so before it
+  // happens instead of leaving them looking broken afterwards.
   const deps = store.hosts.filter((x) => x.jumpHostId === h.id)
   const msg = deps.length
     ? t('hosts.deleteConfirmJump', { name: h.label, n: deps.length })
@@ -250,7 +249,6 @@ async function remove(h: Host): Promise<void> {
     removing.value = false
   }
 }
-
 // ---- Card menu ----
 const menu = reactive({ open: false, x: 0, y: 0, host: null as Host | null })
 const menuEl = ref<HTMLElement>()

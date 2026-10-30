@@ -101,7 +101,6 @@ let pasteBusy = false
 
 
 
-const { toast } = useToast()
 async function copySelection(): Promise<void> {
   const sel = term?.getSelection()
   if (!sel) return
@@ -123,7 +122,6 @@ async function copyFromMenu(): Promise<void> {
 }
 async function pasteClipboard(): Promise<void> {
   if (pasteBusy) return
-  const text = window.api.clipboard.readText()
   let text: string
   try {
     text = window.api.clipboard.readText()

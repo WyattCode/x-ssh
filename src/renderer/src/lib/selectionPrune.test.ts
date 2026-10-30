@@ -15,6 +15,10 @@ describe('pruneSelection', () => {
   it('drops names that are no longer shown', () => {
     const sel = new Set(['a', 'b'])
     const next = pruneSelection(sel, ['a', 'c'])
+    expect(next).not.toBe(sel)
+    expect([...next]).toEqual(['a'])
+  })
+
   it('returns the same Set when `shown` is a Set that still holds everything', () => {
     const sel = new Set(['a'])
     expect(pruneSelection(sel, new Set(['a', 'b']))).toBe(sel)
@@ -27,10 +31,9 @@ describe('pruneSelection', () => {
     expect([...next]).toEqual(['a'])
   })
 
-  it('clears the selection when nothing is shown', () => {
-    const sel = new Set(['a', 'b'])
-    const next = pruneSelection(sel, [])
   it('clears everything when nothing is shown', () => {
+    // An empty listing (a directory that failed to load, a filter matching
+    // nothing) must not leave a selection holding rows the user cannot see.
     const sel = new Set(['a', 'b'])
     const next = pruneSelection(sel, [])
     expect(next).not.toBe(sel)

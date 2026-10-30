@@ -1,13 +1,11 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
-import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
 
 import { useSessions } from '../stores/sessions'
 import { useI18n } from '../lib/i18n'
 import { useToast } from '../composables/toast'
 import { canRevealHistory } from '../lib/transferHistory'
 import { localJoin } from '../../../shared/fsUtils'
-import { useToast } from '../composables/toast'
 import {
   pct as pctOf,
   formatBytes,
@@ -15,15 +13,13 @@ import {
   formatAgo,
   formatEta,
   histStatusLabel,
-  isCancelled
-  formatTransferError
-
+  isCancelled,
+  formatTransferError,
   formatTransferName
 } from '../lib/transferFormat'
 import { allPausedFlag, prunePaused, toggleId } from '../lib/transferPause'
 import type { SftpProgress, TransferHistoryItem } from '../../../shared/types'
 import Icon from './Icon.vue'
-import { useToast } from '../composables/toast'
 
 const store = useSessions()
 const { t } = useI18n()
@@ -42,8 +38,6 @@ onUnmounted(() => window.removeEventListener('keydown', onPanelKey))
 
 // Paused job ids (in-memory, main-driven). Tracked here so the resume button
 // shows only for paused rows, and a global "resume all" reflects the state.
-const pausedIds = new Set<string>()
-const allPaused = ref(false)
 
 // A row that has already failed or been cancelled. Main keeps these in
 // `store.transfers` for a few seconds before cleanup, so they can still show
@@ -52,21 +46,6 @@ function isResidual(x: SftpProgress): boolean {
   return !!x.error || isCancelled(x)
 }
 
-function togglePause(id: string): void {
-  const paused = !pausedIds.has(id)
-  if (paused) pausedIds.add(id)
-  else pausedIds.delete(id)
-  window.api.sftp.pause(id, paused)
-}
-function togglePauseAll(): void {
-  allPaused.value = !allPaused.value
-  // Bulk pause mirrors the main process's set: pause adds every running id,
-  // resume clears them, so per-row icons stay truthful. Residual rows are
-  // already finished — pausing them would be meaningless.
-  if (allPaused.value) for (const x of running.value) pausedIds.add(x.id)
-  else pausedIds.clear()
-  window.api.sftp.pauseAll(allPaused.value)
-}
 // A plain Set is not reactive in Vue 3, so every mutation *replaces* the Set
 // (see lib/transferPause) — otherwise the per-row glyph only flips on the next
 // progress tick.
@@ -122,8 +101,7 @@ watch(
 // clear the flag so the next transfer shows "Pause all", not a stale Resume.
 watch(active, (list) => {
   if (list.length === 0 && allPaused.value) {
-    allPaused.value = false
-    pausedIds.clear()
+    pausedIds.value = new Set()
   }
 })
 
@@ -131,14 +109,11 @@ watch(active, (list) => {
 const recent = computed(() => store.transferHistory.slice(0, 12))
 
 function histStatus(h: TransferHistoryItem): string {
-  return histStatusLabel(h.status, t)
+  // A sync job reports a machine marker so the count can be localized here.
+  const sm = h.error && /^sync-items-failed:(\d+)$/.exec(h.error)
+  if (sm) return t('sfp.syncItemsFailed', { n: Number(sm[1]) })
   if (h.status === 'cancelled') return t('sfp.cancelled')
   if (h.status === 'error') return h.error ? formatTransferError(h.error, t) : t('sfp.failed')
-  if (h.status === 'error') {
-    const sm = h.error && /^sync-items-failed:(\d+)$/.exec(h.error)
-    if (sm) return t('sfp.syncItemsFailed', { n: Number(sm[1]) })
-    return h.error || t('sfp.failed')
-  }
   return t('sfp.done')
 }
 function residualLabel(x: SftpProgress): string {
@@ -150,12 +125,6 @@ function residualClass(x: SftpProgress): string {
 
 async function reveal(h: TransferHistoryItem): Promise<void> {
   const target =
-    h.direction === 'down' ? h.localDir : h.localPaths?.[0]
-  if (!target) return
-  const r = await window.api.sftp.revealLocal(target)
-  if (!r.ok) toast(r.error === 'path-invalid' ? t('sfp.pathInvalid') : (r.error ?? t('sfp.revealFail')), 'error')
-async function reveal(h: TransferHistoryItem): Promise<void> {
-  const target =
     h.direction === 'up'
       ? h.localPaths?.[0]
       : h.localDir
@@ -163,7 +132,12 @@ async function reveal(h: TransferHistoryItem): Promise<void> {
         : undefined
   if (!target) return
   const r = await window.api.sftp.revealLocal(target)
-  if (!r.ok) toast(r.error ?? t('sfp.revealFail'), 'error')
+  if (!r.ok) {
+    toast(
+      r.error === 'path-invalid' ? t('sfp.pathInvalid') : (r.error ?? t('sfp.revealFail')),
+      'error'
+    )
+  }
 }
 // History rows only expose "reveal" for finished down/up transfers.
 function canReveal(h: TransferHistoryItem): boolean {
@@ -201,7 +175,6 @@ function eta(x: SftpProgress): string {
     <section class="tpanel">
       <header class="tp-head">
         <span class="tp-title">{{ t('tpanel.title') }}</span>
-        <button class="tp-x" :title="t('sfp.close')" @click="store.toggleTransferPanel(false)">
         <button class="tp-x" :title="t('fileDiff.close')" @click="store.toggleTransferPanel(false)">
           <Icon name="close" :size="16" />
         </button>

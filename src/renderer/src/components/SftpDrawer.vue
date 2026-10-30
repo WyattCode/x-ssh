@@ -10,7 +10,6 @@ import {
   formatSpeed,
   formatAgo,
   formatTransferError,
-  transferStatusText
   transferStatusText,
   transferErrorText
 } from '../lib/transferFormat'
@@ -34,30 +33,22 @@ const { t: tt } = useI18n()
 const { toast } = useToast()
 const store = useSessions()
 
-/** Maps main's transfer error codes (files-failed:N, sync-list-failed) to the
- *  UI language; anything else falls back to the given key. */
-function sftpErr(err: string | undefined, fallbackKey: string): string {
-  if (err === 'sync-list-failed') return tt('sfp.syncListFailed')
-  if (err?.startsWith('files-failed:')) return formatTransferError(err, tt)
-/** IPC failures arrive as codes; render the ones the UI knows in its language. */
-function sftpErr(err: string | undefined, fallbackKey: string): string {
-  if (err === 'window-not-ready') return tt('app.windowNotReady')
-/** Turns a machine error code from main into UI text (falls back to `err`). */
-function sftpErr(err: string | undefined, fallbackKey: string): string {
-  const m = err && /^delete-failed:(\d+)$/.exec(err)
-  if (m) return tt('sfp.deletePartial', { n: Number(m[1]) })
-  if (err === 'extract-failed') return tt('sfp.extractFail')
 /** Main-process errors arrive as machine codes (session-missing, …) so the UI
  *  can localize them; anything else is shown as-is, with the caller's fallback
  *  key when there is no message at all. */
 function sftpErr(err: string | undefined, fallbackKey: string): string {
+  if (err === 'window-not-ready') return tt('app.windowNotReady')
   if (err === 'session-missing') return tt('sfp.sessionMissing')
   if (err === 'session-gone') return tt('sfp.sessionGone')
   if (err === 'remote-timeout') return tt('sfp.remoteTimeout')
   if (err === 'unsafe-filename') return tt('sfp.unsafeFilename')
+  if (err === 'extract-failed') return tt('sfp.extractFail')
+  if (err === 'sync-list-failed') return tt('sfp.syncListFailed')
+  const m = err && /^delete-failed:(\d+)$/.exec(err)
+  if (m) return tt('sfp.deletePartial', { n: Number(m[1]) })
+  if (err?.startsWith('files-failed:')) return formatTransferError(err, tt)
   return err ?? tt(fallbackKey)
 }
-
 // `page`: the SFTP sidebar page shows this full-size (no resize edge, no close)
 // instead of as the drawer on the terminal page.
 const props = defineProps<{ sessionId?: string; open: boolean; terminalCwd?: string; reloadKey?: number; page?: boolean }>()
@@ -99,17 +90,15 @@ async function previewFile(entry: FileEntry): Promise<void> {
   if (!props.sessionId) return
   preview.value = { open: true, name: entry.name, url: '', error: '' }
   const r = await window.api.sftp.readBinary(props.sessionId, posixJoin(path.value, entry.name))
-  if (r.ok && r.base64) preview.value.url = `data:image/${fileExt(entry.name)};base64,${r.base64}`
-  else {
-    const err = r.error
-    preview.value.error =
-      err === 'preview-too-large' ? tt('sfp.previewTooLarge') : (err ?? tt('sfp.previewFail'))
+  if (r.ok && r.base64) {
+    preview.value.url = `data:image/${fileExt(entry.name)};base64,${r.base64}`
+    return
   }
-  else preview.value.error = r.error ?? tt('sfp.previewFail')
-    const msg = r.error ?? '无法预览'
-    preview.value.error = msg
-    toast(msg, 'error')
-  }
+  // Dialog is dismissible, so the inline line alone can be missed — toast too.
+  const msg =
+    r.error === 'preview-too-large' ? tt('sfp.previewTooLarge') : (r.error ?? tt('sfp.previewFail'))
+  preview.value.error = msg
+  toast(msg, 'error')
 }
 
 // ---- local (dual-panel) pane: browse the machine's own filesystem ----
@@ -296,63 +285,44 @@ async function localDelete(): Promise<void> {
   if (!t || !localPath.value) return
   if (busy.value) return
   localMenu.open = false
-  const ok = await confirm(tt('sfp.confirmDel', { name: t.name }))
+  const ok = await confirm(tt('sfp.confirmDel', { name: t.name }), { danger: true })
   if (!ok) return
   busy.value = true
+  let failed = false
   try {
     const r = await window.api.local.del(localPath.value, t.name, t.isDir)
-    if (!r.ok) toast(r.error ?? tt('sfp.delFail'), 'error')
+    if (!r.ok) { failed = true; toast(sftpErr(r.error, 'sfp.delFail'), 'error') }
     else await refreshLocal()
   } finally {
     busy.value = false
   }
-  const r = await window.api.local.del(localPath.value, t.name, t.isDir)
-  if (!r.ok) toast(r.error === 'invalid-name' ? tt('sfp.invalidName') : (r.error ?? tt('sfp.delFail')), 'error')
-  if (!r.ok) toast(sftpErr(r.error, 'sfp.delFail'), 'error')
-  else await refreshLocal()
+  return void failed
 }
 async function localDelSelected(): Promise<void> {
   if (!localSelSet.value.size || !localPath.value) return
   if (busy.value) return
   const entries = localSorted.value.filter((e) => localSelSet.value.has(e.name))
   if (!entries.length) return
-  const ok = await confirm(tt('sfp.delMany', { n: entries.length }))
+  const ok = await confirm(tt('sfp.delMany', { n: entries.length }), { danger: true })
   if (!ok) return
   busy.value = true
   try {
-    let failed = false
+    // Report the first failure once, rather than one toast per row: deleting a
+    // twenty-file selection that fails would otherwise bury the screen.
+    let firstErr: string | null = null
     for (const e of entries) {
       const r = await window.api.local.del(localPath.value, e.name, e.isDir)
-      if (!r.ok) {
-        failed = true
-        toast(r.error ?? tt('sfp.delFail'), 'error')
-      }
-  let failed = false
-  for (const e of entries) {
-    const r = await window.api.local.del(localPath.value, e.name, e.isDir)
-    if (!r.ok) {
-      failed = true
-      toast(r.error === 'invalid-name' ? tt('sfp.invalidName') : (r.error ?? tt('sfp.delFail')), 'error')
-      toast(sftpErr(r.error, 'sfp.delFail'), 'error')
+      if (!r.ok && firstErr === null) firstErr = sftpErr(r.error, 'sfp.delFail')
     }
     localSelSet.value = new Set()
     localAnchor.value = null
     await refreshLocal()
-    if (failed) toast(tt('sfp.delFail'), 'error')
+    if (firstErr !== null) toast(firstErr, 'error')
   } finally {
     busy.value = false
   }
-  let firstErr: string | null = null
-  for (const e of entries) {
-    const r = await window.api.local.del(localPath.value, e.name, e.isDir)
-    if (!r.ok && firstErr === null) firstErr = r.error ?? tt('sfp.delFail')
-  }
-  localSelSet.value = new Set()
-  localAnchor.value = null
-  await refreshLocal()
-  if (firstErr !== null) toast(firstErr, 'error')
 }
-// Keyboard helpers: act on the single currently-selected local entry.
+
 function localSelectedSingle(): LocalEntry | null {
   if (localSelSet.value.size !== 1) return null
   const n = Array.from(localSelSet.value)[0]
@@ -385,7 +355,11 @@ async function localSubmit(e?: Event): Promise<void> {
     if (localModal.action === 'new') {
       const r = await window.api.local.create(localPath.value, name, localModal.kind)
       if (!r.ok) {
-        localModal.error = r.error ?? tt('sfp.createFail')
+        // Keep the modal error AND toast: the modal can be scrolled away from
+        // its error line, which then reads as "nothing happened".
+        const msg = sftpErr(r.error, 'sfp.createFail')
+        localModal.error = msg
+        toast(msg, 'error')
         return
       }
     } else {
@@ -393,34 +367,11 @@ async function localSubmit(e?: Event): Promise<void> {
       if (!t) return
       const r = await window.api.local.rename(localPath.value, t.name, name)
       if (!r.ok) {
-        localModal.error = r.error ?? tt('sfp.renameFail')
+        const msg = sftpErr(r.error, 'sfp.renameFail')
+        localModal.error = msg
+        toast(msg, 'error')
         return
       }
-  if (localModal.action === 'new') {
-    const r = await window.api.local.create(localPath.value, name, localModal.kind)
-    if (!r.ok) {
-      localModal.error =
-        r.error === 'invalid-name' ? tt('sfp.invalidName') : (r.error ?? tt('sfp.createFail'))
-      localModal.error = sftpErr(r.error, 'sfp.createFail')
-      // Keep modal error; also toast so a scrolled-away modal chrome still surfaces it
-      // (remote rename/create toast is #103; this is the local-pane twin).
-      const msg = r.error ?? tt('sfp.createFail')
-      localModal.error = msg
-      toast(msg, 'error')
-      return
-    }
-  } else {
-    const t = localModal.target
-    if (!t) return
-    const r = await window.api.local.rename(localPath.value, t.name, name)
-    if (!r.ok) {
-      localModal.error =
-        r.error === 'invalid-name' ? tt('sfp.invalidName') : (r.error ?? tt('sfp.renameFail'))
-      localModal.error = sftpErr(r.error, 'sfp.renameFail')
-      const msg = r.error ?? tt('sfp.renameFail')
-      localModal.error = msg
-      toast(msg, 'error')
-      return
     }
     localModal.open = false
     await refreshLocal()
@@ -428,6 +379,7 @@ async function localSubmit(e?: Event): Promise<void> {
     localSubmitting.value = false
   }
 }
+
 function fmtLocalTime(ms?: number): string {
   if (!ms) return ''
   const d = new Date(ms)
@@ -862,8 +814,20 @@ async function uploadLocalSelection(): Promise<void> {
   busy.value = true
   try {
     const paths = localSelectedNames().map((n) => localJoin(localPath.value, n))
-    const r = await window.api.sftp.uploadPaths(props.sessionId, path.value, paths, store.transferConcurrency)
-    if (!r.ok && !r.canceled) error.value = r.error ?? tt('sfp.uploadFail')
+    const r = await window.api.sftp.uploadPaths(
+      props.sessionId, path.value, paths, store.transferConcurrency
+    )
+    if (r.ok) {
+      await load(path.value)
+      return
+    }
+    if (r.canceled) return
+    // A concurrent load() (e.g. the reload a successful upload triggers) clears
+    // `error`, so the banner alone can vanish without a trace — toast too, like
+    // the download paths already do.
+    const msg = sftpErr(r.error, 'sfp.uploadFail')
+    error.value = msg
+    toast(msg, 'error')
   } finally {
     busy.value = false
   }
@@ -873,31 +837,23 @@ async function downloadSelectionToLocal(): Promise<void> {
   if (busy.value) return
   busy.value = true
   try {
-    const items = selectedEntries().map((x) => ({ path: posixJoin(path.value, x.name), name: x.name, isDir: x.isDir }))
-    const r = await window.api.sftp.downloadTo(props.sessionId, items, localPath.value, store.transferConcurrency)
-    if (!r.ok && !r.canceled) toast(tt('sfp.downloadFail'), 'error')
-    else await refreshLocal()
+    const items = selectedEntries().map((x) => ({
+      path: posixJoin(path.value, x.name),
+      name: x.name,
+      isDir: x.isDir
+    }))
+    const r = await window.api.sftp.downloadTo(
+      props.sessionId, items, localPath.value, store.transferConcurrency
+    )
+    if (r.ok) {
+      await refreshLocal()
+      return
+    }
+    if (r.canceled) return
+    toast(sftpErr(r.error, 'sfp.downloadFail'), 'error')
   } finally {
     busy.value = false
   }
-  const paths = localSelectedNames().map((n) => localJoin(localPath.value, n))
-  const r = await window.api.sftp.uploadPaths(props.sessionId, path.value, paths, store.transferConcurrency)
-  if (!r.ok && !r.canceled) error.value = sftpErr(r.error, 'sfp.uploadFail')
-  if (!r.ok && !r.canceled) {
-    // A concurrent load() (e.g. the reload a *successful* upload triggers)
-    // clears `error`, so the banner alone can vanish without a trace — toast it
-    // too, like the download paths already do.
-    const msg = r.error ?? tt('sfp.uploadFail')
-    error.value = msg
-    toast(msg, 'error')
-  }
-}
-async function downloadSelectionToLocal(): Promise<void> {
-  if (!props.sessionId || !localPath.value || !selected.value.size) return
-  const items = selectedEntries().map((x) => ({ path: posixJoin(path.value, x.name), name: x.name, isDir: x.isDir }))
-  const r = await window.api.sftp.downloadTo(props.sessionId, items, localPath.value, store.transferConcurrency)
-  if (!r.ok && !r.canceled) toast(sftpErr(r.error, 'sfp.downloadFail'), 'error')
-  else await refreshLocal()
 }
 
 function selectedEntries(): FileEntry[] {
@@ -1346,23 +1302,19 @@ async function commitRename(entry: FileEntry, e?: Event): Promise<void> {
   if (!r.ok) {
     // Keep the editor open with what the user typed: a failed rename (name
     // taken, permission denied) is fixed by editing the name, not by starting
-    // over from the context menu.
-    error.value = r.error ?? tt('sfp.renameFail')
+    // over from the context menu. load() clears `error` at start, so also toast
+    // — otherwise the failure reads as a silent no-op.
+    const msg = sftpErr(r.error, 'sfp.renameFail')
+    error.value = msg
+    toast(msg, 'error')
     renameInput.value = next
     renamingName.value = entry.name
     focusEdit()
     return
   }
-  if (!r.ok) error.value = sftpErr(r.error, 'sfp.renameFail')
-    error.value = r.error ?? tt('sfp.renameFail')
-    return
-    // load() clears error at start — toast so a permission/rename failure is not a silent no-op.
-    const msg = r.error ?? tt('sfp.renameFail')
-    error.value = msg
-    toast(msg, 'error')
-  }
   await load(path.value)
 }
+
 function startCreate(kind: 'folder' | 'file'): void {
   creatingKind.value = kind
   newName.value = ''
@@ -1384,21 +1336,17 @@ async function commitCreate(e?: Event): Promise<void> {
     // Same as rename: a failed mkdir/createFile (already exists, no write
     // permission) leaves the row in place with the typed name so it can be
     // corrected and retried, instead of vanishing into a banner.
-    error.value = r.error ?? tt('sfp.createFail')
+    const msg = sftpErr(r.error, 'sfp.createFail')
+    error.value = msg
+    toast(msg, 'error')
     newName.value = name
     creatingKind.value = kind
     focusEdit()
     return
   }
-  if (!r.ok) error.value = sftpErr(r.error, 'sfp.createFail')
-    error.value = r.error ?? tt('sfp.createFail')
-    return
-    const msg = r.error ?? tt('sfp.createFail')
-    error.value = msg
-    toast(msg, 'error')
-  }
   await load(path.value)
 }
+
 // ---- selection-aware operations (used by menu + shortcuts) ----
 function copySelectedPaths(): void {
   const items = selectedEntries()
@@ -1419,13 +1367,19 @@ async function downloadSelected(): Promise<void> {
   busy.value = true
   try {
     if (items.length === 1 && !items[0].isDir) {
-      // Single file → Save-As dialog.
-      await window.api.sftp.download(
+      // Single file → Save-As dialog. Surface failures: a refused/failed write
+      // used to look like a no-op.
+      const r = await window.api.sftp.download(
         props.sessionId,
         posixJoin(path.value, items[0].name),
         items[0].name,
         store.transferConcurrency
       )
+      if (!r.ok && !r.canceled) {
+        const msg = sftpErr(r.error, 'sfp.downloadFail')
+        error.value = msg
+        toast(msg, 'error')
+      }
       return
     }
     // Multiple / folders → pick one target folder.
@@ -1435,43 +1389,16 @@ async function downloadSelected(): Promise<void> {
       isDir: e.isDir
     }))
     const r = await window.api.sftp.downloadMany(props.sessionId, payload, store.transferConcurrency)
-    if (!r.ok && !r.canceled) error.value = r.error ?? tt('sfp.downloadFail')
-  } finally {
-    busy.value = false
-  if (items.length === 1 && !items[0].isDir) {
-    // Single file → Save-As dialog. Surface failures the same way as
-    // downloadMany — a refused/failed write used to look like a no-op.
-    // Single file → Save-As dialog. Surface failures like downloadMany /
-    // downloadSelectionToLocal — a refused/failed write used to look like a no-op.
-    const r = await window.api.sftp.download(
-      props.sessionId,
-      posixJoin(path.value, items[0].name),
-      items[0].name,
-      store.transferConcurrency
-    )
-    if (!r.ok && !r.canceled) error.value = r.error ?? tt('sfp.downloadFail')
     if (!r.ok && !r.canceled) {
-      const msg = r.error ?? tt('sfp.downloadFail')
+      const msg = sftpErr(r.error, 'sfp.downloadFail')
       error.value = msg
       toast(msg, 'error')
     }
-    return
+  } finally {
+    busy.value = false
   }
-  // Multiple / folders → pick one target folder.
-  const payload = items.map((e) => ({
-    path: posixJoin(path.value, e.name),
-    name: e.name,
-    isDir: e.isDir
-  }))
-  const r = await window.api.sftp.downloadMany(props.sessionId, payload, store.transferConcurrency)
-  if (!r.ok && !r.canceled) error.value = sftpErr(r.error, 'sfp.downloadFail')
-  if (!r.ok && !r.canceled) {
-    const msg = r.error ?? tt('sfp.downloadFail')
-    error.value = msg
-    toast(msg, 'error')
-  }
-  if (!r.ok && !r.canceled) error.value = r.error ? transferErrorText(r.error, tt) : tt('sfp.downloadFail')
 }
+
 async function packDownloadSelected(): Promise<void> {
   if (!props.sessionId) return
   const items = selectedEntries()
@@ -1485,27 +1412,21 @@ async function packDownloadSelected(): Promise<void> {
   busy.value = true
   try {
     const r = await window.api.sftp.packDownload(props.sessionId, payload)
-    if (!r.ok && !r.canceled)
-      error.value =
-        r.error === 'nothing-to-pack' ? tt('sfp.nothingToPack') : (r.error ?? tt('sfp.packFail'))
-    if (!r.ok && !r.canceled) error.value = sftpErr(r.error, 'sfp.packFail')
-    else if (r.ok) await load(path.value)
-    if (!r.ok && !r.canceled) {
-      // Main reports a failed tar as the machine code `pack-failed`; show the
-      // localized wording rather than the raw token.
-      error.value = r.error === 'pack-failed' ? tt('sfp.packFail') : (r.error ?? tt('sfp.packFail'))
-    if (!r.ok && !r.canceled) {
-      // The banner alone can be wiped by a concurrent load(), so a failed pack
-      // would look like a no-op; toast it the same way uploads do.
-      const msg = r.error ?? tt('sfp.packFail')
-      error.value = msg
-      toast(msg, 'error')
-    if (!r.ok && !r.canceled) {
-      error.value =
-        r.error === 'pack-empty'
-          ? tt('sfp.packEmpty')
-          : (r.error ?? tt('sfp.packFail'))
-    } else if (r.ok) await load(path.value)
+    if (r.ok) {
+      await load(path.value)
+      return
+    }
+    if (r.canceled) return
+    // The banner alone can be wiped by a concurrent load(), so a failed pack
+    // would look like a no-op; toast it the same way uploads do. Main reports
+    // a failed tar as `pack-failed`, which sftpErr turns into its wording.
+    if (r.error === 'pack-empty') {
+      error.value = tt('sfp.packEmpty')
+      return
+    }
+    const msg = sftpErr(r.error, 'sfp.packFail')
+    error.value = msg
+    toast(msg, 'error')
   } finally {
     busy.value = false
   }
@@ -1515,65 +1436,48 @@ async function uploadExtractPick(): Promise<void> {
   busy.value = true
   try {
     const r = await window.api.sftp.uploadExtract(props.sessionId, path.value, store.transferConcurrency)
-    if (!r.ok && !r.canceled) error.value = sftpErr(r.error, 'sfp.extractFail')
-    else if (r.ok) await load(path.value)
-    if (!r.ok && !r.canceled) {
-      const msg = r.error ?? tt('sfp.extractFail')
-      error.value = msg
-      toast(msg, 'error')
-    if (!r.ok && !r.canceled) {
-      error.value = r.error === 'extract-failed' ? tt('sfp.extractFail') : (r.error ?? tt('sfp.extractFail'))
-    } else if (r.ok) await load(path.value)
+    if (r.ok) {
+      await load(path.value)
+      return
+    }
+    if (r.canceled) return
+    const msg = sftpErr(r.error, 'sfp.extractFail')
+    error.value = msg
+    toast(msg, 'error')
   } finally {
     busy.value = false
   }
 }
+
 async function delSelected(): Promise<void> {
   if (!props.sessionId) return
   const items = selectedEntries()
   if (!items.length) return
+  if (busy.value) return
   const msg =
     items.length === 1
-    ? items[0].isDir ? tt('sfp.delOneDir', { name: items[0].name }) : tt('sfp.delOneFile', { name: items[0].name })
-    : tt('sfp.delMany', { n: items.length })
+      ? items[0].isDir
+        ? tt('sfp.delOneDir', { name: items[0].name })
+        : tt('sfp.delOneFile', { name: items[0].name })
+      : tt('sfp.delMany', { n: items.length })
   const ok = await confirm(msg, { title: tt('sfp.delTitle'), danger: true, confirmText: tt('sfp.delOk') })
   if (!ok) return
-  if (busy.value) return
   busy.value = true
   try {
+    // Collect the first failure and report it once after the reload: load()
+    // clears `error` at start, so a banner set inside the loop would vanish and
+    // a failed delete would read as a silent no-op.
+    let firstErr: string | null = null
     for (const it of items) {
       const r = await window.api.sftp.remove(props.sessionId, posixJoin(path.value, it.name), it.isDir)
-      if (!r.ok) error.value = r.error ?? tt('sfp.delFail')
+      if (!r.ok && !firstErr) firstErr = sftpErr(r.error, 'sfp.delFail')
     }
     selected.value = new Set()
     await load(path.value)
+    if (firstErr) toast(firstErr, 'error')
   } finally {
     busy.value = false
-  for (const it of items) {
-    const r = await window.api.sftp.remove(props.sessionId, posixJoin(path.value, it.name), it.isDir)
-    if (!r.ok) error.value = sftpErr(r.error, 'sfp.delFail')
   }
-  let failMsg = ''
-  for (const it of items) {
-    const r = await window.api.sftp.remove(props.sessionId, posixJoin(path.value, it.name), it.isDir)
-    if (!r.ok) failMsg = r.error ?? tt('sfp.delFail')
-  }
-  selected.value = new Set()
-  await load(path.value)
-  // load() clears error at start — restore a delete failure so it is not a silent no-op.
-  if (failMsg) error.value = failMsg
-  let firstErr: string | null = null
-  for (const it of items) {
-    const r = await window.api.sftp.remove(props.sessionId, posixJoin(path.value, it.name), it.isDir)
-    if (!r.ok) {
-      const msg = r.error ?? tt('sfp.delFail')
-      error.value = msg
-      if (!firstErr) firstErr = msg
-    }
-  }
-  selected.value = new Set()
-  await load(path.value)
-  if (firstErr) toast(firstErr, 'error')
 }
 
 function runMenu(fn: () => void): void {
@@ -1627,17 +1531,17 @@ function openSyncDialog(): void {
 }
 function closeSync(): void {
   if (sync.busy) return
+  sync.open = false
+  // Reopening starts from a clean form: a stale error from the last attempt
+  // would look like the new one had already failed.
+  sync.error = ''
+}
 /** Maps the main process's `sync-items-failed:N` marker to a localized message;
  *  anything else (a thrown walk error, a plain failure) is shown as-is. */
 function syncErrorText(err?: string): string {
   const m = /^sync-items-failed:(\d+)$/.exec(err ?? '')
   if (m) return tt('sfp.syncItemsFailed', { n: Number(m[1]) })
   return err ?? tt('sfp.syncFail')
-}
-async function startSync(): Promise<void> {
-  if (!props.sessionId || !sync.local || !sync.remote) return
-  sync.open = false
-  sync.error = ''
 }
 async function startSync(): Promise<void> {
   if (!props.sessionId || !sync.local || !sync.remote || sync.busy) return
@@ -1673,29 +1577,8 @@ function onSyncEnter(e: KeyboardEvent): void {
   if (e.key !== 'Enter' || isImeEnter(e) || sync.busy || !sync.local || !sync.remote) return
   e.preventDefault()
   void startSync()
-    if (r.ok) watchActive.value = true
-    else error.value = sftpErr(r.error, 'sfp.syncFail')
-    return
-  }
-  const r = await window.api.sftp.sync(props.sessionId, sync.local, sync.remote, sync.mode, sync.del, store.transferConcurrency)
-  if (!r.ok) error.value = sftpErr(r.error, 'sfp.syncFail')
-  // Cancel is reported via the transfer row (CANCELLED_TEXT); don't toast syncFail.
-  if (!r.ok && !r.canceled) error.value = r.error ?? tt('sfp.syncFail')
-    else {
-      const msg = r.error ?? tt('sfp.syncFail')
-      error.value = msg
-      toast(msg, 'error')
-    }
-    return
-  }
-  const r = await window.api.sftp.sync(props.sessionId, sync.local, sync.remote, sync.mode, sync.del, store.transferConcurrency)
-  if (!r.ok) {
-    const msg = r.error ?? tt('sfp.syncFail')
-    error.value = msg
-    toast(msg, 'error')
-  }
-  if (!r.ok) error.value = syncErrorText(r.error)
 }
+
 async function stopWatch(): Promise<void> {
   if (!props.sessionId) return
   try {

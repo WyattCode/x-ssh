@@ -9,7 +9,6 @@ useFocusTrap(dialogEl, () => store.publishOpen)
 import { useSessions } from '../stores/sessions'
 import { useI18n } from '../lib/i18n'
 import { keyErrorMessage } from '../lib/keyError'
-import { useToast } from '../composables/toast'
 import type { ManagedKey, Host } from '../../../shared/types'
 import Icon from './Icon.vue'
 
@@ -71,6 +70,7 @@ function hostOpError(err?: string): string {
   if (err === 'app-locked') return t('keyPub.appLocked')
   if (err === 'connect-failed') return t('keyPub.connectFailed')
   return err ?? ''
+}
 /** Main reports a failed remote command as `remote-exit:N`; show it in the UI
  *  language instead of the raw machine code. Anything else passes through. */
 function mapError(msg: string | undefined): string {
@@ -81,27 +81,19 @@ function mapError(msg: string | undefined): string {
 
 async function publish(): Promise<void> {
   if (!keyId.value || !selected.size) return
+  // One publish at a time: a second in-flight call would interleave two
+  // rewrites of the same authorized_keys and report a state that never existed.
   if (busy.value || revokeBusy.value) return
   busy.value = true
   err.value = ''
   results.value = []
-  const r = await window.api.keys.publish(keyId.value, [...selected])
-  busy.value = false
-  if (!r.ok) {
-    err.value = r.code || r.error ? keyErrorMessage(r, t) : t('keyPub.fail')
-    err.value =
-      r.error === 'no-public-key' ? t('keyPub.noPublicKey') : (r.error ?? t('keyPub.fail'))
-    err.value = pubErr(r.error) || t('keyPub.fail')
-    err.value = mapError(r.error) || t('keyPub.fail')
-    // Dialog is dismissible; banner alone is lost on close — same class as #94 listFail.
-    const msg = r.error ?? t('keyPub.fail')
-    err.value = msg
-    toast(msg, 'error')
-    return
   try {
     const r = await window.api.keys.publish(keyId.value, [...selected])
     if (!r.ok) {
-      err.value = r.error ?? t('keyPub.fail')
+      // Dialog is dismissible, so a banner alone is lost on close — toast too.
+      const msg = mapError(r.error) || t('keyPub.fail')
+      err.value = msg
+      toast(msg, 'error')
       return
     }
     results.value = r.results ?? []
@@ -109,32 +101,22 @@ async function publish(): Promise<void> {
     busy.value = false
   }
 }
+
 async function revoke(): Promise<void> {
   if (!keyId.value || !selected.size) return
   // Revoking rewrites authorized_keys on the remotes and cannot be undone here.
   const ok = await confirm(t('keyPub.revokeConfirm'))
   if (!ok) return
-  revokeBusy.value = true
-  revokeResults.value = []
-  const r = await window.api.keys.revoke(keyId.value, [...selected])
-  revokeBusy.value = false
-  if (!r.ok) {
-    err.value = r.code || r.error ? keyErrorMessage(r, t) : t('keyPub.revokeFail')
-    err.value =
-      r.error === 'no-public-key' ? t('keyPub.noPublicKey') : (r.error ?? t('keyPub.revokeFail'))
-    err.value = pubErr(r.error) || t('keyPub.revokeFail')
-    err.value = mapError(r.error) || t('keyPub.revokeFail')
-    const msg = r.error ?? t('keyPub.revokeFail')
-    err.value = msg
-    toast(msg, 'error')
-    return
+  // Ignore a second click while the first is in flight: both would rewrite the
+  // same files and the second report would describe a half-applied state.
   if (busy.value || revokeBusy.value) return
   revokeBusy.value = true
   revokeResults.value = []
+  err.value = ''
   try {
     const r = await window.api.keys.revoke(keyId.value, [...selected])
     if (!r.ok) {
-      err.value = r.error ?? t('keyPub.revokeFail')
+      err.value = mapError(r.error) || t('keyPub.revokeFail')
       return
     }
     revokeResults.value = r.results ?? []

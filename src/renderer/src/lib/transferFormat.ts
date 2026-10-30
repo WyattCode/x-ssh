@@ -67,6 +67,10 @@ export function formatTransferName(
   name: string,
   translate: (key: string, vars?: Record<string, string | number>) => string
 ): string {
+  // A multi-item job reports `items:N`; the legacy Chinese `N 项` form is still
+  // mapped for older main builds. A real file name passes through unchanged.
+  const m = /^items:(\d+)$/.exec(name) || /^(\d+) 项$/.exec(name)
+  if (m) return translate('sfp.nItems', { n: Number(m[1]) })
   if (name === 'sync' || name === '同步') return translate('sfp.sync')
   return name
 }
@@ -111,6 +115,8 @@ export function formatEta(
   const tr = t as unknown as (key: string, vars?: Record<string, number>) => string
   if (seconds < 60) return tr('sfp.etaSec', { n: Math.round(seconds) })
   return tr('sfp.etaMin', { n: Math.ceil(seconds / 60) })
+}
+
 /** Map main's transfer error codes to i18n. Unknown strings pass through. */
 export function formatTransferError(
   err: string,
@@ -123,18 +129,8 @@ export function formatTransferError(
   const cm = /^checksum-mismatch:(\d+)$/.exec(err)
   if (cm) return translate('sfp.checksumMismatch', { n: Number(cm[1]) })
   return err
- * Job display name. Main may emit a machine token for a multi-item job
- * (`items:N`) instead of a pre-formatted label, so the count is localized here;
- * the legacy Chinese `N 项` form is still mapped for older main builds.
- * Sync jobs (`同步`) are deliberately left alone — their naming is owned elsewhere.
- */
-export function formatTransferName(
-  name: string,
-  translate: (key: string, vars?: Record<string, string | number>) => string
-): string {
-  const m = /^items:(\d+)$/.exec(name) || /^(\d+) 项$/.exec(name)
-  if (m) return translate('sfp.nItems', { n: Number(m[1]) })
-  return name
+}
+
 /** Maps a machine-readable transfer error code from main to display text.
  *  Unknown errors pass through unchanged. */
 export function transferErrorText(

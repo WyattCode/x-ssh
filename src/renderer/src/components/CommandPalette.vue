@@ -438,10 +438,6 @@ function onBroadcastEnter(e: KeyboardEvent): void {
 /** Clicking the dim overlay goes back one step while a prompt is open (the
  *  same thing Esc does) instead of throwing the whole flow away — a mis-click
  *  next to the palette shouldn't lose a typed password or command. */
-function onOverlayDown(): void {
-  if (pending.value) {
-    pending.value = null
-/** Overlay click: same as Esc — leave a sub-view first, only then close. */
 function onOverlayDismiss(): void {
   if (pending.value) {
     pending.value = null
@@ -503,7 +499,6 @@ function onKey(e: KeyboardEvent): void {
 </script>
 
 <template>
-  <div v-if="store.paletteOpen" class="overlay" @mousedown.self="onOverlayDown">
   <div v-if="store.paletteOpen" class="overlay" @mousedown.self="onOverlayDismiss">
     <div ref="trapEl" tabindex="-1" class="palette" @keydown="onKey">
       <!-- Broadcast command prompt -->

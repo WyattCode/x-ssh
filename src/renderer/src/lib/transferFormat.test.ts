@@ -131,6 +131,9 @@ describe('formatEta', () => {
     expect(formatEta(60 * 1024, 1024, tr)).toBe('sfp.etaMin:{"n":1}')
     expect(formatEta(90 * 1024, 1024, tr)).toBe('sfp.etaMin:{"n":2}')
     expect(formatEta(10 * 60 * 1024, 1024, tr)).toBe('sfp.etaMin:{"n":10}')
+  })
+})
+
 describe('formatTransferName', () => {
   it('translates the sync job token main emits', () => {
     expect(formatTransferName('sync', tr)).toBe('sfp.sync')
@@ -142,7 +145,8 @@ describe('formatTransferName', () => {
 
   it('passes a real file name through untouched', () => {
     expect(formatTransferName('report.tar.gz', tr)).toBe('report.tar.gz')
-describe('formatTransferName', () => {
+  })
+
   it('maps the machine token to a localized item count', () => {
     expect(formatTransferName('items:3', trName)).toBe('sfp.nItems:{"n":3}')
   })
@@ -153,7 +157,9 @@ describe('formatTransferName', () => {
 
   it('passes a plain filename through unchanged', () => {
     expect(formatTransferName('report.txt', trName)).toBe('report.txt')
-    expect(formatTransferName('同步', trName)).toBe('同步')
+  })
+})
+
 describe('transferErrorText', () => {
   it('maps a checksum-mismatch code to display text', () => {
     expect(transferErrorText('checksum-mismatch:3', tr)).toBe('sfp.checksumMismatch:{"n":3}')

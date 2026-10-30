@@ -7,13 +7,12 @@ import { useSnippetVars } from '../composables/snippetVars'
 import { clampConcurrency } from '../../../shared/fsUtils'
 import { decideStatusEvent, nextReconnectFloorMs, retryDelayMs, shouldReviveOnOnline } from '../lib/reconnect'
 import { isCancelled, formatTransferError } from '../lib/transferFormat'
-import { decideStatusEvent, retryDelayMs, shouldReviveOnOnline } from '../lib/reconnect'
 import { liveSnippetSessionId } from '../lib/snippetSession'
 import { hasLiveConnectedPane, closeOthersNeedsConfirm } from '../lib/snapshotGuard'
 import { closeAllNeedsConfirm } from '../lib/tabCloseGuard'
 
 import { formatTransferName } from '../lib/transferFormat'
-import { isCancelled } from '../lib/transferFormat'
+import { connectFailureMessage } from '../lib/connectFailure'
 import {
   buildFlatTree,
   buildGrid,
@@ -940,22 +939,14 @@ export const useSessions = defineStore('sessions', {
     persistTabs(): void {
       if (!this.restoreTabs) return
       void (async () => {
-        const tabs = serializeTabs(this.tabs)
         const idx = this.tabs.findIndex((t) => t.id === this.activeId)
         try {
-          const r1 = await window.api.settings.set('openTabs', tabs)
-          const r2 = await window.api.settings.set(
-            'openTabsActiveIndex',
-            idx >= 0 ? idx : 0
-          )
-          if ((r1 && r1.ok === false) || (r2 && r2.ok === false)) {
-            toast(t('app.tabsPersistFail'), 'error')
-          }
-        } catch {
-          toast(t('app.tabsPersistFail'), 'error')
-        try {
-          const r = await window.api.settings.set('openTabs', serializeTabs(this.tabs))
-          if (r && r.ok === false) throw new Error(r.error ?? 'refused')
+          // Both keys have to land: restoreSavedTabs reads the active index to
+          // put the user back on the tab they were on, so writing only the list
+          // silently resets the selection on every launch.
+          const r1 = await window.api.settings.set('openTabs', serializeTabs(this.tabs))
+          const r2 = await window.api.settings.set('openTabsActiveIndex', idx >= 0 ? idx : 0)
+          if ((r1 && r1.ok === false) || (r2 && r2.ok === false)) throw new Error('refused')
           tabsPersistFailToasted = false
         } catch {
           // A refused write leaves disk with the old layout while memory has the
@@ -1245,10 +1236,7 @@ export const useSessions = defineStore('sessions', {
               host: owner.params.host,
               port: owner.params.port || 22,
               username: owner.params.username,
-              detail: p.error ? `${p.name} · ${formatTransferError(p.error, t)}` : p.name,
-              detail: p.error ? `${p.name} · ${xferErr(p.error)}` : p.name,
-              detail: p.error ? `${displayName} · ${p.error}` : displayName,
-              detail: p.error ? `${formatTransferName(p.name, t)} · ${p.error}` : formatTransferName(p.name, t),
+              detail: p.error ? `${displayName} · ${formatTransferError(p.error, t)}` : displayName,
               bytes: p.transferred
             })
           }
@@ -1258,20 +1246,10 @@ export const useSessions = defineStore('sessions', {
             const displayName = formatTransferName(p.name, t)
             window.api.notify(
               p.error ? t('sfp.notifyError') : t('sfp.notifyDone'),
-              `${p.name}\n${p.direction === 'up' ? t('sfp.up') : t('sfp.down')}${p.error ? ` · ${formatTransferError(p.error, t)}` : ''}`,
-              `${p.name}\n${p.direction === 'up' ? t('sfp.up') : t('sfp.down')}${p.error ? ` · ${xferErr(p.error)}` : ''}`,
-              `${displayName}\n${p.direction === 'up' ? t('sfp.up') : t('sfp.down')}${p.error ? ` · ${p.error}` : ''}`,
-              !p.error
+              `${displayName}\n${p.direction === 'up' ? t('sfp.up') : t('sfp.down')}${p.error ? ` · ${formatTransferError(p.error, t)}` : ''}`
             )
             toast(
               p.error ? `${displayName} · ${t('sfp.failed')}` : `${displayName} · ${t('sfp.done')}`,
-              `${formatTransferName(p.name, t)}\n${p.direction === 'up' ? t('sfp.up') : t('sfp.down')}${p.error ? ` · ${p.error}` : ''}`,
-              !p.error
-            )
-            toast(
-              p.error
-                ? `${formatTransferName(p.name, t)} · ${t('sfp.failed')}`
-                : `${formatTransferName(p.name, t)} · ${t('sfp.done')}`,
               p.error ? 'error' : 'success'
             )
           }
@@ -1323,12 +1301,6 @@ export const useSessions = defineStore('sessions', {
       // then the snapshot would show up here and be gone on the next launch.
       const prev = this.snapshots
       this.snapshots = [snap, ...this.snapshots].slice(0, 30)
-      const r = await window.api.settings.set('snapshots', toPlain(this.snapshots))
-      if (r && r.ok === false) {
-        this.snapshots = prev
-        toast(t('pal.snapFail'), 'error')
-      const prev = this.snapshots
-      this.snapshots = [snap, ...this.snapshots].slice(0, 30)
       try {
         const r = await window.api.settings.set('snapshots', toPlain(this.snapshots))
         if (r && r.ok === false) throw new Error(r.error ?? 'refused')
@@ -1342,16 +1314,14 @@ export const useSessions = defineStore('sessions', {
     async deleteSnapshot(id: string): Promise<void> {
       const prev = this.snapshots
       this.snapshots = this.snapshots.filter((s) => s.id !== id)
-      const r = await window.api.settings.set('snapshots', toPlain(this.snapshots))
-      if (r && r.ok === false) {
-        this.snapshots = prev
-        toast(t('pal.snapDeleteFail'), 'error')
       try {
         const r = await window.api.settings.set('snapshots', toPlain(this.snapshots))
         if (r && r.ok === false) throw new Error(r.error ?? 'refused')
       } catch {
+        // Same rollback as save: a refused delete leaves the entry on disk, so
+        // keeping it on screen is the honest state.
         this.snapshots = prev
-        toast(t('app.snapPersistFail'), 'error')
+        toast(t('pal.snapDeleteFail'), 'error')
       }
     },
     /** Replaces the current tabs with a saved snapshot (disconnected). */
@@ -1366,14 +1336,8 @@ export const useSessions = defineStore('sessions', {
           cancelText: t('confirm.cancel')
         })
         if (!ok) return
-      const live = this.tabs.some((t) => t.panes.some((p) => p.status === 'connected'))
-      if (live && this.confirmClose) {
-        const ok = await confirm(t('pal.snapOpenConfirm'), {
-          title: t('app.closeExitTitle'),
-          confirmText: t('app.closeExitOk'),
-          cancelText: t('confirm.cancel')
-        })
-        if (!ok) return
+        // Restoring a snapshot replaces the whole workspace, so wind the live
+        // shells down first — otherwise they linger with no tab pointing at them.
         for (const tab of this.tabs) {
           for (const p of tab.panes) {
             if (p.status === 'connected' && p.sshSessionId) {
@@ -1596,15 +1560,6 @@ export const useSessions = defineStore('sessions', {
       }
     },
     async removeHost(id: string): Promise<void> {
-      this.hosts = await window.api.hosts.delete(id)
-      // A deleted host must not leave its last probe result behind: the stats
-      // and any host that later reuses the id would read it as their own.
-      this.clearReach([id])
-      // Drop the deleted host's probe result too — nothing else ever removes an
-      // id from `reach`, so it would sit there for the life of the process.
-      if (id in this.reach) {
-        const { [id]: _gone, ...rest } = this.reach
-        this.reach = rest
       try {
         this.hosts = await window.api.hosts.delete(id)
       } catch {
@@ -1612,7 +1567,12 @@ export const useSessions = defineStore('sessions', {
         // unreadable file). HostsPage and any other caller must not look like
         // the delete succeeded.
         toast(t('hosts.deleteFail'), 'error')
+        return
       }
+      // Drop the deleted host's probe result too — nothing else ever removes an
+      // id from `reach`, so it would sit there for the life of the process and
+      // the online/offline counts would keep including it.
+      this.clearReach([id])
     },
     /** A copy under a fresh id. Saved passwords stay with the original (they're
      *  keyed by id); the copy asks on first connect. */
@@ -1932,84 +1892,7 @@ export const useSessions = defineStore('sessions', {
         const keyPort = result.keyPort ?? (found.pane.params.port || 22)
         const viaJump = keyCode && keyHost !== found.pane.params.host
         const keyWhere = `${keyHost}${keyPort !== 22 ? ':' + keyPort : ''}`
-        const msg =
-          result.code === 'jump_needs_password'
-            ? t('app.jumpNeedsPassword')
-            : result.code === 'locked'
-              ? t('app.locked')
-              : result.code === 'no-private-key'
-                ? t('app.noPrivateKey')
-            : result.code === 'jump_missing'
-              ? t('app.jumpMissing')
-            : result.code === 'jump_needs_key'
-              ? t('app.jumpNeedsKey')
-              : result.code === 'locked'
-                ? t('app.locked')
-                : result.code === 'host_key_unknown'
-              : result.code === 'secrets_load_failed'
-                ? t('app.secretsLoadFail')
-                : result.code === 'host_key_unknown'
-                ? viaJump
-                  ? t('app.keyUnknownJumpMsg', { host: keyWhere })
-                  : t('app.keyUnknownMsg', { host: keyWhere })
-                : result.code === 'host_key_changed'
-                  ? viaJump
-                    ? t('app.keyUnknownJumpMsg', { host: keyWhere })
-                    : t('app.keyUnknownMsg', { host: keyWhere })
-                  : result.code === 'host_key_changed'
-                    ? viaJump
-                      ? t('app.keyChangedJumpMsg', { host: keyWhere })
-                      : t('app.keyChangedMsg', { host: keyWhere })
-                    : (result.error ?? t('app.connectFail'))
-                    ? t('app.keyChangedJumpMsg', { host: keyWhere })
-                    : t('app.keyChangedMsg', { host: keyWhere })
-                  : result.code === 'jump-forward-timeout'
-                    ? t('app.jumpForwardTimeout')
-                    : result.code === 'jump-connect-failed'
-                      ? t('app.jumpConnectFailed')
-                      : result.code === 'proxy-handshake-timeout'
-                        ? t('app.proxyHandshakeTimeout')
-                        : result.code === 'socks5-version'
-                          ? t('app.socks5Version')
-                          : result.code === 'socks5-auth-required'
-                            ? t('app.socks5AuthRequired')
-                            : result.code === 'socks5-auth-failed'
-                              ? t('app.socks5AuthFailed')
-                              : result.code === 'socks5-connect-failed'
-                                ? t('app.socks5ConnectFailed')
-                                : result.code === 'socks5-addr-type'
-                                  ? t('app.socks5AddrType')
-                                  : result.code === 'http-proxy-failed'
-                                    ? t('app.httpProxyFailed')
-                                    : (result.error ?? t('app.connectFail'))
-                  : result.error === 'channel-closed' || result.error === '已关闭'
-                    ? t('app.channelClosed')
-                    : (result.error ?? t('app.connectFail'))
-
-                  : result.code === 'auth_failed'
-                    ? t('app.authFailed')
-                    : (result.error ?? t('app.connectFail'))
-
-            : result.code === 'needs_key'
-              ? t('app.needsKey')
-              : result.code === 'needs_password'
-                ? t('app.needsPassword')
-            : result.code === 'needs_passphrase'
-              ? t('app.needsPassphrase')
-              : result.code === 'bad_passphrase'
-                ? t('app.badPassphrase')
-                : result.code === 'locked'
-                  ? t('app.locked')
-                  : result.code === 'host_key_unknown'
-                    ? viaJump
-                      ? t('app.keyUnknownJumpMsg', { host: keyWhere })
-                      : t('app.keyUnknownMsg', { host: keyWhere })
-                    : result.code === 'host_key_changed'
-                      ? viaJump
-                        ? t('app.keyChangedJumpMsg', { host: keyWhere })
-                        : t('app.keyChangedMsg', { host: keyWhere })
-                      : (result.error ?? t('app.connectFail'))
-        live.pane.message = msg
+        const msg = connectFailureMessage(result, { viaJump, keyWhere }, t)
         live.pane.errorCode = result.code
         // A refusal that carries a retry delay (the server's connection-rate
         // limiting) must raise the *next* wait, even mid-loop: the drop itself
@@ -2092,26 +1975,6 @@ export const useSessions = defineStore('sessions', {
      *  from the saved host, so it lands on the right entry even when a jump hop
      *  is the one rejected. */
     async trustAndReconnect(paneId: string): Promise<void> {
-      const found = this.findPane(paneId)
-      if (!found) return
-      const { hostKey, hostKeyHost, hostKeyPort } = found.pane
-      // Main only accepts the key it just refused for that host:port; with no
-      // fingerprint captured there is nothing to trust — reconnecting shows the
-      // card again with the key the server presents.
-      if (hostKey) {
-        const host = hostKeyHost ?? found.pane.params.host
-        const r = await window.api.ssh.trustHostKey(host, hostKeyPort ?? (found.pane.params.port || 22), hostKey)
-        if (!r?.ok) {
-          // The key was not written (stale rejection, persist failure, bad
-          // args). Reconnecting here would look like the trust worked and then
-          // bring the rejection card back with no explanation.
-          toast(t('app.trustFail'), 'error')
-          toast(
-            r?.code === 'corrupt' ? t('app.trustFailCorrupt') : t('app.trustFail'),
-            'error'
-          )
-          await this.reconnect(paneId)
-          return
       // Ignore re-entry: the second click would find the rejection already
       // consumed and reconnect on top of the first call's in-flight write.
       if (trustingPanes.has(paneId)) return
@@ -2127,7 +1990,10 @@ export const useSessions = defineStore('sessions', {
           const host = hostKeyHost ?? found.pane.params.host
           const r = await window.api.ssh.trustHostKey(host, hostKeyPort ?? (found.pane.params.port || 22), hostKey)
           if (!r?.ok) {
-            await this.reconnect(paneId)
+            // The key was not written (stale rejection, persist failure, bad
+            // args). Reconnecting here would look like the trust worked and then
+            // bring the rejection card back with no explanation.
+            toast(r?.code === 'corrupt' ? t('app.trustFailCorrupt') : t('app.trustFail'), 'error')
             return
           }
         }
@@ -2176,22 +2042,12 @@ export const useSessions = defineStore('sessions', {
       // also makes any trailing `closed` for this session a no-op.
       pane.sshSessionId = undefined
       pane.status = 'error'
-      const display =
-        message === 'connection-lost' || !message ? t('app.sessionLost') : message
-      pane.message = display
-      // When auto-reconnect is on, the "reconnecting…" banner communicates the
-      // drop without us flooding a toast per attempt.
-      if (!this.autoReconnect) toast(display, 'error')
-      if (this.notifications) {
-        window.api.notify(
-          t('app.sessionDisconnected'),
-          `${pane.params.username}@${pane.params.host}${pane.params.port !== 22 ? `:${pane.params.port}` : ''}\n${display}`,
       // A multiplexed bridge that was already closed reports a machine code
       // (older builds sent the Chinese literal); show it in the UI language
       // instead of leaking either into the pane / toast / notification.
       const lostMsg =
         message === 'channel-closed' || message === '已关闭' ? t('app.channelClosed') : message
-      if (lostMsg) pane.message = lostMsg
+      pane.message = lostMsg ?? t('app.sessionLost')
       // When auto-reconnect is on, the "reconnecting…" banner communicates the
       // drop without us flooding a toast per attempt.
       if (!this.autoReconnect) toast(lostMsg ?? t('app.sessionLost'), 'error')
@@ -2254,26 +2110,14 @@ export const useSessions = defineStore('sessions', {
         const after = this.findPane(paneId)
         if (!after) return
         if (after.pane.status === 'connected') {
-        if (after.pane.status === 'connected') after.pane.reconnectAttempt = undefined
-        // A refused host key won't fix itself by retrying: stop, and leave the
-        // card (with its fingerprint) for the user to decide.
-        else if (
-          after.pane.errorCode === 'host_key_unknown' ||
-          after.pane.errorCode === 'host_key_changed' ||
-          after.pane.errorCode === 'needs_passphrase' ||
-          after.pane.errorCode === 'bad_passphrase'
-        ) {
           after.pane.reconnectAttempt = undefined
           after.pane.reconnectMinDelayMs = undefined
-        }
-        // A refused host key won't fix itself by retrying: stop, and leave the
-        if (after.pane.status === 'connected') after.pane.reconnectAttempt = undefined
-        // A permanent code won't fix itself by retrying: stop, and leave the
-        // card (with its fingerprint) for the user to decide.
-        else if (after.pane.errorCode) {
-          // Permanent codes (auth_failed / locked / jump_* / host_key_*): retrying
-          // cannot help and may hammer credentials. Android ReconnectPolicy already
-          // treats auth as permanent; desktop must match.
+        } else if (after.pane.errorCode) {
+          // Permanent codes (auth_failed / locked / jump_* / host_key_* /
+          // needs_passphrase / bad_passphrase): retrying cannot help and may
+          // hammer credentials. Android's ReconnectPolicy already treats auth
+          // as permanent; desktop must match. Leaving the card up lets the user
+          // act on it instead of watching a loop that can never succeed.
           after.pane.reconnectAttempt = undefined
           after.pane.reconnectMinDelayMs = undefined
         } else this.scheduleReconnect(paneId)
@@ -2361,27 +2205,17 @@ export const useSessions = defineStore('sessions', {
     },
 
     async closeOthers(id: string): Promise<void> {
-      if (closeOthersNeedsConfirm(this.confirmClose, this.tabs, id)) {
-        const ok = await confirm(t('tabbar.closeOthersConfirm'), {
-          danger: true,
       const otherTabs = this.tabs.filter((t) => t.id !== id)
-      const live = otherTabs.some((t) => t.panes.some((p) => p.status === 'connected'))
-      if (live && this.confirmClose) {
+      if (closeOthersNeedsConfirm(this.confirmClose, this.tabs, id)) {
         const ok = await confirm(t('tabbar.closeOthersConfirm', { n: otherTabs.length }), {
           title: t('app.closeExitTitle'),
           confirmText: t('app.closeExitOk'),
-          cancelText: t('confirm.cancel')
+          cancelText: t('confirm.cancel'),
+          danger: true
         })
         if (!ok) return
-        for (const tab of this.tabs) {
-          if (tab.id === id) continue
-          for (const p of tab.panes) {
-            if (p.status === 'connected' && p.sshSessionId) void window.api.ssh.input(p.sshSessionId, 'exit\n')
-          }
-        }
-      }
-      const others = this.tabs.filter((t) => t.id !== id).map((t) => t.id)
-      others.forEach((oid) => this.closeTab(oid))
+        // Wind the live shells down before the tabs go away, so the remote
+        // side sees a clean exit rather than a dropped connection.
         for (const tab of otherTabs) {
           for (const p of tab.panes) {
             if (p.status === 'connected' && p.sshSessionId) {

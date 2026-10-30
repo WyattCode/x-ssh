@@ -74,28 +74,18 @@ async function add(): Promise<void> {
       remoteHost: form.host.trim() || '127.0.0.1',
       remotePort: form.mode === 'dynamic' ? 0 : rp
     })
-    if (!r.ok) err.value = r.error ?? t('fw.fail')
-    else {
+    if (!r.ok) {
+      // Dialog dismissible; keep inline err and toast so a bind failure is not
+      // lost when the user closes it straight away.
+      const msg = r.error ?? t('fw.fail')
+      err.value = msg
+      toast(msg, 'error')
+    } else {
       form.localPort = ''
       form.remotePort = ''
     }
   } finally {
     busy.value = false
-  const r = await store.addForward({
-    mode: form.mode,
-    localPort: lp,
-    remoteHost: form.host.trim() || '127.0.0.1',
-    remotePort: form.mode === 'dynamic' ? 0 : rp
-  })
-  busy.value = false
-  if (!r.ok) {
-    // Dialog dismissible; keep inline err and toast so a bind failure is not lost.
-    const msg = r.error ?? t('fw.fail')
-    err.value = msg
-    toast(msg, 'error')
-  } else {
-    form.localPort = ''
-    form.remotePort = ''
   }
 }
 
@@ -116,14 +106,14 @@ async function remove(mode: ForwardMode | undefined, localPort: number): Promise
   if (!(await confirm(t('fwp.removeConfirm', { rule: label }), { danger: true, confirmText: t('fw.remove') }))) return
   removing.value = true
   try {
-    await store.removeForward(mode, localPort)
+    // Await the result: a failed stop used to leave the rule in the list with
+    // no error at all (the forwards page already awaits + toasts; this dialog
+    // did not).
+    const r = await store.removeForward(mode, localPort)
+    if (!r.ok) toast(r.error ?? t('fw.removeFail'), 'error')
   } finally {
     removing.value = false
   }
-  // Await the result: a failed stop used to leave the rule in the list with no
-  // error at all (the page already awaits + toasts; this dialog did not).
-  const r = await store.removeForward(mode, localPort)
-  if (!r.ok) toast(r.error ?? t('fw.removeFail'), 'error')
 }
 </script>
 

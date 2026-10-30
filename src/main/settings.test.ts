@@ -77,7 +77,10 @@ describe('SettingsStore', () => {
     expect(await next.status()).toBe('bad')
     const beforeMain = await readFile(file())
     const beforeBak = await readFile(bak())
-    await next.set('openTabs', [])
+    // set() now fails loudly instead of silently doing nothing: a refused write
+    // that looks successful is exactly the class of bug this store exists to
+    // prevent, so the caller (IPC) learns the setting was not stored.
+    await expect(next.set('openTabs', [])).rejects.toThrow()
     await next.flush()
     expect(await readFile(file())).toEqual(beforeMain)
     expect(await readFile(bak())).toEqual(beforeBak)

@@ -3,9 +3,9 @@ import {
   friendlyError,
   isAuthConnectError,
   isTransientConnectError,
-  penaltyRetryDelayMs
+  penaltyRetryDelayMs,
+  passphraseConnectCode
 } from './friendlyError'
-import { friendlyError, isTransientConnectError, penaltyRetryDelayMs, passphraseConnectCode } from './friendlyError'
 
 describe('friendlyError', () => {
   it('names the rate-limit refusal instead of a generic reset', () => {
@@ -68,6 +68,9 @@ describe('isAuthConnectError', () => {
   it('does not flag plain network errors', () => {
     expect(isAuthConnectError('read ECONNRESET')).toBe(false)
     expect(isAuthConnectError('connect ETIMEDOUT')).toBe(false)
+  })
+})
+
 describe('passphraseConnectCode', () => {
   it('flags missing passphrase', () => {
     expect(
