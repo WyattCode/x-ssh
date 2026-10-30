@@ -117,7 +117,16 @@ fun HostKeyGate(
         onEnter = if (changed) null else onTrust,
         body = {
             if (changed) {
-                FingerprintCard(stringResource(R.string.host_gate_last_recorded), host.keyFingerprint, p.textDim)
+                // 可能已信任多把:全部列出来,方便对照"是不是轮换还是中间人"。
+                host.trustedHostKeys().forEachIndexed { index, fp ->
+                    if (index > 0) Spacer(Modifier.height(GapItem))
+                    FingerprintCard(
+                        if (host.trustedHostKeys().size == 1) stringResource(R.string.host_gate_last_recorded)
+                        else stringResource(R.string.host_gate_last_recorded) + " (${index + 1})",
+                        fp,
+                        p.textDim,
+                    )
+                }
                 Spacer(Modifier.height(GapItem))
                 FingerprintCard(stringResource(R.string.host_gate_received_now), fingerprint, p.danger)
             } else {

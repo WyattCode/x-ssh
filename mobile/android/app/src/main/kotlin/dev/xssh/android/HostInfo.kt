@@ -126,18 +126,28 @@ fun HostInfoGroups(host: Host, onPin: ((Host) -> Unit)? = null) {
     }
     Spacer(Modifier.height(24.dp))
     FormGroup(title = stringResource(R.string.host_group_host_key)) {
-        if (host.keyFingerprint.isBlank()) {
+        val trusted = host.trustedHostKeys()
+        if (trusted.isEmpty()) {
             InfoRow(stringResource(R.string.host_status), stringResource(R.string.host_unconfirmed), valueColor = p.warn)
         } else {
             // 指纹 11 字一组、两组一行(和确认主机身份那一页同一个断法),逐段比对时断点落在同一处。
-            val (algorithm, rows) = fingerprintRows(host.keyFingerprint)
-            Column(Modifier.fillMaxWidth().padding(horizontal = BoxPad, vertical = 14.dp)) {
-                Text(algorithm.ifBlank { stringResource(R.string.host_fingerprint) }, color = p.textDim, fontSize = 13.sp)
-                Spacer(Modifier.height(6.dp))
-                SelectionContainer {
-                    Column {
-                        rows.forEach {
-                            Text(it, color = p.text, fontSize = 15.sp, fontFamily = XsshFonts.monoUi)
+            // 多把已信任密钥各显示一块(轮换后旧的仍在)。
+            trusted.forEachIndexed { index, fp ->
+                if (index > 0) FormDivider()
+                val (algorithm, rows) = fingerprintRows(fp)
+                Column(Modifier.fillMaxWidth().padding(horizontal = BoxPad, vertical = 14.dp)) {
+                    val label = algorithm.ifBlank { stringResource(R.string.host_fingerprint) }
+                    Text(
+                        if (trusted.size == 1) label else "$label (${index + 1}/${trusted.size})",
+                        color = p.textDim,
+                        fontSize = 13.sp,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    SelectionContainer {
+                        Column {
+                            rows.forEach {
+                                Text(it, color = p.text, fontSize = 15.sp, fontFamily = XsshFonts.monoUi)
+                            }
                         }
                     }
                 }

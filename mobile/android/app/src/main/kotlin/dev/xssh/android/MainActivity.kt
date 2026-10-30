@@ -306,7 +306,8 @@ fun App(devTarget: DevTarget? = null) {
                 },
                 onTrustKey = { host, fingerprint ->
                     // 换一个 Host 实例 → 终端的 remember(host) 失效 → 带着新指纹重连。
-                    persist(hosts.map { if (it.id == host.id) it.copy(keyFingerprint = fingerprint) else it })
+                    // 追加信任,不抹掉这台主机已有的其它主机密钥。
+                    persist(hosts.map { if (it.id == host.id) it.withTrustedHostKey(fingerprint) else it })
                 },
                 onPin = { pinned -> persist(hosts.map { if (it.id == pinned.id) pinned else it }) },
                 onConnected = { id ->
@@ -580,13 +581,32 @@ private fun PhoneFlow(
             }
             fun trustKey(host: Host, fingerprint: String) {
                 val trusted = host.copy(keyFingerprint = fingerprint)
+        is Screen.Terminal -> TerminalScreen(
+            host = current.host,
+            onExit = {
+                onTerminalHost(null)
+                onScreen(land(current.back))
+            },
+            onTrustKey = { fingerprint ->
+                // 换一个 Host 实例 → 终端屏的 remember(host) 失效 → 带着新指纹重连。
+                // 追加信任,不抹掉这台主机已有的其它主机密钥。
+                val trusted = current.host.withTrustedHostKey(fingerprint)
                 if (hosts.any { it.id == trusted.id }) {
-                    persist(hosts.map { if (it.id == trusted.id) it.copy(keyFingerprint = fingerprint) else it })
+                    persist(hosts.map { if (it.id == trusted.id) it.withTrustedHostKey(fingerprint) else it })
                 }
                 // 主窗格指纹变了要换 Screen 里的 Host 实例以触发重连。
                 if (current.host.id == trusted.id) onScreen(current.copy(host = trusted))
             }
             fun connected(id: String) {
+                onScreen(current.copy(host = trusted))
+            },
+            // 跳板机的指纹存到跳板机那台上;主机表一变,终端屏拿到新的跳板机实例,随之重连。
+            onTrustJumpKey = { jump, fingerprint ->
+                persist(hosts.map { if (it.id == jump.id) it.withTrustedHostKey(fingerprint) else it })
+            },
+            onFiles = { onScreen(Screen.Files(current)) },
+            // 连上 / 接管的那一刻记一笔"最近使用"(失败和自动重连不算)。
+            onConnected = { id ->
                 persist(hosts.map { if (it.id == id) it.copy(lastUsed = System.currentTimeMillis()) else it })
             }
             if (pickingBeside) {

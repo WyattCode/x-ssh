@@ -357,10 +357,11 @@ fun openTransport(host: Host, jump: Host?, cols: Int, rows: Int): Pair<Session, 
         host.port.toUShort(),
         host.username,
         authOf(host),
-        knownKey = host.keyFingerprint.ifBlank { null },
+        // 多把已信任指纹用换行拼进 known_key;核心 verify_host_key 认其中任意一把。
+        knownKey = host.trustedHostKeys().joinToString("\n").ifBlank { null },
         // 跳板机的密钥单独验、单独存(见 FfiException.JumpHostKey*)。
         jump = jump?.let {
-            JumpHost(it.address, it.port.toUShort(), it.username, authOf(it), it.keyFingerprint.ifBlank { null })
+            JumpHost(it.address, it.port.toUShort(), it.username, authOf(it), it.trustedHostKeys().joinToString("\n").ifBlank { null })
         },
     )
     val started = System.currentTimeMillis()

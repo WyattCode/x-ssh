@@ -276,7 +276,7 @@ const zh: Dict = {
 
   // settings security
   'set.sec.known': '主机密钥 (known_hosts)',
-  'set.sec.knownDesc': '首次连接的服务器指纹在此记录;再次连接若指纹变更会中止并告警(疑似中间人)。删除后可重新信任。',
+  'set.sec.knownDesc': '首次连接的服务器指纹在此记录;一台主机可同时信任多把密钥,轮换时旧指纹保留。再次连接若都不匹配会中止并告警(疑似中间人)。删除后可重新信任。',
   'set.sec.empty': '暂无记录',
   'set.sec.delete': '删除',
   'set.sec.keyAge': '首次信任至今',
@@ -1054,7 +1054,7 @@ const en: Dict = {
   'set.conn.confirmCloseDesc': 'Ask before closing a tab/pane that is still connected; an `exit` is sent first',
 
   'set.sec.known': 'Host keys (known_hosts)',
-  'set.sec.knownDesc': 'First-connect fingerprints are recorded here; a later mismatch aborts with a warning (possible MITM). Delete to re-trust.',
+  'set.sec.knownDesc': 'First-connect fingerprints are recorded here; a host may trust several keys so rotation keeps prior trust. A later mismatch against all of them aborts with a warning (possible MITM). Delete to re-trust.',
   'set.sec.empty': 'No entries',
   'set.sec.delete': 'Delete',
   'set.sec.keyAge': 'Trusted since',
@@ -1837,7 +1837,7 @@ const zhTW: Dict = {
 
   // settings security
   'set.sec.known': '主機金鑰 (known_hosts)',
-  'set.sec.knownDesc': '首次連線的伺服器指紋會記錄在此;再次連線時若指紋變更將中止並發出警告(疑似中間人攻擊)。刪除後可重新信任。',
+  'set.sec.knownDesc': '首次連線的伺服器指紋會記錄在此;同一主機可同時信任多把金鑰,輪換時舊指紋保留。再次連線若都不符合將中止並發出警告(疑似中間人攻擊)。刪除後可重新信任。',
   'set.sec.empty': '尚無紀錄',
   'set.sec.delete': '刪除',
   'set.sec.keyAge': '首次信任至今',
