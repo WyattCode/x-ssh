@@ -127,6 +127,16 @@ class TerminalSession(
     private val _frame = MutableStateFlow(TerminalFrame())
     val frame: StateFlow<TerminalFrame> = _frame
 
+    private val _keyHalt = MutableStateFlow<KeyHalt?>(null)
+    val keyHalt: StateFlow<KeyHalt?> = _keyHalt
+    private val _reconnectFailHint = MutableStateFlow<ReconnectFailHint?>(null)
+    val reconnectFailHint: StateFlow<ReconnectFailHint?> = _reconnectFailHint
+
+    fun clearReconnectHalt() {
+        _keyHalt.value = null
+        _reconnectFailHint.value = null
+    }
+
     /**
      * 链路状态:0 = 连着,>0 = 正在自动重连(第几次)。
      *
@@ -260,13 +270,19 @@ class TerminalSession(
                 files.rebind(live.session)
                 _frame.value = _frame.value.copy(reconnecting = 0)
                 _linkState.value = 0
+                clearReconnectHalt()
                 Log.i(TAG, "reconnected ($label) on attempt $attempt")
                 return true
             }
             val error = result.exceptionOrNull() ?: continue
             lastError = error
             Log.w(TAG, "reconnect $attempt failed ($label): [${error.javaClass.simpleName}] ${error.message}")
-            if (ReconnectPolicy.isPermanent(error)) break
+            if (ReconnectPolicy.isPermanent(error)) {
+                val halt = hostKeyHalt(error)
+                if (halt != null) _keyHalt.value = halt
+                else _reconnectFailHint.value = reconnectFailHint(error)
+                break
+            }
         }
         _frame.value = _frame.value.copy(reconnecting = 0)
         _linkState.value = 0
@@ -352,6 +368,7 @@ class TerminalSession(
     fun scrollToBottom() = enqueue { live.scrollToBottom(); publishFrame() }
 
     internal fun shutdown() {
+        clearReconnectHalt()
         credentials = null
         jumpCredentials = null
         job.cancel()

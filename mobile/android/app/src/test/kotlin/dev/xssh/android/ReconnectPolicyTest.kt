@@ -106,6 +106,28 @@ class ReconnectPolicyTest {
     }
 
     @Test
+    fun `hostKeyHalt maps fingerprints and ignores empty`() {
+        val h = hostKeyHalt(FfiException.HostKeyChanged("SHA256:abc"))!!
+        assertEquals("SHA256:abc", h.fingerprint)
+        assertTrue(h.changed)
+        assertFalse(h.jump)
+        val j = hostKeyHalt(FfiException.JumpHostKeyUnknown("SHA256:j"))!!
+        assertTrue(j.jump)
+        assertFalse(j.changed)
+        assertEquals(null, hostKeyHalt(FfiException.HostKeyUnknown("  ")))
+        assertEquals(null, hostKeyHalt(FfiException.Message("authentication failed")))
+    }
+
+    @Test
+    fun `reconnectFailHint covers auth and passphrase only`() {
+        assertEquals(ReconnectFailHint.Auth, reconnectFailHint(FfiException.Message("authentication failed")))
+        assertEquals(ReconnectFailHint.KeyPassphrase, reconnectFailHint(FfiException.KeyEncrypted("x")))
+        assertEquals(null, reconnectFailHint(FfiException.HostKeyChanged("SHA256:x")))
+        assertEquals(null, reconnectFailHint(FfiException.Message("connection refused")))
+    }
+
+
+    @Test
     fun `plain output keeps the link alive`() {
         assertEquals(LinkOutcome.Alive, linkOutcome(emptyList()))
         assertEquals(LinkOutcome.Alive, linkOutcome(listOf(ServerEvent.Data(byteArrayOf(0x41)), ServerEvent.Eof)))

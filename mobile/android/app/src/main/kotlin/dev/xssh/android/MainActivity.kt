@@ -36,6 +36,7 @@ import android.view.KeyEvent
 import android.view.KeyboardShortcutGroup
 import android.view.KeyboardShortcutInfo
 import android.view.Menu
+import android.widget.Toast
 
 class MainActivity : ComponentActivity() {
     /**
@@ -290,6 +291,8 @@ fun App(devTarget: DevTarget? = null) {
                 context.getString(R.string.host_seal_failed),
                 android.widget.Toast.LENGTH_LONG,
             ).show()
+        if (!store.save(sorted)) {
+            Toast.makeText(context, R.string.hosts_persist_failed, Toast.LENGTH_LONG).show()
         }
     }
 

@@ -502,6 +502,8 @@ fun TerminalScreen(
             onFocusRequest = onFocusRequest,
             onOpenBeside = onOpenBeside,
             onSwapPanes = onSwapPanes,
+            onTrustKey = onTrustKey,
+            onTrustJumpKey = onTrustJumpKey,
         )
     }
 }
@@ -519,6 +521,8 @@ private fun TerminalView(
     onFocusRequest: () -> Unit = {},
     onOpenBeside: (() -> Unit)? = null,
     onSwapPanes: (() -> Unit)? = null,
+    onTrustKey: (String) -> Unit,
+    onTrustJumpKey: (Host, String) -> Unit,
 ) {
     val p = LocalXssh.current
     // Disconnect / leave must be one-shot: a double-tap would pop the nav stack twice.
@@ -545,6 +549,27 @@ private fun TerminalView(
         if (reconnectTapped) return
         reconnectTapped = true
         onReconnect()
+    val keyHalt by live.keyHalt.collectAsState()
+    val failHint by live.reconnectFailHint.collectAsState()
+    val jumpHost = host.jumpHostId.takeIf { it.isNotEmpty() }
+        ?.let { id -> LocalHosts.current.firstOrNull { it.id == id } }
+    val halt = keyHalt
+    if (halt != null) {
+        val keyHost = if (halt.jump) jumpHost ?: host else host
+        HostKeyGate(
+            host = keyHost,
+            fingerprint = halt.fingerprint,
+            changed = halt.changed,
+            tablet = tablet != null,
+            jumpFor = if (halt.jump) host else null,
+            onTrust = {
+                live.clearReconnectHalt()
+                if (halt.jump && jumpHost != null) onTrustJumpKey(jumpHost, halt.fingerprint)
+                else onTrustKey(halt.fingerprint)
+            },
+            onExit = onExit,
+        )
+        return
     }
     val scope = rememberCoroutineScope()
     val keyboard = LocalSoftwareKeyboardController.current
@@ -636,6 +661,10 @@ private fun TerminalView(
     val dead by remember { derivedStateOf { !frameState.value.alive } }
     // 断线后正在自动重连的第几次;0 = 没在重连。
     val reconnecting by remember { derivedStateOf { frameState.value.reconnecting } }
+    val deadFailHint = if (dead) when (failHint) {
+        ReconnectFailHint.Auth, ReconnectFailHint.KeyPassphrase -> stringResource(R.string.term_reconnect_auth_failed)
+        null -> null
+    } else null
     val scrolled by remember { derivedStateOf { frameState.value.scrollOffset > 0 } }
     val hasSelection by remember { derivedStateOf { frameState.value.selection != null } }
     val canFling by remember {
@@ -1170,7 +1199,7 @@ private fun TerminalView(
             // 直板机原来这一行右边挤着四颗按钮,全屏程序的头几行被压着(用户实测的抱怨);
             // 按钮挪到底下以后,名字留在顶上 —— 标题在上、操作在下,安卓手机的通常排法,
             // 也和折叠屏同一个样子。试过把名字放到底下按钮左边,用户否掉了。
-            HostLine(host = host, dead = dead, reconnecting = reconnecting)
+            HostLine(host = host, dead = dead, reconnecting = reconnecting, failHint = deadFailHint)
         }
     }
 
@@ -1428,7 +1457,7 @@ private fun FloatingKeys(columns: Int, content: @Composable (keyWidth: Dp) -> Un
  * 原来这里是一条 56dp 的 bgElev 横条,还塞着键盘和断开两个按钮,把终端从顶上压掉一块。
  */
 @Composable
-private fun HostLine(host: Host, dead: Boolean, reconnecting: Int = 0) {
+private fun HostLine(host: Host, dead: Boolean, reconnecting: Int = 0, failHint: String? = null) {
     val p = LocalXssh.current
     Row(
         Modifier.fillMaxWidth().padding(start = Gutter, end = Gutter, top = 10.dp, bottom = 8.dp),
@@ -1448,7 +1477,7 @@ private fun HostLine(host: Host, dead: Boolean, reconnecting: Int = 0) {
         // 「已断开」是状态,必须显示,放不下时顶掉的是名字(名字自己省略)。
         // 重连中和已断开一样是状态,必须显示(放不下时顶掉的是名字)。
         val detail = when {
-            dead -> stringResource(R.string.term_disconnected)
+            dead -> failHint ?: stringResource(R.string.term_disconnected)
             reconnecting > 0 -> reconnectingText(reconnecting)
             else -> host.subtitle
         }

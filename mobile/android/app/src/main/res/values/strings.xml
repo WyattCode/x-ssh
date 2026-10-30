@@ -201,6 +201,7 @@
     <string name="host_seal_failed">Couldn\'t save the password securely — kept the previous one. Other changes were saved.</string>
     <string name="host_username">Username</string>
     <string name="hosts_persist_refused">Couldn\'t update hosts — kept your saved list</string>
+    <string name="hosts_persist_failed">Couldn\'t save hosts</string>
     <string name="main_sc_close_session">Disconnect current session</string>
     <string name="main_sc_edit_host">Edit host</string>
     <string name="main_sc_ime">Terminal: switch input method / direct English</string>
@@ -287,6 +288,7 @@
     <string name="term_disconnect">Disconnect</string>
     <string name="term_disconnect_session">Disconnect</string>
     <string name="term_disconnected">Disconnected</string>
+    <string name="term_reconnect_auth_failed">Disconnected · authentication failed</string>
     <string name="term_err_cancelled">All sessions were disconnected</string>
     <string name="term_err_jump_gone">This host\'s jump host has been deleted.</string>
     <string name="term_err_jump_key_passphrase_needed">The private key of jump host \"%1$s\" has a passphrase.</string>
