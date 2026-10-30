@@ -64,6 +64,39 @@ export function isTransientConnectError(raw: string | undefined): boolean {
   )
 }
 
+/** Passphrase / encrypted-key parse failures (not generic auth_failed). */
+export type PassphraseConnectCode = 'needs_passphrase' | 'bad_passphrase'
+
+/**
+ * When `raw` is an encrypted-key / passphrase error, return a stable code.
+ * `hadPassphrase` distinguishes "none given" vs "wrong" when the message is
+ * ambiguous (Android uses the same rule for KeyEncrypted).
+ * Accepts already-mapped Chinese so a second pass stays stable.
+ */
+export function passphraseConnectCode(
+  raw: string | undefined,
+  hadPassphrase: boolean
+): PassphraseConnectCode | undefined {
+  const m = (raw ?? '').toLowerCase()
+  const zh = raw ?? ''
+  const isPass =
+    m.includes('no passphrase given') ||
+    m.includes('encrypted private key') ||
+    m.includes('encrypted private openssh') ||
+    m.includes('encrypted openssh') ||
+    m.includes('encrypted ppk') ||
+    m.includes('integrity check') ||
+    m.includes('bad passphrase') ||
+    (m.includes('passphrase') && (m.includes('privatekey') || m.includes('private key') || m.includes('cannot parse'))) ||
+    m.includes('cannot parse privatekey') ||
+    zh.includes('私钥无法解析') ||
+    zh.includes('密码短语不正确') ||
+    zh.includes('密碼短語')
+  if (!isPass) return undefined
+  if (m.includes('no passphrase given') || !hadPassphrase) return 'needs_passphrase'
+  return 'bad_passphrase'
+}
+
 /**
  * How long to wait before the automatic first retry when the refusal came from
  * the server's connection-rate limiting: each refused attempt is itself a

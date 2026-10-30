@@ -1509,17 +1509,21 @@ export const useSessions = defineStore('sessions', {
         const msg =
           result.code === 'jump_needs_password'
             ? t('app.jumpNeedsPassword')
-            : result.code === 'locked'
-              ? t('app.locked')
-              : result.code === 'host_key_unknown'
-                ? viaJump
-                  ? t('app.keyUnknownJumpMsg', { host: keyWhere })
-                  : t('app.keyUnknownMsg', { host: keyWhere })
-                : result.code === 'host_key_changed'
-                  ? viaJump
-                    ? t('app.keyChangedJumpMsg', { host: keyWhere })
-                    : t('app.keyChangedMsg', { host: keyWhere })
-                  : (result.error ?? t('app.connectFail'))
+            : result.code === 'needs_passphrase'
+              ? t('app.needsPassphrase')
+              : result.code === 'bad_passphrase'
+                ? t('app.badPassphrase')
+                : result.code === 'locked'
+                  ? t('app.locked')
+                  : result.code === 'host_key_unknown'
+                    ? viaJump
+                      ? t('app.keyUnknownJumpMsg', { host: keyWhere })
+                      : t('app.keyUnknownMsg', { host: keyWhere })
+                    : result.code === 'host_key_changed'
+                      ? viaJump
+                        ? t('app.keyChangedJumpMsg', { host: keyWhere })
+                        : t('app.keyChangedMsg', { host: keyWhere })
+                      : (result.error ?? t('app.connectFail'))
         live.pane.message = msg
         live.pane.errorCode = result.code
         // Host-key rejection: stash what the user is being asked to trust —
@@ -1697,7 +1701,12 @@ export const useSessions = defineStore('sessions', {
         if (after.pane.status === 'connected') after.pane.reconnectAttempt = undefined
         // A refused host key won't fix itself by retrying: stop, and leave the
         // card (with its fingerprint) for the user to decide.
-        else if (after.pane.errorCode === 'host_key_unknown' || after.pane.errorCode === 'host_key_changed') {
+        else if (
+          after.pane.errorCode === 'host_key_unknown' ||
+          after.pane.errorCode === 'host_key_changed' ||
+          after.pane.errorCode === 'needs_passphrase' ||
+          after.pane.errorCode === 'bad_passphrase'
+        ) {
           after.pane.reconnectAttempt = undefined
         } else this.scheduleReconnect(paneId, { minDelayMs: opts.minDelayMs })
       }, delay)

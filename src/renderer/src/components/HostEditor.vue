@@ -254,6 +254,12 @@ async function generateKey(e?: Event): Promise<void> {
   }
   keyModal.open = false
   form.keyPath = r.key.path
+  // Keep the passphrase the user just typed for generation — otherwise canSave
+  // would still block a passphraseProtected key, and connect would fail late.
+  if (keyModal.passphrase) {
+    passphrase.value = keyModal.passphrase
+    keyModal.passphrase = ''
+  }
   await loadKeys()
   if (r.key.passphraseProtected === false) toast(t('host.keyUnprotected'), 'info')
 }
@@ -281,7 +287,26 @@ async function deleteKey(k: ManagedKey): Promise<void> {
   panelEl.value?.focus()
 }
 
-const canSave = (): boolean => !!form.host && !!form.username
+const selectedManagedKey = (): ManagedKey | undefined =>
+  managedKeys.value.find((k) => k.path === form.keyPath)
+
+/** True when the chosen managed key is known to be encrypted and we have no
+ *  typed passphrase and no previously saved one — Android refuses this at save. */
+const keyPassphraseMissing = (): boolean => {
+  if (form.auth !== 'key') return false
+  if (passphrase.value) return false
+  if (props.host?.hasSavedPassphrase) return false
+  return selectedManagedKey()?.passphraseProtected === true
+}
+
+const canSave = (): boolean =>
+  !!form.host && !!form.username && !keyPassphraseMissing()
+
+const saveBlockReason = (): string => {
+  if (!form.host || !form.username) return t('host.saveDisabled')
+  if (keyPassphraseMissing()) return t('host.passphraseRequired')
+  return ''
+}
 
 // ---- Tags: type, Enter (or comma) adds; Backspace on an empty box removes the last ----
 const tagDraft = ref('')
@@ -673,7 +698,7 @@ async function remove(): Promise<void> {
           <button v-if="host" type="button" class="btn btn-danger" @click="remove">{{ t('host.delete') }}</button>
           <span class="spacer" />
           <button type="button" class="btn" @click="void requestClose()">{{ t('host.cancel') }}</button>
-          <button type="button" class="btn btn-primary" :disabled="!canSave()" :title="canSave() ? undefined : t('host.saveDisabled')" @click="save">{{ t('host.save') }}</button>
+          <button type="button" class="btn btn-primary" :disabled="!canSave()" :title="canSave() ? undefined : saveBlockReason()" @click="save">{{ t('host.save') }}</button>
         </footer>
 
         <!-- Generate a key: a small sheet over the panel. -->

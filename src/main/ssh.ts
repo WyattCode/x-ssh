@@ -23,7 +23,7 @@ import type {
   UploadOverwrite
 } from '../shared/types'
 import { KnownHosts } from './knownHosts'
-import { friendlyError, isTransientConnectError, penaltyRetryDelayMs } from './friendlyError'
+import { friendlyError, isTransientConnectError, passphraseConnectCode, penaltyRetryDelayMs } from './friendlyError'
 import { posixJoin, parentOf, clampConcurrency, buildPackCommand, buildExtractCommand, treeDirMode } from '../shared/fsUtils'
 
 /** Streams a local file through SHA-256 and resolves its lowercase hex digest. */
@@ -417,9 +417,19 @@ export class SshManager {
           Object.assign(config, auth)
           client.connect(config)
         })
-        .catch((e) => fail(friendlyError((e as Error).message)))
+        .catch((e) => {
+          const raw = (e as Error).message
+          fail(friendlyError(raw), {
+            code: passphraseConnectCode(raw, !!jump.passphrase)
+          })
+        })
       client.on('error', (err) => {
-        if (!keyRejected) return fail(friendlyError(err.message))
+        if (!keyRejected) {
+          const raw = err.message
+          return fail(friendlyError(raw), {
+            code: passphraseConnectCode(raw, !!jump.passphrase)
+          })
+        }
         fail('跳板机主机密钥未获信任,连接已中止', {
           code: keyUnknown ? 'host_key_unknown' : 'host_key_changed',
           key: lastKey,
@@ -923,7 +933,12 @@ export class SshManager {
       jumpClient?.end()
       ;(config.sock as Duplex | Socket | undefined)?.destroy()
       this.sessions.delete(id)
-      return { ok: false, error: friendlyError((err as Error).message) }
+      const raw = (err as Error).message
+      return {
+        ok: false,
+        error: friendlyError(raw),
+        code: passphraseConnectCode(raw, !!params.passphrase)
+      }
     }
 
     // -A: forward the local agent so the remote host (and any hosts it jumps
@@ -1056,7 +1071,11 @@ export class SshManager {
           error: message,
           transient: !keyRejected && isTransientConnectError(raw),
           retryDelayMs: penaltyRetryDelayMs(raw),
-          code: keyRejected ? (keyUnknown ? 'host_key_unknown' : 'host_key_changed') : undefined,
+          code: keyRejected
+            ? keyUnknown
+              ? 'host_key_unknown'
+              : 'host_key_changed'
+            : passphraseConnectCode(raw, !!params.passphrase),
           key: keyRejected ? lastKey : undefined,
           keyHost: keyRejected ? params.host : undefined,
           keyPort: keyRejected ? port : undefined

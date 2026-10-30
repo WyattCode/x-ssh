@@ -79,6 +79,8 @@ const zh: Dict = {
   'app.closeExitTitle': '关闭活跃会话',
   'app.closeExitOk': '发送 exit 并关闭',
   'app.jumpNeedsPassword': '跳板机需要密码,但没有已保存的密码。请在「主机」编辑页为跳板主机设置密码后重试,或改用密钥认证。',
+  'app.needsPassphrase': '这把私钥有口令,但没有已保存的密码短语。请在「主机」编辑页填写后重试。',
+  'app.badPassphrase': '私钥密码短语不正确。请在「主机」编辑页更正后重试。',
 
   // settings tabs
   'tab.general': '通用',
@@ -702,6 +704,7 @@ const zh: Dict = {
   'host.cancel': '取消',
   'host.save': '保存',
   'host.saveDisabled': '请填写主机地址和用户名',
+  'host.passphraseRequired': '该私钥已加密,请填写密码短语后再保存',
   'host.discardConfirm': '放弃未保存的修改?',
   'host.discard': '放弃修改',
   'host.pickKey': '选择私钥',
@@ -861,6 +864,8 @@ const en: Dict = {
   'app.closeExitTitle': 'Close active session',
   'app.closeExitOk': 'Send exit & close',
   'app.jumpNeedsPassword': 'The jump host requires a password, but none is saved. Set one on the jump host profile (or switch to key auth) and retry.',
+  'app.needsPassphrase': 'This private key has a passphrase, but none is saved. Enter it on the host profile and retry.',
+  'app.badPassphrase': 'Wrong private key passphrase. Correct it on the host profile and retry.',
 
   'tab.general': 'General',
   'tab.terminal': 'Terminal',
@@ -1475,6 +1480,7 @@ const en: Dict = {
   'host.cancel': 'Cancel',
   'host.save': 'Save',
   'host.saveDisabled': 'Fill in the host address and username',
+  'host.passphraseRequired': 'This private key is encrypted — enter its passphrase before saving',
   'host.discardConfirm': 'Discard unsaved changes?',
   'host.discard': 'Discard',
   'host.pickKey': 'Choose private key',
@@ -1636,6 +1642,8 @@ const zhTW: Dict = {
   'app.closeExitTitle': '關閉作用中的工作階段',
   'app.closeExitOk': '傳送 exit 並關閉',
   'app.jumpNeedsPassword': '跳板機需要密碼,但沒有已儲存的密碼。請在「主機」編輯頁為跳板主機設定密碼後重試,或改用金鑰驗證。',
+  'app.needsPassphrase': '這把私鑰有密碼短語,但沒有已儲存的密碼短語。請在「主機」編輯頁填寫後重試。',
+  'app.badPassphrase': '私鑰密碼短語不正確。請在「主機」編輯頁更正後重試。',
 
   // settings tabs
   'tab.general': '一般',
@@ -2260,6 +2268,7 @@ const zhTW: Dict = {
   'host.cancel': '取消',
   'host.save': '儲存',
   'host.saveDisabled': '請填寫主機位址和使用者名稱',
+  'host.passphraseRequired': '此私鑰已加密,請填寫密碼短語後再儲存',
   'host.discardConfirm': '放棄未儲存的變更?',
   'host.discard': '放棄變更',
   'host.pickKey': '選擇私鑰',

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { friendlyError, isTransientConnectError, penaltyRetryDelayMs } from './friendlyError'
+import { friendlyError, isTransientConnectError, penaltyRetryDelayMs, passphraseConnectCode } from './friendlyError'
 
 describe('friendlyError', () => {
   it('names the rate-limit refusal instead of a generic reset', () => {
@@ -39,5 +39,29 @@ describe('penaltyRetryDelayMs', () => {
     expect(penaltyRetryDelayMs('Not allowed at this time')).toBe(30_000)
     expect(penaltyRetryDelayMs('read ECONNRESET')).toBeUndefined()
     expect(penaltyRetryDelayMs(undefined)).toBeUndefined()
+  })
+})
+
+describe('passphraseConnectCode', () => {
+  it('flags missing passphrase', () => {
+    expect(
+      passphraseConnectCode('Encrypted private key detected, but no passphrase given', false)
+    ).toBe('needs_passphrase')
+    expect(
+      passphraseConnectCode('Encrypted OpenSSH private key detected, but no passphrase given', false)
+    ).toBe('needs_passphrase')
+  })
+  it('flags wrong passphrase when one was supplied', () => {
+    expect(
+      passphraseConnectCode('OpenSSH key integrity check failed -- bad passphrase?', true)
+    ).toBe('bad_passphrase')
+  })
+  it('treats ambiguous Chinese with no passphrase as needs', () => {
+    expect(passphraseConnectCode('私钥无法解析,或密钥的密码短语不正确', false)).toBe('needs_passphrase')
+    expect(passphraseConnectCode('私钥无法解析,或密钥的密码短语不正确', true)).toBe('bad_passphrase')
+  })
+  it('ignores plain network / auth-methods failures', () => {
+    expect(passphraseConnectCode('All configured authentication methods failed', false)).toBeUndefined()
+    expect(passphraseConnectCode('read ECONNRESET', true)).toBeUndefined()
   })
 })

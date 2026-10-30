@@ -1,3 +1,16 @@
+# 会话记录:连续改进 M3.148(2026-10-30,复核打磨:加密私钥口令码 + HostEditor 保存拦截 + quiet 探测跳过)
+
+功能清单已够,本轮按站立规则做开源复核打磨(不合并)。未动 PR #4–#82(尤其 #82 HostEditor keyRequired / needs_key / needs_password / quietJumpConfig keyPath;#81 withTempHosts / jump_needs_key;#80 SFTP upload / trustingPanes / delete jump warn;#79 auth_failed;#78 jump_missing;#67 theme;#65/#64 host save/delete;#63/#62 forward remove)。
+
+**修了**:
+1. **加密私钥口令有稳定错误码(Android KeyEncrypted 对齐)**:`passphraseConnectCode` → `needs_passphrase` / `bad_passphrase`;`connect` / `authConfig` catch / `connectJump` 带上 code;渲染层 i18n,不再只靠中文 friendlyError;自动重连在这两种 code 上停;network-online revive 测试补上。
+2. **HostEditor 保存前拦截缺口令的加密托管密钥**:`passphraseProtected === true` 且无已填/已存口令时禁用保存并提示 `host.passphraseRequired`;生成带口令的密钥时把口令拷进主机字段(避免立刻又被挡)。
+3. **quiet OS 探测跳过「加密且无口令」的密钥**:`keyLikelyEncrypted` + `quietParams` / `quietJumpConfig` 返回 null,避免把地址记进一周失败黑名单。
+
+**验证**:`typecheck` + `lint:i18n`(桌面 752/752/752,移动端对称) + vitest **338** / 30 文件全绿。未跑 Gradle。未合并。本地 DeepSeek via ds.py tag `xssh-m3148-a`,HAND_APPLY 23/23,生成口令拷贝处有一处手修(关 modal 后清掉 keyModal 明文)。
+
+---
+
 # X-SSH 交接文档
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。
