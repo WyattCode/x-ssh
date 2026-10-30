@@ -328,7 +328,7 @@ describe('SshManager.connectJump (channel-open timeout)', () => {
       })
     )
     expect(res.ok).toBe(false)
-    expect(res.error ?? '').toContain('跳板机')
+    expect(res.code).toBe('jump-forward-timeout')
     expect(Date.now() - started).toBeLessThan(5000)
     mute.close()
   })

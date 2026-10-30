@@ -2013,7 +2013,7 @@ function registerIpc(): void {
   ipcMain.handle(IPC.lockStatus, () => masterLock.status())
   ipcMain.handle(IPC.lockSetPassphrase, async (_e, passphrase: string) => {
     try {
-      if (!passphrase) return { ok: false, error: '口令不能为空' }
+      if (!passphrase) return { ok: false, error: 'passphrase-empty' }
       await masterLock.setPassphrase(passphrase)
       store.setLocked(masterLock.locked)
       return { ok: true, ...masterLock.status() }

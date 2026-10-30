@@ -1585,6 +1585,27 @@ export const useSessions = defineStore('sessions', {
                       ? t('app.keyChangedJumpMsg', { host: keyWhere })
                       : t('app.keyChangedMsg', { host: keyWhere })
                     : (result.error ?? t('app.connectFail'))
+                    ? t('app.keyChangedJumpMsg', { host: keyWhere })
+                    : t('app.keyChangedMsg', { host: keyWhere })
+                  : result.code === 'jump-forward-timeout'
+                    ? t('app.jumpForwardTimeout')
+                    : result.code === 'jump-connect-failed'
+                      ? t('app.jumpConnectFailed')
+                      : result.code === 'proxy-handshake-timeout'
+                        ? t('app.proxyHandshakeTimeout')
+                        : result.code === 'socks5-version'
+                          ? t('app.socks5Version')
+                          : result.code === 'socks5-auth-required'
+                            ? t('app.socks5AuthRequired')
+                            : result.code === 'socks5-auth-failed'
+                              ? t('app.socks5AuthFailed')
+                              : result.code === 'socks5-connect-failed'
+                                ? t('app.socks5ConnectFailed')
+                                : result.code === 'socks5-addr-type'
+                                  ? t('app.socks5AddrType')
+                                  : result.code === 'http-proxy-failed'
+                                    ? t('app.httpProxyFailed')
+                                    : (result.error ?? t('app.connectFail'))
         live.pane.message = msg
         live.pane.errorCode = result.code
         // A refusal that carries a retry delay (the server's connection-rate

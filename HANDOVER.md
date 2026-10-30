@@ -537,6 +537,22 @@ Continue continuous-improve from origin/main on a new branch; do **not** touch/m
 
 ### Next
 Continue continuous-improve from origin/main on a new branch; do **not** touch/merge this PR or #47–#12 / #4–#11. Prefer substantive P0/P1 over busy-gates.
+## HANDOVER M3.114 — review polish (jump/proxy connect codes + passphrase-empty)
+
+**Branch:** `fix/review-polish-m3114` (from origin/main). **Do NOT merge.** Open PR (see report).
+**Skipped / do not redo:** PR #48 `fix/review-polish-m3113` (backup-not-configured / session-missing|gone|remote-timeout|unsafe-filename) and #47–#12, #4–#11. Features / intentional deferrals / M3.77–M3.113 done items.
+
+### Fixes shipped
+1. **Jump forward / connect Chinese** — `jump-forward-timeout` / `jump-connect-failed` via KeyError codes; sessions i18n; connect.test asserts code.
+2. **HTTP/SOCKS5 proxy Chinese** — `proxy-handshake-timeout` / `socks5-*` / `http-proxy-failed`; connect() returns `code`; sessions maps seven `app.*` keys.
+3. **Master-lock empty passphrase** — IPC `passphrase-empty`; Settings maps to `lock.passReq`.
+
+### Verify
+- typecheck OK; lint:i18n OK (desktop 758/758/758); vitest **334**/30 green.
+- Model: DeepSeek-V4.1-Flash-1017 via ds.py; thinking=off medium; 17/17 HAND_APPLY clean. No product hand-fix. Incidents: none.
+
+### Next
+Continue continuous-improve from origin/main on a new branch; do **not** touch/merge this PR or #48–#12 / #4–#11. Prefer substantive P0/P1 over busy-gates.
 
 ---
 
