@@ -1365,9 +1365,13 @@ async function commitCreate(e?: Event): Promise<void> {
 function copySelectedPaths(): void {
   const items = selectedEntries()
   if (!items.length) return
-  window.api.clipboard.writeText(
-    items.map((e) => posixJoin(path.value, e.name)).join('\n')
-  )
+  try {
+    window.api.clipboard.writeText(
+      items.map((e) => posixJoin(path.value, e.name)).join('\n')
+    )
+  } catch {
+    toast(tt('sfp.copyFail'), 'error')
+  }
 }
 async function downloadSelected(): Promise<void> {
   if (!props.sessionId) return

@@ -482,6 +482,15 @@
 1. **安卓终端粘贴 / 拖放读剪贴板静默失败**(`TerminalScreen.kt`)。`primaryClip` / `coerceToText` 抛 `SecurityException`、或没有 `ClipboardManager` 时,粘贴 lambda 直接崩掉,看起来像"点了没反应"。现在 null CM / `SecurityException` → Toast `clipboard_unavailable`(三语言,与 #87/#88 同文案,主线尚无此键);空剪贴板仍静默。`onDrop` 同样包住。
 2. **桌面 History 搜索复制假成功**(`HistorySearch.vue` / `i18n.ts`)。`clipboard.writeText` 是同步 void,抛错后仍 `toggleHistory(false)` 关对话框。现在 try/catch,失败 toast `hist.copyFail`(三语)并保持对话框打开。未动 `exportLog`(#84)。
 3. **安卓命令片段保存用 `apply()` 假成功**(`Snippets.kt`)。`save` 改 `commit(): Boolean`;调用方先组 `next` 再落盘,成功才改内存/关编辑页,失败 Toast `snip_save_failed` / `snip_delete_failed` 并留在编辑页。
+# M3.156 — 终端/SFTP 剪贴板失败不再静默 (2026-10-30)
+
+> 分支 `fix/review-polish-m3156`(从 `origin/main` 切出)。**未合并**;PR #4–#90 一律没碰。
+
+## 修了什么
+
+1. **桌面终端复制失败静默**(`TerminalView.vue`)。`copySelection` / `copyFromMenu` / `copyOnSelect` 的 `clipboard.writeText` 原先无 try/catch;剪贴板锁住或超大时抛错 → 快捷键/右键复制/选中即复制看起来没反应。现在 try/catch + toast `term.copyFail`(三语言)。OSC 52 路径原本就有 catch,未动。
+2. **桌面 SFTP「复制路径」失败静默**(`SftpDrawer.vue` 的 `copySelectedPaths`)。同样包 try/catch + toast `sfp.copyFail`。
+3. **桌面终端粘贴 `readText` 失败静默**(`TerminalView.vue` 的 `pasteClipboard`)。`clipboard.readText` 抛错时 toast `term.pasteFail` 并返回;空剪贴板仍静默。
 
 ## 验证
 
@@ -495,6 +504,7 @@ npm run test
 安卓侧只改了 Kotlin + strings(没动 Rust)。**没有在真机/模拟器上点过**剪贴板服务不可用与空表落盘护栏。
 typecheck / lint:i18n / vitest **334** / 30 全绿。安卓只改了 Kotlin + strings(没动 Rust)。**没有在真机/模拟器上点过** seal 失败路径。
 typecheck / lint:i18n / vitest **334** / 30 全绿。安卓只改了 Kotlin + strings(没动 Rust)。**没有在真机/模拟器上点过** 剪贴板拒绝 / 片段写盘失败路径。
+typecheck / lint:i18n(桌面 752/752/752) / vitest **334** / 30 全绿。未在真机上模拟剪贴板锁定。
 
 ## 注意
 
@@ -504,6 +514,8 @@ typecheck / lint:i18n / vitest **334** / 30 全绿。安卓只改了 Kotlin + st
 - 未触碰的开放 PR:#4–#88(尤其 #88 TransferPanel reveal / paste / persist empty;#87 copySelection;#86 publicKey/symlink;#85 diff/preview;#84 export/pack toast;#51 pack-failed)。
 - 未触碰的开放 PR:#4–#89(尤其 #88 TransferPanel reveal / paste CM-null / persist empty;#87 copySelection/copyText;#86 publicKey/symlink;#85 diff/preview;#84 export/pack toast)。`clipboard_unavailable` 文案与 #87/#88 对齐以便合并。
 - 未触碰 `/workspace/MCode`。
+- 未触碰的开放 PR:#4–#90(尤其 #90 HistorySearch.copyFail / Android paste SecurityException / Snippet commit;#87 Android copyText;#88 paste CM-null;#89 HostStore seal)。
+- 未触碰 `/workspace/MCode`。未改 preload 剪贴板签名。
 
 ---
 

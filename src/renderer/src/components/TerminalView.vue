@@ -98,19 +98,37 @@ const { confirm } = useConfirm()
 /** Guards against stacking paste-confirm dialogs when paste is triggered twice. */
 let pasteBusy = false
 
+
 const { toast } = useToast()
 async function copySelection(): Promise<void> {
   const sel = term?.getSelection()
-  if (sel) window.api.clipboard.writeText(sel)
+  if (!sel) return
+  try {
+    window.api.clipboard.writeText(sel)
+  } catch {
+    toast(t('term.copyFail'), 'error')
+  }
 }
 /** Right-click Copy: the terminal's own selection, else what the program last copied (see [lastAppCopy]). */
 async function copyFromMenu(): Promise<void> {
   if (term?.hasSelection()) return copySelection()
-  if (menu.appCopy) window.api.clipboard.writeText(menu.appCopy)
+  if (!menu.appCopy) return
+  try {
+    window.api.clipboard.writeText(menu.appCopy)
+  } catch {
+    toast(t('term.copyFail'), 'error')
+  }
 }
 async function pasteClipboard(): Promise<void> {
   if (pasteBusy) return
   const text = window.api.clipboard.readText()
+  let text: string
+  try {
+    text = window.api.clipboard.readText()
+  } catch {
+    toast(t('term.pasteFail'), 'error')
+    return
+  }
   if (!text || !term) return
   // Strip terminal control characters that could act on the shell beyond what
   // was copied (e.g. bracketed-paste markers, OSC sequences, other C0 controls
@@ -391,7 +409,13 @@ onMounted(() => {
   term.onSelectionChange(() => {
     if (store.copyOnSelect) {
       const sel = term?.getSelection()
-      if (sel) window.api.clipboard.writeText(sel)
+      if (sel) {
+        try {
+          window.api.clipboard.writeText(sel)
+        } catch {
+          toast(t('term.copyFail'), 'error')
+        }
+      }
     }
   })
 
