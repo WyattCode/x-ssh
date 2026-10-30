@@ -148,6 +148,17 @@ watch(
 )
 
 const jumpCandidates = computed(() => store.hosts.filter((h) => h.id !== form.id))
+const jumpGone = computed(
+  () => !!form.jumpHostId && !store.hosts.some((h) => h.id === form.jumpHostId)
+)
+/** Hosts that use *this* profile as their jump — one hop only, same as Android. */
+const jumpUsedBy = computed(() =>
+  props.host ? store.hosts.filter((h) => h.jumpHostId === props.host!.id) : []
+)
+// Match Android JumpField: only block *adding* a jump when this host is
+// already someone else's hop (one hop only). A stale/legacy jumpHostId must
+// still be clearable.
+const jumpBlocked = computed(() => jumpUsedBy.value.length > 0 && !form.jumpHostId)
 
 // Pasting "user@host:port" into 主机 fills all three. Only on an unambiguous
 // shape: a single colon (so IPv6 literals are left alone).
@@ -567,13 +578,19 @@ async function remove(): Promise<void> {
               <div class="row" :title="t('host.jumpHint')">
                 <span class="r-label wide">{{ t('host.jump') }}</span>
                 <div class="r-select end">
-                  <select v-model="form.jumpHostId">
+                  <select v-model="form.jumpHostId" :disabled="jumpBlocked">
                     <option value="">{{ t('host.jumpNone') }}</option>
                     <option v-for="j in jumpCandidates" :key="j.id" :value="j.id">{{ j.label }} · {{ j.username }}@{{ j.host }}</option>
+                    <!-- The saved jump host was deleted: keep the stale id visible
+                         instead of a blank select while v-model still holds it. -->
+                    <option v-if="jumpGone" :value="form.jumpHostId">{{ t('host.jumpDeleted') }}</option>
                   </select>
                   <Icon name="chevron-down" :size="14" class="caret" />
                 </div>
               </div>
+              <p v-if="jumpGone || jumpBlocked" class="sub-hint jump-hint">
+                {{ jumpGone ? t('host.jumpGone') : t('host.jumpBlocked', { name: jumpUsedBy[0].label }) }}
+              </p>
 
               <button type="button" class="row disclosure" @click="sections.proxy = !sections.proxy">
                 <span class="r-label wide">{{ t('host.proxy') }}</span>
@@ -1032,6 +1049,13 @@ input[type='number']::-webkit-inner-spin-button {
   font-size: 12px;
   line-height: 1.5;
   color: var(--text-dim);
+}
+/* Jump-host warning under its row (deleted jump / this host is a jump itself). */
+.jump-hint {
+  padding: 0 16px 10px;
+}
+.jump-hint + .row {
+  border-top: 1px solid var(--border);
 }
 .panel:focus {
   outline: none;

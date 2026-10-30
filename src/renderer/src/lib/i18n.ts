@@ -79,6 +79,7 @@ const zh: Dict = {
   'app.closeExitTitle': '关闭活跃会话',
   'app.closeExitOk': '发送 exit 并关闭',
   'app.jumpNeedsPassword': '跳板机需要密码,但没有已保存的密码。请在「主机」编辑页为跳板主机设置密码后重试,或改用密钥认证。',
+  'app.jumpMissing': '这台主机的跳板机已被删除。请在主机编辑页重新选择跳板机,或改为直接连接。',
 
   // settings tabs
   'tab.general': '通用',
@@ -678,6 +679,9 @@ const zh: Dict = {
   'host.jump': '跳板机 (ProxyJump)',
   'host.jumpNone': '无(直接连接)',
   'host.jumpHint': '连接本机前先通过所选主机建立隧道(需其已保存且可认证)',
+  'host.jumpDeleted': '已删除',
+  'host.jumpGone': '原来选的跳板机已经删除了。',
+  'host.jumpBlocked': '它是「{name}」的跳板机,不能再经过别的跳板机。',
   'host.forwards': '本地端口转发',
   'host.fwMode': '类型',
   'host.fwLocalMode': '本地 -L',
@@ -861,6 +865,7 @@ const en: Dict = {
   'app.closeExitTitle': 'Close active session',
   'app.closeExitOk': 'Send exit & close',
   'app.jumpNeedsPassword': 'The jump host requires a password, but none is saved. Set one on the jump host profile (or switch to key auth) and retry.',
+  'app.jumpMissing': 'This host\'s jump host has been deleted. Pick another jump host in the editor, or connect directly.',
 
   'tab.general': 'General',
   'tab.terminal': 'Terminal',
@@ -1451,6 +1456,9 @@ const en: Dict = {
   'host.jump': 'Jump host (ProxyJump)',
   'host.jumpNone': 'None (direct)',
   'host.jumpHint': 'Tunnel through the selected host first (must be saved & authenticatable)',
+  'host.jumpDeleted': 'Deleted',
+  'host.jumpGone': 'The jump host chosen earlier has been deleted.',
+  'host.jumpBlocked': 'It\'s the jump host for "{name}", so it can\'t go through another jump host.',
   'host.forwards': 'Local port forwards',
   'host.fwMode': 'Type',
   'host.fwLocalMode': 'Local -L',
@@ -1636,6 +1644,7 @@ const zhTW: Dict = {
   'app.closeExitTitle': '關閉作用中的工作階段',
   'app.closeExitOk': '傳送 exit 並關閉',
   'app.jumpNeedsPassword': '跳板機需要密碼,但沒有已儲存的密碼。請在「主機」編輯頁為跳板主機設定密碼後重試,或改用金鑰驗證。',
+  'app.jumpMissing': '這台主機的跳板機已被刪除。請在主機編輯頁重新選擇跳板機,或改為直接連線。',
 
   // settings tabs
   'tab.general': '一般',
@@ -2236,6 +2245,9 @@ const zhTW: Dict = {
   'host.jump': '跳板機 (ProxyJump)',
   'host.jumpNone': '無(直接連線)',
   'host.jumpHint': '連線此主機前先透過所選主機建立通道(該主機需已儲存且可驗證)',
+  'host.jumpDeleted': '已刪除',
+  'host.jumpGone': '原本選的跳板機已經刪除了。',
+  'host.jumpBlocked': '它是「{name}」的跳板機,不能再經過其他跳板機。',
   'host.forwards': '本機連接埠轉送',
   'host.fwMode': '類型',
   'host.fwLocalMode': '本機 -L',

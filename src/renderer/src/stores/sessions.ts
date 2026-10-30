@@ -1509,17 +1509,19 @@ export const useSessions = defineStore('sessions', {
         const msg =
           result.code === 'jump_needs_password'
             ? t('app.jumpNeedsPassword')
-            : result.code === 'locked'
-              ? t('app.locked')
-              : result.code === 'host_key_unknown'
-                ? viaJump
-                  ? t('app.keyUnknownJumpMsg', { host: keyWhere })
-                  : t('app.keyUnknownMsg', { host: keyWhere })
-                : result.code === 'host_key_changed'
+            : result.code === 'jump_missing'
+              ? t('app.jumpMissing')
+              : result.code === 'locked'
+                ? t('app.locked')
+                : result.code === 'host_key_unknown'
                   ? viaJump
-                    ? t('app.keyChangedJumpMsg', { host: keyWhere })
-                    : t('app.keyChangedMsg', { host: keyWhere })
-                  : (result.error ?? t('app.connectFail'))
+                    ? t('app.keyUnknownJumpMsg', { host: keyWhere })
+                    : t('app.keyUnknownMsg', { host: keyWhere })
+                  : result.code === 'host_key_changed'
+                    ? viaJump
+                      ? t('app.keyChangedJumpMsg', { host: keyWhere })
+                      : t('app.keyChangedMsg', { host: keyWhere })
+                    : (result.error ?? t('app.connectFail'))
         live.pane.message = msg
         live.pane.errorCode = result.code
         // Host-key rejection: stash what the user is being asked to trust —
