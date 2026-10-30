@@ -1408,8 +1408,14 @@ function openHistory(): void {
   historyMenu.y = moreMenu.y
   historyMenu.open = true
 }
-function clearHistory(): void {
-  void store.clearTransferHistory()
+async function clearHistory(): Promise<void> {
+  const ok = await confirm(tt('sfp.clearHistConfirm'), {
+    title: tt('sfp.clear'),
+    confirmText: tt('sfp.clear'),
+    danger: true
+  })
+  if (!ok) return
+  await store.clearTransferHistory()
   historyMenu.open = false
 }
 function locateHistory(h: TransferHistoryItem): void {
@@ -1424,11 +1430,14 @@ function locateHistory(h: TransferHistoryItem): void {
 async function retryHistory(h: TransferHistoryItem): Promise<void> {
   if (!props.sessionId || !h.localDir || h.direction !== 'down') return
   historyMenu.open = false
+  // Same destination the user already picked — skip the overwrite prompt
+  // (mirrors resumeDownloads; partials resume inside downloadJob).
   const r = await window.api.sftp.downloadTo(
     props.sessionId,
     buildRetryItems(h),
     h.localDir,
-    store.transferConcurrency
+    store.transferConcurrency,
+    true
   )
   if (!r.ok && !r.canceled) toast(r.error ?? tt('sfp.retryFail'), 'error')
 }
