@@ -1346,6 +1346,9 @@ openSnapshot/closeOthers/saveSetting (#68), theme/transfer clears (#67), bookmar
 
 - **会话日志中途写失败**:`startLog` 的 `ws.on('error')` 原来只把 `logging=false`,界面仍显示「记录中」、再点「开始记录」永远返回 false。现在同时 `end()` + 清 `logWrite` + 经新 IPC `sessionLog:failed` 通知渲染层,`TerminalView` 收到后把 `logOn` 置 false 并提示 `term.logWriteFail`。
 - **安卓凭据封存失败**:`HostStore.writeSecret` 封不上时保留旧密文(不丢数据),但界面以为存好了。现在 `save()` 记 `lastSaveSealFailed`,`MainActivity.persist` 据此 Toast `hosts_secret_seal_failed`,明确告诉用户磁盘上仍是旧凭据。
+# 会话记录:M3.182(Windows 深路径下载修复)
+
+- **`downloadJob` / `downloadTree` / `putFileSilent` 补 `longPath`**:`\\?\` 前缀原来只在 `syncJob` 里用,下载(含拖出 / 外部编辑器回写)的 `mkdir` / `unlink` / `createWriteStream` / `createReadStream`,以及 `pipeStream` 失败清理的 `unlink` 都漏了 —— Windows 上深目录(node_modules 等)下载会失败或留下半截文件,而同一棵树的同步却正常。现在全部走 `this.longPath(...)`。
 
 # 会话记录:第二十四次会话(2026-10-29,中文输入法的回车 + 测试套件自己会漏跑)
 
