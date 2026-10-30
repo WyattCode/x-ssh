@@ -34,6 +34,7 @@ import LockScreen from './components/LockScreen.vue'
 import ZoomHud from './components/ZoomHud.vue'
 import { useZoom, ZOOM_STEP } from './composables/zoom'
 import { useI18n } from './lib/i18n'
+import { useToast } from './composables/toast'
 import { collectPaneIds } from './lib/paneLayout'
 import {
   DEFAULT_BINDINGS,
@@ -56,6 +57,13 @@ const SftpDrawer = defineAsyncComponent(() => import('./components/SftpDrawer.vu
 
 const store = useSessions()
 const { t } = useI18n()
+const { toast } = useToast()
+/** Maps a main-process error code from editExternal / openWith to a message. */
+function openErr(err?: string): string {
+  if (err === 'invalid-name') return t('sfp.invalidName')
+  if (err === 'program-not-allowed') return t('sfp.programNotAllowed')
+  return err ?? t('sfp.openFail')
+}
 
 // Modifier symbol shown in hints (⌘ on macOS, Ctrl elsewhere).
 const modKey = isMac ? '⌘' : 'Ctrl'
@@ -119,13 +127,16 @@ function onEditorSaved(): void {
 }
 async function onEditExternal(p: { path: string; name: string }): Promise<void> {
   const sid = store.activePane?.sshSessionId
-  if (sid) await window.api.sftp.editExternal(sid, p.path, p.name)
+  if (!sid) return
+  const r = await window.api.sftp.editExternal(sid, p.path, p.name)
+  if (!r.ok) toast(openErr(r.error), 'error')
 }
 async function onOpenWith(p: { path: string; name: string; ext: string }): Promise<void> {
   const sid = store.activePane?.sshSessionId
   if (!sid) return
   const program = store.fileOpeners[p.ext] || undefined
-  await window.api.sftp.openWith(sid, p.path, p.name, program)
+  const r = await window.api.sftp.openWith(sid, p.path, p.name, program)
+  if (!r.ok) toast(openErr(r.error), 'error')
 }
 
 // Per-session working directory reported by shell integration (OSC 7).

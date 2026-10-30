@@ -1143,7 +1143,7 @@ function registerIpc(): void {
     try {
       const buf = await readFile(res.filePaths[0], 'utf8')
       const data = JSON.parse(buf)
-      if (!Array.isArray(data.hosts)) return { ok: false, error: '无效的备份文件' }
+      if (!Array.isArray(data.hosts)) return { ok: false, error: 'invalid-backup' }
       await store.importJson(JSON.stringify(data.hosts))
       if (Array.isArray(data.snippets)) await settings.set('snippets', data.snippets)
       if (Array.isArray(data.snapshots)) await settings.set('snapshots', data.snapshots)
@@ -1862,7 +1862,7 @@ function registerIpc(): void {
       try {
         // `name` becomes a path segment under the temp dir — keep it one segment.
         if (!name || name === '.' || name === '..' || basename(name) !== name) {
-          return { ok: false, error: '文件名无效' }
+          return { ok: false, error: 'invalid-name' }
         }
         const dir = await mkdtemp(join(tmpdir(), 'xssh-edit-'))
         const local = join(dir, name)
@@ -1904,7 +1904,7 @@ function registerIpc(): void {
       const remotePath = path
       // `name` becomes a path segment under the temp dir — keep it one segment.
       if (!name || name === '.' || name === '..' || basename(name) !== name) {
-        return { ok: false, error: '文件名无效' }
+        return { ok: false, error: 'invalid-name' }
       }
       // Only an editor the user stored in settings may be launched from here;
       // otherwise this channel is a way to run any binary on the machine.
@@ -1913,7 +1913,7 @@ function registerIpc(): void {
         const editor = (await settings.get<string>('externalEditor')) || ''
         const openers = (await settings.get<Record<string, string>>('fileOpeners')) || {}
         const allowed = new Set([editor, ...Object.values(openers)].filter(Boolean))
-        if (!allowed.has(program)) return { ok: false, error: '程序没有在设置中配置' }
+        if (!allowed.has(program)) return { ok: false, error: 'program-not-allowed' }
       }
       const dir = await mkdtemp(join(tmpdir(), 'xssh-open-'))
       const local = join(dir, name)

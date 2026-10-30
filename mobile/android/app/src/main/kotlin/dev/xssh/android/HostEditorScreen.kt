@@ -113,6 +113,9 @@ fun HostEditorScreen(
     var saving by remember { mutableStateOf(false) }
 
     val context = LocalContext.current
+    // 保存要验口令 / 走密钥库,几百毫秒里按钮还能再按一次(Ctrl+S 也一样)——
+    // 不挡住的话会存两遍、弹两次生物识别。
+    var saving by remember { mutableStateOf(false) }
 
     fun save() {
         if (saving) return
@@ -127,6 +130,7 @@ fun HostEditorScreen(
         saving = true
         scope.launch {
             saving = true
+
 
             try {
                 val host = buildHostForSave(activity, draft)

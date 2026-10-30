@@ -1345,15 +1345,25 @@ private fun HostSheet(
         }
     }
 
+    // 保存要验口令 / 走密钥库,几百毫秒里按钮还能再按一次(Ctrl+S 也一样)——
+    // 不挡住的话会存两遍、弹两次生物识别。
+    var saving by remember { mutableStateOf(false) }
+
     fun save() {
+        if (saving) return
         val activity = hostActivity(context)
         if (activity == null) {
             draft.error = UiText(R.string.tab_save_failed_no_page)
             return
         }
+        saving = true
         scope.launch {
-            val host = buildHostForSave(activity, draft)
-            host?.let(onSave)
+            try {
+                val host = buildHostForSave(activity, draft)
+                host?.let(onSave)
+            } finally {
+                saving = false
+            }
         }
     }
     fun cancel() {

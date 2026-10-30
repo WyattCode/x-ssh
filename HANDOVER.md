@@ -423,6 +423,23 @@
 
 **验证**:`typecheck` + `lint:i18n` + vitest **345** 全绿(原 334;+`snapshotGuard` 11)。Android 本轮未改。未合并。
 
+## HANDOVER M3.107 — review polish (editExternal/openWith + backup import + Android HostEditor save)
+
+**Branch:** `fix/review-polish-m3107` (from origin/main). **Do NOT merge.** Open PR (see report).
+**Skipped / do not redo:** PR #41 `fix/review-polish-m3106` (invalid-name local FS / publish-revoke / ConnectGate actOnce) and #40–#12, #4–#11. Features / intentional deferrals / M3.77–M3.106 done items.
+
+### Fixes shipped
+1. **External edit / Open with silent fail + Chinese errors** — `sftpEditExternal` / `sftpOpenWith` return stable `invalid-name` / `program-not-allowed`; `App.vue` toasts via `openErr()` + `sfp.openFail|invalidName|programNotAllowed` (zh/en/zh-TW).
+2. **Full-data import invalid backup + double-fire** — `importAll` → `invalid-backup`; Settings `exportAllData`/`importAllData` gated by existing `backupBusy` + disabled buttons; `set.sec.invalidBackup` i18n.
+3. **Android HostEditor / HostSheet double save** — `saving` + try/finally around `buildHostForSave` in `HostEditorScreen.kt` and `Tablet.kt` `HostSheet` (not desktop HostEditor.vue — that was #38).
+
+### Verify
+- typecheck OK; lint:i18n OK (desktop 753/753/753); vitest **334**/30 green.
+- Model: DeepSeek-V4.1-Flash-1017 via ds.py; thinking=off medium; 17/17 HAND_APPLY first try (applicator accepted BEFORE/END/AFTER/END). No hand-fix. Incidents: none.
+
+### Next
+Continue continuous-improve from origin/main on a new branch; do **not** touch/merge this PR or #41–#12 / #4–#11. Prefer substantive P0/P1 over busy-gates.
+
 ---
 
 ## 项目概述
