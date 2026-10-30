@@ -188,6 +188,8 @@
     <string name="host_unreadable_2">%1$s、%2$s 無法讀取</string>
     <string name="host_unreadable_3">%1$s、%2$s、%3$s 無法讀取</string>
     <string name="host_username">使用者名稱</string>
+    <string name="hosts_save_failed">沒能儲存主機清單。改動沒有寫入磁碟。</string>
+    <string name="sidebar_persist_failed">沒能儲存側邊欄偏好。</string>
     <string name="main_sc_close_session">中斷目前的工作階段</string>
     <string name="main_sc_edit_host">編輯主機</string>
     <string name="main_sc_ime">終端機內切換輸入法 / 英文直通</string>

@@ -269,8 +269,16 @@ fun App(devTarget: DevTarget? = null) {
             android.util.Log.e("XsshData", "refusing to persist an empty host list over existing data")
             return
         }
+        if (!store.save(sorted)) {
+            android.util.Log.e("XsshData", "host list write failed")
+            android.widget.Toast.makeText(
+                context,
+                R.string.hosts_save_failed,
+                android.widget.Toast.LENGTH_LONG,
+            ).show()
+            return
+        }
         hosts = sorted
-        store.save(sorted)
     }
 
     // 平板:窗口够宽(≥ 600dp)就是平板那一整套交互;小窗、窄分屏缩到手机宽度时退回手机的页面,

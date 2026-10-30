@@ -235,7 +235,8 @@ class HostStore(context: Context) {
      */
     private fun readSecret(sealed: String): String = Secrets.open(sealed)
 
-    fun save(hosts: List<Host>) {
+    /** 存盘。用 commit 而不是 apply,好让调用方知道写没写进去。 */
+    fun save(hosts: List<Host>): Boolean {
         val array = JSONArray()
         val disk = diskRecords()
         hosts.forEach { host ->
@@ -280,7 +281,7 @@ class HostStore(context: Context) {
             item.put("pinned", host.pinned)
             array.put(item)
         }
-        prefs.edit().putString(KEY_LIST, array.toString()).apply()
+        return prefs.edit().putString(KEY_LIST, array.toString()).commit()
     }
 
     /**
@@ -380,9 +381,11 @@ class UiPrefs(context: Context) {
     /** 平板侧边栏是否展开(收起后终端独占整个宽度,下次打开保持用户的选择)。 */
     var sidebarVisible: Boolean
         get() = prefs.getBoolean(KEY_SIDEBAR, true)
-        set(value) {
-            prefs.edit().putBoolean(KEY_SIDEBAR, value).apply()
-        }
+        set(value) { setSidebarVisible(value) }
+
+    /** Persist sidebar visibility. Returns false when SharedPreferences.commit failed. */
+    fun setSidebarVisible(value: Boolean): Boolean =
+        prefs.edit().putBoolean(KEY_SIDEBAR, value).commit()
 
     companion object {
         private const val KEY_SIDEBAR = "sidebarVisible"

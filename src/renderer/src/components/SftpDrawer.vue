@@ -1196,12 +1196,18 @@ async function delSelected(): Promise<void> {
     : tt('sfp.delMany', { n: items.length })
   const ok = await confirm(msg, { title: tt('sfp.delTitle'), danger: true, confirmText: tt('sfp.delOk') })
   if (!ok) return
+  let firstErr: string | null = null
   for (const it of items) {
     const r = await window.api.sftp.remove(props.sessionId, posixJoin(path.value, it.name), it.isDir)
-    if (!r.ok) error.value = r.error ?? tt('sfp.delFail')
+    if (!r.ok) {
+      const msg = r.error ?? tt('sfp.delFail')
+      error.value = msg
+      if (!firstErr) firstErr = msg
+    }
   }
   selected.value = new Set()
   await load(path.value)
+  if (firstErr) toast(firstErr, 'error')
 }
 
 function runMenu(fn: () => void): void {

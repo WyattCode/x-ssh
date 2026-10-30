@@ -249,8 +249,16 @@ fun TabletApp(
     val prefs = remember(context) { UiPrefs(context) }
     var sidebarVisible by remember { mutableStateOf(prefs.sidebarVisible) }
     fun toggleSidebar() {
-        sidebarVisible = !sidebarVisible
-        prefs.sidebarVisible = sidebarVisible
+        val next = !sidebarVisible
+        if (prefs.setSidebarVisible(next)) {
+            sidebarVisible = next
+        } else {
+            android.widget.Toast.makeText(
+                context,
+                R.string.sidebar_persist_failed,
+                android.widget.Toast.LENGTH_LONG,
+            ).show()
+        }
     }
 
     var sheet by remember { mutableStateOf<SheetTarget?>(null) }
