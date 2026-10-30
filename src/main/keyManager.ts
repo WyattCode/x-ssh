@@ -131,6 +131,10 @@ export class KeyManager {
       throw new Error('密钥标签文件损坏，已停止写入以免覆盖原有名称')
     }
     await writeFile(this.labelsPath, JSON.stringify(labels), { mode: 0o600 }).catch(() => undefined)
+    // Do not swallow write failures: generate/import/remove callers already
+    // surface errors via keyGenFail / keyImportFail / delete toast. Silent
+    // catch left friendly names missing after a cold start.
+    await writeFile(this.labelsPath, JSON.stringify(labels), { mode: 0o600 })
   }
 
   /** Whether the labels sidecar failed to parse this session (friendly names at risk). */

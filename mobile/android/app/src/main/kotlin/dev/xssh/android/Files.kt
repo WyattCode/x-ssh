@@ -885,6 +885,9 @@ fun FilesPane(
                                 if (e !is CancellationException) {
                                     files.notify(FileText.of(R.string.files_cannot_read_folder, e.reason()), error = true)
                                 }
+                                // GoTo only appears while browsing — notify like a
+                                // load failure that leaves the current listing.
+                                if (e !is CancellationException) files.notify(e.reason(), error = true)
                             }
                     }
                     target.startsWith("/") -> load(target.trimEnd('/').ifEmpty { "/" })
