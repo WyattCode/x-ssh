@@ -40,6 +40,39 @@ object ReconnectPolicy {
     }
 }
 
+/** Auto-reconnect stopped because the peer presented a host key the user must accept. */
+data class KeyHalt(val fingerprint: String, val changed: Boolean, val jump: Boolean)
+
+/** Classify a permanent reconnect error into a trust card, or null if not a host-key halt / empty fp. */
+fun hostKeyHalt(error: Throwable): KeyHalt? {
+    val fp = error.message.orEmpty().trim()
+    if (fp.isEmpty()) return null
+    return when (error) {
+        is FfiException.HostKeyUnknown -> KeyHalt(fp, changed = false, jump = false)
+        is FfiException.HostKeyChanged -> KeyHalt(fp, changed = true, jump = false)
+        is FfiException.JumpHostKeyUnknown -> KeyHalt(fp, changed = false, jump = true)
+        is FfiException.JumpHostKeyChanged -> KeyHalt(fp, changed = true, jump = true)
+        else -> null
+    }
+}
+
+enum class ReconnectFailHint { Auth, KeyPassphrase }
+
+/** Permanent credential failure (not host-key). */
+fun reconnectFailHint(error: Throwable): ReconnectFailHint? {
+    if (hostKeyHalt(error) != null) return null
+    return when (error) {
+        is FfiException.KeyEncrypted -> ReconnectFailHint.KeyPassphrase
+        is FfiException.Message ->
+            if (error.message.orEmpty().contains("authentication failed", ignoreCase = true)) {
+                ReconnectFailHint.Auth
+            } else {
+                null
+            }
+        else -> null
+    }
+}
+
 /**
  * 首次连接的自动重试。
  *

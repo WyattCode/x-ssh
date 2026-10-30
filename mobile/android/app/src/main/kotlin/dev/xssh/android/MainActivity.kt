@@ -36,6 +36,7 @@ import android.view.KeyEvent
 import android.view.KeyboardShortcutGroup
 import android.view.KeyboardShortcutInfo
 import android.view.Menu
+import android.widget.Toast
 
 class MainActivity : ComponentActivity() {
     /**
@@ -270,7 +271,9 @@ fun App(devTarget: DevTarget? = null) {
             return
         }
         hosts = sorted
-        store.save(sorted)
+        if (!store.save(sorted)) {
+            Toast.makeText(context, R.string.hosts_persist_failed, Toast.LENGTH_LONG).show()
+        }
     }
 
     // 平板:窗口够宽(≥ 600dp)就是平板那一整套交互;小窗、窄分屏缩到手机宽度时退回手机的页面,

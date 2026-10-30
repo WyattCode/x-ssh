@@ -188,6 +188,7 @@
     <string name="host_unreadable_2">%1$s、%2$s 读不出来</string>
     <string name="host_unreadable_3">%1$s、%2$s、%3$s 读不出来</string>
     <string name="host_username">用户名</string>
+    <string name="hosts_persist_failed">主机列表保存失败</string>
     <string name="main_sc_close_session">断开当前会话</string>
     <string name="main_sc_edit_host">编辑主机</string>
     <string name="main_sc_ime">终端里切换输入法 / 英文直通</string>
@@ -270,6 +271,7 @@
     <string name="term_disconnect">断开</string>
     <string name="term_disconnect_session">断开连接</string>
     <string name="term_disconnected">已断开</string>
+    <string name="term_reconnect_auth_failed">已断开 · 认证失败</string>
     <string name="term_err_cancelled">已全部断开</string>
     <string name="term_err_jump_gone">这台主机的跳板机已经删除了。</string>
     <string name="term_err_jump_key_passphrase_needed">跳板机「%1$s」的私钥有口令。</string>
