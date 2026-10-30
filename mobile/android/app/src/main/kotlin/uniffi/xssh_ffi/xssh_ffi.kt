@@ -699,7 +699,11 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_xssh_ffi_checksum_func_inspect_key(
     ): Int
+    external fun uniffi_xssh_ffi_checksum_method_session_add_forward(
+    ): Int
     external fun uniffi_xssh_ffi_checksum_method_session_disconnect(
+    ): Int
+    external fun uniffi_xssh_ffi_checksum_method_session_forwards(
     ): Int
     external fun uniffi_xssh_ffi_checksum_method_session_host_key(
     ): Int
@@ -708,6 +712,8 @@ internal object IntegrityCheckingUniffiLib {
     external fun uniffi_xssh_ffi_checksum_method_session_open_sftp(
     ): Int
     external fun uniffi_xssh_ffi_checksum_method_session_open_shell(
+    ): Int
+    external fun uniffi_xssh_ffi_checksum_method_session_remove_forward(
     ): Int
     external fun uniffi_xssh_ffi_checksum_method_sftp_download_to_fd(
     ): Int
@@ -804,8 +810,12 @@ internal object UniffiLib {
     ): Unit
     external fun uniffi_xssh_ffi_fn_constructor_session_connect(`config`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Long
+    external fun uniffi_xssh_ffi_fn_method_session_add_forward(`ptr`: Long,`spec`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     external fun uniffi_xssh_ffi_fn_method_session_disconnect(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
+    external fun uniffi_xssh_ffi_fn_method_session_forwards(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     external fun uniffi_xssh_ffi_fn_method_session_host_key(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_xssh_ffi_fn_method_session_open_exec(`ptr`: Long,`cols`: Int,`rows`: Int,`term`: RustBuffer.ByValue,`command`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -814,6 +824,8 @@ internal object UniffiLib {
     ): Long
     external fun uniffi_xssh_ffi_fn_method_session_open_shell(`ptr`: Long,`cols`: Int,`rows`: Int,`term`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Long
+    external fun uniffi_xssh_ffi_fn_method_session_remove_forward(`ptr`: Long,`id`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
     external fun uniffi_xssh_ffi_fn_clone_sftp(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Long
     external fun uniffi_xssh_ffi_fn_free_sftp(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -1029,7 +1041,13 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_xssh_ffi_checksum_func_inspect_key() and 0xFFFF) != 57374) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if ((lib.uniffi_xssh_ffi_checksum_method_session_add_forward() and 0xFFFF) != 60569) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if ((lib.uniffi_xssh_ffi_checksum_method_session_disconnect() and 0xFFFF) != 44178) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_xssh_ffi_checksum_method_session_forwards() and 0xFFFF) != 20167) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_xssh_ffi_checksum_method_session_host_key() and 0xFFFF) != 22163) {
@@ -1042,6 +1060,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_xssh_ffi_checksum_method_session_open_shell() and 0xFFFF) != 43723) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_xssh_ffi_checksum_method_session_remove_forward() and 0xFFFF) != 50073) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_xssh_ffi_checksum_method_sftp_download_to_fd() and 0xFFFF) != 65254) {
@@ -1661,9 +1682,19 @@ public object FfiConverterByteArray: FfiConverterRustBuffer<ByteArray> {
 public interface SessionInterface {
     
     /**
+     * 开一条端口转发。失败不伤终端。错误文本带 `forward: ` 前缀。
+     */
+    fun `addForward`(`spec`: ForwardSpec): ForwardInfo
+    
+    /**
      * 断开连接。
      */
     fun `disconnect`()
+    
+    /**
+     * 这条连接上现在开着的转发。
+     */
+    fun `forwards`(): List<ForwardInfo>
     
     /**
      * 服务端主机密钥指纹(SHA256)。
@@ -1684,6 +1715,11 @@ public interface SessionInterface {
      * 打开交互式 PTY shell。
      */
     fun `openShell`(`cols`: kotlin.UInt, `rows`: kotlin.UInt, `term`: kotlin.String): Shell
+    
+    /**
+     * 按编号拆掉一条转发。
+     */
+    fun `removeForward`(`id`: kotlin.ULong)
     
     companion object
 }
@@ -1794,6 +1830,24 @@ open class Session: Disposable, AutoCloseable, SessionInterface
 
     
     /**
+     * 开一条端口转发。失败不伤终端。错误文本带 `forward: ` 前缀。
+     */
+    @Throws(FfiException::class)override fun `addForward`(`spec`: ForwardSpec): ForwardInfo {
+            return FfiConverterTypeForwardInfo.lift(
+    callWithHandle {
+    uniffiRustCallWithError(FfiException) { _status ->
+    UniffiLib.uniffi_xssh_ffi_fn_method_session_add_forward(
+        it,
+        
+        FfiConverterTypeForwardSpec.lower(`spec`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * 断开连接。
      */override fun `disconnect`()
         = 
@@ -1805,6 +1859,22 @@ open class Session: Disposable, AutoCloseable, SessionInterface
 }
     }
     
+    
+
+    
+    /**
+     * 这条连接上现在开着的转发。
+     */override fun `forwards`(): List<ForwardInfo> {
+            return FfiConverterSequenceTypeForwardInfo.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_xssh_ffi_fn_method_session_forwards(
+        it,
+        _status)
+}
+    }
+    )
+    }
     
 
     
@@ -1879,6 +1949,23 @@ open class Session: Disposable, AutoCloseable, SessionInterface
     }
     )
     }
+    
+
+    
+    /**
+     * 按编号拆掉一条转发。
+     */
+    @Throws(FfiException::class)override fun `removeForward`(`id`: kotlin.ULong)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(FfiException) { _status ->
+    UniffiLib.uniffi_xssh_ffi_fn_method_session_remove_forward(
+        it,
+        
+        FfiConverterULong.lower(`id`),_status)
+}
+    }
+    
     
 
     
@@ -3733,6 +3820,113 @@ public object FfiConverterTypeCursorState: FfiConverterRustBuffer<CursorState> {
 
 
 /**
+ * 已开着的一条转发。
+ */
+data class ForwardInfo (
+    var `id`: kotlin.ULong
+    , 
+    var `mode`: ForwardMode
+    , 
+    var `localPort`: kotlin.UShort
+    , 
+    var `remoteHost`: kotlin.String
+    , 
+    var `remotePort`: kotlin.UShort
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeForwardInfo: FfiConverterRustBuffer<ForwardInfo> {
+    override fun read(buf: ByteBuffer): ForwardInfo {
+        return ForwardInfo(
+            FfiConverterULong.read(buf),
+            FfiConverterTypeForwardMode.read(buf),
+            FfiConverterUShort.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterUShort.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: ForwardInfo) = (
+            FfiConverterULong.allocationSize(value.`id`) +
+            FfiConverterTypeForwardMode.allocationSize(value.`mode`) +
+            FfiConverterUShort.allocationSize(value.`localPort`) +
+            FfiConverterString.allocationSize(value.`remoteHost`) +
+            FfiConverterUShort.allocationSize(value.`remotePort`)
+    )
+
+    override fun write(value: ForwardInfo, buf: ByteBuffer) {
+            FfiConverterULong.write(value.`id`, buf)
+            FfiConverterTypeForwardMode.write(value.`mode`, buf)
+            FfiConverterUShort.write(value.`localPort`, buf)
+            FfiConverterString.write(value.`remoteHost`, buf)
+            FfiConverterUShort.write(value.`remotePort`, buf)
+    }
+}
+
+
+
+/**
+ * 要开的一条转发规则。
+ */
+data class ForwardSpec (
+    var `mode`: ForwardMode
+    , 
+    var `localPort`: kotlin.UShort
+    , 
+    var `remoteHost`: kotlin.String
+    , 
+    var `remotePort`: kotlin.UShort
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeForwardSpec: FfiConverterRustBuffer<ForwardSpec> {
+    override fun read(buf: ByteBuffer): ForwardSpec {
+        return ForwardSpec(
+            FfiConverterTypeForwardMode.read(buf),
+            FfiConverterUShort.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterUShort.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: ForwardSpec) = (
+            FfiConverterTypeForwardMode.allocationSize(value.`mode`) +
+            FfiConverterUShort.allocationSize(value.`localPort`) +
+            FfiConverterString.allocationSize(value.`remoteHost`) +
+            FfiConverterUShort.allocationSize(value.`remotePort`)
+    )
+
+    override fun write(value: ForwardSpec, buf: ByteBuffer) {
+            FfiConverterTypeForwardMode.write(value.`mode`, buf)
+            FfiConverterUShort.write(value.`localPort`, buf)
+            FfiConverterString.write(value.`remoteHost`, buf)
+            FfiConverterUShort.write(value.`remotePort`, buf)
+    }
+}
+
+
+
+/**
  * 在设备上生成的一把新私钥。
  */
 data class GeneratedKey (
@@ -4472,6 +4666,44 @@ public object FfiConverterTypeFfiError : FfiConverterRustBuffer<FfiException> {
 
 
 /**
+ * 端口转发方式(和桌面版 / 核心一致)。
+ */
+
+enum class ForwardMode {
+    
+    LOCAL,
+    REMOTE,
+    DYNAMIC;
+
+    
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeForwardMode: FfiConverterRustBuffer<ForwardMode> {
+    override fun read(buf: ByteBuffer) = try {
+        ForwardMode.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: ForwardMode) = 4UL
+
+    override fun write(value: ForwardMode, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+/**
  * 怎么选:按格(拖动)、按词(双击 / 长按)、按行(三击)。
  */
 
@@ -4927,6 +5159,34 @@ public object FfiConverterSequenceString: FfiConverterRustBuffer<List<kotlin.Str
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterString.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeForwardInfo: FfiConverterRustBuffer<List<ForwardInfo>> {
+    override fun read(buf: ByteBuffer): List<ForwardInfo> {
+        val len = buf.getInt()
+        return List<ForwardInfo>(len) {
+            FfiConverterTypeForwardInfo.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<ForwardInfo>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeForwardInfo.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<ForwardInfo>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeForwardInfo.write(it, buf)
         }
     }
 }

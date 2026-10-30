@@ -370,4 +370,34 @@
     <plurals name="term_notify_title_many">
         <item quantity="other">%d 个 SSH 会话连接中</item>
     </plurals>
+    <string name="fwd_title">端口转发</string>
+    <string name="fwd_saved_title">已保存的规则</string>
+    <string name="fwd_live_title">端口转发</string>
+    <string name="fwd_mode_local">本地</string>
+    <string name="fwd_mode_remote">远端</string>
+    <string name="fwd_mode_dynamic">SOCKS</string>
+    <string name="fwd_local_port">监听端口</string>
+    <string name="fwd_remote_host">目标主机</string>
+    <string name="fwd_remote_port">目标端口</string>
+    <string name="fwd_add">添加</string>
+    <string name="fwd_add_live">仅本次会话</string>
+    <string name="fwd_edit">编辑规则</string>
+    <string name="fwd_delete">删除</string>
+    <string name="fwd_remove_live">停止</string>
+    <string name="fwd_empty">还没有保存的规则。</string>
+    <string name="fwd_empty_live">这条会话上还没有开着的转发。</string>
+    <string name="fwd_none_saved">无</string>
+    <string name="fwd_summary">%d 条</string>
+    <string name="fwd_status_on">运行中</string>
+    <string name="fwd_status_failed">失败</string>
+    <string name="fwd_tag_temp">临时</string>
+    <string name="fwd_err_port_in_use">本机端口已被占用。</string>
+    <string name="fwd_err_already">这条规则已经开着。</string>
+    <string name="fwd_err_bad_port">端口要在 1 到 65535 之间。</string>
+    <string name="fwd_err_denied">服务器拒绝了这条转发。</string>
+    <string name="fwd_hint_local">在本机监听,经 SSH 转到服务器视角的地址。</string>
+    <string name="fwd_hint_remote">在服务器监听,连回本机上的地址。</string>
+    <string name="fwd_hint_dynamic">在本机开 SOCKS5 代理,流量走这条 SSH。</string>
+    <string name="term_forwards">端口转发</string>
+    <string name="term_menu_forwards">端口转发…</string>
 </resources>

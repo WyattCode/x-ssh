@@ -152,6 +152,7 @@ fun HostEditorScreen(
         }
         // 经哪台过去,和"连到哪台"是一件事,紧跟在地址下面。
         JumpField(draft)
+        ForwardField(draft.portForwards) { draft.portForwards = it }
     }
 
     val credentials: @Composable () -> Unit = {
@@ -359,6 +360,8 @@ class HostDraft(private val initial: Host?) {
     var tmux by mutableStateOf(initial?.tmux ?: false)
     /** 跳板机(另一台主机的 id,空 = 直连)。 */
     var jumpHostId by mutableStateOf(initial?.jumpHostId ?: "")
+    /** 保存在主机上的端口转发规则。 */
+    var portForwards by mutableStateOf(initial?.portForwards ?: emptyList())
 
     /** 正在编辑的这台的 id;新建时为 null(选跳板机时要把自己排除掉)。 */
     val id: String? get() = initial?.id
@@ -402,7 +405,8 @@ class HostDraft(private val initial: Host?) {
             // 连「放弃未保存的修改?」都不问。tmux 那个开关同理。
             lockSecrets != originalLocked ||
             tmux != (initial?.tmux ?: false) ||
-            jumpHostId != (initial?.jumpHostId ?: "")
+            jumpHostId != (initial?.jumpHostId ?: "") ||
+            portForwards != (initial?.portForwards ?: emptyList())
 
     /**
      * 这台主机磁盘上有一条加锁的密码密文。
@@ -522,6 +526,7 @@ class HostDraft(private val initial: Host?) {
             lockSecrets = lockSecrets,
             tmux = tmux,
             jumpHostId = jumpHostId,
+            portForwards = portForwards,
             // 没解锁就保存时,明文是空的 —— 把磁盘上那几条原样带过去,别覆盖成空。
             // (用户只是改个名字,不该顺手把密码弄丢。取舍规则见 carriedSecrets,抽出去是为了能测。)
             lockedPassword = kept.lockedPassword,

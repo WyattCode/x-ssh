@@ -54,6 +54,11 @@ data class Host(
      */
     val jumpHostId: String = "",
     /**
+     * 端口转发规则(连接成功后自动开)。结构和桌面版 `portForwards` 一致:
+     * local / remote / dynamic。空列表 = 不开。
+     */
+    val portForwards: List<HostForward> = emptyList(),
+    /**
      * 最近一次**连上**的时刻(毫秒,0 = 从没连过)。首页按"置顶 → 最近使用 → 添加顺序"排,
      * 遥控器的第一需求是"点我最常连的那台"。只在连接成功时写,失败和自动重连不写。
      */
@@ -202,6 +207,7 @@ class HostStore(context: Context) {
                         keyPublicFingerprint = item.optString("keyPublicFingerprint"),
                         tmux = item.optBoolean("tmux", false),
                         jumpHostId = item.optString("jumpHostId"),
+                        portForwards = parsePortForwards(item.optJSONArray("portForwards")),
                         lastUsed = item.optLong("lastUsed", 0L),
                         pinned = item.optBoolean("pinned", false),
                         // **这一条不能漏**:漏了每次加载都是 false —— 编辑页的开关显示成"关"
@@ -276,6 +282,7 @@ class HostStore(context: Context) {
             item.put("keyPublicFingerprint", host.keyPublicFingerprint)
             item.put("tmux", host.tmux)
             item.put("jumpHostId", host.jumpHostId)
+            if (host.portForwards.isNotEmpty()) item.put("portForwards", encodePortForwards(host.portForwards))
             item.put("lastUsed", host.lastUsed)
             item.put("pinned", host.pinned)
             array.put(item)

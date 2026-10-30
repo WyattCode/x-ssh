@@ -451,7 +451,7 @@ private fun SnippetInput(
  * 手机贴底(圆角只在上面),平板居中限宽。点外面 / Esc 关。
  */
 @Composable
-private fun SheetFrame(
+internal fun SheetFrame(
     title: String,
     tablet: Boolean,
     onDismiss: () -> Unit,

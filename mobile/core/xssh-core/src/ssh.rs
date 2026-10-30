@@ -4,15 +4,26 @@
 //! 服务端消息通过 [`Shell::poll_msg`] 拉取;输出字节喂给 [`crate::terminal::Terminal`] 上屏,
 //! 终端应答([`crate::terminal::TerminalEvent::Write`])写回 [`Shell::write`]。
 
+use std::collections::HashMap;
 use std::fmt;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use russh::client::{self, Handle};
 use russh::keys::{load_secret_key, HashAlg, PrivateKeyWithHashAlg, PublicKeyOrCertificate};
 use russh::ChannelId;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
+use tokio::task::AbortHandle;
+
+use crate::forward::{
+    dest_host, socks5_fail_reply, socks5_greeting, socks5_greeting_len, socks5_parse_connect,
+    socks5_success_reply, validate_spec, ForwardError, ForwardId, ForwardInfo, ForwardMode,
+    ForwardSpec, SocksErr,
+};
 
 /// 连接 + 认证总超时。
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
@@ -182,6 +193,8 @@ pub enum SshError {
     /// 跳板机登录成功了,但它不肯 / 没能开隧道到目标(目标地址不对、跳板机连不过去、
     /// 服务器关了 `AllowTcpForwarding`)。带跳板机给的原因。
     Tunnel(String),
+    /// 端口转发失败(前缀 `forward: `,界面按前缀翻译)。
+    Forward(ForwardError),
     Russh(russh::Error),
 }
 
@@ -205,6 +218,7 @@ impl fmt::Display for SshError {
             // 这两句的开头是给宿主认的(Android 按前缀换成中文),别改措辞。
             Self::Jump(inner) => write!(f, "jump host: {inner}"),
             Self::Tunnel(reason) => write!(f, "jump host could not open a tunnel: {reason}"),
+            Self::Forward(err) => write!(f, "{err}"),
             Self::Russh(err) => write!(f, "ssh: {err}"),
         }
     }
@@ -215,6 +229,12 @@ impl std::error::Error for SshError {}
 impl From<std::io::Error> for SshError {
     fn from(err: std::io::Error) -> Self {
         Self::Io(err)
+    }
+}
+
+impl From<ForwardError> for SshError {
+    fn from(err: ForwardError) -> Self {
+        Self::Forward(err)
     }
 }
 
@@ -235,6 +255,8 @@ struct Handler {
     /// 同一条连接上的 SFTP 通道自己读自己的字节流,它的数据要是也进来,二进制会被当成终端输出画上屏,
     /// 它一关闭,终端还会以为自己断了。
     shell_channel: Arc<Mutex<Option<ChannelId>>>,
+    /// 远端端口转发(-R):服务器监听端口 → 本机目标。没有对应规则的 forwarded-tcpip 直接拒。
+    remote_dests: Arc<Mutex<HashMap<u32, (String, u16)>>>,
 }
 
 impl Handler {
@@ -322,6 +344,38 @@ impl client::Handler for Handler {
         Ok(())
     }
 
+    async fn server_channel_open_forwarded_tcpip(
+        &mut self,
+        channel: russh::Channel<client::Msg>,
+        _connected_address: &str,
+        connected_port: u32,
+        _originator_address: &str,
+        _originator_port: u32,
+        reply: client::ChannelOpenHandle,
+        _session: &mut client::Session,
+    ) -> Result<(), Self::Error> {
+        let dest = self
+            .remote_dests
+            .lock()
+            .ok()
+            .and_then(|m| m.get(&connected_port).cloned());
+        let Some((host, port)) = dest else {
+            // 丢掉 reply = 拒绝这条通道。
+            drop(reply);
+            return Ok(());
+        };
+        reply.accept().await;
+        tokio::spawn(async move {
+            let mut tcp = match TcpStream::connect((host.as_str(), port)).await {
+                Ok(t) => t,
+                Err(_) => return,
+            };
+            let mut stream = channel.into_stream();
+            let _ = tokio::io::copy_bidirectional(&mut tcp, &mut stream).await;
+        });
+        Ok(())
+    }
+
     async fn disconnected(
         &mut self,
         _reason: client::DisconnectReason<Self::Error>,
@@ -351,6 +405,7 @@ impl Probe {
         tx: mpsc::UnboundedSender<ServerMsg>,
         known_key: Option<String>,
         shell_channel: Arc<Mutex<Option<ChannelId>>>,
+        remote_dests: Arc<Mutex<HashMap<u32, (String, u16)>>>,
     ) -> Handler {
         Handler {
             tx,
@@ -358,6 +413,7 @@ impl Probe {
             known_key,
             verdict: self.verdict.clone(),
             shell_channel,
+            remote_dests,
         }
     }
 
@@ -410,12 +466,57 @@ async fn authenticate(handle: &mut Handle<Handler>, target: &Target) -> Result<(
 /// 一条已认证的 SSH 连接。
 pub struct Ssh {
     runtime: Arc<tokio::runtime::Runtime>,
-    handle: Handle<Handler>,
+    handle: Arc<Handle<Handler>>,
     /// 经跳板机连的话,跳板机那条连接。隧道长在它上面,它一断目标就断 —— 必须和目标活得一样久。
     jump: Option<Handle<Handler>>,
     events: Option<mpsc::UnboundedReceiver<ServerMsg>>,
     server_key: String,
     shell_channel: Arc<Mutex<Option<ChannelId>>>,
+    /// 正在跑的端口转发(本机监听 / 远端监听)。断开时全部拆掉。
+    forwards: ForwardBook,
+}
+
+/// 一条连接上的转发台账。
+struct ForwardBook {
+    next_id: AtomicU64,
+    live: Mutex<HashMap<ForwardId, LiveForward>>,
+    remote_dests: Arc<Mutex<HashMap<u32, (String, u16)>>>,
+}
+
+struct LiveForward {
+    spec: ForwardSpec,
+    abort: AbortHandle,
+}
+
+impl ForwardBook {
+    fn new(remote_dests: Arc<Mutex<HashMap<u32, (String, u16)>>>) -> Self {
+        Self {
+            next_id: AtomicU64::new(1),
+            live: Mutex::new(HashMap::new()),
+            remote_dests,
+        }
+    }
+
+    fn list(&self) -> Vec<ForwardInfo> {
+        let live = self.live.lock().unwrap_or_else(|e| e.into_inner());
+        let mut out: Vec<_> = live
+            .iter()
+            .map(|(&id, lf)| ForwardInfo {
+                id,
+                spec: lf.spec.clone(),
+            })
+            .collect();
+        out.sort_by_key(|i| i.id);
+        out
+    }
+
+    fn has(&self, mode: ForwardMode, port: u16) -> bool {
+        self.live
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .values()
+            .any(|lf| lf.spec.mode == mode && lf.spec.local_port == port)
+    }
 }
 
 impl Ssh {
@@ -451,7 +552,12 @@ impl Ssh {
             let jump = match target.jump.as_deref() {
                 None => None,
                 Some(hop) => {
-                    let handler = jump_probe.handler(tx.clone(), hop.known_key.clone(), Arc::new(Mutex::new(None)));
+                    let handler = jump_probe.handler(
+                        tx.clone(),
+                        hop.known_key.clone(),
+                        Arc::new(Mutex::new(None)),
+                        Arc::new(Mutex::new(HashMap::new())),
+                    );
                     let reached = tokio::time::timeout(CONNECT_TIMEOUT, async {
                         let mut handle = client::connect(config.clone(), (hop.host.as_str(), hop.port), handler).await?;
                         authenticate(&mut handle, hop).await?;
@@ -465,7 +571,14 @@ impl Ssh {
                 }
             };
 
-            let handler = probe.handler(tx, target.known_key.clone(), shell_channel.clone());
+            let remote_dests: Arc<Mutex<HashMap<u32, (String, u16)>>> =
+                Arc::new(Mutex::new(HashMap::new()));
+            let handler = probe.handler(
+                tx,
+                target.known_key.clone(),
+                shell_channel.clone(),
+                remote_dests.clone(),
+            );
             let reached = tokio::time::timeout(CONNECT_TIMEOUT, async {
                 let mut handle = match &jump {
                     None => client::connect(config, (target.host.as_str(), target.port), handler).await?,
@@ -494,7 +607,7 @@ impl Ssh {
             });
 
             match reached {
-                Ok(handle) => Ok((handle, jump)),
+                Ok(handle) => Ok((handle, jump, remote_dests)),
                 Err(err) => {
                     // 跳板机连上了、目标没连上:跳板机那条别漏在外面。
                     if let Some(jump) = jump {
@@ -508,9 +621,17 @@ impl Ssh {
                 }
             }
         });
-        let (handle, jump) = connected?;
+        let (handle, jump, remote_dests) = connected?;
 
-        Ok(Self { runtime, handle, jump, events: Some(rx), server_key: probe.fingerprint(), shell_channel })
+        Ok(Self {
+            runtime,
+            handle: Arc::new(handle),
+            jump,
+            events: Some(rx),
+            server_key: probe.fingerprint(),
+            shell_channel,
+            forwards: ForwardBook::new(remote_dests),
+        })
     }
 
     /// 在这条连接上再开一个 SFTP 通道(不影响终端)。服务器没开 sftp 子系统时报错。
@@ -609,8 +730,147 @@ impl Ssh {
         Ok(Shell { runtime: self.runtime.handle().clone(), channel: writer, events })
     }
 
+    /// 开一条端口转发(本机 / 远端 / SOCKS)。失败不伤终端通道。
+    pub fn add_forward(&self, spec: ForwardSpec) -> Result<ForwardInfo, SshError> {
+        validate_spec(&spec)?;
+        if self.forwards.has(spec.mode, spec.local_port) {
+            return Err(ForwardError::Already {
+                port: spec.local_port,
+            }
+            .into());
+        }
+        let id = self.forwards.next_id.fetch_add(1, Ordering::Relaxed);
+        let abort = match spec.mode {
+            ForwardMode::Local => self.spawn_local_listener(&spec)?,
+            ForwardMode::Dynamic => self.spawn_dynamic_listener(spec.local_port)?,
+            ForwardMode::Remote => self.start_remote_forward(&spec)?,
+        };
+        let info = ForwardInfo {
+            id,
+            spec: spec.clone(),
+        };
+        self.forwards
+            .live
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(id, LiveForward { spec, abort });
+        Ok(info)
+    }
+
+    /// 按编号拆掉一条转发。
+    pub fn remove_forward(&self, id: ForwardId) -> Result<(), SshError> {
+        let lf = self
+            .forwards
+            .live
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&id)
+            .ok_or(ForwardError::NotFound { id })?;
+        lf.abort.abort();
+        if lf.spec.mode == ForwardMode::Remote {
+            let port = u32::from(lf.spec.local_port);
+            if let Ok(mut map) = self.forwards.remote_dests.lock() {
+                map.remove(&port);
+            }
+            let handle = self.handle.clone();
+            let _ = self.runtime.block_on(async {
+                let _ = handle.cancel_tcpip_forward("127.0.0.1", port).await;
+            });
+        }
+        Ok(())
+    }
+
+    /// 当前这条连接上开着的转发。
+    pub fn forwards(&self) -> Vec<ForwardInfo> {
+        self.forwards.list()
+    }
+
+    /// 拆掉全部转发(断开前调用)。
+    pub fn close_all_forwards(&self) {
+        let mut live = self.forwards.live.lock().unwrap_or_else(|e| e.into_inner());
+        for (_, lf) in live.drain() {
+            lf.abort.abort();
+            if lf.spec.mode == ForwardMode::Remote {
+                let port = u32::from(lf.spec.local_port);
+                if let Ok(mut map) = self.forwards.remote_dests.lock() {
+                    map.remove(&port);
+                }
+                let handle = self.handle.clone();
+                let _ = self.runtime.block_on(async {
+                    let _ = handle.cancel_tcpip_forward("127.0.0.1", port).await;
+                });
+            }
+        }
+    }
+
+    fn spawn_local_listener(&self, spec: &ForwardSpec) -> Result<AbortHandle, SshError> {
+        let listener = self.runtime.block_on(bind_local(spec.local_port))?;
+        let handle = self.handle.clone();
+        let dest = dest_host(&spec.remote_host).to_string();
+        let dest_port = u32::from(spec.remote_port);
+        let origin = u32::from(spec.local_port);
+        let join = self.runtime.spawn(async move {
+            loop {
+                let Ok((tcp, _)) = listener.accept().await else { break };
+                let handle = handle.clone();
+                let dest = dest.clone();
+                tokio::spawn(async move {
+                    let _ = pipe_direct(handle, tcp, dest, dest_port, origin).await;
+                });
+            }
+        });
+        Ok(join.abort_handle())
+    }
+
+    fn spawn_dynamic_listener(&self, local_port: u16) -> Result<AbortHandle, SshError> {
+        let listener = self.runtime.block_on(bind_local(local_port))?;
+        let handle = self.handle.clone();
+        let join = self.runtime.spawn(async move {
+            loop {
+                let Ok((tcp, _)) = listener.accept().await else { break };
+                let handle = handle.clone();
+                tokio::spawn(async move {
+                    let _ = pipe_socks(handle, tcp).await;
+                });
+            }
+        });
+        Ok(join.abort_handle())
+    }
+
+    fn start_remote_forward(&self, spec: &ForwardSpec) -> Result<AbortHandle, SshError> {
+        let port = u32::from(spec.local_port);
+        let handle = self.handle.clone();
+        self.runtime
+            .block_on(async {
+                handle
+                    .tcpip_forward("127.0.0.1", port)
+                    .await
+                    .map_err(|e| ForwardError::Denied {
+                        reason: e.to_string(),
+                    })
+            })?;
+        let dest = (
+            dest_host(&spec.remote_host).to_string(),
+            spec.remote_port,
+        );
+        if let Ok(mut map) = self.forwards.remote_dests.lock() {
+            map.insert(port, dest);
+        }
+        let handle = self.handle.clone();
+        let dests = self.forwards.remote_dests.clone();
+        let join = self.runtime.spawn(async move {
+            std::future::pending::<()>().await;
+            let _ = handle.cancel_tcpip_forward("127.0.0.1", port).await;
+            if let Ok(mut map) = dests.lock() {
+                map.remove(&port);
+            }
+        });
+        Ok(join.abort_handle())
+    }
+
     /// 断开连接。
     pub fn disconnect(&self) {
+        self.close_all_forwards();
         // 死连接上断开可能等不到回音;最多等 3 秒,别把调用方(会话收尾)卡住。
         // 计时器必须在 async 块**里面**构造:写成 block_on 的参数的话,它在进入运行时
         // 之前就被求值,tokio 找不到当前运行时直接 panic("no reactor running")。
@@ -629,6 +889,108 @@ impl Ssh {
                 .await;
             }
         });
+    }
+}
+
+async fn bind_local(port: u16) -> Result<TcpListener, SshError> {
+    TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port))
+        .await
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::AddrInUse {
+                SshError::from(ForwardError::PortInUse { port })
+            } else {
+                SshError::Io(e)
+            }
+        })
+}
+
+async fn pipe_direct(
+    handle: Arc<Handle<Handler>>,
+    mut tcp: TcpStream,
+    dest_host: String,
+    dest_port: u32,
+    origin_port: u32,
+) -> Result<(), ()> {
+    let channel = handle
+        .channel_open_direct_tcpip(dest_host, dest_port, "127.0.0.1", origin_port)
+        .await
+        .map_err(|_| ())?;
+    let mut stream = channel.into_stream();
+    let _ = tokio::io::copy_bidirectional(&mut tcp, &mut stream).await;
+    Ok(())
+}
+
+async fn pipe_socks(handle: Arc<Handle<Handler>>, mut tcp: TcpStream) -> Result<(), ()> {
+    let mut buf = Vec::with_capacity(64);
+    loop {
+        let mut tmp = [0u8; 64];
+        let n = tcp.read(&mut tmp).await.map_err(|_| ())?;
+        if n == 0 {
+            return Err(());
+        }
+        buf.extend_from_slice(&tmp[..n]);
+        match socks5_greeting(&buf) {
+            None => continue,
+            Some(Err(_)) => {
+                let _ = tcp.write_all(&[0x05, 0xFF]).await;
+                return Err(());
+            }
+            Some(Ok(reply)) => {
+                tcp.write_all(&reply).await.map_err(|_| ())?;
+                let len = socks5_greeting_len(&buf).unwrap_or(buf.len());
+                buf.drain(..len.min(buf.len()));
+                break;
+            }
+        }
+    }
+    let (host, port) = loop {
+        match socks5_parse_connect(&buf) {
+            Ok(None) => {
+                let mut tmp = [0u8; 256];
+                let n = tcp.read(&mut tmp).await.map_err(|_| ())?;
+                if n == 0 {
+                    return Err(());
+                }
+                buf.extend_from_slice(&tmp[..n]);
+            }
+            Ok(Some(target)) => break target,
+            Err(SocksErr::BadCommand) => {
+                let _ = tcp.write_all(&socks5_fail_reply(0x07)).await;
+                return Err(());
+            }
+            Err(_) => {
+                let _ = tcp.write_all(&socks5_fail_reply(0x01)).await;
+                return Err(());
+            }
+        }
+    };
+    let channel = match handle
+        .channel_open_direct_tcpip(host, u32::from(port), "127.0.0.1", 0)
+        .await
+    {
+        Ok(c) => c,
+        Err(_) => {
+            let _ = tcp.write_all(&socks5_fail_reply(0x05)).await;
+            return Err(());
+        }
+    };
+    tcp.write_all(&socks5_success_reply()).await.map_err(|_| ())?;
+    let mut stream = channel.into_stream();
+    let _ = tokio::io::copy_bidirectional(&mut tcp, &mut stream).await;
+    Ok(())
+}
+
+impl Drop for Ssh {
+    fn drop(&mut self) {
+        // 只 abort 监听任务、清表;不再 block_on(取消远端转发) ——
+        // Drop 时运行时可能正在拆,block_on 会恐慌。disconnect() 里会做完整清理。
+        let mut live = self.forwards.live.lock().unwrap_or_else(|e| e.into_inner());
+        for (_, lf) in live.drain() {
+            lf.abort.abort();
+        }
+        if let Ok(mut map) = self.forwards.remote_dests.lock() {
+            map.clear();
+        }
     }
 }
 

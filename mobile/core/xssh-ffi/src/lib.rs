@@ -39,6 +39,33 @@ pub struct JumpHost {
     pub known_key: Option<String>,
 }
 
+/// 端口转发方式(和桌面版 / 核心一致)。
+#[derive(Debug, Clone, Copy, uniffi::Enum)]
+pub enum ForwardMode {
+    Local,
+    Remote,
+    Dynamic,
+}
+
+/// 要开的一条转发规则。
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct ForwardSpec {
+    pub mode: ForwardMode,
+    pub local_port: u16,
+    pub remote_host: String,
+    pub remote_port: u16,
+}
+
+/// 已开着的一条转发。
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct ForwardInfo {
+    pub id: u64,
+    pub mode: ForwardMode,
+    pub local_port: u16,
+    pub remote_host: String,
+    pub remote_port: u16,
+}
+
 /// 认证方式。
 #[derive(Debug, Clone, uniffi::Enum)]
 pub enum AuthMethod {
@@ -395,6 +422,23 @@ impl Session {
         Ok(Arc::new(Sftp { inner: sftp }))
     }
 
+    /// 开一条端口转发。失败不伤终端。错误文本带 `forward: ` 前缀。
+    pub fn add_forward(&self, spec: ForwardSpec) -> Result<ForwardInfo, FfiError> {
+        let info = self.lock().add_forward(to_core_spec(spec))?;
+        Ok(from_core_info(info))
+    }
+
+    /// 按编号拆掉一条转发。
+    pub fn remove_forward(&self, id: u64) -> Result<(), FfiError> {
+        self.lock().remove_forward(id)?;
+        Ok(())
+    }
+
+    /// 这条连接上现在开着的转发。
+    pub fn forwards(&self) -> Vec<ForwardInfo> {
+        self.lock().forwards().into_iter().map(from_core_info).collect()
+    }
+
     /// 断开连接。
     pub fn disconnect(&self) {
         self.lock().disconnect();
@@ -406,6 +450,35 @@ fn auth_of(auth: AuthMethod) -> ssh::Auth {
         AuthMethod::Password { password } => ssh::Auth::Password(password),
         AuthMethod::KeyFile { path, passphrase } => ssh::Auth::KeyFile { path: path.into(), passphrase },
         AuthMethod::KeyData { pem, passphrase } => ssh::Auth::KeyData { pem, passphrase },
+    }
+}
+
+fn to_core_spec(spec: ForwardSpec) -> xssh_core::forward::ForwardSpec {
+    use xssh_core::forward::{ForwardMode as M, ForwardSpec as S};
+    S {
+        mode: match spec.mode {
+            ForwardMode::Local => M::Local,
+            ForwardMode::Remote => M::Remote,
+            ForwardMode::Dynamic => M::Dynamic,
+        },
+        local_port: spec.local_port,
+        remote_host: spec.remote_host,
+        remote_port: spec.remote_port,
+    }
+}
+
+fn from_core_info(info: xssh_core::forward::ForwardInfo) -> ForwardInfo {
+    use xssh_core::forward::ForwardMode as M;
+    ForwardInfo {
+        id: info.id,
+        mode: match info.spec.mode {
+            M::Local => ForwardMode::Local,
+            M::Remote => ForwardMode::Remote,
+            M::Dynamic => ForwardMode::Dynamic,
+        },
+        local_port: info.spec.local_port,
+        remote_host: info.spec.remote_host,
+        remote_port: info.spec.remote_port,
     }
 }
 
