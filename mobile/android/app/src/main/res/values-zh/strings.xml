@@ -320,6 +320,7 @@
     <string name="term_snippets">命令片段</string>
     <string name="term_unlock_subtitle">用生物识别或锁屏密码继续</string>
     <string name="term_unlock_title">解锁已保存的凭据</string>
+    <string name="theme_persist_failed">主题保存失败,请重试</string>
     <plurals name="files_cancelled_downloaded">
         <item quantity="other">已取消(已下载 %d 个)</item>
     </plurals>

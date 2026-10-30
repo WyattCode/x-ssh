@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { nextTick, ref, reactive, computed, watch } from 'vue'
 import { useFocusTrap } from '../composables/focusTrap'
+import { useToast } from '../composables/toast'
 
 const dialogEl = ref<HTMLElement>()
 useFocusTrap(dialogEl, () => store.publishOpen)
@@ -11,6 +12,7 @@ import Icon from './Icon.vue'
 
 const store = useSessions()
 const { t } = useI18n()
+const { toast } = useToast()
 // Mounted for the app's lifetime and shown by its own v-if, so an onMounted
 // focus ran once at startup with no element and never again.
 watch(
@@ -22,6 +24,7 @@ watch(
 
 const keys = ref<ManagedKey[]>([])
 const keyId = ref('')
+const keysFailed = ref(false)
 const selected = reactive(new Set<string>())
 const busy = ref(false)
 const revokeBusy = ref(false)
@@ -32,8 +35,16 @@ const revokeResults = ref<{ host: string; ok: boolean; error?: string }[]>([])
 const hostList = computed(() => [...store.hosts].sort((a, b) => a.label.localeCompare(b.label)))
 
 async function refresh(): Promise<void> {
-  keys.value = await window.api.keys.list()
-  if (!keys.value.some((k) => k.id === keyId.value)) keyId.value = keys.value[0]?.id ?? ''
+  try {
+    keys.value = await window.api.keys.list()
+    keysFailed.value = false
+    if (!keys.value.some((k) => k.id === keyId.value)) keyId.value = keys.value[0]?.id ?? ''
+  } catch {
+    keysFailed.value = true
+    keys.value = []
+    keyId.value = ''
+    toast(t('keyPub.listFail'), 'error')
+  }
 }
 function toggleHost(h: Host): void {
   if (selected.has(h.id)) selected.delete(h.id)
@@ -92,6 +103,7 @@ watch(
         <select v-model="keyId" class="kp-select">
           <option v-for="k in keys" :key="k.id" :value="k.id">{{ k.name }}<template v-if="k.type"> · {{ k.type }}</template></option>
         </select>
+        <button v-if="keysFailed" type="button" class="kp-run ghost" @click="refresh">{{ t('keyPub.retry') }}</button>
         <label class="kp-label">{{ t('keyPub.hosts') }}</label>
         <div class="kp-hosts">
           <label v-for="h in hostList" :key="h.id" class="kp-host">
