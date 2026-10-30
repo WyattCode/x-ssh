@@ -347,7 +347,15 @@ fun TabletApp(
             ) { connect(host) },
         )
         add(MenuAction(context.getString(R.string.tab_menu_edit), shortcut = "Ctrl+E") { sheet = SheetTarget.Edit(host) })
-        add(MenuAction(context.getString(R.string.tab_copy_address)) { copyText(context, host.subtitle) })
+        add(MenuAction(context.getString(R.string.tab_copy_address)) {
+            if (!copyText(context, host.subtitle)) {
+                android.widget.Toast.makeText(
+                    context,
+                    context.getString(R.string.clipboard_unavailable),
+                    android.widget.Toast.LENGTH_SHORT,
+                ).show()
+            }
+        })
         if (live) add(MenuAction(context.getString(R.string.tab_disconnect), danger = true) { disconnect(host) })
         add(MenuAction(context.getString(R.string.tab_menu_delete), danger = true, shortcut = "Delete") { deleting = host })
     }
@@ -627,9 +635,11 @@ fun TabletApp(
     }
 }
 
-fun copyText(context: android.content.Context, text: String) {
-    val clipboard = context.getSystemService(android.content.ClipboardManager::class.java) ?: return
+/** 把 [text] 放进剪贴板;拿不到剪贴板服务时返回 false,调用方要告诉用户。 */
+fun copyText(context: android.content.Context, text: String): Boolean {
+    val clipboard = context.getSystemService(android.content.ClipboardManager::class.java) ?: return false
     clipboard.setPrimaryClip(android.content.ClipData.newPlainText("X-SSH", text))
+    return true
 }
 
 /* ─────────────────────────────── 侧边栏 ─────────────────────────────── */

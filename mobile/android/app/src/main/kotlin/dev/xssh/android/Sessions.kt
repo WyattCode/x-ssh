@@ -331,12 +331,18 @@ class TerminalSession(
      */
     val hasSelection: Boolean get() = live.hasSelection
 
-    /** 取选中的文字交给 [onText](在主线程回调),然后清掉选区。 */
-    fun copySelection(onText: (String) -> Unit) = enqueue {
+    /** 取选中的文字交给 [onText](主线程;返回 true 表示已写入剪贴板),成功后再清掉选区。 */
+    fun copySelection(onText: (String) -> Boolean) = enqueue {
         val text = live.selectionText()
-        live.selectClear()
-        publishFrame()
-        if (!text.isNullOrEmpty()) mainThread.post { onText(text) }
+        if (text.isNullOrEmpty()) return@enqueue
+        mainThread.post {
+            if (onText(text)) {
+                enqueue {
+                    live.selectClear()
+                    publishFrame()
+                }
+            }
+        }
     }
 
     private val mainThread = android.os.Handler(android.os.Looper.getMainLooper())

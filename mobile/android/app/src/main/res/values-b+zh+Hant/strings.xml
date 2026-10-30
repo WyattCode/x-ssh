@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- 由 scratchpad/i18n/merge.py 从各组的 JSON 生成;改文案请改这里的对应条目(三种语言一起改)。 -->
 <resources>
+    <string name="clipboard_unavailable">無法存取剪貼簿</string>
     <string name="edit_address">位址</string>
     <string name="edit_appearance">外觀:%1$s</string>
     <string name="edit_back">返回</string>

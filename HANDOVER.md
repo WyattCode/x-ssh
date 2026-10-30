@@ -441,6 +441,36 @@
 - 桌面:`npm.cmd run typecheck`、`npm.cmd run lint:i18n`、`npm.cmd run test`、`npm.cmd run build`
 - 安卓:`./gradlew :app:assembleDebug`(或 `installDebug`);`npm.cmd run lint:i18n` 会跑 `lint-i18n-mobile.mjs`,三份资源必须对称
 - 人工:安卓编辑页用错口令点「复制公钥」应看到「无法读取公钥」;桌面开连续同步后让 `sshManager` 失效(关窗 / 会话结束)再点停止,应弹 `sfp.syncFail` 而不是静默消失。
+# M3.152 — 复制失败不再假装成功(2026-10-30)
+
+> 分支 `fix/review-polish-m3152`(从 `origin/main` 切出)。**未合并**;PR #4–#86 一律没碰。
+
+## 修了什么
+
+1. **安卓终端「复制」在读不到选区文字时仍清掉选区**(`Sessions.kt` 的 `copySelection`)。`selectionText()` 返回 null 时原来照样 `selectClear()`,剪贴板没变、选区却没了 —— 看着像复制成功。现在签名改成 `onText: (String) -> Boolean`(true = 已写入剪贴板),取不到文字直接返回、不动选区;只有回调返回 true 才 `selectClear()` + `publishFrame()`。
+2. **安卓 `copyText` 在剪贴板服务缺失时静默 return**(`Tablet.kt`)。改成返回 `Boolean`,四个调用点全部处理失败:
+   - `TerminalScreen.kt` 的 `copySelection` 返回 Boolean,失败弹 `clipboard_unavailable` Toast;
+   - `HostEditorScreen.kt` 的 `CredentialFields`(生成密钥 / 复制公钥)失败走 `onMessage(clipboardFailed)`(没有动 `publicKey()` 的 null-else,那是 #86);
+   - `Files.kt` 的 `copyPaths`、`Ctrl+C`、右键「复制当前路径」失败走 `files.notify(..., error = true)`;
+   - `Tablet.kt` 主机菜单「复制地址」失败弹 Toast。
+   新增字符串 `clipboard_unavailable`(values / values-zh / values-b+zh+Hant 三份)。
+3. **桌面主机编辑器删除密钥失败时静默**(`HostEditor.vue` 的 `deleteKey`)。原来只在 `r.error` 有值时才提示,`!r.ok` 且无 error 时什么都不说。现在 `else` 分支统一 `toast(r.error ?? t('host.keyDeleteFail'), 'error')`,三语言新增 `host.keyDeleteFail`。
+
+## 验证
+
+```
+npm run typecheck
+npm run lint:i18n
+npm run test
+```
+
+安卓侧只改了 Kotlin(没动 Rust),`assembleDebug` / `installDebug` 照常;**没有在真机上点过**复制失败那条路(要造一个剪贴板服务不可用的环境)。
+
+## 注意
+
+- **不要合并**:这一批是 review 修复,等人工过一遍再合。
+- 未触碰的开放 PR:#4–#86(尤其 #86 的 `publicKey()` null-else / symlink `isDir` / 桌面 `stopWatch`;#85 的 SFTP diff toast / `previewFail` / GoTo `~`;#84 的 history export / pack / extract / sync / multi-download;#83 passphrase;#60 log-start;#58 link;#42 editExternal;#40 preview i18n)。
+- 未触碰 `/workspace/MCode`。
 
 ---
 

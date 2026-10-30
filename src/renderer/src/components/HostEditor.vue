@@ -382,6 +382,7 @@ async function deleteKey(k: ManagedKey): Promise<void> {
     panelEl.value?.focus()
   } else if (r.error) {
     toast(keyOpError(r.error), 'error')
+    toast(r.error ?? t('host.keyDeleteFail'), 'error')
   }
 }
 

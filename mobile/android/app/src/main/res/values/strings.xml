@@ -2,6 +2,7 @@
 <!-- 由 scratchpad/i18n/merge.py 从各组的 JSON 生成;改文案请改这里的对应条目(三种语言一起改)。 -->
 <resources>
     <string name="app_name" translatable="false">X-SSH</string>
+    <string name="clipboard_unavailable">Couldn\'t access the clipboard</string>
     <string name="edit_address">Address</string>
     <string name="edit_appearance">Appearance: %1$s</string>
     <string name="edit_back">Back</string>
