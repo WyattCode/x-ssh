@@ -1184,6 +1184,19 @@ export const useSessions = defineStore('sessions', {
       this.hostsSort = v
       void this.saveSetting('hostsSort', v)
     },
+    /** Drop cached probe results so the UI shows unknown until a fresh probe lands. */
+    clearReach(ids: string[]): void {
+      if (!ids.length) return
+      const next = { ...this.reach }
+      let changed = false
+      for (const id of ids) {
+        if (id in next) {
+          delete next[id]
+          changed = true
+        }
+      }
+      if (changed) this.reach = next
+    },
     /** Probes the given saved hosts (all when omitted) and merges the results. */
     async probeReach(ids?: string[], opts: { maxAge?: number } = {}): Promise<void> {
       const full = !ids
@@ -1243,6 +1256,9 @@ export const useSessions = defineStore('sessions', {
     },
     async removeHost(id: string): Promise<void> {
       this.hosts = await window.api.hosts.delete(id)
+      // A deleted host must not leave its last probe result behind: the stats
+      // and any host that later reuses the id would read it as their own.
+      this.clearReach([id])
     },
     /** A copy under a fresh id. Saved passwords stay with the original (they're
      *  keyed by id); the copy asks on first connect. */

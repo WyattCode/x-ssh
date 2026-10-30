@@ -69,7 +69,13 @@ watch(
     if (!before) return
     const old = new Set(before.split(','))
     const fresh = store.hosts.filter((h) => !old.has(`${h.id}|${h.host}|${h.port}`)).map((h) => h.id)
-    if (fresh.length) void store.probeReach(fresh)
+    if (fresh.length) {
+      // The cached result belongs to the old address: drop it so the dot goes
+      // back to unknown until the fresh probe lands, instead of showing a green
+      // light for an IP that no longer exists.
+      store.clearReach(fresh)
+      void store.probeReach(fresh)
+    }
   }
 )
 

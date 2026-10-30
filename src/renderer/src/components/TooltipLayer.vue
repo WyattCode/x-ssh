@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { reactive, ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { shouldDismissTooltip } from '../lib/tooltipDismiss'
 
 // A single global tooltip host. It intercepts the native `title` tooltip for
 // every element (via delegated mouseover on the document), suppresses the OS
@@ -104,6 +105,16 @@ function onOut(e: MouseEvent): void {
   release()
 }
 
+// Alt-Tab (or the window being hidden) never delivers a mouseout, so a delayed
+// or already-visible tip would stick around — and the hovered element's title
+// stay stripped — until the pointer came back. Dismiss on either.
+function onInactive(): void {
+  if (shouldDismissTooltip(document.visibilityState, true)) release()
+}
+function onVisibility(): void {
+  if (shouldDismissTooltip(document.visibilityState, false)) release()
+}
+
 // A key press or scroll dismisses the tip, as native tooltips do. It also
 // covers the hovered element disappearing under the pointer (a shortcut
 // switching pages hides it) — no mouseout ever arrives for that.
@@ -113,6 +124,8 @@ onMounted(() => {
   window.addEventListener('resize', release)
   window.addEventListener('keydown', release, true)
   window.addEventListener('wheel', release, { capture: true, passive: true })
+  window.addEventListener('blur', onInactive)
+  document.addEventListener('visibilitychange', onVisibility)
 })
 onBeforeUnmount(() => {
   document.removeEventListener('mouseover', onOver, true)
@@ -120,6 +133,8 @@ onBeforeUnmount(() => {
   window.removeEventListener('resize', release)
   window.removeEventListener('keydown', release, true)
   window.removeEventListener('wheel', release, { capture: true } as EventListenerOptions)
+  window.removeEventListener('blur', onInactive)
+  document.removeEventListener('visibilitychange', onVisibility)
 })
 </script>
 

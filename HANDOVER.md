@@ -7,6 +7,9 @@
 # 会话记录:连续改进 M3.85(2026-10-30,复核打磨:ZoomHud 失焦粘滞 + 窗格失焦 blur + keyManager IPC 错误码)
 
 功能清单已够,本轮按站立规则做开源复核打磨(不合并)。未动 PR #19 / #18 / #17 / #16 / #15 / #14 / #13 / #12 与更早的 #4–#11。
+# 会话记录:连续改进 M3.86(2026-10-30,复核打磨:TooltipLayer 失焦粘滞 + 片段变量重入/焦点 + 改地址清 reach)
+
+功能清单已够,本轮按站立规则做开源复核打磨(不合并)。未动 PR #20 / #19 / #18 / #17 / #16 / #15 / #14 / #13 / #12 与更早的 #4–#11。
 
 **核过已过时 / 已在未合并 PR(本轮不重做)**:
 1. TransferPanel 失败原因 / ETA + Android 罚分地板 —— PR #12。
@@ -39,6 +42,16 @@
 3. **keyManager IPC 错误码**:抛 `invalid-key` / `bad-id` 稳定标记;`KeyErrorCode` + 主进程 `keyFail`;渲染层 `keyErrorMessage` 翻译。顺手给 HostEditor 生成/导入加 `keyBusy`,防双击生两把钥匙。
 
 **验证**:`typecheck` + `lint:i18n` + vitest **343** 全绿(原 334;+`zoomHud` 4 + `keyError` 5)。Android 本轮未改。未合并。
+7. OSC52 空白 base64 + 主锁 Enter/busy + 离线点透明度 —— PR #18。
+8. 主题循环竞态 + 关闭全部确认 + 连接日志 disconnect/滚动 —— PR #19。
+9. ZoomHud 失焦粘滞 + 窗格失焦 blur + keyManager IPC 错误码 —— PR #20。
+
+**修了**:
+1. **TooltipLayer 失焦粘滞**:`lib/tooltipDismiss.ts` `shouldDismissTooltip`;`TooltipLayer` 在 `window.blur` / `visibilitychange→hidden` 时 `release()` —— Alt-Tab 时延迟/已显示的 tip 不会永远挂着,title 也不会一直被摘掉。
+2. **片段变量对话框**:`prompt` 重入时完整拆掉上一次(resolve=null + 关窗),避免挂死的 Promise;无占位符的后续调用也不会留下空壳对话框。`fillSnippetText` 抽出可测;`SnippetVarsDialog` Enter `preventDefault`、打开聚焦第一个空框、校验失败聚焦 `.bad`、输入清 error。
+3. **改地址 / 删主机清 reach**:`sessions.clearReach`;HostsPage 在地址/端口变更后先清再探,避免还亮着旧 IP 的绿点;删除主机顺手丢掉孤儿 reach。
+
+**验证**:`typecheck` + `lint:i18n` + vitest **342** 全绿(原 334;+`tooltipDismiss` 4 + `snippetVars` 4)。Android 本轮未改。未合并。
 
 ---
 
