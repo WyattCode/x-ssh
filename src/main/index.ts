@@ -2182,8 +2182,14 @@ function registerIpc(): void {
     return { ok: true }
   })
   ipcMain.handle(IPC.connLogClear, async () => {
-    await settings.set('connectionLog', [])
-    return { ok: true }
+    try {
+      await settings.set('connectionLog', [])
+      return { ok: true }
+    } catch {
+      // Durable write failed (or will, once SettingsStore propagates). Do not
+      // tell the renderer the audit trail is gone.
+      return { ok: false }
+    }
   })
 
   // ---- App master-lock ----
