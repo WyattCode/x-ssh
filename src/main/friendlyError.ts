@@ -65,6 +65,33 @@ export function isTransientConnectError(raw: string | undefined): boolean {
 }
 
 /**
+ * Whether a raw connect error is a credential / key failure (wrong password,
+ * rejected key, unreadable or passphrase-protected private key, interactive
+ * auth). Android's ReconnectPolicy already treats these as permanent — never
+ * auto-retried — and the desktop loop must match: retrying a rotated password
+ * or a bad key only hammers the account (and feeds fail2ban). Accepts the
+ * already-mapped Chinese wording too, so re-entry through friendlyError() is
+ * safe.
+ */
+export function isAuthConnectError(raw: string | undefined): boolean {
+  const m = (raw ?? '').toLowerCase()
+  const has = (s: string): boolean => m.includes(s)
+  return (
+    has('authentication methods failed') ||
+    has('all configured authentication') ||
+    has('keyboard-interactive') ||
+    has('passphrase') ||
+    has('cannot parse privatekey') ||
+    has('integrity check') ||
+    has('unsupported key') ||
+    has('encrypted private key') ||
+    has('认证失败') ||
+    has('私钥无法解析') ||
+    has('未选择私钥')
+  )
+}
+
+/**
  * How long to wait before the automatic first retry when the refusal came from
  * the server's connection-rate limiting: each refused attempt is itself a
  * pre-auth connection, so retrying within the penalty window only feeds it —

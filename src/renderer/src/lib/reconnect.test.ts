@@ -93,7 +93,13 @@ describe('shouldReviveOnOnline', () => {
   it('does not revive a pane that failed with a code', () => {
     // Bad credentials / changed host key / locked app: the network coming back
     // changes nothing, so don't hammer the host.
-    for (const code of ['locked', 'host_key_changed', 'jump_needs_password']) {
+    for (const code of [
+      'locked',
+      'host_key_changed',
+      'host_key_unknown',
+      'jump_needs_password',
+      'auth_failed'
+    ]) {
       expect(shouldReviveOnOnline({ ...dropped, errorCode: code }), code).toBe(false)
     }
   })

@@ -2,6 +2,17 @@
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。
 
+## M3.144(分支 `fix/review-polish-m3144`,**未合并**)
+
+> 只做缺陷 / 界面打磨,不加功能。**#78–#4 的 PR 都还没合并**,这一批也不含它们。
+
+- **认证失败无 errorCode → 自动重连锤凭据(P0,桌面 ↔ 安卓缺口)**:安卓 `ReconnectPolicy.isPermanent` 早已把认证失败当永久错误;桌面 `ssh.ts` 只给主机密钥拒绝打 `code`,认证失败(`All configured authentication methods failed` / 私钥口令 / keyboard-interactive)留下 `code` 为空 —— `scheduleReconnect` 只停 host_key_*,网络恢复 / 唤醒也会把无 code 的错误面板重新拉起。现在主进程 `isAuthConnectError` → `code: 'auth_failed'`(含 `authConfig` 捕获),渲染层映射 `app.authFailed`;`scheduleReconnect` 遇到**任意** `errorCode` 即停;`handleWake` 改走与 `handleNetworkOnline` 相同的 `shouldReviveOnOnline`。
+- **密钥变更卡可能藏起「之前记录的指纹」(P1)**:`PaneNode.oldFingerprint` 用严格 `k.port === port`,而 `hostKeyKnown` 用 `|| 22`;遗留 / 导入条目 port 为空时变更卡只显示新指纹。现与 `hostKeyKnown` 同一套归一化。
+- i18n 新增 `app.authFailed`(zh / en / zh-TW)。`friendlyError.test` +2 → vitest **336**。
+- 未触碰:M3.143/#78 jump_missing / HostEditor jumpGone;M3.142–M3.137 设置开关 / SFTP / closePane;theme / HostEditor save-delete / trustAndReconnect / ForwardsPage.remove / known_hosts / SFTP upload 波。
+- 仍按原计划搁置:`fontSize` 未使用、`local.home` 静默、StatusBar configured-vs-live、`setWindowOpenHandler`、预览「无法预览」。
+
+
 ## 项目概述
 - 极简、键盘优先的 SSH 客户端。Electron + Vue 3 (Vite) + TypeScript。
 - 平台: Windows (`win32`)。目录: `D:\Documents\Claude Code\X-SSH`。
@@ -12,7 +23,7 @@
 - 必须用 `npm.cmd`(直接 `npm` 会因执行策略失败)。
 - 校验: `npm.cmd run typecheck`、`npm.cmd run build`
 - **本地 SFTP 靶机**:`powershell -File scripts\dev-sshd.ps1 start|stop|status|clean`。密钥、配置、`authorized_keys` 全在 `%TEMP%\xssh-target`,只绑 `127.0.0.1:2222`,**不碰 `%USERPROFILE%\.ssh`**;客户端私钥是 `%TEMP%\xssh-target\id_dev`(主机编辑页「密钥」直接填这个路径),登录用户是你当前 Windows 账号。配置里**不能写 `PerSourcePenalties`**(Windows 自带的 OpenSSH 是 9.x,不认识,写了 sshd 直接起不来)。脚本按 PID 文件停进程 —— 别自己按命令行匹配杀,会把执行命令的 PowerShell 一起匹配掉。
-- **单元测试**: `npm.cmd run test`(Vitest 2;共 **334** 用例 / **30** 个文件:纯逻辑在 `src/shared/*` / `src/renderer/src/lib/*`,外加 `src/main/*.test.ts` 的集成测试(起真 ssh2 服务器),以及两个源码静态检查(`focusTrapCoverage`、`imeEnterCoverage`)。**没有任何组件测试**,界面交互只能人工验。
+- **单元测试**: `npm.cmd run test`(Vitest 2;共 **336** 用例 / **30** 个文件:纯逻辑在 `src/shared/*` / `src/renderer/src/lib/*`,外加 `src/main/*.test.ts` 的集成测试(起真 ssh2 服务器),以及两个源码静态检查(`focusTrapCoverage`、`imeEnterCoverage`)。**没有任何组件测试**,界面交互只能人工验。
   - **配置里钉死了单进程**(`vitest.config.ts` 的 `singleFork`),别改回默认并行:Windows 上并行会让 Vitest 的 SSR 模块缓存互相踩,随机一整个文件报 `EPERM open ...\ssr\<hash>` 然后**静默不收集**,那一跑仍然报绿、只是数字变小(实测同一份代码连跑 10 次出现过 334 / 325 / 326 / 313 / 331 五种结果)。**看到用例数比 334 少,先怀疑这个,别怀疑测试挂掉。**
 - **i18n 键对称校验**: `npm.cmd run lint:i18n`(现在串跑两个脚本:桌面端 `scripts/lint-i18n.mjs` + 移动端 `scripts/lint-i18n-mobile.mjs`;桌面端 zh / zh-TW / en 722/722/722 全对称,移动端三份资源对称且代码里 0 条内联中文)。
 - **发版流程**:升 `package.json`/lock(`npm.cmd version x.y.z --no-git-tag-version`,会把 `schemes` 那行重排,手动还原)+ CHANGELOG → 提交推 `main` → `git tag vx.y.z` 并推 tag;CI(`ci.yml` 的 `release` 作业,windows-latest,约 8 分钟)自动建 GitHub Release 并挂 `X-SSH.Setup.x.y.z.exe` + `.blockmap`。**安卓不在这条流水线里**,APK 只能本机 `installDebug`。

@@ -23,7 +23,12 @@ import type {
   UploadOverwrite
 } from '../shared/types'
 import { KnownHosts } from './knownHosts'
-import { friendlyError, isTransientConnectError, penaltyRetryDelayMs } from './friendlyError'
+import {
+  friendlyError,
+  isAuthConnectError,
+  isTransientConnectError,
+  penaltyRetryDelayMs
+} from './friendlyError'
 import { posixJoin, parentOf, clampConcurrency, buildPackCommand, buildExtractCommand, treeDirMode } from '../shared/fsUtils'
 
 /** Streams a local file through SHA-256 and resolves its lowercase hex digest. */
@@ -923,7 +928,11 @@ export class SshManager {
       jumpClient?.end()
       ;(config.sock as Duplex | Socket | undefined)?.destroy()
       this.sessions.delete(id)
-      return { ok: false, error: friendlyError((err as Error).message) }
+      // A key that can't be read / parsed (or a missing key path) is a
+      // credential failure, not a network one: tag it so the renderer stops the
+      // reconnect loop instead of retrying a key that will never load.
+      const raw = (err as Error).message
+      return { ok: false, error: friendlyError(raw), code: 'auth_failed' }
     }
 
     // -A: forward the local agent so the remote host (and any hosts it jumps
@@ -1056,7 +1065,13 @@ export class SshManager {
           error: message,
           transient: !keyRejected && isTransientConnectError(raw),
           retryDelayMs: penaltyRetryDelayMs(raw),
-          code: keyRejected ? (keyUnknown ? 'host_key_unknown' : 'host_key_changed') : undefined,
+          code: keyRejected
+            ? keyUnknown
+              ? 'host_key_unknown'
+              : 'host_key_changed'
+            : isAuthConnectError(raw)
+              ? 'auth_failed'
+              : undefined,
           key: keyRejected ? lastKey : undefined,
           keyHost: keyRejected ? params.host : undefined,
           keyPort: keyRejected ? port : undefined

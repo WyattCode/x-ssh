@@ -47,7 +47,14 @@ const oldFingerprint = computed(() => {
   if (pn?.errorCode !== 'host_key_changed') return ''
   const host = pn.hostKeyHost ?? pn.params.host
   const port = pn.hostKeyPort ?? (pn.params.port || 22)
-  return store.knownHosts.find((k) => k.host === host && k.port === port)?.fingerprint ?? ''
+  // Same `|| 22` normalize as hostKeyKnown: a legacy / imported entry with a
+  // falsy port must still match, or the "on record" row vanishes on a
+  // host_key_changed card and the user only sees the new key.
+  return (
+    store.knownHosts.find(
+      (k) => k.host === host && (k.port || 22) === (port || 22)
+    )?.fingerprint ?? ''
+  )
 })
 const hostKeyRejected = computed(
   () =>
