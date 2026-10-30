@@ -1640,7 +1640,10 @@ function registerIpc(): void {
     ) => {
       if (!sshManager) return { ok: false, error: '窗口未就绪', count: 0 }
       try {
-        await sshManager.syncJob(sessionId, localDir, remoteDir, mode, deleteExtras, randomUUID(), concurrency, await defaultTransferRate())
+        const r = await sshManager.syncJob(sessionId, localDir, remoteDir, mode, deleteExtras, randomUUID(), concurrency, await defaultTransferRate())
+        // A sync that lost files must not answer ok — the drawer would show it as
+        // a success. The count travels in the error so the UI can localize it.
+        if (r.errors) return { ok: false, error: `sync-items-failed:${r.errors}`, count: 0 }
         return { ok: true, count: 0 }
       } catch (e) {
         return { ok: false, error: friendlyError((e as Error).message), count: 0 }

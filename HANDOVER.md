@@ -2,6 +2,12 @@
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。
 
+## M3.176
+
+- 分支 `fix/review-polish-m3176`(基于 `main` @ `5946b1f`),**未合并**;只动 Windows / Android,不碰 macOS / iOS。
+- **增量同步不再把文件级失败报成成功**:`syncJob` 返回 `{ errors }`,IPC `sftp:sync` 有失败就 `ok:false` + `sync-items-failed:N`,抽屉用新键 `sfp.syncItemsFailed` 显示(zh / en / zh-TW)。取消语义与 `${errors} 项失败` 的 emit 文案没动(分别归 #53 / #47)。
+- **持续同步失败不推进基线**:`runWatchPass` 在同步抛错或有文件失败时保留旧基线,下一轮重试这些文件(原来会越过部分失败,失败文件因大小/时间"对上"而永远不再同步)。
+
 ## 项目概述
 - 极简、键盘优先的 SSH 客户端。Electron + Vue 3 (Vite) + TypeScript。
 - 平台: Windows (`win32`)。目录: `D:\Documents\Claude Code\X-SSH`。

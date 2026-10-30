@@ -1244,6 +1244,13 @@ function openSyncDialog(): void {
   sync.interval = 5
   sync.open = true
 }
+/** Maps the main process's `sync-items-failed:N` marker to a localized message;
+ *  anything else (a thrown walk error, a plain failure) is shown as-is. */
+function syncErrorText(err?: string): string {
+  const m = /^sync-items-failed:(\d+)$/.exec(err ?? '')
+  if (m) return tt('sfp.syncItemsFailed', { n: Number(m[1]) })
+  return err ?? tt('sfp.syncFail')
+}
 async function startSync(): Promise<void> {
   if (!props.sessionId || !sync.local || !sync.remote) return
   sync.open = false
@@ -1257,7 +1264,7 @@ async function startSync(): Promise<void> {
     return
   }
   const r = await window.api.sftp.sync(props.sessionId, sync.local, sync.remote, sync.mode, sync.del, store.transferConcurrency)
-  if (!r.ok) error.value = r.error ?? tt('sfp.syncFail')
+  if (!r.ok) error.value = syncErrorText(r.error)
 }
 async function stopWatch(): Promise<void> {
   if (!props.sessionId) return
