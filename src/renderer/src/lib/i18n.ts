@@ -106,6 +106,8 @@ const zh: Dict = {
   'app.jumpNeedsKey': '跳板机未选择私钥文件。请在「主机」编辑页为跳板主机导入私钥后重试,或改用密码认证。',
   'app.needsKey': '未选择私钥文件。请在「主机」编辑页导入或选择私钥后重试。',
   'app.needsPassword': '需要密码,但没有已保存的密码。请在连接时输入密码,或在「主机」编辑页保存密码后重试。',
+  'app.needsPassphrase': '这把私钥有口令,但没有已保存的密码短语。请在「主机」编辑页填写后重试。',
+  'app.badPassphrase': '私钥密码短语不正确。请在「主机」编辑页更正后重试。',
 
   // settings tabs
   'tab.general': '通用',
@@ -824,6 +826,7 @@ const zh: Dict = {
   'host.save': '保存',
   'host.saveDisabled': '请填写主机地址和用户名',
   'host.keyRequired': '密钥认证需要先选择或导入私钥',
+  'host.passphraseRequired': '该私钥已加密,请填写密码短语后再保存',
   'host.discardConfirm': '放弃未保存的修改?',
   'host.discard': '放弃修改',
   'host.pickKey': '选择私钥',
@@ -1016,6 +1019,8 @@ const en: Dict = {
   'app.jumpNeedsKey': 'The jump host has no private key selected. Import a key on the jump host profile (or switch to password auth) and retry.',
   'app.needsKey': 'No private key selected. Import or choose a key on the host profile and retry.',
   'app.needsPassword': 'A password is required, but none is saved. Enter one when connecting, or save it on the host profile and retry.',
+  'app.needsPassphrase': 'This private key has a passphrase, but none is saved. Enter it on the host profile and retry.',
+  'app.badPassphrase': 'Wrong private key passphrase. Correct it on the host profile and retry.',
 
   'tab.general': 'General',
   'tab.terminal': 'Terminal',
@@ -1726,6 +1731,7 @@ const en: Dict = {
   'host.save': 'Save',
   'host.saveDisabled': 'Fill in the host address and username',
   'host.keyRequired': 'Key authentication needs a private key selected or imported first',
+  'host.passphraseRequired': 'This private key is encrypted — enter its passphrase before saving',
   'host.discardConfirm': 'Discard unsaved changes?',
   'host.discard': 'Discard',
   'host.pickKey': 'Choose private key',
@@ -1920,6 +1926,8 @@ const zhTW: Dict = {
   'app.jumpNeedsKey': '跳板機未選擇私鑰檔。請在「主機」編輯頁為跳板主機匯入私鑰後重試,或改用密碼驗證。',
   'app.needsKey': '未選擇私鑰檔。請在「主機」編輯頁匯入或選擇私鑰後重試。',
   'app.needsPassword': '需要密碼,但沒有已儲存的密碼。請在連線時輸入密碼,或在「主機」編輯頁儲存密碼後重試。',
+  'app.needsPassphrase': '這把私鑰有密碼短語,但沒有已儲存的密碼短語。請在「主機」編輯頁填寫後重試。',
+  'app.badPassphrase': '私鑰密碼短語不正確。請在「主機」編輯頁更正後重試。',
 
   // settings tabs
   'tab.general': '一般',
@@ -2639,6 +2647,7 @@ const zhTW: Dict = {
   'host.save': '儲存',
   'host.saveDisabled': '請填寫主機位址和使用者名稱',
   'host.keyRequired': '金鑰驗證需要先選擇或匯入私鑰',
+  'host.passphraseRequired': '此私鑰已加密,請填寫密碼短語後再儲存',
   'host.discardConfirm': '放棄未儲存的變更?',
   'host.discard': '放棄變更',
   'host.pickKey': '選擇私鑰',

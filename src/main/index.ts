@@ -875,6 +875,14 @@ function notifyHostsChanged(): void {
   }
 }
 
+/** Best-effort: traditional PEM marks ENCRYPTED; OpenSSH v1 encrypted keys name bcrypt. */
+function keyLikelyEncrypted(buf: Buffer): boolean {
+  const s = buf.toString('utf8', 0, Math.min(buf.length, 8192))
+  if (/ENCRYPTED/i.test(s)) return true
+  if (/openssh-key-v1/i.test(s) && /\bbcrypt\b/i.test(s)) return true
+  return false
+}
+
 /** A saved host's jump hop, with its saved secret; null when it can't be used
  *  unattended (missing, or a password hop with no saved password). */
 async function quietJumpConfig(jumpId: string): Promise<JumpConfig | null> {
@@ -890,6 +898,15 @@ async function quietJumpConfig(jumpId: string): Promise<JumpConfig | null> {
     // 「未选择私钥文件」 deep in the handshake and mark the address failed.
     if (!jh.keyPath) return null
     jump.passphrase = await store.getPassphrase(jh.id)
+    jump.passphrase = await store.getPassphrase(jh.id)
+    if (!jump.passphrase && jh.keyPath) {
+      try {
+        const buf = await readFile(jh.keyPath)
+        if (keyLikelyEncrypted(buf)) return null
+      } catch {
+        return null
+      }
+    }
   }
   return jump
 }
@@ -905,6 +922,14 @@ async function quietParams(h: Host): Promise<ConnectParams | null> {
   if (h.auth === 'key') {
     if (!h.keyPath) return null
     p.passphrase = await store.getPassphrase(h.id)
+    if (!p.passphrase) {
+      try {
+        const buf = await readFile(h.keyPath)
+        if (keyLikelyEncrypted(buf)) return null
+      } catch {
+        return null
+      }
+    }
   }
   if (h.jumpHostId) {
     const jump = await quietJumpConfig(h.jumpHostId)

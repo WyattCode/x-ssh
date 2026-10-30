@@ -320,6 +320,17 @@ async function generateKey(e?: Event): Promise<void> {
     keyBusy.value = false
     keyModal.busy = false
   }
+
+  keyModal.open = false
+  form.keyPath = r.key.path
+  // Keep the passphrase the user just typed for generation — otherwise canSave
+  // would still block a passphraseProtected key, and connect would fail late.
+  if (keyModal.passphrase) {
+    passphrase.value = keyModal.passphrase
+    keyModal.passphrase = ''
+  }
+  await loadKeys()
+  if (r.key.passphraseProtected === false) toast(t('host.keyUnprotected'), 'info')
 }
 async function importKey(): Promise<void> {
   if (keyBusy.value) return
@@ -383,6 +394,26 @@ const saveBlockReason = (): string => {
   return ''
 }
 const canSave = (): boolean => !saveBlockReason()
+const selectedManagedKey = (): ManagedKey | undefined =>
+  managedKeys.value.find((k) => k.path === form.keyPath)
+
+/** True when the chosen managed key is known to be encrypted and we have no
+ *  typed passphrase and no previously saved one — Android refuses this at save. */
+const keyPassphraseMissing = (): boolean => {
+  if (form.auth !== 'key') return false
+  if (passphrase.value) return false
+  if (props.host?.hasSavedPassphrase) return false
+  return selectedManagedKey()?.passphraseProtected === true
+}
+
+const canSave = (): boolean =>
+  !!form.host && !!form.username && !keyPassphraseMissing()
+
+const saveBlockReason = (): string => {
+  if (!form.host || !form.username) return t('host.saveDisabled')
+  if (keyPassphraseMissing()) return t('host.passphraseRequired')
+  return ''
+}
 
 // ---- Tags: type, Enter (or comma) adds; Backspace on an empty box removes the last ----
 const tagDraft = ref('')
@@ -808,6 +839,7 @@ async function remove(): Promise<void> {
           <span class="spacer" />
           <button type="button" class="btn" @click="void requestClose()">{{ t('host.cancel') }}</button>
           <button type="button" class="btn btn-primary" :disabled="!canSave() || saving" :title="canSave() ? undefined : t('host.saveDisabled')" @click="save">{{ saving ? t('ed.saving') : t('host.save') }}</button>
+
           <button type="button" class="btn btn-primary" :disabled="!canSave()" :title="canSave() ? undefined : saveBlockReason()" @click="save">{{ t('host.save') }}</button>
         </footer>
 

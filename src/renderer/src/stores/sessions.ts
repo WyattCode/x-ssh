@@ -1903,6 +1903,10 @@ export const useSessions = defineStore('sessions', {
               ? t('app.needsKey')
               : result.code === 'needs_password'
                 ? t('app.needsPassword')
+            : result.code === 'needs_passphrase'
+              ? t('app.needsPassphrase')
+              : result.code === 'bad_passphrase'
+                ? t('app.badPassphrase')
                 : result.code === 'locked'
                   ? t('app.locked')
                   : result.code === 'host_key_unknown'
@@ -2154,6 +2158,15 @@ export const useSessions = defineStore('sessions', {
         const after = this.findPane(paneId)
         if (!after) return
         if (after.pane.status === 'connected') {
+        if (after.pane.status === 'connected') after.pane.reconnectAttempt = undefined
+        // A refused host key won't fix itself by retrying: stop, and leave the
+        // card (with its fingerprint) for the user to decide.
+        else if (
+          after.pane.errorCode === 'host_key_unknown' ||
+          after.pane.errorCode === 'host_key_changed' ||
+          after.pane.errorCode === 'needs_passphrase' ||
+          after.pane.errorCode === 'bad_passphrase'
+        ) {
           after.pane.reconnectAttempt = undefined
           after.pane.reconnectMinDelayMs = undefined
         }
