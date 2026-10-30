@@ -121,6 +121,7 @@
     <string name="files_upload_folder">上傳資料夾…</string>
     <string name="files_uploaded_one">已上傳「%1$s」</string>
     <string name="font_noto">思源等寬</string>
+    <string name="font_size_persist_failed">字級沒能儲存,下次啟動會恢復原來的大小</string>
     <string name="font_style">%1$s 風格</string>
     <string name="host_address">位址</string>
     <string name="host_after_connect">連線後</string>

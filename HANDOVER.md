@@ -1,3 +1,11 @@
+# M3.174 — 复核打磨(分支 `fix/review-polish-m3174`,基于 main @ 5946b1f,**勿合并**)
+
+- fontSize.ts: settings.set 拒绝时滚回字号并 toast `app.fontSizeFail`(zh/en/zh-TW);对齐 #77 zoom。未动 zoom.ts。
+- Android UiPrefs.setTerminalFontSize: commit()+Boolean; TerminalScreen 捏合写盘失败回滚+toast `font_size_persist_failed`。未重做 #96 setTerminalFont/AppLanguage。
+- SettingsDialog editor/openers 本轮未做。未合并。未动 #4–#108。
+
+---
+
 # X-SSH 交接文档
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。

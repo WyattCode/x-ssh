@@ -122,6 +122,7 @@
     <string name="files_upload_folder">Upload folder…</string>
     <string name="files_uploaded_one">Uploaded “%1$s”</string>
     <string name="font_noto">Source Han Mono</string>
+    <string name="font_size_persist_failed">Font size could not be saved — it will reset on next launch</string>
     <string name="font_style">%1$s style</string>
     <string name="host_address">Address</string>
     <string name="host_after_connect">After connecting</string>

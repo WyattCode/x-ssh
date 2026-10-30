@@ -330,8 +330,16 @@ class UiPrefs(context: Context) {
     var terminalFontSize: Float
         get() = prefs.getFloat(KEY_FONT, 14f).coerceIn(FONT_MIN, FONT_MAX)
         set(value) {
-            prefs.edit().putFloat(KEY_FONT, value.coerceIn(FONT_MIN, FONT_MAX)).apply()
+            setTerminalFontSize(value)
         }
+
+    /**
+     * 写盘并**等它落定**:`apply()` 是异步的,写失败(磁盘满、SharedPreferences 坏掉)时
+     * 界面已经按新字号排好了,下次启动却又变回去 —— 用户看到的是"调了没用"。
+     * 返回 false 时调用方要把字号滚回 [terminalFontSize] 并提示。
+     */
+    fun setTerminalFontSize(value: Float): Boolean =
+        prefs.edit().putFloat(KEY_FONT, value.coerceIn(FONT_MIN, FONT_MAX)).commit()
 
     /**
      * 上次量到的竖直折痕位置(dp)。
