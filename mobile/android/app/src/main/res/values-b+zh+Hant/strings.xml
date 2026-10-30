@@ -280,6 +280,7 @@
     <string name="tab_search">搜尋</string>
     <string name="tab_search_results">搜尋結果</string>
     <string name="tab_sessions">工作階段</string>
+    <string name="tab_sidebar_persist_failed">側邊欄設定沒能儲存,下次啟動會恢復原樣</string>
     <string name="tab_show_sidebar">顯示側邊欄</string>
     <string name="term_channel_desc">顯示背景仍在連線的 SSH 工作階段</string>
     <string name="term_channel_name">工作階段保持</string>

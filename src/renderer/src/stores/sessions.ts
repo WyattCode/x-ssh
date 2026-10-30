@@ -77,6 +77,9 @@ let lastFullProbe = 0
 let probeSeq = 0
 const probeSeqOf = new Map<string, number>()
 
+// loadKnownHosts runs on every successful connect; toast only on ok→fail.
+let knownHostsLoadFailed = false
+
 export const forwardKey = (f: HostForward): string => `${f.mode ?? 'local'}:${f.localPort}`
 export interface ForwardRow {
   rule: HostForward
@@ -696,7 +699,17 @@ export const useSessions = defineStore('sessions', {
     },
 
     async loadKnownHosts(): Promise<void> {
-      this.knownHosts = await window.api.knownHosts.list()
+      try {
+        this.knownHosts = await window.api.knownHosts.list()
+        knownHostsLoadFailed = false
+      } catch {
+        // Keep the previous list: [] reads as "no trusted keys" in Settings
+        // and makes hostKeyKnown() treat every host as new.
+        if (!knownHostsLoadFailed) {
+          knownHostsLoadFailed = true
+          toast(t('set.sec.knownLoadFail'), 'error')
+        }
+      }
     },
     /** Whether a host:port key has ever been recorded (trusted once). */
     hostKeyKnown(host: string, port: number): boolean {

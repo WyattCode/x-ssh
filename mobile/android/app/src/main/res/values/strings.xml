@@ -281,6 +281,7 @@
     <string name="tab_search">Search</string>
     <string name="tab_search_results">Search results</string>
     <string name="tab_sessions">Sessions</string>
+    <string name="tab_sidebar_persist_failed">Couldn\'t save the sidebar setting — it will reset on next launch</string>
     <string name="tab_show_sidebar">Show sidebar</string>
     <string name="term_channel_desc">Shows SSH sessions still connected in the background</string>
     <string name="term_channel_name">Keep sessions alive</string>

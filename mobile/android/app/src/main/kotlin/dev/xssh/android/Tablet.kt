@@ -2,6 +2,7 @@ package dev.xssh.android
 
 import android.os.SystemClock
 import android.view.KeyEvent as AndroidKeyEvent
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -249,8 +250,12 @@ fun TabletApp(
     val prefs = remember(context) { UiPrefs(context) }
     var sidebarVisible by remember { mutableStateOf(prefs.sidebarVisible) }
     fun toggleSidebar() {
-        sidebarVisible = !sidebarVisible
-        prefs.sidebarVisible = sidebarVisible
+        val next = !sidebarVisible
+        if (prefs.setSidebarVisible(next)) {
+            sidebarVisible = next
+        } else {
+            Toast.makeText(context, R.string.tab_sidebar_persist_failed, Toast.LENGTH_SHORT).show()
+        }
     }
 
     var sheet by remember { mutableStateOf<SheetTarget?>(null) }

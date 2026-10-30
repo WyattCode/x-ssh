@@ -529,6 +529,13 @@ typecheck / lint:i18n(桌面 752/752/752) / vitest **334** / 30 全绿。未在�
 
 - **不要合并**:这一批是 review 修复,等人工过一遍再合。
 - 未触碰的开放 PR:#4–#92。未触碰 `/workspace/MCode`。未改 Android。
+# M3.160 — 复核打磨(分支 `fix/review-polish-m3160`,基于 main @ 5946b1f,**勿合并**)
+
+> 三条 P1 修复;只动 Windows + Android,不碰 macOS / iOS。
+
+- **A(Android)侧边栏开关落盘失败不再翻转**:`UiPrefs.setSidebarVisible()` 用 `commit()` 的返回值报告是否写进磁盘,`Tablet.toggleSidebar()` 只在成功时改状态,失败弹 `tab_sidebar_persist_failed`(三语言)。
+- **B(桌面)`loadKnownHosts` 失败不再炸连接流程**:加 try/catch 保留上一份列表(空列表会被读成"没有可信密钥",`hostKeyKnown()` 会把每台主机当成新的),只在 ok→fail 那一次弹 `set.sec.knownLoadFail`。
+- **C(桌面)连接日志读取失败有内联提示**:`SettingsDialog.loadConnLog` 加 try/catch,`connLogError` 显示在卡片里并 toast `set.sec.connLogLoadFail`。
 
 ---
 
