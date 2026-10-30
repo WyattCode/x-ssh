@@ -5,7 +5,13 @@ import { useToast } from '../composables/toast'
 import { useConfirm } from '../composables/confirm'
 import { useSnippetVars } from '../composables/snippetVars'
 import { clampConcurrency } from '../../../shared/fsUtils'
-import { decideStatusEvent, nextReconnectFloorMs, retryDelayMs, shouldReviveOnOnline } from '../lib/reconnect'
+import {
+  decideStatusEvent,
+  isPermanentConnectCode,
+  nextReconnectFloorMs,
+  retryDelayMs,
+  shouldReviveOnOnline
+} from '../lib/reconnect'
 import { isCancelled, formatTransferError } from '../lib/transferFormat'
 import { liveSnippetSessionId } from '../lib/snippetSession'
 import { hasLiveConnectedPane, closeOthersNeedsConfirm } from '../lib/snapshotGuard'
@@ -1893,7 +1899,12 @@ export const useSessions = defineStore('sessions', {
         const viaJump = keyCode && keyHost !== found.pane.params.host
         const keyWhere = `${keyHost}${keyPort !== 22 ? ':' + keyPort : ''}`
         const msg = connectFailureMessage(result, { viaJump, keyWhere }, t)
-        live.pane.errorCode = result.code
+        // Only a code that retrying cannot fix is recorded as the pane's error.
+        // A transient one (socks5 / proxy handshake / jump hop dropping) must
+        // NOT land here: `shouldReviveOnOnline` refuses to revive a pane that
+        // carries any code, and the reconnect loop below stops on one — so
+        // recording it would strand the pane exactly when the network came back.
+        live.pane.errorCode = isPermanentConnectCode(result.code) ? result.code : undefined
         // A refusal that carries a retry delay (the server's connection-rate
         // limiting) must raise the *next* wait, even mid-loop: the drop itself
         // is not a penalty, but retrying inside the penalty window feeds it.
@@ -2112,12 +2123,12 @@ export const useSessions = defineStore('sessions', {
         if (after.pane.status === 'connected') {
           after.pane.reconnectAttempt = undefined
           after.pane.reconnectMinDelayMs = undefined
-        } else if (after.pane.errorCode) {
-          // Permanent codes (auth_failed / locked / jump_* / host_key_* /
-          // needs_passphrase / bad_passphrase): retrying cannot help and may
-          // hammer credentials. Android's ReconnectPolicy already treats auth
-          // as permanent; desktop must match. Leaving the card up lets the user
-          // act on it instead of watching a loop that can never succeed.
+        } else if (isPermanentConnectCode(after.pane.errorCode)) {
+          // Wrong credentials / changed host key / locked app: retrying cannot
+          // help and may hammer the credentials. Android's ReconnectPolicy
+          // already treats auth as permanent; desktop must match. Leaving the
+          // card up lets the user act instead of watching a loop that can never
+          // succeed.
           after.pane.reconnectAttempt = undefined
           after.pane.reconnectMinDelayMs = undefined
         } else this.scheduleReconnect(paneId)

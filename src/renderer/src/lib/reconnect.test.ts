@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   decideStatusEvent,
+  isPermanentConnectCode,
   mayRetry,
   backoffMs,
   nextReconnectFloorMs,
@@ -164,5 +165,60 @@ describe('nextReconnectFloorMs', () => {
     // Last attempt wins: a non-penalty failure must not leave the loop stuck at
     // 30s forever, so the caller stores `undefined` and the backoff resumes.
     expect(nextReconnectFloorMs(undefined)).toBeUndefined()
+  })
+})
+
+describe('isPermanentConnectCode', () => {
+  it('stops for codes only a person can resolve', () => {
+    for (const code of [
+      'auth_failed',
+      'needs_key',
+      'needs_password',
+      'needs_passphrase',
+      'bad_passphrase',
+      'no-private-key',
+      'host_key_unknown',
+      'host_key_changed',
+      'jump_needs_password',
+      'jump_needs_key',
+      'jump_missing',
+      'secrets_load_failed',
+      'locked'
+    ]) {
+      expect(isPermanentConnectCode(code), code).toBe(true)
+    }
+  })
+
+  it('keeps retrying network conditions that may already be gone', () => {
+    // These arrive with a `code` from main but describe a network state, not a
+    // decision the user has to make. Treating them as permanent used to stop
+    // the backoff AND strand the pane once the network returned.
+    for (const code of [
+      'socks5-version',
+      'socks5-auth-required',
+      'socks5-auth-failed',
+      'socks5-connect-failed',
+      'socks5-addr-type',
+      'http-proxy-failed',
+      'proxy-handshake-timeout',
+      'jump-connect-failed',
+      'jump-forward-timeout',
+      'connect-failed',
+      'channel-closed'
+    ]) {
+      expect(isPermanentConnectCode(code), code).toBe(false)
+    }
+  })
+
+  it('treats a missing code as retryable', () => {
+    // No code means main could not classify it; the backoff is the safe default.
+    expect(isPermanentConnectCode(undefined)).toBe(false)
+    expect(isPermanentConnectCode('')).toBe(false)
+  })
+
+  it('does not treat an unknown new code as permanent by default', () => {
+    // A code added to main later must opt in here, otherwise a genuinely
+    // transient failure would silently disable reconnect.
+    expect(isPermanentConnectCode('some-future-code')).toBe(false)
   })
 })

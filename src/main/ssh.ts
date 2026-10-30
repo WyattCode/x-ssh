@@ -2545,9 +2545,6 @@ export class SshManager {
       this.jobSession.delete(jobId)
       this.lastProgressAt.delete(jobId)
     }
-    // Callers report these. A local path that could not even be stat'ed only
-    // bumps `failures`, and both counts used to be dropped on the floor — so
-    // uploading a path that does not exist answered "ok, 1 file".
     // Callers report all three. A local path that could not even be stat'ed
     // only bumps `failures`, and the counts used to be dropped on the floor —
     // so uploading a path that does not exist answered "ok, 1 file". A walk
@@ -2884,9 +2881,11 @@ export class SshManager {
       // downloadJob reports per-file failures / cancellation in its return value
       // instead of throwing, so a partial archive used to come back as ok:true.
       if (dl.cancelled) return { ok: false, canceled: true }
-      // Leave the Chinese failures string alone — PR #45 remaps files-failed:N.
-      if (dl.failures) return { ok: false, error: `${dl.failures} 个文件失败` }
-      if (!dl.files) return { ok: false, error: '打包/下载失败' }
+      // Emit the machine marker, not a prose string: the renderer maps
+      // `files-failed:N` to the user's language (transferFormat), whereas a
+      // Chinese literal would leak through untranslated on an English UI.
+      if (dl.failures) return { ok: false, error: `files-failed:${dl.failures}` }
+      if (!dl.files) return { ok: false, error: 'pack-empty' }
       return { ok: true, localPath: outPath }
     } catch (e) {
       await this.execRemote(sessionId, `rm -f "${tmp}"`).catch(() => {})

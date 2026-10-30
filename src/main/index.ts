@@ -1784,7 +1784,6 @@ function registerIpc(): void {
         if (r.cancelled) return { ok: false, canceled: true }
         if (r.failures) return { ok: false, error: `files-failed:${r.failures}` }
         if (r.walkError) return { ok: false, error: r.walkError }
-        if (r.failures) return { ok: false, error: `${r.failures} 个文件失败` }
         if (r.checksumFails) return { ok: false, error: `checksum-mismatch:${r.checksumFails}` }
         return { ok: true }
       } catch (e) {
@@ -1804,10 +1803,12 @@ function registerIpc(): void {
         const policy = await resolveUploadOverwrite(sessionId, remoteDir, res.filePaths.map((p) => basename(p)), overwrite)
         if (policy === 'cancel') return { ok: false, canceled: true, count: 0 }
         const r = await sshManager.uploadJob(sessionId, res.filePaths, remoteDir, randomUUID(), concurrency, await defaultTransferRate(), policy)
-        if (r.failures) return { ok: false, count: r.files, error: `files-failed:${r.failures}` }
+        // Order matters: a cancelled job has neither failures nor a walk error,
+        // so it must be tested before those; and a partial failure is reported
+        // with the count that did land.
         if (r.cancelled) return { ok: false, canceled: true, count: r.files }
+        if (r.failures) return { ok: false, count: r.files, error: `files-failed:${r.failures}` }
         if (r.walkError) return { ok: false, count: r.files, error: r.walkError }
-        if (r.failures) return { ok: false, count: r.files, error: `${r.failures} 个文件失败` }
         return { ok: true, count: r.files }
       } catch (e) {
         return { ok: false, error: friendlyError((e as Error).message), count: 0 }
@@ -1840,7 +1841,6 @@ function registerIpc(): void {
         if (r.cancelled) return { ok: false, canceled: true }
         if (r.failures) return { ok: false, error: `files-failed:${r.failures}` }
         if (r.walkError) return { ok: false, error: r.walkError }
-        if (r.failures) return { ok: false, error: `${r.failures} 个文件失败` }
         if (r.checksumFails) return { ok: false, error: `checksum-mismatch:${r.checksumFails}` }
         return { ok: true, count: r.files }
       } catch (e) {
@@ -1888,7 +1888,6 @@ function registerIpc(): void {
         if (r.cancelled) return { ok: false, canceled: true }
         if (r.failures) return { ok: false, error: `files-failed:${r.failures}` }
         if (r.walkError) return { ok: false, error: r.walkError }
-        if (r.failures) return { ok: false, error: `${r.failures} 个文件失败` }
         if (r.checksumFails) return { ok: false, error: `checksum-mismatch:${r.checksumFails}` }
         return { ok: true, count: r.files }
       } catch (e) {
@@ -1909,10 +1908,12 @@ function registerIpc(): void {
         const policy = await resolveUploadOverwrite(sessionId, remoteDir, res.filePaths.map((p) => basename(p)), overwrite)
         if (policy === 'cancel') return { ok: false, canceled: true, count: 0 }
         const r = await sshManager.uploadJob(sessionId, res.filePaths, remoteDir, randomUUID(), concurrency, await defaultTransferRate(), policy)
-        if (r.failures) return { ok: false, count: r.files, error: `files-failed:${r.failures}` }
+        // Order matters: a cancelled job has neither failures nor a walk error,
+        // so it must be tested before those; and a partial failure is reported
+        // with the count that did land.
         if (r.cancelled) return { ok: false, canceled: true, count: r.files }
+        if (r.failures) return { ok: false, count: r.files, error: `files-failed:${r.failures}` }
         if (r.walkError) return { ok: false, count: r.files, error: r.walkError }
-        if (r.failures) return { ok: false, count: r.files, error: `${r.failures} 个文件失败` }
         return { ok: true, count: r.files }
       } catch (e) {
         return { ok: false, error: friendlyError((e as Error).message), count: 0 }
@@ -1927,10 +1928,9 @@ function registerIpc(): void {
         const policy = await resolveUploadOverwrite(sessionId, remoteDir, paths.map((p) => basename(p)), overwrite)
         if (policy === 'cancel') return { ok: false, canceled: true, count: 0 }
         const r = await sshManager.uploadJob(sessionId, paths, remoteDir, randomUUID(), concurrency, await defaultTransferRate(), policy)
-        if (r.failures) return { ok: false, count: r.files, error: `files-failed:${r.failures}` }
         if (r.cancelled) return { ok: false, canceled: true, count: r.files }
+        if (r.failures) return { ok: false, count: r.files, error: `files-failed:${r.failures}` }
         if (r.walkError) return { ok: false, count: r.files, error: r.walkError }
-        if (r.failures) return { ok: false, count: r.files, error: `${r.failures} 个文件失败` }
         return { ok: true, count: r.files }
       } catch (e) {
         return { ok: false, error: friendlyError((e as Error).message), count: 0 }
@@ -2044,11 +2044,13 @@ function registerIpc(): void {
         if (policy === 'cancel') return { ok: false, canceled: true }
         // Upload the archive into remoteDir, then extract it there.
         const r = await sshManager.uploadJob(sessionId, res.filePaths, remoteDir, randomUUID(), concurrency, await defaultTransferRate(), policy)
-        if (r.failures) return { ok: false, error: `files-failed:${r.failures}` }
         // A cancelled upload must not fall through to the extract below.
         if (r.cancelled) return { ok: false, canceled: true }
+        // Both a failed file and an unwalkable source dir have to stop the
+        // extract: unpacking the archive over a half-finished upload would leave
+        // the remote in a state neither path intended.
+        if (r.failures) return { ok: false, error: `files-failed:${r.failures}` }
         if (r.walkError) return { ok: false, error: r.walkError }
-        if (r.failures) return { ok: false, error: `${r.failures} 个文件失败` }
         const name = basename(res.filePaths[0])
         return await sshManager.extractArchive(sessionId, remoteDir, name)
       } catch (e) {

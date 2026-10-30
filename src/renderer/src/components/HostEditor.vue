@@ -169,11 +169,12 @@ const jumpBlockerLabel = computed(() => jumpUsedBy(store.hosts, form.id || undef
 const jumpGone = computed(
   () => !!form.jumpHostId && !store.hosts.some((h) => h.id === form.jumpHostId)
 )
-/** Hosts that use *this* profile as their jump — one hop only, same as Android. */
 // Match Android JumpField: only block *adding* a jump when this host is
 // already someone else's hop (one hop only). A stale/legacy jumpHostId must
-// still be clearable.
-const jumpBlocked = computed(() => jumpUsedBy(store.hosts, form.id || undefined).length > 0 && !form.jumpHostId)
+// still be clearable, which is why the current value is passed in.
+const jumpBlocked = computed(() =>
+  jumpSelectBlocked(store.hosts, form.id || undefined, form.jumpHostId)
+)
 // One hop only (same rule as Android): a host that itself uses a jump can't be
 // picked, because core ignores the second hop and the connect then looks like a
 // mysterious network failure.

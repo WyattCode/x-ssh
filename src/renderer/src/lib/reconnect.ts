@@ -101,3 +101,40 @@ export function shouldReviveOnOnline(pane: {
     pane.status === 'error' && !pane.errorCode && !pane.sessionId && pane.autoReconnect
   )
 }
+
+/**
+ * Connect-result codes that retrying can never fix.
+ *
+ * These are the ones worth stopping for: wrong credentials, a changed host key,
+ * a locked app — each needs a person to do something. Everything else that main
+ * can return (`socks5-*`, `proxy-handshake-timeout`, `jump-connect-failed`,
+ * `jump-forward-timeout`, or no code at all) is a network condition that may
+ * well be gone by the next attempt.
+ *
+ * This list matters twice over: the reconnect loop stops on a permanent code,
+ * and `shouldReviveOnOnline` refuses to revive a pane that carries one. Letting
+ * a transient code into `errorCode` would therefore both stop the backoff and
+ * strand the pane when the network came back — which is what happened when a
+ * merge collapsed this into "any code is permanent".
+ */
+const PERMANENT_CONNECT_CODES = new Set([
+  'auth_failed',
+  'needs_key',
+  'needs_password',
+  'needs_passphrase',
+  'bad_passphrase',
+  'no-private-key',
+  'host_key_unknown',
+  'host_key_changed',
+  'jump_needs_password',
+  'jump_needs_key',
+  'jump_missing',
+  'secrets_load_failed',
+  'locked'
+])
+
+/** Whether a connect-result code should stop the reconnect loop for good. */
+export function isPermanentConnectCode(code: string | undefined): boolean {
+  if (!code) return false
+  return PERMANENT_CONNECT_CODES.has(code)
+}

@@ -9,10 +9,10 @@ import {
   formatBytes,
   formatSpeed,
   formatAgo,
-  formatTransferError,
   transferStatusText,
   transferErrorText
 } from '../lib/transferFormat'
+import { sftpErrorText } from '../lib/sftpError'
 import { globMatch } from '../lib/glob'
 import { isImeKey } from '../lib/ime'
 import { pruneSelection } from '../lib/selectionPrune'
@@ -34,21 +34,9 @@ const { toast } = useToast()
 const store = useSessions()
 
 /** Main-process errors arrive as machine codes (session-missing, …) so the UI
- *  can localize them; anything else is shown as-is, with the caller's fallback
- *  key when there is no message at all. */
-function sftpErr(err: string | undefined, fallbackKey: string): string {
-  if (err === 'window-not-ready') return tt('app.windowNotReady')
-  if (err === 'session-missing') return tt('sfp.sessionMissing')
-  if (err === 'session-gone') return tt('sfp.sessionGone')
-  if (err === 'remote-timeout') return tt('sfp.remoteTimeout')
-  if (err === 'unsafe-filename') return tt('sfp.unsafeFilename')
-  if (err === 'extract-failed') return tt('sfp.extractFail')
-  if (err === 'sync-list-failed') return tt('sfp.syncListFailed')
-  const m = err && /^delete-failed:(\d+)$/.exec(err)
-  if (m) return tt('sfp.deletePartial', { n: Number(m[1]) })
-  if (err?.startsWith('files-failed:')) return formatTransferError(err, tt)
-  return err ?? tt(fallbackKey)
-}
+ *  can localize them. The mapping lives in lib/sftpError so it can be tested. */
+const sftpErr = (err: string | undefined, fallbackKey: string): string =>
+  sftpErrorText(err, fallbackKey, tt)
 // `page`: the SFTP sidebar page shows this full-size (no resize edge, no close)
 // instead of as the drawer on the terminal page.
 const props = defineProps<{ sessionId?: string; open: boolean; terminalCwd?: string; reloadKey?: number; page?: boolean }>()
