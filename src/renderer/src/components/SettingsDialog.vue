@@ -23,7 +23,7 @@ import { isMac, isWin } from '../composables/platform'
 
 const store = useSessions()
 const { langPref, setLang, t } = useI18n()
-const { pref: themePref, setPref: setThemePref } = useTheme()
+const { pref: themePref, setPref: setThemePref, mode: themeMode } = useTheme()
 const { toast } = useToast()
 const { confirm } = useConfirm()
 
@@ -254,6 +254,12 @@ async function clearAccent(): Promise<void> {
   store.accentColor = ''
   void store.saveSetting('accentColor', '')
 }
+
+/** Swatch shown when no custom accent is set — must match the theme default
+ *  in global.css (--accent is #6ea8fe dark / #2f6fed light). */
+const accentSwatch = computed(() =>
+  store.accentColor || (themeMode.value === 'light' ? '#2f6fed' : '#6ea8fe')
+)
 
 const cursorOptions = computed(() => [
   { v: 'bar', label: t('set.term.cursorBar') },
@@ -1019,7 +1025,7 @@ async function resetMasterLock(): Promise<void> {
                 <div class="row">
                   <div class="r-text"><span class="r-title">{{ t('set.term.accent') }}</span></div>
                   <button v-if="store.accentColor" class="btn sm" @click="clearAccent">{{ t('set.term.accentReset') }}</button>
-                  <input type="color" class="color-in" :value="store.accentColor || '#6ea8fe'" @input="onAccent" />
+                  <input type="color" class="color-in" :value="accentSwatch" @input="onAccent" />
                 </div>
               </div>
               <p class="foot-note">{{ t('set.term.fontHint', { keys: `${modKey}+= / ${modKey}+-` }) }}</p>

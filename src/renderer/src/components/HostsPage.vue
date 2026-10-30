@@ -768,6 +768,9 @@ defineExpose({ focusSearch: () => searchEl.value?.focus() })
   background: var(--hover);
   color: var(--text);
 }
+.gtabs button:active {
+  transform: scale(0.97);
+}
 .gtabs button.on {
   color: var(--text);
   background: var(--selected);

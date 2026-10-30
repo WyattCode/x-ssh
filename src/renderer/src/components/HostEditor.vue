@@ -203,6 +203,10 @@ async function pickKey(): Promise<void> {
 // ---- SSH key library ----
 const managedKeys = ref<ManagedKey[]>([])
 const keyModal = reactive({ open: false, name: '', type: 'ed25519', passphrase: '', error: '' })
+// The generate-key sheet is a modal of its own inside the panel: without its
+// own trap, Tab walked out of the sheet into the host form behind it.
+const keySheetEl = ref<HTMLElement>()
+useFocusTrap(keySheetEl, () => keyModal.open)
 async function loadKeys(): Promise<void> {
   managedKeys.value = await window.api.keys.list()
 }
@@ -678,7 +682,7 @@ async function remove(): Promise<void> {
 
         <!-- Generate a key: a small sheet over the panel. -->
         <div v-if="keyModal.open" class="key-layer" @mousedown.self="closeKeySheet">
-          <div class="key-sheet" @keydown.esc.stop="closeKeySheet">
+          <div ref="keySheetEl" class="key-sheet" tabindex="-1" @keydown.esc.stop="closeKeySheet">
             <h3>{{ t('host.generateKey') }}</h3>
             <div class="card">
               <label class="row">
@@ -1291,6 +1295,9 @@ input[type='number']::-webkit-inner-spin-button {
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
+}
+.key-sheet:focus {
+  outline: none;
 }
 .err {
   margin: 10px 4px 0;

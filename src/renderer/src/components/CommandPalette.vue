@@ -402,6 +402,23 @@ function onBroadcastEnter(e: KeyboardEvent): void {
   submitBroadcast()
 }
 
+/** Clicking the dim overlay goes back one step while a prompt is open (the
+ *  same thing Esc does) instead of throwing the whole flow away — a mis-click
+ *  next to the palette shouldn't lose a typed password or command. */
+function onOverlayDown(): void {
+  if (pending.value) {
+    pending.value = null
+    nextTick(() => inputEl.value?.focus())
+    return
+  }
+  if (broadcastOpen.value) {
+    broadcastOpen.value = false
+    nextTick(() => inputEl.value?.focus())
+    return
+  }
+  store.togglePalette(false)
+}
+
 function onKey(e: KeyboardEvent): void {
   // While an IME is composing, Enter/arrows/Esc are the candidate list's, not
   // ours — searching a Chinese host label would otherwise connect on the Enter
@@ -448,7 +465,7 @@ function onKey(e: KeyboardEvent): void {
 </script>
 
 <template>
-  <div v-if="store.paletteOpen" class="overlay" @mousedown.self="store.togglePalette(false)">
+  <div v-if="store.paletteOpen" class="overlay" @mousedown.self="onOverlayDown">
     <div ref="trapEl" tabindex="-1" class="palette" @keydown="onKey">
       <!-- Broadcast command prompt -->
       <template v-if="broadcastOpen">
