@@ -285,11 +285,18 @@ watch(query, () => {
 /** Imports hosts from ~/.ssh/config, then refreshes the list + security cache. */
 async function importSshConfig(): Promise<void> {
   const res = await window.api.hosts.importSshConfig()
-  if (res.ok) {
-    store.togglePalette(false)
-    await store.loadHosts()
-    await store.loadKnownHosts()
+  if (!res.ok) {
+    toast(
+      res.error === 'missing-config' ? t('set.sec.importSshMissing') : (res.error ?? t('set.sec.importFail')),
+      'error'
+    )
+    return
   }
+  store.togglePalette(false)
+  await store.loadHosts()
+  await store.loadKnownHosts()
+  if (res.count > 0) toast(t('set.sec.importSshOk', { n: res.count }), 'success')
+  else toast(t('set.sec.importSshNone'), 'info')
 }
 watch(
   () => store.paletteOpen,

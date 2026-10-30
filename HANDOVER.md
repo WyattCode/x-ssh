@@ -284,6 +284,19 @@
 1. **SftpDrawer** `retryHistory`:向 `downloadTo` 传 `overwriteLocal: true`(与 `resumeDownloads` 同策;用户已选过目标目录,不再弹覆盖确认)。
 2. **HostEditor** `save()`:`saving` 闸 + try/finally + 按钮 disable/「保存中…」(桌面与 Android #36 对齐,防双写双关)。
 3. **SftpDrawer** `clearHistory`:危险确认 + `sfp.clearHistConfirm` 三语。
+# 会话记录:连续改进 M3.104(2026-10-30,复核打磨:OpenSSH 导入反馈 + Android 命名/确认对话框防双提交)
+
+功能清单已够,本轮按站立规则做开源复核打磨(不合并)。未动 PR #38 / #37–#12 与更早的 #4–#11。本轮优先实质逻辑/状态/无障碍/i18n。
+
+**核过已过时 / 已在未合并 PR(本轮不重做)**:
+1–26. 同 M3.103 所列 PR #12–#37。
+27. retryHistory overwriteLocal + HostEditor saving + clearHistory 确认 —— PR #38。
+28. keyGen busy / sync busy 等 —— 更早未合并 PR。
+
+**修了**:
+1. **OpenSSH 导入**:main ENOENT 返回稳定码 `missing-config`;Settings + CommandPalette toast 成功数/无新主机/缺失配置;`set.sec.importSsh*` 三语(不再吞失败、不再吐硬编码中文)。
+2. **Android Files NameDialog**:`submitted` 闸,防回车+按钮双建/双改名。
+3. **Android Tablet ConfirmDialog**:`confirmOnce`,防回车+按钮双删/双覆盖(Files/片段确认共用)。
 
 **验证**:`typecheck` + `lint:i18n` + vitest **334** / 30 文件全绿。未跑 Gradle。未合并。
 

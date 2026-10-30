@@ -1871,6 +1871,11 @@ private fun NameDialog(
     fun submit() {
         if (!valid || done) return
         done = true
+    // 回车和按钮都会调 submit():对话框还没关掉时连按两下会建两个文件夹 / 改两次名。
+    var submitted by remember { mutableStateOf(false) }
+    fun submit() {
+        if (!valid || submitted) return
+        submitted = true
         onConfirm(name)
     }
     Dialog(onDismissRequest = onDismiss) {

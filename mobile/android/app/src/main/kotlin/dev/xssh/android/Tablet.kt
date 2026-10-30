@@ -1543,6 +1543,7 @@ fun ConfirmDialog(
     val p = LocalXssh.current
     val focus = remember { FocusRequester() }
     // Enter + 确认连点会在关闭前触发两次 onConfirm(双删/双上传)。
+    // 回车和按钮都会调 onConfirm():对话框还没撤掉时连按两下,删除 / 覆盖会跑两遍。
     var done by remember { mutableStateOf(false) }
     fun confirmOnce() {
         if (done) return
