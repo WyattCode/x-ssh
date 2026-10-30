@@ -1914,7 +1914,8 @@ function registerIpc(): void {
     }
   )
   ipcMain.handle(IPC.sftpWatchStop, (_e, sessionId: string) => {
-    sshManager?.stopWatchSyncsForSession(sessionId)
+    if (!sshManager) return { ok: false }
+    sshManager.stopWatchSyncsForSession(sessionId)
     return { ok: true }
   })
   ipcMain.handle(

@@ -1619,8 +1619,16 @@ function onSyncEnter(e: KeyboardEvent): void {
 }
 async function stopWatch(): Promise<void> {
   if (!props.sessionId) return
-  await window.api.sftp.watchStop(props.sessionId)
-  watchActive.value = false
+  try {
+    const r = await window.api.sftp.watchStop(props.sessionId)
+    if (!r.ok) {
+      toast(tt('sfp.syncFail'), 'error')
+      return
+    }
+    watchActive.value = false
+  } catch (e) {
+    toast((e as Error).message || tt('sfp.syncFail'), 'error')
+  }
 }
 function openHistory(): void {
   // The history menu is wider (300px) than the more-menu it inherits its anchor

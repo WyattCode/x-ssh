@@ -793,6 +793,7 @@ fun CredentialFields(
     // 下面几句在协程里才用到,那里调不了 stringResource,先在组合里取好。
     val generatedKeyName = stringResource(R.string.edit_key_generated_name)
     val publicKeyCopied = stringResource(R.string.edit_public_key_copied)
+    val publicKeyFailed = stringResource(R.string.edit_public_key_failed)
     val generateFailed = stringResource(R.string.edit_generate_failed)
     val passwordLabel = stringResource(R.string.edit_password)
     val privateKeyLabel = stringResource(R.string.edit_private_key)
@@ -894,6 +895,8 @@ fun CredentialFields(
                     if (line != null) {
                         copyText(context, line)
                         onMessage(publicKeyCopied)
+                    } else {
+                        onMessage(publicKeyFailed)
                     }
                 }
             }
