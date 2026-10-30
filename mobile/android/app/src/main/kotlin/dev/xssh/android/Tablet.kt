@@ -533,6 +533,10 @@ fun TabletApp(
                                         onTrustKey = { onTrustKey(host, it) },
                                         onTrustJumpKey = { jump, fingerprint -> onTrustKey(jump, fingerprint) },
                                         onConnected = onConnected,
+                                        onSwitchHost = {
+                                            onSelect(it.id)
+                                            onOpenTerminal(it)
+                                        },
                                         tablet = TabletTerminalChrome(
                                             sidebarVisible = sidebarVisible,
                                             onToggleSidebar = ::toggleSidebar,

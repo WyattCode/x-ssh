@@ -45,6 +45,13 @@ object XIcons {
         moveTo(16.5f, 16f); arcTo(2f, 2f, 0f, true, true, 12.5f, 16f); arcTo(2f, 2f, 0f, true, true, 16.5f, 16f)
     }
 
+    /** 会话快照:两层叠板(工作区布局的「存一份」)。 */
+    val Layers = icon("layers") {
+        moveTo(12f, 3.5f); lineTo(20f, 8f); lineTo(12f, 12.5f); lineTo(4f, 8f); close()
+        moveTo(4f, 12f); lineTo(12f, 16.5f); lineTo(20f, 12f)
+        moveTo(4f, 15.5f); lineTo(12f, 20f); lineTo(20f, 15.5f)
+    }
+
     /** 命令片段:闪电(点一下就发出去的「快捷命令」)。 */
     val Bolt = icon("bolt") {
         moveTo(13.5f, 3f); lineTo(5.5f, 13.5f); lineTo(11.5f, 13.5f)

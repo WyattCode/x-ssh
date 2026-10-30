@@ -670,6 +670,17 @@ private fun PhoneFlow(
                 )
             }
         }
+            },
+            onEditHost = {
+                onTerminalHost(null)
+                // 填完回到进终端之前的那一页(详情页或主机页),再点连接就是用新密码连。
+                onScreen(Screen.Editor(current.host, back = current.back))
+            },
+            onSwitchHost = { host ->
+                onTerminalHost(host.id)
+                onScreen(Screen.Terminal(host))
+            },
+        )
 
         is Screen.Files -> {
             val session = SessionRegistry.sessions.collectAsState().value[current.host.id]

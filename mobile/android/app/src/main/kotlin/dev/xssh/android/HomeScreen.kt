@@ -142,6 +142,7 @@ fun HomeScreen(
     val p = LocalXssh.current
     // 哪些主机后台还连着 —— 卡片上要看得出来,不然用户不知道有会话在跑。
     val running by SessionRegistry.sessions.collectAsState()
+    var snapshotsOpen by remember { mutableStateOf(false) }
     // 会话区:活着的会话排在主机区上面(和平板侧栏同一套两段模型),按最后输出新→旧。
     // 不查主机表:会话自己带着建连那一刻的 Host,主机被删了(dev 跳转根本没存过也一样)行还在。
     val sessions = remember(running) {
@@ -387,6 +388,7 @@ fun HomeScreen(
             GlassGroup {
                 ThemeGlassItem()
                 GlassItem(XIcons.Settings, stringResource(R.string.set_title)) { onFonts() }
+                GlassItem(XIcons.Layers, stringResource(R.string.snap_menu)) { snapshotsOpen = true }
                 // 一台主机都没有时不摆搜索 —— 没东西可搜。
                 if (hosts.isNotEmpty()) {
                     GlassItem(XIcons.Search, stringResource(R.string.host_search_hosts)) {
@@ -428,6 +430,21 @@ fun HomeScreen(
                     newHost()
                 }
             }
+        }
+
+        if (snapshotsOpen) {
+            val liveEntries = remember(sessions) { sessions.map { it.hostId to it.label } }
+            SnapshotSheet(
+                tablet = false,
+                liveEntries = liveEntries,
+                activeHostId = sessions.firstOrNull()?.hostId,
+                knownHostIds = hosts.map { it.id }.toSet(),
+                onRestore = { _, focus ->
+                    snapshotsOpen = false
+                    hosts.firstOrNull { it.id == focus }?.let(onConnect)
+                },
+                onDismiss = { snapshotsOpen = false },
+            )
         }
     }
 }
@@ -717,6 +734,8 @@ private fun NoMatches(modifier: Modifier) {
         Text(stringResource(R.string.host_no_matches), color = p.textDim, fontSize = 16.sp)
     }
 }
+
+
 
 /**
  * 双栏右栏的会话实时预览:只读的一小块终端画面。

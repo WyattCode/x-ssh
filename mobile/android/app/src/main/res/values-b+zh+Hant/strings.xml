@@ -400,4 +400,15 @@
     <string name="fwd_hint_dynamic">在本機開 SOCKS5 代理,流量走這條 SSH。</string>
     <string name="term_forwards">連接埠轉發</string>
     <string name="term_menu_forwards">連接埠轉發…</string>
+    <string name="snap_title">工作階段快照</string>
+    <string name="snap_save">儲存</string>
+    <string name="snap_default">快照</string>
+    <string name="snap_empty">還沒有快照。連上主機後點「儲存」,記下目前工作區。</string>
+    <string name="snap_delete">刪除</string>
+    <string name="snap_delete_confirm">刪除這份快照?</string>
+    <string name="snap_hosts_n">%d 台主機</string>
+    <string name="snap_missing_n">%d 台已不在</string>
+    <string name="snap_menu">快照</string>
+    <string name="term_snapshots">快照</string>
+    <string name="term_menu_snapshots">工作階段快照</string>
 </resources>

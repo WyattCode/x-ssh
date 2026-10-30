@@ -613,6 +613,8 @@ const zh: Dict = {
   'pal.snapSave': '保存当前布局为快照…',
   'pal.snapSaveDesc': '记录所有标签与分屏,之后可一键重开',
   'pal.snapDefault': '快照',
+  'pal.snapDelete': '删除「{name}」',
+  'pal.snapDeleteDesc': '从已保存的快照里去掉',
 
   // history search
   'hist.placeholder': '搜索所有会话输出…',
@@ -1387,6 +1389,8 @@ const en: Dict = {
   'pal.snapSave': 'Save current layout as snapshot…',
   'pal.snapSaveDesc': 'Captures all tabs & splits to reopen later',
   'pal.snapDefault': 'Snapshot',
+  'pal.snapDelete': 'Delete “{name}”',
+  'pal.snapDeleteDesc': 'Remove from saved snapshots',
 
   // history search
   'hist.placeholder': 'Search all session output…',
@@ -2171,6 +2175,8 @@ const zhTW: Dict = {
   'pal.snapSave': '將目前版面儲存為快照…',
   'pal.snapSaveDesc': '記錄所有分頁與分割畫面,之後可一鍵重新開啟',
   'pal.snapDefault': '快照',
+  'pal.snapDelete': '刪除「{name}」',
+  'pal.snapDeleteDesc': '從已儲存的快照裡移除',
 
   // history search
   'hist.placeholder': '搜尋所有工作階段的輸出…',
