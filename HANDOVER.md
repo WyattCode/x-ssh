@@ -260,6 +260,18 @@
 1. **TerminalView**:`watch` pane `status !== 'connected'` 时清 `logOn`(主进程断线已 stopLog,菜单徽章不再挂着「停止记录」)。
 2. **SettingsDialog** `forgetKnownHost`:危险确认 + `set.sec.forgetConfirm` 三语(误点 X 不再静默抹掉信任)。
 3. **Android HostEditorScreen** `save()`:`saving` 闸 + try/finally(✓ / Ctrl+S / onDone 并发不再双存双跳)。
+# 会话记录:连续改进 M3.102(2026-10-30,复核打磨:续传上传保留失败项 + 片段删除确认 + 本机新建防双提交)
+
+功能清单已够,本轮按站立规则做开源复核打磨(不合并)。未动 PR #36 / #35–#12 与更早的 #4–#11。本轮优先实质逻辑/状态/i18n。
+
+**核过已过时 / 已在未合并 PR(本轮不重做)**:
+1–24. 同 M3.101 所列 PR #12–#35。
+25. logOn 断线清除 + forgetKnownHost 确认 + HostEditor save 闸 —— PR #36。
+
+**修了**:
+1. **SftpDrawer** `resumePending` + store `setTransferQueue`:失败(非取消)的上传保留在队列,与 `resumeDownloads` 对称;部分失败后 `showResume` 同时看两队列。
+2. **SettingsDialog** `deleteSnippet`:危险确认 + `set.gen.snipDeleteConfirm` 三语。
+3. **SftpDrawer** `localSubmit`:`localSubmitting` 闸 + OK 按钮 disable(防双建/双改名)。
 
 **验证**:`typecheck` + `lint:i18n` + vitest **334** / 30 文件全绿。未跑 Gradle。未合并。
 

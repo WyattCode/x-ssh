@@ -940,6 +940,12 @@ export const useSessions = defineStore('sessions', {
       this.transferQueue = []
       await window.api.settings.set('transferQueue', toPlain(this.transferQueue))
     },
+    /** Rewrites the upload queue minus the ops a resume consumed; failed ops
+     *  stay so a later resume can retry (same policy as setDownloadQueue). */
+    async setTransferQueue(ops: TransferOp[]): Promise<void> {
+      this.transferQueue = ops.slice(0, 20)
+      await window.api.settings.set('transferQueue', toPlain(this.transferQueue))
+    },
     /** Records an interrupted download so it can be resumed into its local dir. */
     async queueDownload(sessionId: string, items: DownloadItem[], localDir: string, hostId?: string): Promise<void> {
       if (!items.length || !localDir) return

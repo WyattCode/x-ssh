@@ -536,6 +536,12 @@ async function deleteSnippet(id: string): Promise<void> {
   // the wrong row is obvious. Fall back to the id if the row is already gone.
   const title = store.snippets.find((s) => s.id === id)?.title ?? id
   const ok = await confirm(t('set.gen.snipDeleteConfirm', { title }), { danger: true })
+  const s = store.snippets.find((x) => x.id === id)
+  const ok = await confirm(t('set.gen.snipDeleteConfirm', { name: s?.title ?? id }), {
+    title: t('set.gen.delete'),
+    confirmText: t('set.gen.delete'),
+    danger: true
+  })
   if (!ok) return
   await store.deleteSnippet(id)
 }
