@@ -473,6 +473,22 @@ Continue continuous-improve from origin/main on a new branch; do **not** touch/m
 
 ### Next
 Continue continuous-improve from origin/main on a new branch; do **not** touch/merge this PR or #43–#12 / #4–#11. Prefer substantive P0/P1 over busy-gates.
+## HANDOVER M3.110 — review polish (sync-list-failed / no-private-key / files-failed + cancelled flag)
+
+**Branch:** `fix/review-polish-m3110` (from origin/main). **Do NOT merge.** Open PR (see report).
+**Skipped / do not redo:** PR #44 `fix/review-polish-m3109` (key import/delete / update-parse / history export) and #43–#12, #4–#11. Features / intentional deferrals / M3.77–M3.109 done items.
+
+### Fixes shipped
+1. **Sync / dir-diff list fail** — `ssh.ts` throws `sync-list-failed`; SftpDrawer `sftpErr` + DirDiffDialog map to `sfp.syncListFailed` / `dirDiff.listFailed`.
+2. **Key auth with no key path** — `authConfig` throws `no-private-key`; connect returns `code`; sessions maps `app.noPrivateKey`.
+3. **Transfer partial-fail Chinese + cancelled flag** — main emits `files-failed:N` / `checksum-mismatch:N` and `CANCELLED_TEXT='cancelled'`; index IPC same; `formatTransferError` + `transferStatusText`; sessions uses shared `isCancelled` (prefers stamped `cancelled` flag, still accepts legacy `已取消`); TransferPanel history + notify/connLog map codes. i18n `sfp.filesFailed` / `sfp.checksumMismatch`.
+
+### Verify
+- typecheck OK; lint:i18n OK (desktop 754/754/754); vitest **336**/30 green (+2 transferFormat cases).
+- Model: DeepSeek-V4.1-Flash-1017 via ds.py; thinking=off medium; 53/54 HAND_APPLY first try; 1 ambiguous SftpDrawer uploadFail×2 hand-finished. No product hand-fix. Incidents: applicator ambiguity only.
+
+### Next
+Continue continuous-improve from origin/main on a new branch; do **not** touch/merge this PR or #44–#12 / #4–#11. Prefer substantive P0/P1 over busy-gates.
 
 ---
 

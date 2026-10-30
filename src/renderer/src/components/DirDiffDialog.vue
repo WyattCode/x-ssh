@@ -55,7 +55,7 @@ async function run(): Promise<void> {
   try {
     const r = await window.api.sftp.diffDirs(props.sessionId, local.value, remote.value)
     if (!r.ok) {
-      err.value = r.error ?? tt('dirDiff.fail')
+      err.value = r.error === 'sync-list-failed' ? tt('dirDiff.listFailed') : (r.error ?? tt('dirDiff.fail'))
       done.value = false
       return
     }

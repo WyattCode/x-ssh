@@ -19,6 +19,10 @@ describe('isCancelled', () => {
     expect(isCancelled({ error: CANCELLED_MARKER })).toBe(true)
   })
 
+  it('still recognises the legacy Chinese marker', () => {
+    expect(isCancelled({ error: '已取消' })).toBe(true)
+  })
+
   it('prefers the explicit flag when main provides it', () => {
     // The flag is what makes this fail-proof: the wording of the message can
     // change (or be translated) without the UI misreading a cancel as a failure.
@@ -130,6 +134,12 @@ describe('transferStatusText', () => {
     // hardcoded Chinese string, so an English UI showed this as an error.
     expect(transferStatusText({ error: CANCELLED_MARKER }, tr)).toBe('sfp.cancelled')
     expect(transferStatusText({ error: 'Cancelled', cancelled: true }, tr)).toBe('sfp.cancelled')
+  })
+
+  it('maps main error codes to i18n', () => {
+    expect(transferStatusText({ error: 'files-failed:3' }, tr)).toBe('sfp.filesFailed:{"n":3}')
+    expect(transferStatusText({ error: 'checksum-mismatch:2' }, tr)).toBe('sfp.checksumMismatch:{"n":2}')
+    expect(transferStatusText({ error: 'sync-list-failed' }, tr)).toBe('sfp.syncListFailed')
   })
 
   it('passes a genuine error through', () => {

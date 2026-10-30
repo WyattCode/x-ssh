@@ -14,6 +14,7 @@ import {
   formatEta,
   histStatusLabel,
   isCancelled
+  formatTransferError
 } from '../lib/transferFormat'
 import { allPausedFlag, prunePaused, toggleId } from '../lib/transferPause'
 import type { SftpProgress, TransferHistoryItem } from '../../../shared/types'
@@ -124,6 +125,9 @@ const recent = computed(() => store.transferHistory.slice(0, 12))
 
 function histStatus(h: TransferHistoryItem): string {
   return histStatusLabel(h.status, t)
+  if (h.status === 'cancelled') return t('sfp.cancelled')
+  if (h.status === 'error') return h.error ? formatTransferError(h.error, t) : t('sfp.failed')
+  return t('sfp.done')
 }
 function residualLabel(x: SftpProgress): string {
   return isCancelled(x) ? t('sfp.cancelled') : t('sfp.failed')

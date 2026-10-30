@@ -313,7 +313,7 @@ export class SshManager {
     password: string | undefined
   ): Promise<Record<string, unknown>> {
     if (auth === 'key') {
-      if (!keyPath) throw new Error('未选择私钥文件')
+      if (!keyPath) throw new Error('no-private-key')
       const cfg: Record<string, unknown> = { privateKey: await readFile(keyPath) }
       if (passphrase) cfg.passphrase = passphrase
       return cfg
@@ -958,10 +958,12 @@ export class SshManager {
         await this.authConfig(params.auth, params.keyPath, params.passphrase, params.password)
       )
     } catch (err) {
+      const msg = (err as Error).message
       jumpClient?.end()
       ;(config.sock as Duplex | Socket | undefined)?.destroy()
       this.sessions.delete(id)
-      return { ok: false, error: friendlyError((err as Error).message) }
+      if (msg === 'no-private-key') return { ok: false, code: 'no-private-key', error: msg }
+      return { ok: false, error: friendlyError(msg) }
     }
 
     // -A: forward the local agent so the remote host (and any hosts it jumps
@@ -1334,7 +1336,7 @@ export class SshManager {
   /** The `error` text used for a cancelled job. Kept as a constant so the
    *  progress event can recognise it when stamping the `cancelled` flag; the
    *  renderer must not depend on this string. */
-  private static readonly CANCELLED_TEXT = '已取消'
+  private static readonly CANCELLED_TEXT = 'cancelled'
 
   /** Limit for one-shot remote commands (tar / unzip / sha256sum). A stuck mount
    *  or a command waiting on stdin must not hang the caller forever. Exposed as
@@ -1543,7 +1545,7 @@ export class SshManager {
     if (!localOk || !remoteOk) {
       this.cancelledJobs.delete(jobId)
       this.pausedJobs.delete(jobId)
-      throw new Error('目录枚举失败，本次同步已中止（源目录可能暂时不可读）')
+      throw new Error('sync-list-failed')
     }
     // Plan: each entry is a transfer (dir up/down) or a deletion.
     interface FilePlan { dir: 'up' | 'down'; local: string; remote: string; rel: string; size: number }
@@ -2070,9 +2072,9 @@ export class SshManager {
       } else if (walkError) {
         emit(label, false, friendlyError((walkError as Error).message), true)
       } else if (failures.length) {
-        emit(label, false, `${failures.length} 个文件失败`, true)
+        emit(label, false, `files-failed:${failures.length}`, true)
       } else if (sumFails.length) {
-        emit(label, false, `校验和不匹配 ${sumFails.length} 个文件`, true)
+        emit(label, false, `checksum-mismatch:${sumFails.length}`, true)
       } else {
         const t = bytesDone || 1
         this.emitProgress({ id: jobId, name: label, direction: 'down', transferred: t, total: t, count: discovered, done: true })
@@ -2125,7 +2127,7 @@ export class SshManager {
     ])
     // A partial snapshot would report files as "only on one side"; say so
     // instead of showing a wrong diff.
-    if (!localOk || !remoteOk) throw new Error('目录枚举失败（源目录可能暂时不可读）')
+    if (!localOk || !remoteOk) throw new Error('sync-list-failed')
     const onlyLocal: string[] = []
     const onlyRemote: string[] = []
     const sizeDiff: string[] = []
@@ -2325,7 +2327,7 @@ export class SshManager {
         } else if (walkError) {
           emit(label, false, friendlyError((walkError as Error).message), true)
         } else if (failures) {
-          emit(label, false, `${failures} 个文件失败`, true)
+          emit(label, false, `files-failed:${failures}`, true)
         } else {
           const t = bytesDone || 1
           this.emitProgress({ id: jobId, name: label, direction: 'up', transferred: t, total: t, count: discovered, localPaths, done: true })
