@@ -1070,32 +1070,32 @@ impl Shell {
 mod tests {
     use super::{inspect_private_key, verify_host_key, HostKeyVerdict, SshError};
 
-    // 测试专用的一次性密钥(只在这里用过,没有放到任何服务器上)。
+    // 测试夹具:一把从生成起就公开的密钥,从未用于任何服务器。
+    // 它在这份源码里明文可见是有意为之——公开的东西不是秘密。
     const PLAIN_KEY: &str = "-----BEGIN OPENSSH PRIVATE KEY-----
 b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
-QyNTUxOQAAACCOX2TFjJykQB49AejSPEeullPCXMVB4mc8zLbdJvhvMQAAAIhbIKMUWyCj
-FAAAAAtzc2gtZWQyNTUxOQAAACCOX2TFjJykQB49AejSPEeullPCXMVB4mc8zLbdJvhvMQ
-AAAEC06P+Sjh3min4ldSJ4NYv63RUZW7flHDaFAQ1EoCk/o45fZMWMnKRAHj0B6NI8R66W
-U8JcxUHiZzzMtt0m+G8xAAAABHRlc3QB
------END OPENSSH PRIVATE KEY-----
-";
+QyNTUxOQAAACBfJAUSHpq7751Mpl33TUIS4d6fBTmXQrXxpR85p/+41gAAAKhaYMZCWmDG
+QgAAAAtzc2gtZWQyNTUxOQAAACBfJAUSHpq7751Mpl33TUIS4d6fBTmXQrXxpR85p/+41g
+AAAEDzILRbUCNh7d6Onxw9zEijELWe5NWSrpZ5Ob5mZxWFSl8kBRIemrvvnUymXfdNQhLh
+3p8FOZdCtfGlHzmn/7jWAAAAJHgtc3NoIHRlc3QgZml4dHVyZSwgcHVibGljIGJ5IGRlc2
+lnbgE=
+-----END OPENSSH PRIVATE KEY-----";
     /// 口令是 `pw123`。
     const LOCKED_KEY: &str = "-----BEGIN OPENSSH PRIVATE KEY-----
-b3BlbnNzaC1rZXktdjEAAAAACmFlczI1Ni1jdHIAAAAGYmNyeXB0AAAAGAAAABBS7uy2Hu
-SMRFX1PEQPdh5cAAAAGAAAAAEAAAAzAAAAC3NzaC1lZDI1NTE5AAAAIK39PcJJEL5bcoKH
-UfSQb2YF8rVWuqbsMyMKdNWytQSjAAAAkHYjEG+65bWqDjbRpm5f1vZHRe2RLH0l9j0jcW
-541GvfuIZjACmp6Xs0hGhe0Kn2tjexjJDpy+GnbH8c2XgXpDP5oS9EL7ARNPPazjEmlzyh
-D0CIHjyFdamhF+XZuRgVSXjyKe3N8K8+jDEwyp+xSLG1Mr5FonHy5fshcN6U0rJZnHz2+N
-H+1bWL3HrzyeMpLQ==
------END OPENSSH PRIVATE KEY-----
-";
+b3BlbnNzaC1rZXktdjEAAAAACmFlczI1Ni1jdHIAAAAGYmNyeXB0AAAAGAAAABBQCtsCCr
+TRwHJBuROFDL/mAAAAGAAAAAEAAAAzAAAAC3NzaC1lZDI1NTE5AAAAIGRBDoymD33KF+rJ
+xRoF6FGbWdc5/5fFutOEfWQPF9wdAAAAsPnUp2WAOR4DEWdpn+HpiLv3W1wp7ZS7M7p+1B
+SZ5ZidCSqnNMXPH47150yMU4/wxo48fVIC4v9IlGPuQhO8CX0mRlNlDrsHZ4TFuDh7XiZq
+2I/teVSBhyAAreknBV2mEbE8i5kwQlizrjw+SE0UVMSiJRT9TuQtVM1/xEaGFpZmHZZoYn
+dioxMPLPFmeyBOpHWcVTyesLJHbIA37SLvbIV0s0xJX2B2Es0mLxalNy7d
+-----END OPENSSH PRIVATE KEY-----";
 
     #[test]
     fn inspects_an_unencrypted_key() {
         let info = inspect_private_key(PLAIN_KEY, None).expect("应能解析");
         assert_eq!(info.algorithm, "ssh-ed25519");
         // 和 `ssh-keygen -lf plain.pub` 的输出一致。
-        assert_eq!(info.fingerprint, "SHA256:Jj0HIeewaSgaFIpQEShYu53Wc3w6AdkjDBaPhhhj68E");
+        assert_eq!(info.fingerprint, "SHA256:E815YwKGOeKXgokX2FAp5JjteGK0Q1f8XfHWACoS63Y");
         assert!(info.public_key.starts_with("ssh-ed25519 AAAA"));
     }
 

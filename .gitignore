@@ -9,3 +9,30 @@ release
 __pycache__
 # Project-local agent data (memory logs, session state). Kept on disk, not in git.
 .workbuddy/
+
+# ---- Secrets ----
+# This repository is public. Nothing here may hold a real credential: a key that
+# is committed once is in the history forever, even after a later commit deletes
+# it, and fork/clone copies keep it alive.
+#
+# Test fixtures that genuinely need a key (mobile/core/xssh-core/src/ssh.rs) use
+# a key generated for publication, never a personal one.
+.env
+.env.*
+*.env
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+id_rsa
+id_rsa.*
+id_ed25519
+id_ed25519.*
+id_ecdsa
+id_ecdsa.*
+credentials.json
+service-account*.json
+*.kdbx
