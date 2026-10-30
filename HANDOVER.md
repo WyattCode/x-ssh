@@ -878,6 +878,15 @@ openSnapshot/closeOthers/saveSetting (#68), theme/transfer clears (#67), bookmar
 - **终端粘贴/选择开关写盘失败会撒谎(P1)**:「粘贴前确认」「清理粘贴」「选中即复制」「中键粘贴」「右键粘贴」五个开关同样先翻再 fire-and-forget。改为 `settings.set` 直写,失败回滚 + toast `set.gen.writeFail`。光标/字体/主题/数字框/其它开关/快捷键/强调色未动。
 - i18n 新增 `set.gen.writeFail`(zh / en / zh-TW;文案与 #66/#68/#74 对齐便于并行合并)。
 - 未触碰:`closePane` / `focusSession` / `openSftpFor` / `splitPane` / `setActive*` / `persistTabs` / sidebar/hosts setters / `TransferPanel` / `SftpDrawer` / `saveSetting` / `zoom` / `fontSize` / M3.139 四个启动开关。
+## M3.141(分支 `fix/review-polish-m3141`,**未合并**)
+
+> 只做缺陷 / 界面打磨,不加功能。**#75–#4 的 PR 都还没合并**,这一批也不含它们。
+
+- **SFTP 单文件下载失败无反馈(P1)**:`downloadSelected` 多选路径会检查 `r.ok` / `r.canceled`,单文件走 Save-As 的 `sftp.download` 却直接 `await` 后 return。磁盘满 / 权限 / 传输失败时点击像没反应。现在与 `downloadMany` 一样把失败写进 `error`(`sfp.downloadFail`)。
+- **端口转发「保存到主机」失败静默(P1)**:`ForwardsPage.add` 在已连上时先 `addForwardTo` 成功,再 `saveHost`;hosts 写盘抛错时 try 无 catch,表单不关但 `err` 空、rejection 未处理。现在只包住 `saveHost`,失败设 `err = ed.saveFail` 并 return,已开的现场转发保留(下次连接不会自动开这条)。未改 `saveHost` 本体(#65)。
+- **连接类剩余开关写盘失败会撒谎(P1)**:「连接复用」「连接时附到 tmux」「Shell 集成」「自动识别服务器系统」「校验校验和」五个开关原来先翻内存再 `void saveSetting`。改为直接 `settings.set`,失败回滚并 toast `set.gen.writeFail`。M3.139/M3.140 那批启动/粘贴开关、光标/字体/主题/数字框/`autoBackup`/快捷键/强调色未动。
+- i18n 新增 `set.gen.writeFail`(zh / en / zh-TW;文案与 #66/#68/#74/#75 对齐便于并行合并)。
+- 未触碰:`closePane` / `focusSession` / `openSftpFor` / `splitPane` / `setActive*` / `persistTabs` / sidebar/hosts / `TransferPanel` / `saveSetting` / `zoom` / `fontSize` / `editExternal`/`openWith` / `saveHost`。
 - 仍按原计划搁置:`fontSize` 未使用、`zoom` 不持久化、`local.home` 静默、StatusBar configured-vs-live、`setWindowOpenHandler`、预览「无法预览」。
 
 

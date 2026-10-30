@@ -1357,6 +1357,17 @@ async function downloadSelected(): Promise<void> {
     if (!r.ok && !r.canceled) error.value = r.error ?? tt('sfp.downloadFail')
   } finally {
     busy.value = false
+  if (items.length === 1 && !items[0].isDir) {
+    // Single file → Save-As dialog. Surface failures the same way as
+    // downloadMany — a refused/failed write used to look like a no-op.
+    const r = await window.api.sftp.download(
+      props.sessionId,
+      posixJoin(path.value, items[0].name),
+      items[0].name,
+      store.transferConcurrency
+    )
+    if (!r.ok && !r.canceled) error.value = r.error ?? tt('sfp.downloadFail')
+    return
   }
   // Multiple / folders → pick one target folder.
   const payload = items.map((e) => ({

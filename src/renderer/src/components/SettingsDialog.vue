@@ -429,13 +429,33 @@ function onConcurrency(e: Event): void {
   store.transferConcurrency = n
   void store.saveSetting('transferConcurrency', n)
 }
-function toggleAutoDetectOs(): void {
-  store.autoDetectOs = !store.autoDetectOs
-  void store.saveSetting('autoDetectOs', store.autoDetectOs)
+async function toggleAutoDetectOs(): Promise<void> {
+  const next = !store.autoDetectOs
+  store.autoDetectOs = next
+  try {
+    const r = await window.api.settings.set('autoDetectOs', next)
+    if (r && r.ok === false) {
+      store.autoDetectOs = !next
+      toast(t('set.gen.writeFail'), 'error')
+    }
+  } catch {
+    store.autoDetectOs = !next
+    toast(t('set.gen.writeFail'), 'error')
+  }
 }
-function toggleVerifyChecksums(): void {
-  store.verifyChecksums = !store.verifyChecksums
-  void store.saveSetting('verifyChecksums', store.verifyChecksums)
+async function toggleVerifyChecksums(): Promise<void> {
+  const next = !store.verifyChecksums
+  store.verifyChecksums = next
+  try {
+    const r = await window.api.settings.set('verifyChecksums', next)
+    if (r && r.ok === false) {
+      store.verifyChecksums = !next
+      toast(t('set.gen.writeFail'), 'error')
+    }
+  } catch {
+    store.verifyChecksums = !next
+    toast(t('set.gen.writeFail'), 'error')
+  }
 }
 function onRate(e: Event): void {
   const raw = (e.target as HTMLInputElement).value
@@ -444,9 +464,19 @@ function onRate(e: Event): void {
   store.transferRateKbps = n
   void store.saveSetting('transferRateKbps', n)
 }
-function toggleShell(): void {
-  store.shellIntegration = !store.shellIntegration
-  void store.saveSetting('shellIntegration', store.shellIntegration)
+async function toggleShell(): Promise<void> {
+  const next = !store.shellIntegration
+  store.shellIntegration = next
+  try {
+    const r = await window.api.settings.set('shellIntegration', next)
+    if (r && r.ok === false) {
+      store.shellIntegration = !next
+      toast(t('set.gen.writeFail'), 'error')
+    }
+  } catch {
+    store.shellIntegration = !next
+    toast(t('set.gen.writeFail'), 'error')
+  }
 }
 async function toggleRestore(): Promise<void> {
   const next = !store.restoreTabs
@@ -560,13 +590,33 @@ async function toggleMinimizeToTray(): Promise<void> {
     toast(t('set.gen.writeFail'), 'error')
   }
 }
-function toggleConnectionMultiplex(): void {
-  store.connectionMultiplex = !store.connectionMultiplex
-  void store.saveSetting('connectionMultiplex', store.connectionMultiplex)
+async function toggleConnectionMultiplex(): Promise<void> {
+  const next = !store.connectionMultiplex
+  store.connectionMultiplex = next
+  try {
+    const r = await window.api.settings.set('connectionMultiplex', next)
+    if (r && r.ok === false) {
+      store.connectionMultiplex = !next
+      toast(t('set.gen.writeFail'), 'error')
+    }
+  } catch {
+    store.connectionMultiplex = !next
+    toast(t('set.gen.writeFail'), 'error')
+  }
 }
-function toggleTmuxOnConnect(): void {
-  store.tmuxOnConnect = !store.tmuxOnConnect
-  void store.saveSetting('tmuxOnConnect', store.tmuxOnConnect)
+async function toggleTmuxOnConnect(): Promise<void> {
+  const next = !store.tmuxOnConnect
+  store.tmuxOnConnect = next
+  try {
+    const r = await window.api.settings.set('tmuxOnConnect', next)
+    if (r && r.ok === false) {
+      store.tmuxOnConnect = !next
+      toast(t('set.gen.writeFail'), 'error')
+    }
+  } catch {
+    store.tmuxOnConnect = !next
+    toast(t('set.gen.writeFail'), 'error')
+  }
 }
 function onTmuxSessionName(e: Event): void {
   const v = (e.target as HTMLInputElement).value
