@@ -592,6 +592,11 @@ async function forgetKnownHost(k: KnownHostEntry): Promise<void> {
   })
   if (!ok) return
   await window.api.knownHosts.forget(k.host, k.port)
+  const r = await window.api.knownHosts.forget(k.host, k.port)
+  if (!r.ok) {
+    toast(r.error ?? t('set.sec.forgetFail'), 'error')
+    return
+  }
   await store.loadKnownHosts()
 }
 /** Human age of a trusted host key ('' for unknown/too young to matter). */

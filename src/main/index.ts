@@ -1272,8 +1272,13 @@ function registerIpc(): void {
     return knownHosts.list()
   })
   ipcMain.handle(IPC.knownHostsForget, async (_e, host: string, port: number) => {
-    await knownHosts.load()
-    await knownHosts.forget(host, port)
+    try {
+      await knownHosts.load()
+      await knownHosts.forget(host, port)
+      return { ok: true as const }
+    } catch (e) {
+      return { ok: false as const, error: friendlyError((e as Error).message) }
+    }
   })
 
   // ---- Cross-session history search (live + persisted across restart) ----
