@@ -37,6 +37,9 @@ const store = useSessions()
 function sftpErr(err: string | undefined, fallbackKey: string): string {
   if (err === 'sync-list-failed') return tt('sfp.syncListFailed')
   if (err?.startsWith('files-failed:')) return formatTransferError(err, tt)
+/** IPC failures arrive as codes; render the ones the UI knows in its language. */
+function sftpErr(err: string | undefined, fallbackKey: string): string {
+  if (err === 'window-not-ready') return tt('app.windowNotReady')
   return err ?? tt(fallbackKey)
 }
 
@@ -280,6 +283,7 @@ async function localDelete(): Promise<void> {
   }
   const r = await window.api.local.del(localPath.value, t.name, t.isDir)
   if (!r.ok) toast(r.error === 'invalid-name' ? tt('sfp.invalidName') : (r.error ?? tt('sfp.delFail')), 'error')
+  if (!r.ok) toast(sftpErr(r.error, 'sfp.delFail'), 'error')
   else await refreshLocal()
 }
 async function localDelSelected(): Promise<void> {
@@ -304,6 +308,7 @@ async function localDelSelected(): Promise<void> {
     if (!r.ok) {
       failed = true
       toast(r.error === 'invalid-name' ? tt('sfp.invalidName') : (r.error ?? tt('sfp.delFail')), 'error')
+      toast(sftpErr(r.error, 'sfp.delFail'), 'error')
     }
     localSelSet.value = new Set()
     localAnchor.value = null
@@ -362,6 +367,7 @@ async function localSubmit(e?: Event): Promise<void> {
     if (!r.ok) {
       localModal.error =
         r.error === 'invalid-name' ? tt('sfp.invalidName') : (r.error ?? tt('sfp.createFail'))
+      localModal.error = sftpErr(r.error, 'sfp.createFail')
       return
     }
   } else {
@@ -371,6 +377,7 @@ async function localSubmit(e?: Event): Promise<void> {
     if (!r.ok) {
       localModal.error =
         r.error === 'invalid-name' ? tt('sfp.invalidName') : (r.error ?? tt('sfp.renameFail'))
+      localModal.error = sftpErr(r.error, 'sfp.renameFail')
       return
     }
     localModal.open = false
@@ -1060,6 +1067,7 @@ async function diffWithLocal(entry: FileEntry): Promise<void> {
   if (!remote.ok) {
     error.value =
       remote.error === 'file-too-large' ? tt('sfp.fileTooLarge') : (remote.error ?? tt('sfp.diffFail'))
+    error.value = sftpErr(remote.error, 'sfp.diffFail')
     return
   }
   const picked = await window.api.local.pickFile()
@@ -1069,6 +1077,7 @@ async function diffWithLocal(entry: FileEntry): Promise<void> {
     error.value =
       local.error === 'file-too-large' ? tt('sfp.fileTooLarge') : (local.error ?? tt('sfp.diffFail'))
       local.error === 'path-invalid' ? tt('sfp.pathInvalid') : (local.error ?? tt('sfp.diffFail'))
+    error.value = sftpErr(local.error, 'sfp.diffFail')
     return
   }
   diff.remoteName = entry.name
@@ -1237,6 +1246,7 @@ async function commitRename(entry: FileEntry, e?: Event): Promise<void> {
     focusEdit()
     return
   }
+  if (!r.ok) error.value = sftpErr(r.error, 'sfp.renameFail')
   await load(path.value)
 }
 function startCreate(kind: 'folder' | 'file'): void {
@@ -1266,6 +1276,7 @@ async function commitCreate(e?: Event): Promise<void> {
     focusEdit()
     return
   }
+  if (!r.ok) error.value = sftpErr(r.error, 'sfp.createFail')
   await load(path.value)
 }
 // ---- selection-aware operations (used by menu + shortcuts) ----
@@ -1367,6 +1378,9 @@ async function delSelected(): Promise<void> {
     await load(path.value)
   } finally {
     busy.value = false
+  for (const it of items) {
+    const r = await window.api.sftp.remove(props.sessionId, posixJoin(path.value, it.name), it.isDir)
+    if (!r.ok) error.value = sftpErr(r.error, 'sfp.delFail')
   }
 }
 
@@ -1523,6 +1537,7 @@ async function revealHistory(h: TransferHistoryItem): Promise<void> {
   historyMenu.open = false
   const r = await window.api.sftp.revealLocal(target)
   if (!r.ok) toast(r.error === 'path-invalid' ? tt('sfp.pathInvalid') : (r.error ?? tt('sfp.revealFail')), 'error')
+  if (!r.ok) toast(sftpErr(r.error, 'sfp.revealFail'), 'error')
 }
 // Finished downloads reveal their dest; finished uploads reveal their source.
 function canReveal(h: TransferHistoryItem): boolean {

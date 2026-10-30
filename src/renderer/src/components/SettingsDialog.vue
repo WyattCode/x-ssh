@@ -640,6 +640,7 @@ async function importSshConfig(): Promise<void> {
   if (!r.ok) {
     toast(
       r.error === 'missing-config' ? t('set.sec.importSshMissing') : (r.error ?? t('set.sec.importFail')),
+      r.error === 'ssh-config-missing' ? t('set.sec.sshConfigMissing') : (r.error ?? t('set.sec.importFail')),
       'error'
     )
     return
@@ -648,6 +649,7 @@ async function importSshConfig(): Promise<void> {
   await store.loadKnownHosts()
   if (r.count > 0) toast(t('set.sec.importSshOk', { n: r.count }), 'success')
   else toast(t('set.sec.importSshNone'), 'info')
+  toast(`${t('set.sec.imported')} ${r.count ?? 0} ${t('set.sec.hosts')}`, 'success')
 }
 async function exportHostsJson(): Promise<void> {
   const r = await window.api.hosts.exportJson()

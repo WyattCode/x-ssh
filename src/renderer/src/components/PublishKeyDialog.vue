@@ -14,6 +14,15 @@ import Icon from './Icon.vue'
 const store = useSessions()
 const { t } = useI18n()
 const { confirm } = useConfirm()
+
+/** Per-host publish/revoke failures arrive as codes; render them in the UI language. */
+function pubErr(err?: string): string {
+  if (err === 'host-missing') return t('keyPub.hostMissing')
+  if (err === 'app-locked') return t('keyPub.appLocked')
+  if (err === 'connect-failed') return t('keyPub.connectFailed')
+  if (err === 'window-not-ready') return t('app.windowNotReady')
+  return err ?? ''
+}
 // Mounted for the app's lifetime and shown by its own v-if, so an onMounted
 // focus ran once at startup with no element and never again.
 watch(
@@ -63,6 +72,7 @@ async function publish(): Promise<void> {
     err.value = r.code || r.error ? keyErrorMessage(r, t) : t('keyPub.fail')
     err.value =
       r.error === 'no-public-key' ? t('keyPub.noPublicKey') : (r.error ?? t('keyPub.fail'))
+    err.value = pubErr(r.error) || t('keyPub.fail')
     return
   try {
     const r = await window.api.keys.publish(keyId.value, [...selected])
@@ -88,6 +98,7 @@ async function revoke(): Promise<void> {
     err.value = r.code || r.error ? keyErrorMessage(r, t) : t('keyPub.revokeFail')
     err.value =
       r.error === 'no-public-key' ? t('keyPub.noPublicKey') : (r.error ?? t('keyPub.revokeFail'))
+    err.value = pubErr(r.error) || t('keyPub.revokeFail')
     return
   if (busy.value || revokeBusy.value) return
   revokeBusy.value = true
@@ -154,6 +165,7 @@ watch(
             <Icon :name="r.ok ? 'check' : 'alert-triangle'" :size="13" />
             <span class="kp-host-label">{{ r.host }}</span>
             <span v-if="!r.ok" class="kp-err">{{ hostOpError(r.error) }}</span>
+            <span v-if="!r.ok" class="kp-err">{{ pubErr(r.error) }}</span>
           </div>
         </div>
         <div v-if="revokeResults.length" class="kp-results">
@@ -162,6 +174,7 @@ watch(
             <Icon :name="r.ok ? 'check' : 'alert-triangle'" :size="13" />
             <span class="kp-host-label">{{ r.host }}</span>
             <span v-if="!r.ok" class="kp-err">{{ hostOpError(r.error) }}</span>
+            <span v-if="!r.ok" class="kp-err">{{ pubErr(r.error) }}</span>
           </div>
         </div>
       </div>
