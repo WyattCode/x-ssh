@@ -4,6 +4,7 @@ import { computed, ref, onMounted, onUnmounted } from 'vue'
 
 import { useSessions } from '../stores/sessions'
 import { useI18n } from '../lib/i18n'
+import { useToast } from '../composables/toast'
 import { canRevealHistory } from '../lib/transferHistory'
 import {
   pct as pctOf,
@@ -20,6 +21,7 @@ import Icon from './Icon.vue'
 
 const store = useSessions()
 const { t } = useI18n()
+const { toast } = useToast()
 
 // Esc closes the panel, like the other overlays (HistorySearch, palette).
 function onPanelKey(e: KeyboardEvent): void {
@@ -129,10 +131,12 @@ function residualLabel(x: SftpProgress): string {
 function residualClass(x: SftpProgress): string {
   return isCancelled(x) ? 'cancelled' : 'error'
 }
-function reveal(h: TransferHistoryItem): void {
+async function reveal(h: TransferHistoryItem): Promise<void> {
   const target =
     h.direction === 'down' ? h.localDir : h.localPaths?.[0]
-  if (target) void window.api.sftp.revealLocal(target)
+  if (!target) return
+  const r = await window.api.sftp.revealLocal(target)
+  if (!r.ok) toast(r.error === 'path-invalid' ? t('sfp.pathInvalid') : (r.error ?? t('sfp.revealFail')), 'error')
 }
 // History rows only expose "reveal" for finished down/up transfers.
 function canReveal(h: TransferHistoryItem): boolean {

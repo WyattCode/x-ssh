@@ -39,6 +39,7 @@ async function load(p: string): Promise<void> {
   if (!r.ok) {
     err.value =
       r.error === 'file-too-large' ? t('sfp.fileTooLarge') : (r.error ?? t('replay.readFail'))
+      r.error === 'path-invalid' ? t('sfp.pathInvalid') : (r.error ?? t('replay.readFail'))
     content.value = ''
     return
   }

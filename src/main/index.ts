@@ -1254,7 +1254,7 @@ function registerIpc(): void {
       // A path the user picked via `localPickFile`, or one already inside a
       // listed directory. Normalize, and refuse embedded NULs.
       const target = resolveDir(p)
-      if (!target) return { ok: false, error: '路径无效' }
+      if (!target) return { ok: false, error: 'path-invalid' }
       // Same ceiling as the remote side (sftpReadText): this feeds the compare
       // view, and an unbounded read of a big file stalls the whole main process.
       const info = await stat(target)
@@ -1580,7 +1580,7 @@ function registerIpc(): void {
     IPC.sftpRevealLocal,
     (_e, target: string) => {
       try {
-        if (!target || !isAbsolute(target)) return { ok: false, error: '路径不合法' }
+        if (!target || !isAbsolute(target)) return { ok: false, error: 'path-invalid' }
         shell.showItemInFolder(target)
         return { ok: true }
       } catch (e) {
@@ -2125,6 +2125,7 @@ function registerIpc(): void {
     try {
       const text = await keyManager.publicKey(id)
       if (!text) return { ok: false, code: 'no-pubkey' }
+      if (!text) return { ok: false, error: 'no-public-key' }
       return { ok: true, text }
     } catch (e) {
       return keyFail(e)
@@ -2142,6 +2143,8 @@ function registerIpc(): void {
     }
     if (!pub) return { ok: false, code: 'no-pubkey' }
     if (!sshManager) return { ok: false, code: 'not-ready' }
+    if (!pub) return { ok: false, error: 'no-public-key' }
+    if (!sshManager) return { ok: false, error: '窗口未就绪' }
     const results = await withTempHosts(hostIds, async (sid) => {
       const cmd = `umask 077; mkdir -p ~/.ssh && chmod 700 ~/.ssh\ncat >> ~/.ssh/authorized_keys <<'XSSH'\n${pub}\nXSSH\ntouch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys`
       await requireSshManager().execCommand(sid, cmd)
@@ -2162,6 +2165,8 @@ function registerIpc(): void {
     }
     if (!pub) return { ok: false, code: 'no-pubkey' }
     if (!sshManager) return { ok: false, code: 'not-ready' }
+    if (!pub) return { ok: false, error: 'no-public-key' }
+    if (!sshManager) return { ok: false, error: '窗口未就绪' }
     const keyPart = pub.split(/\s+/).slice(0, 2).join(' ')
     const results = await withTempHosts(hostIds, async (sid) => {
       // if/fi (not a bare &&-chain) so a host without authorized_keys exits 0

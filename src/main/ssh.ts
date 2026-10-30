@@ -2629,7 +2629,7 @@ export class SshManager {
     localDir: string,
     archiveName?: string
   ): Promise<{ ok: boolean; localPath?: string; error?: string; canceled?: boolean }> {
-    if (!items.length) return { ok: false, error: '没有可打包的项' }
+    if (!items.length) return { ok: false, error: 'nothing-to-pack' }
     const parent = this.parentOf(items[0].path)
     const tmp = `/tmp/xssh-${randomUUID().slice(0, 8)}.tar.gz`
     const names = items.map((i) => i.name)
