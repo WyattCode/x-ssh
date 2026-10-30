@@ -2059,6 +2059,7 @@ function registerIpc(): void {
   })
   // ---- SSH key library ----
   ipcMain.handle(IPC.keysList, () => keyManager.list())
+  ipcMain.handle(IPC.keysLabelsStatus, () => keyManager.labelsStatus())
   ipcMain.handle(
     IPC.keysGenerate,
     async (_e, opts: { name: string; type?: string; passphrase?: string; bits?: number }) => {

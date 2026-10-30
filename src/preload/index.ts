@@ -332,6 +332,7 @@ const api = {
     ipcRenderer.invoke(IPC.pickDirectory),
   keys: {
     list: (): Promise<ManagedKey[]> => ipcRenderer.invoke(IPC.keysList),
+    labelsStatus: (): Promise<{ loadFailed: boolean }> => ipcRenderer.invoke(IPC.keysLabelsStatus),
     generate: (opts: { name: string; type?: string; passphrase?: string; bits?: number }): Promise<{ ok: boolean; key?: ManagedKey; error?: string }> =>
       ipcRenderer.invoke(IPC.keysGenerate, opts),
     import: (): Promise<{ ok: boolean; key?: ManagedKey; error?: string; canceled?: boolean }> =>

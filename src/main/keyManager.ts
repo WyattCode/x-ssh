@@ -5,6 +5,7 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import type { ManagedKey } from '../shared/types'
 import { isPrivateKey, sanitizeKeyName, shouldSkipKeyFile } from '../shared/fsUtils'
+import { parseJson, readDurable } from './durableFile'
 
 const execFileAsync = promisify(execFile)
 
@@ -17,6 +18,8 @@ const execFileAsync = promisify(execFile)
 export class KeyManager {
   private readonly keysDir: string
   private readonly labelsPath: string
+  /** .labels.json (+.bak) existed but none parsed — do not overwrite with {}. */
+  private labelsLoadFailed = false
 
   constructor(dir: string) {
     this.keysDir = join(dir, 'keys')
@@ -92,16 +95,42 @@ export class KeyManager {
   /** Reads the id → friendly-label sidecar (absent when none have been set). */
   private async readLabels(): Promise<Record<string, string>> {
     try {
-      const txt = await readFile(this.labelsPath, 'utf8')
-      const parsed = JSON.parse(txt)
-      return parsed && typeof parsed === 'object' ? parsed as Record<string, string> : {}
+      const r = await readDurable(this.labelsPath, (buf) => {
+        const v = parseJson<unknown>(buf)
+        if (!v || typeof v !== 'object' || Array.isArray(v)) throw new Error('not a labels map')
+        const out: Record<string, string> = {}
+        for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+          if (typeof val === 'string') out[k] = val
+        }
+        return out
+      })
+      if (r.status === 'bad') {
+        this.labelsLoadFailed = true
+        return {}
+      }
+      if (r.status === 'missing') {
+        this.labelsLoadFailed = false
+        return {}
+      }
+      this.labelsLoadFailed = false
+      return r.value
     } catch {
+      // Unexpected throw: keep prior flag (do not clear); treat as empty map.
       return {}
     }
   }
 
   private async writeLabels(labels: Record<string, string>): Promise<void> {
+    if (this.labelsLoadFailed) {
+      throw new Error('密钥标签文件损坏，已停止写入以免覆盖原有名称')
+    }
     await writeFile(this.labelsPath, JSON.stringify(labels), { mode: 0o600 }).catch(() => undefined)
+  }
+
+  /** Whether the labels sidecar failed to parse this session (friendly names at risk). */
+  async labelsStatus(): Promise<{ loadFailed: boolean }> {
+    await this.readLabels()
+    return { loadFailed: this.labelsLoadFailed }
   }
 
   private async sshKeygen(args: string[]): Promise<{ stdout: string }> {
@@ -132,6 +161,8 @@ export class KeyManager {
    *  non-empty passphrase leaves the private key encrypted on disk. */
   async generate(opts: { name: string; type?: string; passphrase?: string; bits?: number }): Promise<ManagedKey> {
     const dir = await this.ensureDir()
+    await this.readLabels()
+    if (this.labelsLoadFailed) throw new Error('密钥标签文件损坏，已停止写入以免覆盖原有名称')
     const safe = sanitizeKeyName(opts.name)
     const id = `${safe}-${randomUUID().slice(0, 8)}`
     const priv = join(dir, id)
@@ -167,6 +198,8 @@ export class KeyManager {
    *  library. Returns the new ManagedKey. */
   async import(srcPath: string): Promise<ManagedKey> {
     const dir = await this.ensureDir()
+    await this.readLabels()
+    if (this.labelsLoadFailed) throw new Error('密钥标签文件损坏，已停止写入以免覆盖原有名称')
     const id = `${sanitizeKeyName(basename(srcPath))}-${randomUUID().slice(0, 8)}`
     const priv = join(dir, id)
     const buf = await readFile(srcPath)

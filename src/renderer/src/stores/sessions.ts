@@ -630,7 +630,12 @@ export const useSessions = defineStore('sessions', {
     },
 
     async loadSnippets(): Promise<void> {
-      this.snippets = await window.api.snippets.list()
+      try {
+        this.snippets = await window.api.snippets.list()
+      } catch {
+        // Keep the previous list — blanking would look like "no snippets".
+        toast(t('snip.loadFail'), 'error')
+      }
     },
     async saveSnippet(snippet: Snippet): Promise<void> {
       this.snippets = await window.api.snippets.save(snippet)

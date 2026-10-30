@@ -202,9 +202,24 @@ async function pickKey(): Promise<void> {
 
 // ---- SSH key library ----
 const managedKeys = ref<ManagedKey[]>([])
+const labelsWarned = ref(false)
 const keyModal = reactive({ open: false, name: '', type: 'ed25519', passphrase: '', error: '' })
 async function loadKeys(): Promise<void> {
-  managedKeys.value = await window.api.keys.list()
+  try {
+    managedKeys.value = await window.api.keys.list()
+  } catch {
+    toast(t('host.keyListFail'), 'error')
+    return
+  }
+  try {
+    const st = await window.api.keys.labelsStatus()
+    if (st.loadFailed && !labelsWarned.value) {
+      labelsWarned.value = true
+      toast(t('host.keyLabelsLoadFail'), 'error')
+    }
+  } catch {
+    /* status is best-effort */
+  }
 }
 // Dropdown text identifies a key: friendly label + algorithm (and a short SHA
 // fingerprint when present), so several keys aren't confused by name alone.
@@ -217,7 +232,10 @@ function keyOptionLabel(k: ManagedKey): string {
 watch(
   () => props.open,
   (open) => {
-    if (open) void loadKeys()
+    if (open) {
+      labelsWarned.value = false
+      void loadKeys()
+    }
   },
   { immediate: true }
 )
