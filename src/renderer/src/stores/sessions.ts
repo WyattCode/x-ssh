@@ -717,8 +717,13 @@ export const useSessions = defineStore('sessions', {
       } else {
         next = [...this.sftpBookmarks, path].slice(-20)
       }
+      const prev = this.sftpBookmarks
       this.sftpBookmarks = next
-      await window.api.settings.set('sftpBookmarks', next)
+      const r = await window.api.settings.set('sftpBookmarks', next)
+      if (r && r.ok === false) {
+        this.sftpBookmarks = prev
+        toast(t('sfp.bookmarkFail'), 'error')
+      }
     },
 
     async saveSetting(key: string, value: unknown): Promise<void> {
@@ -1296,7 +1301,12 @@ export const useSessions = defineStore('sessions', {
     },
     /** Saves a host's profile fields (tags, forward rules…) without touching its secrets. */
     async saveHost(host: Host): Promise<void> {
-      this.hosts = await window.api.hosts.save(toPlain(host) as Host)
+      try {
+        this.hosts = await window.api.hosts.save(toPlain(host) as Host)
+      } catch {
+        toast(t('hosts.saveFail'), 'error')
+        throw new Error('hosts-save-failed')
+      }
     },
     async removeHost(id: string): Promise<void> {
       this.hosts = await window.api.hosts.delete(id)
@@ -1308,6 +1318,13 @@ export const useSessions = defineStore('sessions', {
       if (id in this.reach) {
         const { [id]: _gone, ...rest } = this.reach
         this.reach = rest
+      try {
+        this.hosts = await window.api.hosts.delete(id)
+      } catch {
+        // Main rejects when the hosts file cannot be written (disk full,
+        // unreadable file). HostsPage and any other caller must not look like
+        // the delete succeeded.
+        toast(t('hosts.deleteFail'), 'error')
       }
     },
     /** A copy under a fresh id. Saved passwords stay with the original (they're
