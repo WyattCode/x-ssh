@@ -1523,8 +1523,8 @@ function registerIpc(): void {
     sshManager?.attach(sessionId)
   })
   ipcMain.handle(IPC.sshTmuxList, async (_e, sessionId: string) => {
-    if (!sshManager) return []
-    return sshManager.tmuxListSessions(sessionId).catch(() => [])
+    if (!sshManager) throw new Error('no-session')
+    return sshManager.tmuxListSessions(sessionId)
   })
   ipcMain.handle(IPC.sshTmuxAttach, (_e, sessionId: string, name: string) => {
     if (!sshManager) return { ok: false }

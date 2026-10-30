@@ -707,6 +707,22 @@ Continue continuous-improve from origin/main on a new branch; do **not** touch/m
 
 ### Next
 Continue continuous-improve from origin/main on a new branch; do **not** touch/merge this PR or #58–#12 / #4–#11. Prefer substantive P0/P1 over busy-gates.
+## HANDOVER M3.125 — review polish (session-log write stuck / log-start toast / tmuxList fail-closed)
+
+**Branch:** `fix/review-polish-m3125` (from origin/main). **Do NOT merge.** Open PR (see report).
+**Skipped / do not redo:** PR #59 `fix/review-polish-m3124` (connect-time forward bind / runtime forwardIn / updateOpenFail) and #58–#12, #4–#11. Features / intentional deferrals / M3.77–M3.124 done items.
+
+### Fixes shipped
+1. **Session-log write error leaves logging stuck** — `startLog` write-stream `error` cleared `logging` but kept `logWrite`, so a later start always returned false until Stop. Now drops `logWrite` (when still this stream) and ends the broken stream.
+2. **Start logging menu ignores failure** — `toggleLog` toasts `term.logFail` when main returns `{ ok: false }` and the dialog was not canceled.
+3. **tmuxList failure looks like empty** — no longer swallow session-gone into `[]` / `tmux.empty`. Manager throws when session missing; IPC stops `.catch(() => [])`; TmuxDialog toasts `tmux.listFail`.
+
+### Verify
+- typecheck OK; lint:i18n OK (751/751/751 desktop); vitest **334**/30 green.
+- Model: DeepSeek-V4.1-Flash-1017 via ds.py; thinking=off medium; 15/15 HAND_APPLY first try. No hand-fix. Incidents: none.
+
+### Next
+Continue continuous-improve from origin/main on a new branch; do **not** touch/merge this PR or #59–#12 / #4–#11. Prefer substantive P0/P1 over busy-gates.
 
 ---
 

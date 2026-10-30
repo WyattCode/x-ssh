@@ -219,6 +219,7 @@ async function toggleLog(): Promise<void> {
     logOn.value = true
   } else if (!res.canceled) {
     toast(res.error ? String(res.error) : t('term.logFail'), 'error')
+
   }
 }
 

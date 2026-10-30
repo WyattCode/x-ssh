@@ -24,7 +24,12 @@ function sid(): string | undefined {
 async function list(): Promise<void> {
   const id = sid()
   if (!id) return
-  sessions.value = await window.api.ssh.tmuxList(id)
+  try {
+    sessions.value = await window.api.ssh.tmuxList(id)
+  } catch {
+    sessions.value = []
+    toast(t('tmux.listFail'), 'error')
+  }
 }
 
 async function attach(name: string): Promise<void> {
