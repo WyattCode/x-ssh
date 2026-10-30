@@ -2,6 +2,13 @@
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。
 
+## M3.177
+
+- 分支 `fix/review-polish-m3177`(基于 main @ 5946b1f),**do-not-merge**,Windows + Android 专项。
+- A: `downloadTree` 读目录失败不再当空目录成功返回(重抛);子项全部失败时抛 `download-tree-empty:<name>`;部分成功仍保留。
+- B: 设置 → 外部编辑器 / 按扩展名打开程序,`settings.set` 被拒时回滚 store 并提示 `set.gen.writeFail`;表单只在成功后清空。
+- 新增 i18n 键:`set.gen.writeFail`(zh / zh-TW / en)。
+
 ## 项目概述
 - 极简、键盘优先的 SSH 客户端。Electron + Vue 3 (Vite) + TypeScript。
 - 平台: Windows (`win32`)。目录: `D:\Documents\Claude Code\X-SSH`。
