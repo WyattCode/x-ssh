@@ -30,6 +30,8 @@ const keyManager = new KeyManager(app.getPath('userData'))
 const masterLock = new MasterLock(settings)
 const userVerify = registerUserVerifyIpc({ settings })
 const activeEdits = new Set<string>()
+/** Per-path stop callbacks for in-flight external edits (clear debounce + unwatch + rm). */
+const editCleanups = new Map<string, () => void>()
 // Cache of drag-out downloads keyed by session:paths, so files prefetched on
 // mousedown are ready by the time the drag gesture reaches startDrag.
 const dragCache = new Map<string, Promise<{ dir: string; local: string }>>()
@@ -114,7 +116,17 @@ const NL: Record<string, Record<UiLang, string>> = {
   pickEditor: { zh: '选择外部编辑器程序', 'zh-TW': '選擇外部編輯器程式', en: 'Choose the external editor' },
   pickBackupDir: { zh: '选择备份目录', 'zh-TW': '選擇備份目錄', en: 'Choose the backup folder' },
   pickPrivateKey: { zh: '选择私钥', 'zh-TW': '選擇私鑰', en: 'Choose a private key' },
-  importPrivateKey: { zh: '导入私钥', 'zh-TW': '匯入私鑰', en: 'Import a private key' }
+  importPrivateKey: { zh: '导入私钥', 'zh-TW': '匯入私鑰', en: 'Import a private key' },
+  editSaveFailTitle: {
+    zh: '外部编辑保存失败',
+    'zh-TW': '外部編輯儲存失敗',
+    en: 'External edit save failed'
+  },
+  editSaveFailBody: {
+    zh: '无法把 {name} 写回远端',
+    'zh-TW': '無法把 {name} 寫回遠端',
+    en: 'Could not write {name} back to the remote host'
+  }
 }
 /** Localized dialog string for the current UI language (English fallback). */
 async function dl(key: string): Promise<string> {
@@ -1041,10 +1053,8 @@ function createWindow(saved?: SavedBounds, prefs: UiPrefs = {}): void {
           void settings.set('sessionHistory', merged.slice(-300))
         })
     }
-    for (const p of activeEdits) {
-      unwatchFile(p)
-      void rm(dirname(p), { recursive: true, force: true }).catch(() => undefined)
-    }
+    for (const stop of [...editCleanups.values()]) stop()
+    editCleanups.clear()
     activeEdits.clear()
     sshManager?.disposeAll()
     sshManager = null
@@ -1888,29 +1898,55 @@ function registerIpc(): void {
 
         const editor = await settings.get<string>('externalEditor')
         if (editor) spawn(editor, [local], { detached: true, stdio: 'ignore' }).unref()
-        else await shell.openPath(local)
+        else {
+          const openErr = await shell.openPath(local)
+          if (openErr) {
+            await rm(dir, { recursive: true, force: true }).catch(() => undefined)
+            return { ok: false, error: friendlyError(openErr) }
+          }
+        }
 
         const remoteDir = remotePath.slice(0, remotePath.lastIndexOf('/')) || '/'
         let timer: NodeJS.Timeout | null = null
+        let stopped = false
+        const stop = (): void => {
+          if (stopped) return
+          stopped = true
+          if (timer) {
+            clearTimeout(timer)
+            timer = null
+          }
+          unwatchFile(local)
+          activeEdits.delete(local)
+          editCleanups.delete(local)
+          void rm(dir, { recursive: true, force: true }).catch(() => undefined)
+        }
         // watchFile polls mtime, so it also catches editors that save atomically
         // (write temp + rename), which fs.watch on the original path can miss.
         watchFile(local, { interval: 1000 }, (curr, prev) => {
+          if (stopped) return
           if (curr.mtimeMs === prev.mtimeMs) return
           if (timer) clearTimeout(timer)
           timer = setTimeout(() => {
+            if (stopped) return
             void sshManager
               ?.putFileSilent(sessionId, local, remoteDir, name)
-              .catch(() => undefined)
+              .catch(() => {
+                void (async () => {
+                  if (stopped) return
+                  if (!(await notifyEnabled())) return
+                  const title = await dl('editSaveFailTitle')
+                  const body = (await dl('editSaveFailBody')).replace('{name}', name)
+                  notify(title, body)
+                })()
+              })
           }, 300)
         })
         activeEdits.add(local)
+        editCleanups.set(local, stop)
         // Stop watching after 30 minutes to avoid leaking watchers, and drop
         // the temp dir.
-        setTimeout(() => {
-          unwatchFile(local)
-          activeEdits.delete(local)
-          void rm(dir, { recursive: true, force: true }).catch(() => undefined)
-        }, 30 * 60 * 1000)
+        setTimeout(stop, 30 * 60 * 1000)
         return { ok: true }
       } catch (e) {
         return { ok: false, error: friendlyError((e as Error).message) }
@@ -1937,7 +1973,13 @@ function registerIpc(): void {
       const local = join(dir, name)
       await requireSshManager().downloadTree(sessionId, remotePath, dir, name, false)
       if (program) spawn(program, [local], { detached: true, stdio: 'ignore' }).unref()
-      else await shell.openPath(local)
+      else {
+        const openErr = await shell.openPath(local)
+        if (openErr) {
+          await rm(dir, { recursive: true, force: true }).catch(() => undefined)
+          return { ok: false, error: friendlyError(openErr) }
+        }
+      }
       setTimeout(() => void rm(dir, { recursive: true, force: true }).catch(() => undefined), 30 * 60 * 1000)
       return { ok: true }
     } catch (e) {

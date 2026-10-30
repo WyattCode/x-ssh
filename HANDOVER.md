@@ -625,6 +625,15 @@ Continue continuous-improve from origin/main on a new branch; do **not** touch/m
 1. **packAndDownload ignored downloadJob cancel/failures** — archive download cancel (or per-file failures) still returned `{ ok: true }`. Now returns `{ ok: false, canceled: true }` / failures error. Did **not** add tar exit check (#51 `pack-failed`).
 2. **CommandPalette overlay vs Esc** — password / broadcast sub-views: overlay click now backs out like Esc instead of closing the whole palette.
 3. **sessions Chinese-only isCancelled** — deleted the local `error === '已取消'` helper; import shared `transferFormat.isCancelled` (prefers stamped `cancelled` flag; TransferPanel parity). Did **not** rename CANCELLED_TEXT (#45).
+## HANDOVER M3.120 — review polish (external-edit save notify / cleanup race / openPath fail)
+
+**Branch:** `fix/review-polish-m3120` (from origin/main). **Do NOT merge.** Open PR (see report).
+**Skipped / do not redo:** PR #54 `fix/review-polish-m3119` (pack download cancel / palette overlay / shared isCancelled) and #53–#12, #4–#11. Features / intentional deferrals / M3.77–M3.119 done items.
+
+### Fixes shipped
+1. **External-edit autosave silent failure** — `putFileSilent` errors after external-editor save were swallowed (`.catch(() => undefined)`). Now shows a localized OS notification (`editSaveFailTitle` / `editSaveFailBody` via `NL`/`dl`), honoring the notify toggle. No success spam.
+2. **External-edit 30-min cleanup race** — teardown did not clear the 300ms debounce; a late timer could put against a deleted temp file. Added idempotent `stop()` + `editCleanups` map; 30-min timer and window `closed` both call it (clears debounce, unwatch, rm).
+3. **editExternal / openWith ignore `shell.openPath` failure** — Electron returns an error string on failure; it was discarded and handlers returned `{ ok: true }` (and editExternal still started a watcher). Now cleanup temp dir and return `{ ok: false, error: friendlyError(…) }`. Did **not** add App.vue toasts / return codes (#42).
 
 ### Verify
 - typecheck OK; lint:i18n OK; vitest **334**/30 green.
@@ -634,6 +643,11 @@ Continue continuous-improve from origin/main on a new branch; do **not** touch/m
 Continue continuous-improve from origin/main on a new branch; do **not** touch/merge this PR or #53–#12 / #4–#11. Prefer substantive P0/P1 over busy-gates.
 
 ---
+
+Continue continuous-improve from origin/main on a new branch; do **not** touch/merge this PR or #54–#12 / #4–#11. Prefer substantive P0/P1 over busy-gates. Stale HANDOVER notes (download cancel unfixed / click.self overlay / recordChord reserved) are obsolete where covered by #12–#54.
+
+---
+
 
 ## 项目概述
 - 极简、键盘优先的 SSH 客户端。Electron + Vue 3 (Vite) + TypeScript。
