@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import { friendlyError, isTransientConnectError, penaltyRetryDelayMs } from './friendlyError'
+import {
+  friendlyError,
+  isAuthConnectError,
+  isTransientConnectError,
+  penaltyRetryDelayMs
+} from './friendlyError'
 
 describe('friendlyError', () => {
   it('names the rate-limit refusal instead of a generic reset', () => {
@@ -44,5 +49,23 @@ describe('penaltyRetryDelayMs', () => {
     expect(penaltyRetryDelayMs('Not allowed at this time')).toBe(30_000)
     expect(penaltyRetryDelayMs('read ECONNRESET')).toBeUndefined()
     expect(penaltyRetryDelayMs(undefined)).toBeUndefined()
+  })
+})
+
+describe('isAuthConnectError', () => {
+  it('flags credential / key failures', () => {
+    for (const m of [
+      'All configured authentication methods failed',
+      'Encrypted private key detected',
+      'Cannot parse privateKey: Error: malformed',
+      '认证失败:用户名、密码或密钥不正确',
+    ]) {
+      expect(isAuthConnectError(m), m).toBe(true)
+      expect(isTransientConnectError(m), m).toBe(false)
+    }
+  })
+  it('does not flag plain network errors', () => {
+    expect(isAuthConnectError('read ECONNRESET')).toBe(false)
+    expect(isAuthConnectError('connect ETIMEDOUT')).toBe(false)
   })
 })

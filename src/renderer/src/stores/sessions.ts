@@ -813,8 +813,18 @@ export const useSessions = defineStore('sessions', {
       this.networkOnline = typeof navigator !== 'undefined' ? navigator.onLine : true
       for (const tab of this.tabs) {
         for (const pane of tab.panes) {
-          const dropped = pane.status === 'error' && !pane.errorCode && !pane.sshSessionId
-          if (dropped && pane.params && this.autoReconnect) {
+          // Same guard as handleNetworkOnline: a pane whose last attempt returned
+          // a code (bad credentials, changed host key, locked app) stays skipped —
+          // waking the machine changes nothing about those.
+          if (
+            shouldReviveOnOnline({
+              status: pane.status,
+              errorCode: pane.errorCode,
+              sessionId: pane.sshSessionId,
+              autoReconnect: this.autoReconnect
+            }) &&
+            pane.params
+          ) {
             this.cancelReconnect(pane)
             this.scheduleReconnect(pane.id)
           }
@@ -1876,6 +1886,9 @@ export const useSessions = defineStore('sessions', {
                     ? t('app.channelClosed')
                     : (result.error ?? t('app.connectFail'))
 
+                  : result.code === 'auth_failed'
+                    ? t('app.authFailed')
+                    : (result.error ?? t('app.connectFail'))
         live.pane.message = msg
         live.pane.errorCode = result.code
         // A refusal that carries a retry delay (the server's connection-rate
@@ -2100,8 +2113,13 @@ export const useSessions = defineStore('sessions', {
           after.pane.reconnectMinDelayMs = undefined
         }
         // A refused host key won't fix itself by retrying: stop, and leave the
+        if (after.pane.status === 'connected') after.pane.reconnectAttempt = undefined
+        // A permanent code won't fix itself by retrying: stop, and leave the
         // card (with its fingerprint) for the user to decide.
-        else if (after.pane.errorCode === 'host_key_unknown' || after.pane.errorCode === 'host_key_changed') {
+        else if (after.pane.errorCode) {
+          // Permanent codes (auth_failed / locked / jump_* / host_key_*): retrying
+          // cannot help and may hammer credentials. Android ReconnectPolicy already
+          // treats auth as permanent; desktop must match.
           after.pane.reconnectAttempt = undefined
           after.pane.reconnectMinDelayMs = undefined
         } else this.scheduleReconnect(paneId)
