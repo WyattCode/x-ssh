@@ -25,7 +25,7 @@ class LocalNetworkTest {
         // IPv6 唯一本地 / 链路本地
         "fd00::1", "fc00::1", "fe80::1",
         // mDNS
-        "printer.local", "workstation.local",
+        "printer.local", "DGX-Node-0.local",
         // 没有点的裸主机名
         "nas", "dgx"
     )

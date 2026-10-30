@@ -110,7 +110,7 @@ SFTP 已做(上传/下载/重命名/删除,上传是"先写临时文件再改名
 
 ### 1.0 本机联调(不碰用户服务器时)
 
-用户的真服务器 `192.168.1.100`(主机名 DGX Node 0)**只点界面、不在里面敲命令**。要测输入就用本地靶机:
+用户的真服务器 `192.168.1.100`(主机名 DGX-Node-0)**只点界面、不在里面敲命令**。要测输入就用本地靶机:
 
 靶机在第十三/十四次会话之间被清理过(Temp 目录只剩一个 `authorized_keys`,`sshd.exe`、配置、主机密钥、私钥全没了)。
 **第十四次会话用系统自带的 OpenSSH 重建了它**,配置固定为只绑回环:
@@ -232,7 +232,7 @@ adb push id_xssh_dev /sdcard/Download/id_xssh_dev   # 然后在表单里「导�
 | Gradle | `D:\Android\gradle-9.7.1`(不用 wrapper) |
 | 本地 SSH 靶机 | 系统自带 OpenSSH,配置 `%LOCALAPPDATA%\Temp\opencode\xssh-sshd\`(**127.0.0.1:2222**,私钥 `id_xssh_dev`,第十四次会话重建) |
 | MuMu 模拟器 | `D:\Apps\MuMuPlayer`(MuMuManager 6.7.0;实例 0 = Android 15/API 35,伪装 vivo V2362A,1440×2560@360dpi,adb `127.0.0.1:16384`) |
-| 用户服务器 | `192.168.1.100`(DGX Node 0,用户 user;**密码不写进仓库**;只点界面不敲命令) |
+| 用户服务器 | `192.168.1.100`(DGX-Node-0,用户 user;**密码不写进仓库**;只点界面不敲命令) |
 | 网络 | PC 与手机同一局域网 `192.168.10.x`(手机曾为 `.150`) |
 | MSVC | VS 2022 Build Tools + C++ 工作负载(**cargo-ndk / 桌面版 xssh-ffi 编译要 `link.exe`**,没有就 `linker link.exe not found`) |
 

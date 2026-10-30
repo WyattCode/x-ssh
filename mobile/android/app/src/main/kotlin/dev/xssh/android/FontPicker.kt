@@ -65,7 +65,7 @@ import uniffi.xssh_ffi.StyledRun
 
 /** 样例内容:提示符、中英混排的表格、容易看混的字形。 */
 private val SampleRows: List<List<Pair<String, Long>>> = listOf(
-    listOf("user@dgx" to 2L, ":" to -1L, "~/项目" to 4L, "$ ls -l" to -1L),
+    listOf("user@node" to 2L, ":" to -1L, "~/项目" to 4L, "$ ls -l" to -1L),
     listOf("├─ README.md   2.4K  已同步" to -1L),
     listOf("└─ 配置 nginx.conf  " to -1L, "0O 1lI {}" to 3L),
 )
