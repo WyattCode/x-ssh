@@ -578,6 +578,12 @@ typecheck / lint:i18n(桌面 752/752/752) / vitest **334** / 30 全绿。未在�
 - **A(Android)主机列表存盘改 commit**:`HostStore.save(): Boolean`;`persist` 仅在写入成功后更新内存,失败 toast `hosts_save_failed`(不重做 #101 拒空 toast / #97 loadFailed)。
 - **B(Android)平板侧栏偏好改 commit**:`UiPrefs.setSidebarVisible`;失败回滚 UI + toast `sidebar_persist_failed`(不重做 #94 theme / #96 font)。
 - **C(桌面)远程多选删除失败补单次 toast**:`SftpDrawer.delSelected` 收集 firstErr 后 toast 一次(不重做 #101 localDelSelected)。
+# M3.168 — 复核打磨(分支 `fix/review-polish-m3168`,基于 main @ 5946b1f,**勿合并**)
+
+> 两条 P1 修复;只动 Windows SFTP 抽屉,不碰 macOS / iOS / Android。
+
+- **A(桌面)SFTP 重命名 / 新建失败可感知**:`commitRename` / `commitCreate` 在写 `error` 的同时 toast(`sfp.renameFail` / `sfp.createFail`)。`load()` 开头会清 banner,以前权限不够时像没反应。
+- **B(桌面)SFTP 单文件下载失败可感知**:`downloadSelected` 的 Save-As 分支原先丢弃返回值;现在与多选路径一样 toast `sfp.downloadFail`(取消仍安静)。
 
 ---
 
