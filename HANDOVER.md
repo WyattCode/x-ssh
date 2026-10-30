@@ -591,6 +591,13 @@ typecheck / lint:i18n(桌面 752/752/752) / vitest **334** / 30 全绿。未在�
 - **A(桌面)SFTP chmod 失败可感知**:`PermDialog.apply` 在写 dialog `error` 的同时 toast(`sfp.permFail` / `sfp.permFailMany` / catch message)。关掉对话框后以前像没反应。
 - **B(Android)SFTP 前往 `~` 失败可感知**:GoTo 对话框里 `files.home()` 失败原先无 `onFailure`(对话框关了像没点);现在 `files.notify(..., error = true)`,与列表加载失败一致。
 - **C(桌面)密钥标签写入不再吞错**:`KeyManager.writeLabels` 去掉 `.catch(() => undefined)`,generate/import/remove 的写盘失败会冒泡到现有 toast。
+# M3.170 — 复核打磨(分支 `fix/review-polish-m3170`,基于 main @ 5946b1f,**勿合并**)
+
+> 一条 P1 + 两条 P2;只动 Windows + Android,不碰 macOS / iOS。
+
+- **A(Android)复制公钥失败可感知**:`HostEditor`「复制公钥」在 `publicKey()` 返回 null 时原先无 `onMessage`(像没点);现在 `onMessage(edit_err_key_unusable)`,与生成密钥失败对称。
+- **B(桌面)目录对比失败 toast**:`DirDiffDialog.run` 在写 dialog `err` 的同时 toast(`dirDiff.fail` / catch message)。关掉对话框后以前像没反应。
+- **C(桌面)本地新建/重命名失败 toast**:`SftpDrawer.localSubmit` 在写 `localModal.error` 的同时 toast(`sfp.createFail` / `sfp.renameFail`),与远端 #103 对称。
 
 ---
 

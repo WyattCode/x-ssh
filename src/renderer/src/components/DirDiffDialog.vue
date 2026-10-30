@@ -11,6 +11,7 @@ const dialogEl = ref<HTMLElement>()
 useFocusTrap(dialogEl, () => true) // mounted only while the parent shows it
 onMounted(() => nextTick(() => dialogEl.value?.focus()))
 import { useI18n } from '../lib/i18n'
+import { useToast } from '../composables/toast'
 import Icon from './Icon.vue'
 
 const props = defineProps<{
@@ -23,6 +24,7 @@ const props = defineProps<{
 const emit = defineEmits<{ (e: 'close'): void }>()
 
 const { t: tt } = useI18n()
+const { toast } = useToast()
 
 const local = ref(props.localPath)
 const remote = ref(props.remotePath)
@@ -67,6 +69,10 @@ async function run(): Promise<void> {
     if (!r.ok) {
       err.value = r.error === 'sync-list-failed' ? tt('dirDiff.listFailed') : (r.error ?? tt('dirDiff.fail'))
       err.value = diffErr(r.error)
+      // Dialog-local err alone is lost on dismiss — toast like PermDialog (#104).
+      const msg = r.error ?? tt('dirDiff.fail')
+      err.value = msg
+      toast(msg, 'error')
       done.value = false
       return
     }
@@ -76,6 +82,9 @@ async function run(): Promise<void> {
     done.value = true
   } catch (e) {
     err.value = diffErr((e as Error).message || undefined)
+    const msg = (e as Error).message
+    err.value = msg
+    toast(msg, 'error')
     done.value = false
   } finally {
     busy.value = false

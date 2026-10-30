@@ -395,6 +395,11 @@ async function localSubmit(e?: Event): Promise<void> {
       localModal.error =
         r.error === 'invalid-name' ? tt('sfp.invalidName') : (r.error ?? tt('sfp.createFail'))
       localModal.error = sftpErr(r.error, 'sfp.createFail')
+      // Keep modal error; also toast so a scrolled-away modal chrome still surfaces it
+      // (remote rename/create toast is #103; this is the local-pane twin).
+      const msg = r.error ?? tt('sfp.createFail')
+      localModal.error = msg
+      toast(msg, 'error')
       return
     }
   } else {
@@ -405,6 +410,9 @@ async function localSubmit(e?: Event): Promise<void> {
       localModal.error =
         r.error === 'invalid-name' ? tt('sfp.invalidName') : (r.error ?? tt('sfp.renameFail'))
       localModal.error = sftpErr(r.error, 'sfp.renameFail')
+      const msg = r.error ?? tt('sfp.renameFail')
+      localModal.error = msg
+      toast(msg, 'error')
       return
     }
     localModal.open = false
