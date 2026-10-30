@@ -146,6 +146,13 @@ internal fun fallbackSealed(locked: String?, unreadable: Boolean, disk: String?)
 class HostStore(context: Context) {
     private val prefs = context.getSharedPreferences("xssh_hosts", Context.MODE_PRIVATE)
 
+    /**
+     * 上一次 [save] 里有没有凭据"没封上"(见 [writeSecret])。封不上时旧密文会原样留着
+     * (不丢数据),但界面必须知道"新密码其实没存进去",否则用户以为改成功了。
+     */
+    var lastSaveSealFailed: Boolean = false
+        private set
+
     /** 磁盘上现有的记录,按 id 索引(只读 JSON,不碰密钥库)。读不出来就当没有。 */
     private fun diskRecords(): Map<String, JSONObject> = runCatching {
         val array = JSONArray(prefs.getString(KEY_LIST, "[]"))
@@ -236,6 +243,7 @@ class HostStore(context: Context) {
     private fun readSecret(sealed: String): String = Secrets.open(sealed)
 
     fun save(hosts: List<Host>) {
+        lastSaveSealFailed = false
         val array = JSONArray()
         val disk = diskRecords()
         hosts.forEach { host ->
@@ -299,6 +307,7 @@ class HostStore(context: Context) {
         // 这个静默兜底已经骗过两轮排查了。
         locked -> runCatching { Secrets.writeLocked(plain) }.getOrElse { err ->
             android.util.Log.w("xssh", "seal locked secret failed: ${err.javaClass.simpleName} ${err.message}")
+            lastSaveSealFailed = true
             sealed ?: ""
         }
         // `Secrets.seal` 出错时返回空串(它的兜底是"这次没存上,别崩")。直接写下去
@@ -306,6 +315,7 @@ class HostStore(context: Context) {
         // 封不上就留着旧的,并记一条日志(界面这一层看不见,只能靠日志发现)。
         else -> Secrets.seal(plain).ifEmpty {
             android.util.Log.w("xssh", "seal secret failed; keeping the previous ciphertext")
+            lastSaveSealFailed = true
             sealed ?: ""
         }
     }

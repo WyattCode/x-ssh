@@ -188,6 +188,7 @@
     <string name="host_unreadable_2">%1$s、%2$s 读不出来</string>
     <string name="host_unreadable_3">%1$s、%2$s、%3$s 读不出来</string>
     <string name="host_username">用户名</string>
+    <string name="hosts_secret_seal_failed">新的密码/密钥没能安全保存,磁盘上仍是旧的。请重试。</string>
     <string name="main_sc_close_session">断开当前会话</string>
     <string name="main_sc_edit_host">编辑主机</string>
     <string name="main_sc_ime">终端里切换输入法 / 英文直通</string>

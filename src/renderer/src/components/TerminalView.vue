@@ -8,6 +8,7 @@ import { SearchAddon } from '@xterm/addon-search'
 import { useTheme } from '../composables/theme'
 import { useFontSize } from '../composables/fontSize'
 import { useConfirm } from '../composables/confirm'
+import { useToast } from '../composables/toast'
 import { themeFor } from '../lib/terminalThemes'
 import { useI18n } from '../lib/i18n'
 import { isImeKey } from '../lib/ime'
@@ -86,11 +87,13 @@ let search: SearchAddon | null = null
 let webgl: WebglAddon | null = null
 let ro: ResizeObserver | null = null
 let offData: (() => void) | null = null
+let offLogFailed: (() => void) | null = null
 /** Removes the IME listeners added to xterm's textarea (and cancels a pending catch-up). */
 const imeAbort = new AbortController()
 
 // ---- Clipboard actions ----
 const { confirm } = useConfirm()
+const { toast } = useToast()
 async function copySelection(): Promise<void> {
   const sel = term?.getSelection()
   if (sel) window.api.clipboard.writeText(sel)
@@ -587,6 +590,15 @@ onMounted(() => {
       if (followOutput.value && !scrolledUp.value) term?.scrollToBottom()
     }
   })
+  // A live log stream can fail mid-write (disk full, dir removed). Main stops
+  // logging and tells us; clear the toggle so the caption and the next
+  // Start/Stop click match reality.
+  offLogFailed = window.api.ssh.onLogFailed((payload) => {
+    if (payload.sessionId === props.sessionId) {
+      logOn.value = false
+      toast(t('term.logWriteFail'), 'error')
+    }
+  })
   // Track whether the user has scrolled the terminal's scrollback, so follow
   // can pause while they read (and show a "jump to bottom" pill).
   term.onScroll(() => updateScrollState())
@@ -688,6 +700,7 @@ onBeforeUnmount(() => {
   if (fitTimer) clearTimeout(fitTimer)
   imeAbort.abort()
   offData?.()
+  offLogFailed?.()
   ro?.disconnect()
   term?.dispose()
   term = null

@@ -271,6 +271,14 @@ fun App(devTarget: DevTarget? = null) {
         }
         hosts = sorted
         store.save(sorted)
+        // 封存失败时旧密文还在盘上(不丢数据),但用户以为新密码存好了 —— 必须说出来。
+        if (store.lastSaveSealFailed) {
+            android.widget.Toast.makeText(
+                context,
+                context.getString(R.string.hosts_secret_seal_failed),
+                android.widget.Toast.LENGTH_LONG,
+            ).show()
+        }
     }
 
     // 平板:窗口够宽(≥ 600dp)就是平板那一整套交互;小窗、窄分屏缩到手机宽度时退回手机的页面,

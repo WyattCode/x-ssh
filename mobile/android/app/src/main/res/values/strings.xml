@@ -189,6 +189,7 @@
     <string name="host_unreadable_2">%1$s, %2$s unreadable</string>
     <string name="host_unreadable_3">%1$s, %2$s, %3$s unreadable</string>
     <string name="host_username">Username</string>
+    <string name="hosts_secret_seal_failed">Couldn\'t save the new password/key securely — the previous one is still on disk. Please try again.</string>
     <string name="main_sc_close_session">Disconnect current session</string>
     <string name="main_sc_edit_host">Edit host</string>
     <string name="main_sc_ime">Terminal: switch input method / direct English</string>
