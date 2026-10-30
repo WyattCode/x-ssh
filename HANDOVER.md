@@ -616,6 +616,11 @@ typecheck / lint:i18n(桌面 752/752/752) / vitest **334** / 30 全绿。未在�
 - previewFile: 预览失败 toast(同一字符串);不碰 #85 的 previewFail i18n 映射。
 - refreshLocal: 本机目录读失败 toast(sfp.localErr);不碰 #94 local.home / #105 localSubmit。
 - 未合并。未动 #4–#107。
+# M3.174 — 复核打磨(分支 `fix/review-polish-m3174`,基于 main @ 5946b1f,**勿合并**)
+
+- fontSize.ts: settings.set 拒绝时滚回字号并 toast `app.fontSizeFail`(zh/en/zh-TW);对齐 #77 zoom。未动 zoom.ts。
+- Android UiPrefs.setTerminalFontSize: commit()+Boolean; TerminalScreen 捏合写盘失败回滚+toast `font_size_persist_failed`。未重做 #96 setTerminalFont/AppLanguage。
+- SettingsDialog editor/openers 本轮未做。未合并。未动 #4–#108。
 
 ---
 

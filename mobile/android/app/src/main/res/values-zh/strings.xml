@@ -131,6 +131,7 @@
     <string name="files_uploaded_one">已上传「%1$s」</string>
     <string name="font_noto">思源等宽</string>
     <string name="font_persist_failed">字体设置没能保存,下次启动会恢复原样</string>
+    <string name="font_size_persist_failed">字号没能保存,下次启动会恢复原来的大小</string>
     <string name="font_style">%1$s 风格</string>
     <string name="host_address">地址</string>
     <string name="host_after_connect">连接后</string>

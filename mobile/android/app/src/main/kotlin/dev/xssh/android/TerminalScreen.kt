@@ -682,9 +682,16 @@ private fun TerminalView(
     var snapshotsOpen by remember { mutableStateOf(false) }
 
     // 捏合调完字号要记住;等手停下来再写盘,别把每一帧都落到 SharedPreferences。
+    // 写盘失败(磁盘满、SharedPreferences 坏掉)时把字号滚回去并提示 —— 否则这一屏
+    // 按新字号排好了,下次启动又变回旧的,用户只会觉得"调了没用"。
     LaunchedEffect(fontSize) {
         delay(400)
-        prefs.terminalFontSize = fontSize
+        if (prefs.setTerminalFontSize(fontSize)) return@LaunchedEffect
+        val saved = prefs.terminalFontSize
+        if (fontSize != saved) {
+            fontSize = saved
+            android.widget.Toast.makeText(context, R.string.font_size_persist_failed, android.widget.Toast.LENGTH_SHORT).show()
+        }
     }
 
     val transformState = rememberTransformableState { _: Offset, zoomChange: Float, _: Offset, _: Float ->
