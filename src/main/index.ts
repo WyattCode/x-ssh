@@ -1459,26 +1459,34 @@ function registerIpc(): void {
         const jumpId = params.jumpHostId ?? h.jumpHostId
         if (jumpId) {
           const jh = (await store.list()).find((x) => x.id === jumpId)
-          if (jh) {
-            const jump: JumpConfig = {
-              host: jh.host,
-              port: jh.port,
-              username: jh.username,
-              auth: jh.auth,
-              keyPath: jh.keyPath
+          if (!jh) {
+            // Jump host was deleted (or never imported). Must NOT fall through to
+            // a direct connect — that looks like a network failure on an
+            // internal address. Android already refuses this path.
+            return {
+              ok: false,
+              code: 'jump_missing',
+              error: '跳板机已被删除,请在主机编辑页重新选择跳板机或改为直接连接。'
             }
-            if (jh.auth === 'password') jump.password = store.isLocked ? undefined : await store.getPassword(jh.id)
-            if (jh.auth === 'key') jump.passphrase = store.isLocked ? undefined : await store.getPassphrase(jh.id)
-            params.jump = jump
-            // A password jump host with no usable secret would fail obscurely deep
-            // in the handshake; surface it now with actionable guidance (the jump
-            // host's saved password, or the host's own — set it in the profile).
-            if (jh.auth === 'password' && !jump.password) {
-              return {
-                ok: false,
-                code: 'jump_needs_password',
-                error: `跳板机 ${jh.host} 需要密码,但没有已保存的密码。请在「主机」编辑页为 ${jh.label} 设置密码后重试,或更换认证方式。`
-              }
+          }
+          const jump: JumpConfig = {
+            host: jh.host,
+            port: jh.port,
+            username: jh.username,
+            auth: jh.auth,
+            keyPath: jh.keyPath
+          }
+          if (jh.auth === 'password') jump.password = store.isLocked ? undefined : await store.getPassword(jh.id)
+          if (jh.auth === 'key') jump.passphrase = store.isLocked ? undefined : await store.getPassphrase(jh.id)
+          params.jump = jump
+          // A password jump host with no usable secret would fail obscurely deep
+          // in the handshake; surface it now with actionable guidance (the jump
+          // host's saved password, or the host's own — set it in the profile).
+          if (jh.auth === 'password' && !jump.password) {
+            return {
+              ok: false,
+              code: 'jump_needs_password',
+              error: `跳板机 ${jh.host} 需要密码,但没有已保存的密码。请在「主机」编辑页为 ${jh.label} 设置密码后重试,或更换认证方式。`
             }
           }
         }

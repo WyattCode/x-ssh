@@ -101,6 +101,7 @@ const zh: Dict = {
   'app.socks5ConnectFailed': 'SOCKS5 代理连接失败',
   'app.socks5AddrType': 'SOCKS5 代理响应地址类型无效',
   'app.httpProxyFailed': 'HTTP 代理隧道失败',
+  'app.jumpMissing': '这台主机的跳板机已被删除。请在主机编辑页重新选择跳板机,或改为直接连接。',
 
   // settings tabs
   'tab.general': '通用',
@@ -790,6 +791,9 @@ const zh: Dict = {
   'host.jumpNone': '无(直接连接)',
   'host.jumpHint': '连接本机前先通过所选主机建立隧道(需其已保存且可认证)',
   'host.jumpBlocked': '已被「{label}」用作跳板机，不能再设跳板（只支持一层）',
+  'host.jumpDeleted': '已删除',
+  'host.jumpGone': '原来选的跳板机已经删除了。',
+  'host.jumpBlocked': '它是「{name}」的跳板机,不能再经过别的跳板机。',
   'host.forwards': '本地端口转发',
   'host.fwMode': '类型',
   'host.fwLocalMode': '本地 -L',
@@ -1000,6 +1004,7 @@ const en: Dict = {
   'app.socks5ConnectFailed': 'SOCKS5 proxy connection failed',
   'app.socks5AddrType': 'SOCKS5 proxy returned an invalid address type',
   'app.httpProxyFailed': 'HTTP proxy tunnel failed',
+  'app.jumpMissing': 'This host\'s jump host has been deleted. Pick another jump host in the editor, or connect directly.',
 
   'tab.general': 'General',
   'tab.terminal': 'Terminal',
@@ -1681,6 +1686,9 @@ const en: Dict = {
   'host.jumpNone': 'None (direct)',
   'host.jumpHint': 'Tunnel through the selected host first (must be saved & authenticatable)',
   'host.jumpBlocked': 'Already used as a jump by “{label}” — cannot nest another hop',
+  'host.jumpDeleted': 'Deleted',
+  'host.jumpGone': 'The jump host chosen earlier has been deleted.',
+  'host.jumpBlocked': 'It\'s the jump host for "{name}", so it can\'t go through another jump host.',
   'host.forwards': 'Local port forwards',
   'host.fwMode': 'Type',
   'host.fwLocalMode': 'Local -L',
@@ -1893,6 +1901,7 @@ const zhTW: Dict = {
   'app.socks5ConnectFailed': 'SOCKS5 代理連線失敗',
   'app.socks5AddrType': 'SOCKS5 代理回應位址類型無效',
   'app.httpProxyFailed': 'HTTP 代理通道失敗',
+  'app.jumpMissing': '這台主機的跳板機已被刪除。請在主機編輯頁重新選擇跳板機,或改為直接連線。',
 
   // settings tabs
   'tab.general': '一般',
@@ -2583,6 +2592,9 @@ const zhTW: Dict = {
   'host.jumpNone': '無(直接連線)',
   'host.jumpHint': '連線此主機前先透過所選主機建立通道(該主機需已儲存且可驗證)',
   'host.jumpBlocked': '已被「{label}」用作跳板機，不能再設跳板（只支援一層）',
+  'host.jumpDeleted': '已刪除',
+  'host.jumpGone': '原本選的跳板機已經刪除了。',
+  'host.jumpBlocked': '它是「{name}」的跳板機,不能再經過其他跳板機。',
   'host.forwards': '本機連接埠轉送',
   'host.fwMode': '類型',
   'host.fwLocalMode': '本機 -L',

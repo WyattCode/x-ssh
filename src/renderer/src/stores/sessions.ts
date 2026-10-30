@@ -1838,6 +1838,10 @@ export const useSessions = defineStore('sessions', {
               ? t('app.locked')
               : result.code === 'no-private-key'
                 ? t('app.noPrivateKey')
+            : result.code === 'jump_missing'
+              ? t('app.jumpMissing')
+              : result.code === 'locked'
+                ? t('app.locked')
                 : result.code === 'host_key_unknown'
                   ? viaJump
                     ? t('app.keyUnknownJumpMsg', { host: keyWhere })
@@ -1871,6 +1875,7 @@ export const useSessions = defineStore('sessions', {
                   : result.error === 'channel-closed' || result.error === '已关闭'
                     ? t('app.channelClosed')
                     : (result.error ?? t('app.connectFail'))
+
         live.pane.message = msg
         live.pane.errorCode = result.code
         // A refusal that carries a retry delay (the server's connection-rate

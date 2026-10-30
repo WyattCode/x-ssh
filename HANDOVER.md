@@ -899,6 +899,17 @@ openSnapshot/closeOthers/saveSetting (#68), theme/transfer clears (#67), bookmar
 - 未触碰:theme(#67)、HostEditor remove/save(#64/#65)、trustAndReconnect(#62)、ForwardsPage.remove(#63)、downloadSelected(#76)、设置开关波、fontSize / local.home / StatusBar / setWindowOpenHandler / preview 无法预览。
 - 仍按原计划搁置:`fontSize` 未使用、`local.home` 静默、StatusBar configured-vs-live、`setWindowOpenHandler`、预览「无法预览」。
 
+## M3.143(分支 `fix/review-polish-m3143`,**未合并**)
+
+> 只做缺陷 / 界面打磨,不加功能。**#77–#4 的 PR 都还没合并**,这一批也不含它们。
+
+- **跳板机已删仍直连(P0,桌面 ↔ 安卓缺口)**:`ssh:connect` 在 `jumpHostId` 指向的主机不在库里时原来静默跳过跳板、按直连走 —— 内网地址会表现为莫名其妙的网络失败;安卓 `TerminalScreen` 早已拒绝并报「跳板机已经删除了」。现在主进程返回 `code: 'jump_missing'`,`sessions.ts` 映射到 `app.jumpMissing` toast/面板文案。
+- **主机编辑页跳板机状态与安卓不对齐(P1)**:选中的跳板已被删时下拉变成空白、用户不知道为什么连不上;这台本身是别人跳板时仍可再套一层。现在 `jumpGone` 保留「已删除」选项 + `host.jumpGone` 提示;`jumpBlocked` 对齐安卓(仅「被用作跳板且当前未设跳板」时禁用新增跳板,遗留值仍可清掉)+ `host.jumpBlocked`。
+- i18n 新增 `app.jumpMissing` / `host.jumpDeleted` / `host.jumpGone` / `host.jumpBlocked`(zh / en / zh-TW)。
+- 未触碰:M3.142/#77 SFTP rename/mkdir/create/delete + zoom;M3.141–M3.137 设置开关 / SFTP 下载 toast / closePane;theme / HostEditor save-delete / trustAndReconnect / ForwardsPage.remove / known_hosts / SFTP upload 波。
+- 仍按原计划搁置:`fontSize` 未使用、`local.home` 静默、StatusBar configured-vs-live、`setWindowOpenHandler`、预览「无法预览」。
+
+
 ## 项目概述
 - 极简、键盘优先的 SSH 客户端。Electron + Vue 3 (Vite) + TypeScript。
 - 平台: Windows (`win32`)。目录: `D:\Documents\Claude Code\X-SSH`。
