@@ -1103,7 +1103,12 @@ async function commitRename(entry: FileEntry, e?: Event): Promise<void> {
     posixJoin(path.value, entry.name),
     posixJoin(path.value, next)
   )
-  if (!r.ok) error.value = r.error ?? tt('sfp.renameFail')
+  if (!r.ok) {
+    // load() clears error at start — toast so a permission/rename failure is not a silent no-op.
+    const msg = r.error ?? tt('sfp.renameFail')
+    error.value = msg
+    toast(msg, 'error')
+  }
   await load(path.value)
 }
 function startCreate(kind: 'folder' | 'file'): void {
@@ -1123,7 +1128,11 @@ async function commitCreate(e?: Event): Promise<void> {
     kind === 'folder'
       ? await window.api.sftp.mkdir(props.sessionId, target)
       : await window.api.sftp.createFile(props.sessionId, target)
-  if (!r.ok) error.value = r.error ?? tt('sfp.createFail')
+  if (!r.ok) {
+    const msg = r.error ?? tt('sfp.createFail')
+    error.value = msg
+    toast(msg, 'error')
+  }
   await load(path.value)
 }
 // ---- selection-aware operations (used by menu + shortcuts) ----
@@ -1139,13 +1148,19 @@ async function downloadSelected(): Promise<void> {
   const items = selectedEntries()
   if (!items.length) return
   if (items.length === 1 && !items[0].isDir) {
-    // Single file → Save-As dialog.
-    await window.api.sftp.download(
+    // Single file → Save-As dialog. Surface failures like downloadMany /
+    // downloadSelectionToLocal — a refused/failed write used to look like a no-op.
+    const r = await window.api.sftp.download(
       props.sessionId,
       posixJoin(path.value, items[0].name),
       items[0].name,
       store.transferConcurrency
     )
+    if (!r.ok && !r.canceled) {
+      const msg = r.error ?? tt('sfp.downloadFail')
+      error.value = msg
+      toast(msg, 'error')
+    }
     return
   }
   // Multiple / folders → pick one target folder.

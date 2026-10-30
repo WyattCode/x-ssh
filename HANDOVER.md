@@ -1,3 +1,12 @@
+# M3.168 — 复核打磨(分支 `fix/review-polish-m3168`,基于 main @ 5946b1f,**勿合并**)
+
+> 两条 P1 修复;只动 Windows SFTP 抽屉,不碰 macOS / iOS / Android。
+
+- **A(桌面)SFTP 重命名 / 新建失败可感知**:`commitRename` / `commitCreate` 在写 `error` 的同时 toast(`sfp.renameFail` / `sfp.createFail`)。`load()` 开头会清 banner,以前权限不够时像没反应。
+- **B(桌面)SFTP 单文件下载失败可感知**:`downloadSelected` 的 Save-As 分支原先丢弃返回值;现在与多选路径一样 toast `sfp.downloadFail`(取消仍安静)。
+
+---
+
 # X-SSH 交接文档
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。
