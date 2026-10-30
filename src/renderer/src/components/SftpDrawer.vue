@@ -263,18 +263,15 @@ async function localDelSelected(): Promise<void> {
   if (!entries.length) return
   const ok = await confirm(tt('sfp.delMany', { n: entries.length }))
   if (!ok) return
-  let failed = false
+  let firstErr: string | null = null
   for (const e of entries) {
     const r = await window.api.local.del(localPath.value, e.name, e.isDir)
-    if (!r.ok) {
-      failed = true
-      toast(r.error ?? tt('sfp.delFail'), 'error')
-    }
+    if (!r.ok && firstErr === null) firstErr = r.error ?? tt('sfp.delFail')
   }
   localSelSet.value = new Set()
   localAnchor.value = null
   await refreshLocal()
-  if (failed) toast(tt('sfp.delFail'), 'error')
+  if (firstErr !== null) toast(firstErr, 'error')
 }
 // Keyboard helpers: act on the single currently-selected local entry.
 function localSelectedSingle(): LocalEntry | null {

@@ -267,6 +267,11 @@ fun App(devTarget: DevTarget? = null) {
         // 不走这里 —— 那时内存里还有 1 台,不会命中这个条件。
         if (sorted.isEmpty() && hosts.isEmpty() && store.diskCount() > 0) {
             android.util.Log.e("XsshData", "refusing to persist an empty host list over existing data")
+            android.widget.Toast.makeText(
+                context,
+                R.string.hosts_persist_refused,
+                android.widget.Toast.LENGTH_LONG,
+            ).show()
             return
         }
         hosts = sorted
