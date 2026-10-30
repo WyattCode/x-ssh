@@ -175,6 +175,9 @@ fun ConnectGate(
     val p = LocalXssh.current
     // Retry / fix both reconnect: remember must be unconditional (Compose).
     // Keyed on failure so a fresh error gets a fresh one-shot.
+    // 失败页上回车、主按钮、重试按钮指向同一个动作:一次失败只允许触发一次,
+    // 否则连点两下(或回车 + 点按钮)会同时发起两次重连。以 failure 为 key,
+    // 下一次新的失败会重新给一次机会。
     var acted by remember(failure) { mutableStateOf(false) }
     fun actOnce(block: () -> Unit) {
         if (acted) return
@@ -210,6 +213,7 @@ fun ConnectGate(
             tile = p.danger.copy(alpha = 0.12f),
             title = stringResource(R.string.host_gate_failed),
             onEnter = primary?.second?.let { run -> { actOnce(run) } },
+            onEnter = primary?.second?.let { action -> { actOnce(action) } },
             body = { MessageCard(failure) },
             actions = { stacked ->
                 GateButtons(
@@ -220,6 +224,7 @@ fun ConnectGate(
                     secondary = stringResource(R.string.host_back),
                     onSecondary = onExit,
                     tertiary = if (fix != null && retry != null) retryLabel to ({ actOnce(retry) }) else null,
+                    tertiary = if (fix != null && retry != null) retryLabel to { actOnce(retry) } else null,
                 )
             },
         )

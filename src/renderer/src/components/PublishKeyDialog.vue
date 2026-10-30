@@ -43,6 +43,14 @@ function toggleHost(h: Host): void {
   else selected.add(h.id)
 }
 
+/** Main returns stable codes for the per-host failures; the wording is ours. */
+function hostOpError(err?: string): string {
+  if (err === 'host-missing') return t('keyPub.hostMissing')
+  if (err === 'app-locked') return t('keyPub.appLocked')
+  if (err === 'connect-failed') return t('keyPub.connectFailed')
+  return err ?? ''
+}
+
 async function publish(): Promise<void> {
   if (!keyId.value || !selected.size) return
   if (busy.value || revokeBusy.value) return
@@ -141,7 +149,7 @@ watch(
           <div v-for="(r, i) in results" :key="i" class="kp-result" :class="r.ok ? 'ok' : 'bad'">
             <Icon :name="r.ok ? 'check' : 'alert-triangle'" :size="13" />
             <span class="kp-host-label">{{ r.host }}</span>
-            <span v-if="!r.ok" class="kp-err">{{ r.error }}</span>
+            <span v-if="!r.ok" class="kp-err">{{ hostOpError(r.error) }}</span>
           </div>
         </div>
         <div v-if="revokeResults.length" class="kp-results">
@@ -149,7 +157,7 @@ watch(
           <div v-for="(r, i) in revokeResults" :key="i" class="kp-result" :class="r.ok ? 'ok' : 'bad'">
             <Icon :name="r.ok ? 'check' : 'alert-triangle'" :size="13" />
             <span class="kp-host-label">{{ r.host }}</span>
-            <span v-if="!r.ok" class="kp-err">{{ r.error }}</span>
+            <span v-if="!r.ok" class="kp-err">{{ hostOpError(r.error) }}</span>
           </div>
         </div>
       </div>
