@@ -20,6 +20,7 @@ import {
   type RebindableAction
 } from '../lib/shortcuts'
 import { sanitizePasteText } from '../../../shared/fsUtils'
+import { pasteLineCount } from '../lib/pasteLines'
 import { isMac } from '../composables/platform'
 
 const modKey = isMac ? '⌘' : 'Ctrl'
@@ -92,6 +93,8 @@ const imeAbort = new AbortController()
 
 // ---- Clipboard actions ----
 const { confirm } = useConfirm()
+/** Guards against stacking paste-confirm dialogs when paste is triggered twice. */
+let pasteBusy = false
 async function copySelection(): Promise<void> {
   const sel = term?.getSelection()
   if (sel) window.api.clipboard.writeText(sel)
@@ -102,28 +105,38 @@ async function copyFromMenu(): Promise<void> {
   if (menu.appCopy) window.api.clipboard.writeText(menu.appCopy)
 }
 async function pasteClipboard(): Promise<void> {
+  if (pasteBusy) return
   const text = window.api.clipboard.readText()
   if (!text || !term) return
   // Strip terminal control characters that could act on the shell beyond what
   // was copied (e.g. bracketed-paste markers, OSC sequences, other C0 controls
   // beyond tab/newline). Guarded by the sanitizePaste setting.
   const clean = store.sanitizePaste ? sanitizePasteText(text) : text
+  if (!clean) return
   // Multi-line paste into a shell can be destructive (a command runs per line
   // without waiting) — confirm before sending anything more than one line.
-  const lineCount = clean.split('\n').length
+  // pasteLineCount ignores a trailing newline, so copying one line from an
+  // editor doesn't ask.
+  const lineCount = pasteLineCount(clean)
   if (lineCount > 1 && store.confirmPaste) {
-    const ok = await confirm(
-      t('term.pasteConfirm', { n: lineCount }),
-      { title: t('term.pasteConfirmTitle'), confirmText: t('term.pasteConfirmOk'), cancelText: t('term.cancel') }
-    )
-    if (!ok) {
-      term?.focus()
-      return
+    pasteBusy = true
+    try {
+      const ok = await confirm(
+        t('term.pasteConfirm', { n: lineCount }),
+        { title: t('term.pasteConfirmTitle'), confirmText: t('term.pasteConfirmOk'), cancelText: t('term.cancel') }
+      )
+      if (!ok) {
+        term?.focus()
+        return
+      }
+    } finally {
+      pasteBusy = false
     }
   }
-  // The session can go away while the confirm is up (drop, tab closed, pane
-  // reconnecting tears this view down with it) — don't paste into a dead one.
+  // Confirm awaited: term/session may have gone away or been replaced.
   if (!term) return
+  const pane = store.paneBySession(props.sessionId)
+  if (!pane || pane.status !== 'connected' || pane.sshSessionId !== props.sessionId) return
   term.paste(clean)
   term.focus()
 }

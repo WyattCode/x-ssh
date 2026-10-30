@@ -109,6 +109,9 @@ watch(formOpen, (open) => {
   err.value = ''
 })
 watch(() => form.mode, () => { err.value = '' })
+watch(() => form.target, () => {
+  err.value = ''
+})
 const targetIsSaved = computed(() => form.target.startsWith('h:'))
 
 async function add(): Promise<void> {
@@ -235,7 +238,7 @@ async function add(): Promise<void> {
           <span class="text">{{ ruleText(row.rule) }}</span>
           <span v-if="!row.saved" class="badge temp" :title="t('fwp.tempHint')">{{ t('fwp.temp') }}</span>
           <span v-else />
-          <button class="del" :title="t('fw.remove')" :disabled="!!busyKey" @click="remove(s, row)">
+          <button class="del" :title="t('fw.remove')" :disabled="busyKey === `${s.id}|${key(row.rule)}`" @click="remove(s, row)">
             <Icon name="trash" :size="14" />
           </button>
         </div>
@@ -453,5 +456,8 @@ async function add(): Promise<void> {
 .del:hover:not(:disabled) {
   color: var(--danger);
   background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+.del:active:not(:disabled) {
+  transform: scale(0.92);
 }
 </style>

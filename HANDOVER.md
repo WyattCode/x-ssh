@@ -16,6 +16,9 @@
 # 会话记录:连续改进 M3.88(2026-10-30,复核打磨:跳板一层对齐 Android + SFTP 远程选区 prune + 部署对话框 busy/错误)
 
 功能清单已够,本轮按站立规则做开源复核打磨(不合并)。未动 PR #22 / #21 / #20 / #19 / #18 / #17 / #16 / #15 / #14 / #13 / #12 与更早的 #4–#11。
+# 会话记录:连续改进 M3.89(2026-10-30,复核打磨:粘贴行数/死会话 + 同步对话框 busy/错误 + ForwardsPage 列表 + Android 粘贴消毒)
+
+功能清单已够,本轮按站立规则做开源复核打磨(不合并)。未动 PR #23 / #22 / #21 / #20 / #19 / #18 / #17 / #16 / #15 / #14 / #13 / #12 与更早的 #4–#11。
 
 **核过已过时 / 已在未合并 PR(本轮不重做)**:
 1. TransferPanel 失败原因 / ETA + Android 罚分地板 —— PR #12。
@@ -59,6 +62,7 @@
 
 **验证**:`typecheck` + `lint:i18n` + vitest **342** 全绿(原 334;+`tooltipDismiss` 4 + `snippetVars` 4)。Android 本轮未改。未合并。
 
+
 7. OSC52 空白 base64 + 主锁 Enter/busy + 离线点透明度 —— PR #18。
 8. 主题循环竞态 + 关闭全部确认 + 连接日志 disconnect/滚动 —— PR #19。
 9. ZoomHud 失焦粘滞 + 窗格失焦 blur + keyManager IPC 错误码 —— PR #20。
@@ -79,6 +83,16 @@
 3. **部署对话框**:`closeDeploy` 在 `deploy.busy` 时拒绝 Esc/遮罩/取消/关闭;失败写进对话框内 `deploy.error`(不再藏到抽屉 banner 后面);Enter 提交(Shift+Enter 换行,IME 守卫)。
 
 **验证**:`typecheck` + `lint:i18n` + vitest **353** 全绿(原 334;+`jumpCandidates` 14 + `selectionPrune` 5)。Android 本轮未改代码(跳板规则桌面追上 `JumpField.kt`)。未合并。
+11. TextEditor Esc/saveError/session 冻结 + SFTP 本机选区 prune + 命令面板主机搜索 —— PR #22。
+12. 跳板一层对齐 Android + SFTP 远程选区 prune + 部署对话框 busy/错误 —— PR #23。
+
+**修了**:
+1. **终端多行粘贴误确认**:`lib/pasteLines.ts` `pasteLineCount` 归一化 CRLF 并去掉尾部换行,单行复制不再弹确认;确认期间 `pasteBusy` 防叠对话框;确认回来后复核 `paneBySession` 仍 connected 且 sessionId 匹配再 `term.paste`。
+2. **同步对话框**:`busy`/`error` 进对话框;失败不再写抽屉 banner;成功才关;`closeSync` 在 busy 时拒绝 Esc/遮罩/取消/关闭;Enter 提交;切到 `both` 清掉隐藏的 `del`。
+3. **ForwardsPage 列表**:删除按钮只锁当前 `busyKey` 那一行(不再整页锁死);`.del:active` 按下缩小;改 `form.target` 清残留 `err`。
+4. **Android 粘贴消毒**:`PasteSanitize` 对齐桌面 `sanitizePasteText`(保留 tab/CR/LF,剥 C0/C1);剪贴板粘贴与拖入终端两条路径都过一遍。
+
+**验证**:`typecheck` + `lint:i18n` + vitest **338** 全绿(原 334;+`pasteLines` 4)。Android 单测文件已加(`PasteSanitizeTest`),本环境未跑 Gradle。未合并。
 
 ---
 
