@@ -255,6 +255,11 @@ fun TabletApp(
             sidebarVisible = next
         } else {
             Toast.makeText(context, R.string.tab_sidebar_persist_failed, Toast.LENGTH_SHORT).show()
+            android.widget.Toast.makeText(
+                context,
+                R.string.sidebar_persist_failed,
+                android.widget.Toast.LENGTH_LONG,
+            ).show()
         }
     }
 

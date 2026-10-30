@@ -1529,6 +1529,18 @@ async function delSelected(): Promise<void> {
   await load(path.value)
   // load() clears error at start — restore a delete failure so it is not a silent no-op.
   if (failMsg) error.value = failMsg
+  let firstErr: string | null = null
+  for (const it of items) {
+    const r = await window.api.sftp.remove(props.sessionId, posixJoin(path.value, it.name), it.isDir)
+    if (!r.ok) {
+      const msg = r.error ?? tt('sfp.delFail')
+      error.value = msg
+      if (!firstErr) firstErr = msg
+    }
+  }
+  selected.value = new Set()
+  await load(path.value)
+  if (firstErr) toast(firstErr, 'error')
 }
 
 function runMenu(fn: () => void): void {

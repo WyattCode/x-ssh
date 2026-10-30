@@ -297,6 +297,15 @@ fun App(devTarget: DevTarget? = null) {
             ).show()
             return
         }
+        if (!store.save(sorted)) {
+            android.util.Log.e("XsshData", "host list write failed")
+            android.widget.Toast.makeText(
+                context,
+                R.string.hosts_save_failed,
+                android.widget.Toast.LENGTH_LONG,
+            ).show()
+            return
+        }
         hosts = sorted
         // 密码 / 私钥 / 口令封不上时 save 会沿用旧密文 —— 其他字段照常存好了,
         // 但"新密码已保存"是假的,必须说出来,否则用户以为改成功了。
@@ -310,6 +319,7 @@ fun App(devTarget: DevTarget? = null) {
         if (!store.save(sorted)) {
             Toast.makeText(context, R.string.hosts_persist_failed, Toast.LENGTH_LONG).show()
         }
+
     }
 
     // 平板:窗口够宽(≥ 600dp)就是平板那一整套交互;小窗、窄分屏缩到手机宽度时退回手机的页面,

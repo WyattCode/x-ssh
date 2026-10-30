@@ -320,6 +320,7 @@ class HostStore(context: Context) {
     /** 返回 true 表示有凭据没能重新加密、沿用了旧密文(界面要提示"密码没存上")。 */
     fun save(hosts: List<Host>): Boolean {
         sealFellBack = false
+    /** 存盘。用 commit 而不是 apply,好让调用方知道写没写进去。 */
     fun save(hosts: List<Host>): Boolean {
         val array = JSONArray()
         val disk = diskRecords()
@@ -373,6 +374,7 @@ class HostStore(context: Context) {
         val ok = prefs.edit().putString(KEY_LIST, array.toString()).commit()
         if (!ok) android.util.Log.e("XsshData", "host list persist commit failed")
         return ok
+        return prefs.edit().putString(KEY_LIST, array.toString()).commit()
     }
 
     /**
@@ -494,6 +496,7 @@ class UiPrefs(context: Context) {
         set(value) { setSidebarVisible(value) }
 
     /** 写侧边栏展开状态。返回 false = 没写进磁盘(下次冷启动会回到旧值)。 */
+    /** Persist sidebar visibility. Returns false when SharedPreferences.commit failed. */
     fun setSidebarVisible(value: Boolean): Boolean =
         prefs.edit().putBoolean(KEY_SIDEBAR, value).commit()
 

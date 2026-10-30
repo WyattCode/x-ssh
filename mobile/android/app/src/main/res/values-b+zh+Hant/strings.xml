@@ -204,6 +204,8 @@
     <string name="hosts_persist_failed">主機列表儲存失敗</string>
     <string name="hosts_load_failed">部分已儲存的主機無法讀取。磁碟上的檔案未被覆蓋;若主機缺失,請從備份還原。</string>
     <string name="hosts_persist_refused">沒能儲存空的主機清單——磁碟上還有受保護的資料。</string>
+    <string name="hosts_save_failed">沒能儲存主機清單。改動沒有寫入磁碟。</string>
+    <string name="sidebar_persist_failed">沒能儲存側邊欄偏好。</string>
     <string name="main_sc_close_session">中斷目前的工作階段</string>
     <string name="main_sc_edit_host">編輯主機</string>
     <string name="main_sc_ime">終端機內切換輸入法 / 英文直通</string>

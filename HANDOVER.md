@@ -571,6 +571,15 @@ typecheck / lint:i18n(桌面 752/752/752) / vitest **334** / 30 全绿。未在�
 > - **D. Android 空表落盘拒绝时 Toast**:`MainActivity.persist` 在 `diskCount()>0` 护栏命中时除 `Log.e` 外弹出 `hosts_persist_refused`(en/zh/zh-Hant)。不引入 `hasProtectedDiskData` / `loadFailed`(属 #97)。
 > - **C. Windows 本机多选删除只弹一次失败 Toast**:`SftpDrawer.localDelSelected` 收集首个错误,循环后单次 `toast`,去掉 per-item + summary 的 N+1。
 > - Windows + Android;未动 macOS / iOS。
+# M3.167 — 复核打磨(分支 `fix/review-polish-m3167`,基于 main @ 5946b1f,**勿合并**)
+
+> 三条 P1 修复;只动 Windows + Android,不碰 macOS / iOS。
+
+- **A(Android)主机列表存盘改 commit**:`HostStore.save(): Boolean`;`persist` 仅在写入成功后更新内存,失败 toast `hosts_save_failed`(不重做 #101 拒空 toast / #97 loadFailed)。
+- **B(Android)平板侧栏偏好改 commit**:`UiPrefs.setSidebarVisible`;失败回滚 UI + toast `sidebar_persist_failed`(不重做 #94 theme / #96 font)。
+- **C(桌面)远程多选删除失败补单次 toast**:`SftpDrawer.delSelected` 收集 firstErr 后 toast 一次(不重做 #101 localDelSelected)。
+
+---
 
 # X-SSH 交接文档
 
