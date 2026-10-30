@@ -825,7 +825,15 @@ fun FilesPane(
                 dialog = null
                 // 相对路径按当前目录算;`~` 回家目录。
                 when {
-                    target == "~" -> scope.launch { runCatching { files.home() }.onSuccess { load(it) } }
+                    target == "~" -> scope.launch {
+                        runCatching { files.home() }
+                            .onSuccess { load(it) }
+                            .onFailure { e ->
+                                // GoTo only appears while browsing — notify like a
+                                // load failure that leaves the current listing.
+                                if (e !is CancellationException) files.notify(e.reason(), error = true)
+                            }
+                    }
                     target.startsWith("/") -> load(target.trimEnd('/').ifEmpty { "/" })
                     else -> load(joinPath(path ?: "/", target).trimEnd('/'))
                 }

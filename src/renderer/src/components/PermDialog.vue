@@ -10,6 +10,7 @@ import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import type { FileEntry } from '../../../shared/types'
 import { posixJoin } from '../../../shared/fsUtils'
 import { useI18n } from '../lib/i18n'
+import { useToast } from '../composables/toast'
 import { useFocusTrap } from '../composables/focusTrap'
 import { BIT_GROUPS, clampMode, parseOctal, sanitizeOctalText, toOctal, toSymbolic } from '../lib/fileMode'
 import Icon from './Icon.vue'
@@ -29,6 +30,7 @@ const emit = defineEmits<{
 }>()
 
 const { t: tt } = useI18n()
+const { toast } = useToast()
 
 const bits = ref(props.initialMode ?? props.targets[0]?.mode ?? 0o755)
 const recursive = ref(false)
@@ -93,15 +95,21 @@ async function apply(): Promise<void> {
       if (!r.ok) failed.push(it.name)
     }
     if (failed.length) {
-      error.value =
+      // Dialog-local error alone is easy to miss if the user dismisses quickly —
+      // toast the same message (rename/create wave already does this).
+      const msg =
         failed.length === props.targets.length
           ? tt('sfp.permFail')
           : tt('sfp.permFailMany', { n: failed.length, list: failed.join('、') })
+      error.value = msg
+      toast(msg, 'error')
       return
     }
     emit('close', { applied: true })
   } catch (e) {
-    error.value = (e as Error).message
+    const msg = (e as Error).message
+    error.value = msg
+    toast(msg, 'error')
   } finally {
     busy.value = false
   }

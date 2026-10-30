@@ -101,7 +101,10 @@ export class KeyManager {
   }
 
   private async writeLabels(labels: Record<string, string>): Promise<void> {
-    await writeFile(this.labelsPath, JSON.stringify(labels), { mode: 0o600 }).catch(() => undefined)
+    // Do not swallow write failures: generate/import/remove callers already
+    // surface errors via keyGenFail / keyImportFail / delete toast. Silent
+    // catch left friendly names missing after a cold start.
+    await writeFile(this.labelsPath, JSON.stringify(labels), { mode: 0o600 })
   }
 
   private async sshKeygen(args: string[]): Promise<{ stdout: string }> {
