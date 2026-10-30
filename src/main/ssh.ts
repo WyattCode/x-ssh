@@ -2799,6 +2799,7 @@ export class SshManager {
     archiveName?: string
   ): Promise<{ ok: boolean; localPath?: string; error?: string; canceled?: boolean }> {
     if (!items.length) return { ok: false, error: 'nothing-to-pack' }
+    if (!items.length) return { ok: false, error: 'pack-empty' }
     const parent = this.parentOf(items[0].path)
     const tmp = `/tmp/xssh-${randomUUID().slice(0, 8)}.tar.gz`
     const names = items.map((i) => i.name)
@@ -2845,6 +2846,10 @@ export class SshManager {
       code: -1,
       out: (e as Error).message
     }))
+
+    // Empty stderr must not fall back to a Chinese literal: `error` is always
+    // non-empty then, so the renderer's `r.error ?? tt('sfp.extractFail')` never
+    // fires and an English UI shows Chinese. Use a machine token instead.
     if (code !== 0) return { ok: false, error: out.trim() || 'extract-failed' }
     return { ok: true }
   }

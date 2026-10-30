@@ -281,7 +281,16 @@ fun App(devTarget: DevTarget? = null) {
             return
         }
         hosts = sorted
-        store.save(sorted)
+        // 密码 / 私钥 / 口令封不上时 save 会沿用旧密文 —— 其他字段照常存好了,
+        // 但"新密码已保存"是假的,必须说出来,否则用户以为改成功了。
+        val sealFailed = store.save(sorted)
+        if (sealFailed) {
+            android.widget.Toast.makeText(
+                context,
+                context.getString(R.string.host_seal_failed),
+                android.widget.Toast.LENGTH_LONG,
+            ).show()
+        }
     }
 
     // 平板:窗口够宽(≥ 600dp)就是平板那一整套交互;小窗、窄分屏缩到手机宽度时退回手机的页面,

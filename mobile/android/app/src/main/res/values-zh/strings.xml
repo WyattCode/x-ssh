@@ -197,6 +197,7 @@
     <string name="host_unreadable_1">%1$s 读不出来</string>
     <string name="host_unreadable_2">%1$s、%2$s 读不出来</string>
     <string name="host_unreadable_3">%1$s、%2$s、%3$s 读不出来</string>
+    <string name="host_seal_failed">无法安全保存密码，已保留原来的密码。其他改动已保存。</string>
     <string name="host_username">用户名</string>
     <string name="hosts_persist_refused">无法更新主机列表，已保留已保存的数据</string>
     <string name="main_sc_close_session">断开当前会话</string>

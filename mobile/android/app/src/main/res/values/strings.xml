@@ -198,6 +198,7 @@
     <string name="host_unreadable_1">%1$s unreadable</string>
     <string name="host_unreadable_2">%1$s, %2$s unreadable</string>
     <string name="host_unreadable_3">%1$s, %2$s, %3$s unreadable</string>
+    <string name="host_seal_failed">Couldn\'t save the password securely — kept the previous one. Other changes were saved.</string>
     <string name="host_username">Username</string>
     <string name="hosts_persist_refused">Couldn\'t update hosts — kept your saved list</string>
     <string name="main_sc_close_session">Disconnect current session</string>

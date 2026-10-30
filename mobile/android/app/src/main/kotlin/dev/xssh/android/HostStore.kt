@@ -199,6 +199,14 @@ internal fun fallbackSealed(locked: String?, unreadable: Boolean, disk: String?)
 class HostStore(context: Context) {
     private val prefs = context.getSharedPreferences("xssh_hosts", Context.MODE_PRIVATE)
 
+    /**
+     * 这次 [save] 里有没有哪条凭据"封不上、退回了旧密文"。
+     *
+     * 退回旧密文是为了不丢东西,但它同时意味着"用户改了密码,界面说存好了,其实没改" ——
+     * 光靠日志看不见,得让界面把这件事说出来(见 MainActivity 的 persist)。
+     */
+    private var sealFellBack = false
+
     /** 磁盘上现有的记录,按 id 索引(只读 JSON,不碰密钥库)。读不出来就当没有。 */
     private fun diskRecords(): Map<String, JSONObject> = runCatching {
         val array = JSONArray(prefs.getString(KEY_LIST, "[]"))
@@ -290,7 +298,9 @@ class HostStore(context: Context) {
      */
     private fun readSecret(sealed: String): String = Secrets.open(sealed)
 
-    fun save(hosts: List<Host>) {
+    /** 返回 true 表示有凭据没能重新加密、沿用了旧密文(界面要提示"密码没存上")。 */
+    fun save(hosts: List<Host>): Boolean {
+        sealFellBack = false
         val array = JSONArray()
         val disk = diskRecords()
         hosts.forEach { host ->
@@ -339,6 +349,7 @@ class HostStore(context: Context) {
             array.put(item)
         }
         prefs.edit().putString(KEY_LIST, array.toString()).apply()
+        return sealFellBack
     }
 
     /**
@@ -357,6 +368,7 @@ class HostStore(context: Context) {
         // 这个静默兜底已经骗过两轮排查了。
         locked -> runCatching { Secrets.writeLocked(plain) }.getOrElse { err ->
             android.util.Log.w("xssh", "seal locked secret failed: ${err.javaClass.simpleName} ${err.message}")
+            sealFellBack = true
             sealed ?: ""
         }
         // `Secrets.seal` 出错时返回空串(它的兜底是"这次没存上,别崩")。直接写下去
@@ -364,6 +376,7 @@ class HostStore(context: Context) {
         // 封不上就留着旧的,并记一条日志(界面这一层看不见,只能靠日志发现)。
         else -> Secrets.seal(plain).ifEmpty {
             android.util.Log.w("xssh", "seal secret failed; keeping the previous ciphertext")
+            sealFellBack = true
             sealed ?: ""
         }
     }

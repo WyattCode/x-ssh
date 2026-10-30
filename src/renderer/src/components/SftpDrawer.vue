@@ -1450,6 +1450,11 @@ async function packDownloadSelected(): Promise<void> {
       const msg = r.error ?? tt('sfp.packFail')
       error.value = msg
       toast(msg, 'error')
+    if (!r.ok && !r.canceled) {
+      error.value =
+        r.error === 'pack-empty'
+          ? tt('sfp.packEmpty')
+          : (r.error ?? tt('sfp.packFail'))
     } else if (r.ok) await load(path.value)
   } finally {
     busy.value = false
@@ -1466,6 +1471,8 @@ async function uploadExtractPick(): Promise<void> {
       const msg = r.error ?? tt('sfp.extractFail')
       error.value = msg
       toast(msg, 'error')
+    if (!r.ok && !r.canceled) {
+      error.value = r.error === 'extract-failed' ? tt('sfp.extractFail') : (r.error ?? tt('sfp.extractFail'))
     } else if (r.ok) await load(path.value)
   } finally {
     busy.value = false

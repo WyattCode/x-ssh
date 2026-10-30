@@ -197,6 +197,7 @@
     <string name="host_unreadable_1">%1$s 無法讀取</string>
     <string name="host_unreadable_2">%1$s、%2$s 無法讀取</string>
     <string name="host_unreadable_3">%1$s、%2$s、%3$s 無法讀取</string>
+    <string name="host_seal_failed">無法安全儲存密碼，已保留原來的密碼。其他變更已儲存。</string>
     <string name="host_username">使用者名稱</string>
     <string name="hosts_persist_refused">無法更新主機列表，已保留已儲存的資料</string>
     <string name="main_sc_close_session">中斷目前的工作階段</string>

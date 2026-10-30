@@ -464,6 +464,15 @@
 1. **桌面 TransferPanel「在文件夹中显示」下错路径且静默**(`TransferPanel.vue` 的 `reveal`)。下载完成项原来把 `h.localDir`(目录)交给 `revealLocal`,只打开文件夹、不选中文件;`SftpDrawer.revealHistory` 已用 `localJoin(h.localDir, h.name)`。现在对齐路径,并 `await` + 失败 toast `sfp.revealFail`(主线上 #74 只补了 toast、未修路径;本切片路径是新的)。
 2. **安卓终端粘贴在剪贴板服务缺失时静默**(`TerminalScreen.kt`)。先取 `ClipboardManager`,为 null 时 Toast `clipboard_unavailable` 后返回;有服务但内容为空仍静默(无内容可粘)。`clipboard_unavailable` 三语言新增(与未合的 #87 文案一致)。
 3. **安卓 `persist` 拒绝空表落盘只打 Log**(`MainActivity.kt`)。数据安全护栏拒绝用空内存覆盖非空磁盘时,补 Toast `hosts_persist_refused`(三语言),避免用户以为删/存成功。
+# M3.154 — HostStore seal-fail toast + extract/pack empty i18n codes (2026-10-30)
+
+> 分支 `fix/review-polish-m3154`(从 `origin/main` 切出)。**未合并**;PR #4–#88 一律没碰。
+
+## 修了什么
+
+1. **安卓 `HostStore.writeSecret` 封失败静默撒谎**(`HostStore.kt` / `MainActivity.kt`)。`Secrets.seal` / `writeLocked` 失败时沿用旧密文只打 `Log.w`,`save` 仍成功 → 用户以为新密码已存。现在 `save` 返回是否发生 seal 回退,`persist` 用 Toast `host_seal_failed`(三语言)说明"密码没存上,其他改动已保存"。空表拒绝落盘仍属 #88,未动。
+2. **桌面 `extractArchive` 空 stderr 中文兜底**(`ssh.ts` / `SftpDrawer.vue`)。`out.trim() || '解压失败'` 让 EN UI 看到中文;改为机器码 `extract-failed`,渲染层映射到已有 `sfp.extractFail`。(#51 只改了 pack-failed;#84 只加 toast,未改此码。)
+3. **桌面 `packAndDownload` 空列表中文**(`ssh.ts` / `SftpDrawer.vue` / `i18n.ts`)。`没有可打包的项` → 机器码 `pack-empty` + 新键 `sfp.packEmpty`(三语)。未动 #51 的 tar 退出码路径(主线尚无)。
 
 ## 验证
 
@@ -475,12 +484,14 @@ npm run test
 
 安卓侧只改了 Kotlin(没动 Rust),`assembleDebug` / `installDebug` 照常;**没有在真机上点过**复制失败那条路(要造一个剪贴板服务不可用的环境)。
 安卓侧只改了 Kotlin + strings(没动 Rust)。**没有在真机/模拟器上点过**剪贴板服务不可用与空表落盘护栏。
+typecheck / lint:i18n / vitest **334** / 30 全绿。安卓只改了 Kotlin + strings(没动 Rust)。**没有在真机/模拟器上点过** seal 失败路径。
 
 ## 注意
 
 - **不要合并**:这一批是 review 修复,等人工过一遍再合。
 - 未触碰的开放 PR:#4–#86(尤其 #86 的 `publicKey()` null-else / symlink `isDir` / 桌面 `stopWatch`;#85 的 SFTP diff toast / `previewFail` / GoTo `~`;#84 的 history export / pack / extract / sync / multi-download;#83 passphrase;#60 log-start;#58 link;#42 editExternal;#40 preview i18n)。
 - 未触碰的开放 PR:#4–#87(尤其 #87 的 copySelection/copyText;#86 publicKey/symlink/stopWatch;#85 diff/preview/GoTo;#84 export/pack;#74 TransferPanel reveal toast;#57 openExternal)。
+- 未触碰的开放 PR:#4–#88(尤其 #88 TransferPanel reveal / paste / persist empty;#87 copySelection;#86 publicKey/symlink;#85 diff/preview;#84 export/pack toast;#51 pack-failed)。
 - 未触碰 `/workspace/MCode`。
 
 ---
