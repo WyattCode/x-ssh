@@ -4,6 +4,9 @@
 # 会话记录:连续改进 M3.84(2026-10-30,复核打磨:主题循环竞态 + 关闭全部确认 + 连接日志 disconnect/滚动)
 
 功能清单已够,本轮按站立规则做开源复核打磨(不合并)。未动 PR #18 / #17 / #16 / #15 / #14 / #13 / #12 与更早的 #4–#11。
+# 会话记录:连续改进 M3.85(2026-10-30,复核打磨:ZoomHud 失焦粘滞 + 窗格失焦 blur + keyManager IPC 错误码)
+
+功能清单已够,本轮按站立规则做开源复核打磨(不合并)。未动 PR #19 / #18 / #17 / #16 / #15 / #14 / #13 / #12 与更早的 #4–#11。
 
 **核过已过时 / 已在未合并 PR(本轮不重做)**:
 1. TransferPanel 失败原因 / ETA + Android 罚分地板 —— PR #12。
@@ -27,6 +30,15 @@
 3. **连接日志 UI**:`.log-event.disconnect` 补中性灰芯片(原先无样式、和默认糊在一起);日志行包进 `.log-list`(`max-height:320px` 可滚),空态/清空按钮仍在外。
 
 **验证**:`typecheck` + `lint:i18n` + vitest **338** 全绿(原 334;+`tabCloseGuard` 4)。Android 本轮未改。未合并。
+7. OSC52 空白 base64 + 主锁 Enter/busy + 离线点透明度 —— PR #18。
+8. 主题循环竞态 + 关闭全部确认 + 连接日志 disconnect/滚动 —— PR #19。
+
+**修了**:
+1. **ZoomHud 失焦粘滞**:`lib/zoomHud.ts` `shouldReleaseZoomHover`;`composables/zoom.ts` 在 `window.blur` / `visibilitychange→hidden` 时清掉 `hovering` 并重新计时隐藏 —— Alt-Tab 时指针还停在药丸上不会再永远挂着。
+2. **窗格 / 离页焦点**:`TerminalView` 在 `focused` 或 `visible` 变 false 时 `term.blur()`。终端页是 `v-show` 常挂,切到连接 / SFTP / 设置后 xterm textarea 以前仍占着 `document.activeElement`,按键会打进还活着的 SSH。
+3. **keyManager IPC 错误码**:抛 `invalid-key` / `bad-id` 稳定标记;`KeyErrorCode` + 主进程 `keyFail`;渲染层 `keyErrorMessage` 翻译。顺手给 HostEditor 生成/导入加 `keyBusy`,防双击生两把钥匙。
+
+**验证**:`typecheck` + `lint:i18n` + vitest **343** 全绿(原 334;+`zoomHud` 4 + `keyError` 5)。Android 本轮未改。未合并。
 
 ---
 

@@ -13,6 +13,11 @@ const execFileAsync = promisify(execFile)
  * The private key file is copied here (mode 0600) so users can generate a
  * keypair in-app and reuse it across hosts without pointing each host at a
  * separately-managed file. This never decrypts or stores passphrases.
+ *
+ * Failures the UI can name are thrown with a stable English marker as the
+ * message (`'invalid-key'`, `'bad-id'` — see KeyErrorCode in shared/types), so
+ * main can hand the renderer a code to translate instead of a hard-coded
+ * Chinese string that an English UI would show raw.
  */
 export class KeyManager {
   private readonly keysDir: string
@@ -182,7 +187,8 @@ export class KeyManager {
     if (!isPrivateKey(buf)) {
       await rm(priv, { force: true }).catch(() => {})
       await rm(`${priv}.pub`, { force: true }).catch(() => {})
-      throw new Error('所选文件不是有效的私钥')
+      // Stable marker: main turns this into KeyErrorCode 'invalid-key'.
+      throw new Error('invalid-key')
     }
     const label = basename(srcPath).replace(/\.(pem|key|pub)$/i, '')
     const labels = await this.readLabels()
@@ -195,7 +201,8 @@ export class KeyManager {
    *  derived from an unprotected private key). Used by "publish key to hosts". */
   async publicKey(id: string): Promise<string> {
     await this.ensureDir()
-    if (basename(id) !== id) throw new Error('非法密钥标识')
+    // Stable marker: main turns this into KeyErrorCode 'bad-id'.
+    if (basename(id) !== id) throw new Error('bad-id')
     const priv = join(this.keysDir, id)
     try {
       return (await readFile(`${priv}.pub`, 'utf8')).trim()
@@ -206,10 +213,11 @@ export class KeyManager {
     }
   }
 
-  async remove(id: string): Promise<void> {    await this.ensureDir()
+  async remove(id: string): Promise<void> {
+    await this.ensureDir()
     // Only ever operate inside the key dir: refuse path traversal in the id,
     // since it arrives over IPC from the renderer.
-    if (basename(id) !== id) throw new Error('非法密钥标识')
+    if (basename(id) !== id) throw new Error('bad-id')
     const priv = join(this.keysDir, id)
     await rm(priv, { force: true })
     await rm(`${priv}.pub`, { force: true })

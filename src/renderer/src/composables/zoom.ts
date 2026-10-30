@@ -1,4 +1,5 @@
 import { ref, computed } from 'vue'
+import { shouldReleaseZoomHover } from '../lib/zoomHud'
 
 // Chromium zoom levels: factor = 1.2 ^ level. Half-level steps give the
 // familiar 100 → 110 → 120 … ladder; the range is 58 % … 249 %.
@@ -53,6 +54,31 @@ function setHover(on: boolean): void {
     clearTimeout(hideTimer)
     hideTimer = null
   } else if (!on && hudOpen.value) scheduleHide()
+}
+
+/**
+ * Clear sticky hover so the HUD can auto-hide after blur/hide.
+ *
+ * `hovering` is normally cleared by the pill's `mouseleave`. When the window is
+ * blurred (Alt-Tab) or the document is hidden while the pointer sits on the
+ * pill, that event never fires and `hudOpen` would stay true forever — the
+ * auto-hide timer is never armed again. Called from the window/document
+ * listeners registered below.
+ */
+export function releaseHudHover(): void {
+  hovering = false
+  if (hudOpen.value) scheduleHide()
+}
+
+// Registered once, at module init (renderer only). A blur or a hidden document
+// means the pointer's `mouseleave` will never arrive.
+if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+  window.addEventListener('blur', () => {
+    if (shouldReleaseZoomHover(document.visibilityState, true)) releaseHudHover()
+  })
+  document.addEventListener('visibilitychange', () => {
+    if (shouldReleaseZoomHover(document.visibilityState, false)) releaseHudHover()
+  })
 }
 
 export function useZoom(): {

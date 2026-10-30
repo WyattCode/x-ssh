@@ -6,7 +6,7 @@ import { mkdtemp, rm, readFile, stat, readdir, mkdir, unlink, rename, writeFile 
 import { watchFile, unwatchFile } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { IPC, PREFS_ARG } from '../shared/ipc'
-import type { ConnectParams, Host, HostForward, ForwardMode, JumpConfig, LocalEntry, Snippet, ThemePref, UiPrefs, UploadOverwrite } from '../shared/types'
+import type { ConnectParams, Host, HostForward, ForwardMode, JumpConfig, KeyErrorCode, LocalEntry, Snippet, ThemePref, UiPrefs, UploadOverwrite } from '../shared/types'
 import { readLaunchTarget, targetFromUrl, PROTOCOL, compareVersions } from '../shared/launchTarget'
 import { isRendererSettableKey } from '../shared/settingsKeys'
 import { resolveLang, type LangPref, type UiLang } from '../shared/lang'
@@ -2083,6 +2083,13 @@ function registerIpc(): void {
     return res.canceled ? undefined : res.filePaths[0]
   })
   // ---- SSH key library ----
+  /** Maps a KeyManager failure to a stable code the renderer can translate;
+   *  anything else keeps the friendly message. */
+  function keyFail(e: unknown): { ok: false; code?: KeyErrorCode; error?: string } {
+    const msg = (e as Error)?.message ?? ''
+    if (msg === 'invalid-key' || msg === 'bad-id') return { ok: false, code: msg }
+    return { ok: false, error: friendlyError(msg) }
+  }
   ipcMain.handle(IPC.keysList, () => keyManager.list())
   ipcMain.handle(
     IPC.keysGenerate,
@@ -2090,7 +2097,7 @@ function registerIpc(): void {
       try {
         return { ok: true, key: await keyManager.generate(opts) }
       } catch (e) {
-        return { ok: false, error: friendlyError((e as Error).message) }
+        return keyFail(e)
       }
     }
   )
@@ -2103,7 +2110,7 @@ function registerIpc(): void {
     try {
       return { ok: true, key: await keyManager.import(res.filePaths[0]) }
     } catch (e) {
-      return { ok: false, error: friendlyError((e as Error).message) }
+      return keyFail(e)
     }
   })
   ipcMain.handle(IPC.keysDelete, async (_e, id: string) => {
@@ -2111,16 +2118,16 @@ function registerIpc(): void {
       await keyManager.remove(id)
       return { ok: true }
     } catch (e) {
-      return { ok: false, error: friendlyError((e as Error).message) }
+      return keyFail(e)
     }
   })
   ipcMain.handle(IPC.keysPublicKey, async (_e, id: string) => {
     try {
       const text = await keyManager.publicKey(id)
-      if (!text) return { ok: false, error: '该密钥没有可用的公钥' }
+      if (!text) return { ok: false, code: 'no-pubkey' }
       return { ok: true, text }
     } catch (e) {
-      return { ok: false, error: friendlyError((e as Error).message) }
+      return keyFail(e)
     }
   })
   // Appends a public key to the authorized_keys of several saved hosts. Each is
@@ -2131,10 +2138,10 @@ function registerIpc(): void {
     try {
       pub = (await keyManager.publicKey(keyId)).trim()
     } catch (e) {
-      return { ok: false, error: friendlyError((e as Error).message) }
+      return keyFail(e)
     }
-    if (!pub) return { ok: false, error: '该密钥没有可用的公钥' }
-    if (!sshManager) return { ok: false, error: '窗口未就绪' }
+    if (!pub) return { ok: false, code: 'no-pubkey' }
+    if (!sshManager) return { ok: false, code: 'not-ready' }
     const results = await withTempHosts(hostIds, async (sid) => {
       const cmd = `umask 077; mkdir -p ~/.ssh && chmod 700 ~/.ssh\ncat >> ~/.ssh/authorized_keys <<'XSSH'\n${pub}\nXSSH\ntouch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys`
       await requireSshManager().execCommand(sid, cmd)
@@ -2151,10 +2158,10 @@ function registerIpc(): void {
     try {
       pub = (await keyManager.publicKey(keyId)).trim()
     } catch (e) {
-      return { ok: false, error: friendlyError((e as Error).message) }
+      return keyFail(e)
     }
-    if (!pub) return { ok: false, error: '该密钥没有可用的公钥' }
-    if (!sshManager) return { ok: false, error: '窗口未就绪' }
+    if (!pub) return { ok: false, code: 'no-pubkey' }
+    if (!sshManager) return { ok: false, code: 'not-ready' }
     const keyPart = pub.split(/\s+/).slice(0, 2).join(' ')
     const results = await withTempHosts(hostIds, async (sid) => {
       // if/fi (not a bare &&-chain) so a host without authorized_keys exits 0
