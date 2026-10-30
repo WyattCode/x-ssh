@@ -127,6 +127,41 @@ const NL: Record<string, Record<UiLang, string>> = {
   pickArchive: { zh: '选择要上传并解压的归档文件', 'zh-TW': '選擇要上傳並解壓縮的封存檔', en: 'Choose the archive to upload and extract' },
   pickEditor: { zh: '选择外部编辑器程序', 'zh-TW': '選擇外部編輯器程式', en: 'Choose the external editor' },
   pickBackupDir: { zh: '选择备份目录', 'zh-TW': '選擇備份目錄', en: 'Choose the backup folder' },
+  backupDisabled: {
+    zh: '自动备份未启用',
+    'zh-TW': '自動備份未啟用',
+    en: 'Scheduled auto-backup is turned off'
+  },
+  backupNoDir: {
+    zh: '未选择自动备份目录',
+    'zh-TW': '未選擇自動備份目錄',
+    en: 'No auto-backup folder is set'
+  },
+  backupWriteFail: {
+    zh: '写入备份失败(目录不可用或磁盘已满)',
+    'zh-TW': '寫入備份失敗(目錄不可用或磁碟已滿)',
+    en: 'Could not write the backup (folder unavailable or disk full)'
+  },
+  backupWriteFailTitle: {
+    zh: '自动备份失败',
+    'zh-TW': '自動備份失敗',
+    en: 'Auto-backup failed'
+  },
+  backupWriteFailBody: {
+    zh: '无法写入备份文件,请检查备份目录权限或磁盘空间',
+    'zh-TW': '無法寫入備份檔,請檢查備份目錄權限或磁碟空間',
+    en: 'Could not write the backup file — check folder permissions or disk space'
+  },
+  globalShortcutFailTitle: {
+    zh: '全局快捷键未生效',
+    'zh-TW': '全域快捷鍵未生效',
+    en: 'Global hotkey not registered'
+  },
+  globalShortcutFailBody: {
+    zh: '已保存的呼出快捷键无法注册(可能被占用或不合法)',
+    'zh-TW': '已儲存的呼出快捷鍵無法註冊(可能已被佔用或不合法)',
+    en: 'The saved show/hide hotkey could not be registered (taken or invalid)'
+  },
   pickPrivateKey: { zh: '选择私钥', 'zh-TW': '選擇私鑰', en: 'Choose a private key' },
   importPrivateKey: { zh: '导入私钥', 'zh-TW': '匯入私鑰', en: 'Import a private key' },
   editSaveFailTitle: {
@@ -467,19 +502,23 @@ async function buildBackupPayload(): Promise<string> {
   )
 }
 
-export async function writeAutoBackupSync(): Promise<boolean> {
+export type AutoBackupResult =
+  | { ok: true }
+  | { ok: false; reason: 'disabled' | 'no-dir' | 'write' }
+
+export async function writeAutoBackupSync(): Promise<AutoBackupResult> {
   const enabled = (await settings.get<boolean>('autoBackup')) === true
-  if (!enabled) return false
+  if (!enabled) return { ok: false, reason: 'disabled' }
   const dir = await settings.get<string>('autoBackupDir')
-  if (!dir) return false
+  if (!dir) return { ok: false, reason: 'no-dir' }
   try {
     await mkdir(dir, { recursive: true })
     const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
     const target = join(dir, `x-ssh-backup-${stamp}.json`)
     await writeFile(target, await buildBackupPayload(), 'utf8')
-    return true
+    return { ok: true }
   } catch {
-    return false
+    return { ok: false, reason: 'write' }
   }
 }
 
@@ -489,7 +528,15 @@ async function scheduleAutoBackup(): Promise<void> {
   const enabled = (await settings.get<boolean>('autoBackup')) === true
   if (!enabled) return
   const hours = Math.max(1, (await settings.get<number>('autoBackupEveryHours')) || 24)
-  backupTimer = setInterval(() => void writeAutoBackupSync(), hours * 60 * 60 * 1000)
+  backupTimer = setInterval(() => {
+    void (async () => {
+      const r = await writeAutoBackupSync()
+      if (r.ok || r.reason !== 'write') return
+      if (await notifyEnabled()) {
+        notify(await dl('backupWriteFailTitle'), await dl('backupWriteFailBody'))
+      }
+    })()
+  }, hours * 60 * 60 * 1000)
   backupTimer.unref?.()
 }
 
@@ -1204,6 +1251,15 @@ function registerIpc(): void {
     if (!enabled || !dir) return { ok: false, error: 'backup-not-configured' }
     const ok = await writeAutoBackupSync()
     return { ok, error: ok ? undefined : 'backup-failed' }
+    const r = await writeAutoBackupSync()
+    if (r.ok) return { ok: true }
+    const key =
+      r.reason === 'write'
+        ? 'backupWriteFail'
+        : r.reason === 'no-dir'
+          ? 'backupNoDir'
+          : 'backupDisabled'
+    return { ok: false, error: await dl(key) }
   })
   ipcMain.handle(IPC.dataRescheduleBackup, async () => {
     await scheduleAutoBackup()
@@ -2361,7 +2417,12 @@ function setGlobalShowHide(accel: string): { ok: boolean; error?: string } {
 }
 async function applyGlobalShowHideFromSettings(): Promise<void> {
   const accel = (await settings.get<string>('globalShowHideAccel')) ?? ''
-  if (accel) setGlobalShowHide(accel)
+  if (!accel) return
+  const r = setGlobalShowHide(accel)
+  if (r.ok) return
+  if (await notifyEnabled()) {
+    notify(await dl('globalShortcutFailTitle'), await dl('globalShortcutFailBody'))
+  }
 }
 
 // Several instances may run side by side, so nothing here may touch storage
