@@ -490,9 +490,19 @@ const crumbs = computed(() => {
 })
 
 const showHidden = ref(window.api.prefs.sftpShowHidden === true)
-function toggleHidden(): void {
-  showHidden.value = !showHidden.value
-  void window.api.settings.set('sftpShowHidden', showHidden.value)
+async function toggleHidden(): Promise<void> {
+  const next = !showHidden.value
+  showHidden.value = next
+  try {
+    const r = await window.api.settings.set('sftpShowHidden', next)
+    if (r && r.ok === false) {
+      showHidden.value = !next
+      toast(tt('sfp.showHiddenFail'), 'error')
+    }
+  } catch {
+    showHidden.value = !next
+    toast(tt('sfp.showHiddenFail'), 'error')
+  }
 }
 
 /** The filter box in the remote pane's head: narrows the listing by name.
@@ -803,6 +813,8 @@ function clampWidth(w: number): number {
 }
 const initW = Number(window.api.prefs.sftpWidth)
 const width = ref(clampWidth(initW >= MIN_W ? initW : 340))
+/** Last width known to be on disk (or the startup default). Drag failures roll back here. */
+let savedWidth = width.value
 let dragX = 0
 let dragW = 0
 function onResizeStart(e: MouseEvent): void {
@@ -823,7 +835,14 @@ function onResizeEnd(): void {
   window.removeEventListener('mouseup', onResizeEnd)
   document.body.style.cursor = ''
   document.body.style.userSelect = ''
-  void window.api.settings.set('sftpWidth', width.value)
+  const next = width.value
+  if (next === savedWidth) return
+  void window.api.settings.set('sftpWidth', next).then((r) => {
+    if (r && r.ok === false) width.value = savedWidth
+    else savedWidth = next
+  }).catch(() => {
+    width.value = savedWidth
+  })
 }
 // Keep within the 50% cap when the window is resized smaller.
 function onWindowResize(): void {
