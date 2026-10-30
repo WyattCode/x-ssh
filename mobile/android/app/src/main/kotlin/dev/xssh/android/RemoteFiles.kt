@@ -19,6 +19,7 @@ import androidx.annotation.PluralsRes
 import androidx.annotation.StringRes
 import java.io.File
 import java.util.Locale
+import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -38,12 +39,14 @@ import uniffi.xssh_ffi.TransferListener
    不用再认证一次。通道第一次打开文件面板时才开,会话断开时一起关。
 
    传输跑在会话的作用域里,不跟着界面走:切回终端、切到别的会话,下载照样在跑,回来还看得到进度。
+   一次跑一批;正在传时再开下载 / 上传 / 分享会**排队**,当前批结束后自动接着跑(M3.73)。
    文件内容不经过 Kotlin —— 目标 / 来源的文件描述符直接交给 Rust,边读边写。
 
    下载去哪儿(和浏览器一样,不每次都问):
    - 「下载」:系统「下载 / X-SSH」目录(MediaStore,Android 10+ 不要任何权限);文件夹按原样的层级放进去。
    - 「下载到…」:用户挑一个文件夹(系统文件夹选择器),一次性。
-   - 「打开」:下到应用缓存,交给别的应用查看(FileProvider)。缓存里只留最近打开的那个。
+   - 「打开」:下到应用缓存 open/<批号>/,交给别的应用查看(FileProvider)。
+   - 「分享」:下到 share/<批号>/,再交给系统分享面板(可落到别的应用);同一份 URI 也可给鼠标拖出用。
 */
 
 /** 一批传输的进度:[done] / [total] 是整批的字节数,[name] 是正在传的那个,第 [index] 个、共 [count] 个。[count] 为 0 = 还在清点。 */
@@ -109,7 +112,6 @@ class RemoteFiles(session: Session, private val scope: CoroutineScope) {
     private val lock = Any()
     private var sftp: Sftp? = null
     private var closed = false
-    private val cancelled = AtomicBoolean(false)
 
     /** 上次看到的目录和内容:切回文件面板时先摆出来,再在后台刷新。只在主线程读写。 */
     var cwd: String? = null
@@ -118,6 +120,10 @@ class RemoteFiles(session: Session, private val scope: CoroutineScope) {
     private val _transfer = MutableStateFlow<Transfer?>(null)
     val transfer: StateFlow<Transfer?> = _transfer
 
+    /** 还在排队、没开跑的批数(不含当前这批)。 */
+    private val _queued = MutableStateFlow(0)
+    val queued: StateFlow<Int> = _queued
+
     /** 我们自己改了远端(上传完成):面板据此重新列一次。 */
     private val _changed = MutableStateFlow(0)
     val changed: StateFlow<Int> = _changed
@@ -125,9 +131,30 @@ class RemoteFiles(session: Session, private val scope: CoroutineScope) {
     private val _notice = MutableStateFlow<Notice?>(null)
     val notice: StateFlow<Notice?> = _notice
 
+    /** 打开 / 分享落到本地后的 URI,供鼠标拖出复用(远端路径 → content URI)。 */
+    private val cachedUris = mutableMapOf<String, Uri>()
+
+    /** 缓存表变更次数:界面 collect 后才能在分享 / 打开完成后挂上拖源。 */
+    private val _cacheEpoch = MutableStateFlow(0)
+    val cacheEpoch: StateFlow<Int> = _cacheEpoch
+
+    private data class Batch(
+        val upload: Boolean,
+        val label: String,
+        val prepare: (Sftp) -> List<Step>,
+        val finish: suspend (sent: Int, steps: List<Step>, failure: Throwable?, cancelled: Boolean) -> Unit,
+        val cancelled: AtomicBoolean = AtomicBoolean(false),
+    )
+
+    private val batches = TransferQueue<Batch>()
+    private var currentCancel: AtomicBoolean? = null
+
     fun notify(text: FileText, error: Boolean = false, action: Pair<FileText, () -> Unit>? = null) {
         _notice.value = Notice(text, error, action)
     }
+
+    /** 远端路径是否已有本地可拖出的 URI(打开 / 分享之后)。 */
+    fun cachedUri(path: String): Uri? = synchronized(lock) { cachedUris[path] }
 
     /** 阻塞调用(在 IO 线程)。通道没开就先开。 */
     private fun <T> withSftp(block: (Sftp) -> T): T {
@@ -169,20 +196,24 @@ class RemoteFiles(session: Session, private val scope: CoroutineScope) {
         s.remove(path, dir)
     }
 
+    /** 只取消当前这批;排队里的接着跑。 */
     fun cancelTransfer() {
-        cancelled.set(true)
+        currentCancel?.set(true)
     }
 
-    /** 还有传输在跑(一次只传一批):给提示并返回 true。 */
-    fun busy(): Boolean {
-        if (_transfer.value == null) return false
-        notify(FileText.of(R.string.files_transfer_busy), error = true)
-        return true
+    /** 取消当前批并丢掉排队;给 TransferBar「全部取消」和 [close] 用。 */
+    fun cancelAllTransfers() {
+        currentCancel?.set(true)
+        val dropped = batches.cancelPending()
+        _queued.value = batches.pendingCount
+        if (dropped.isNotEmpty()) {
+            notify(FileText.plural(R.plurals.files_queue_cleared, dropped.size, dropped.size))
+        }
     }
 
     /**
-     * 跑一批:先 [prepare](在 IO 线程清点要传什么,可能要递归列远端 / 本机目录),再一个一个传。
-     * 出错或取消就停在那一个,清掉它的半截产物;[finish] 拿到传完了几个、共几个、失败原因(取消时为 null 且 cancelled = true)。
+     * 入队或立刻开跑:先 [prepare](在 IO 线程清点),再一个一个传。
+     * 忙时入队并提示排位;当前批结束后自动 [poll] 下一批。
      */
     private fun runBatch(
         upload: Boolean,
@@ -190,20 +221,30 @@ class RemoteFiles(session: Session, private val scope: CoroutineScope) {
         prepare: (Sftp) -> List<Step>,
         finish: suspend (sent: Int, steps: List<Step>, failure: Throwable?, cancelled: Boolean) -> Unit,
     ) {
-        if (busy()) return
-        cancelled.set(false)
-        _transfer.value = Transfer(label, upload, 0, 0, 0, 0)
+        val batch = Batch(upload, label, prepare, finish)
+        val position = batches.offer(batch)
+        _queued.value = batches.pendingCount
+        if (position != null) {
+            notify(FileText.plural(R.plurals.files_transfer_queued, position, position))
+            return
+        }
+        startBatch(batch)
+    }
+
+    private fun startBatch(batch: Batch) {
+        currentCancel = batch.cancelled
+        _transfer.value = Transfer(batch.label, batch.upload, 0, 0, 0, 0)
         scope.launch(Dispatchers.IO) {
             var steps = emptyList<Step>()
             var sent = 0
             var failure: Throwable? = null
             try {
-                steps = withSftp(prepare)
+                steps = withSftp(batch.prepare)
                 val total = steps.sumOf { it.size.coerceAtLeast(0) }
                 var base = 0L
                 for ((index, step) in steps.withIndex()) {
-                    if (cancelled.get()) break
-                    val at = Transfer(step.name, upload, base, total, index, steps.size)
+                    if (batch.cancelled.get()) break
+                    val at = Transfer(step.name, batch.upload, base, total, index, steps.size)
                     _transfer.value = at
                     val listener = object : TransferListener {
                         // A throw here becomes a Rust-side panic (uniffi turns
@@ -211,10 +252,10 @@ class RemoteFiles(session: Session, private val scope: CoroutineScope) {
                         // upload's temp-file cleanup — keep it impossible.
                         override fun progress(done: ULong, total: ULong): Boolean = try {
                             _transfer.value = at.copy(done = base + done.toLong())
-                            !cancelled.get()
+                            !batch.cancelled.get()
                         } catch (t: Throwable) {
                             Log.w(TAG, "progress callback failed: ${t.message}")
-                            !cancelled.get()
+                            !batch.cancelled.get()
                         }
                     }
                     val result = runCatching { step.run(listener) }
@@ -230,10 +271,13 @@ class RemoteFiles(session: Session, private val scope: CoroutineScope) {
                 failure = e
             }
             _transfer.value = null
-            val wasCancelled = cancelled.get() || failure is FfiException.Cancelled
+            val wasCancelled = batch.cancelled.get() || failure is FfiException.Cancelled
             withContext(Dispatchers.Main) {
-                finish(sent, steps, if (wasCancelled) null else failure, wasCancelled)
+                batch.finish(sent, steps, if (wasCancelled) null else failure, wasCancelled)
             }
+            val next = batches.poll()
+            _queued.value = batches.pendingCount
+            if (next != null) startBatch(next) else currentCancel = null
         }
     }
 
@@ -332,16 +376,19 @@ class RemoteFiles(session: Session, private val scope: CoroutineScope) {
         }
     }
 
-    /** 打开:下载到应用缓存,再交给能看它的应用。 */
+    /** 打开:下载到应用缓存 open/<批号>/,再交给能看它的应用。 */
     fun open(entry: RemoteEntry, context: Context) {
-        val dir = File(context.cacheDir, "open")
+        val batchId = UUID.randomUUID().toString()
+        val dir = File(context.cacheDir, "open/$batchId")
         val file = File(dir, entry.name.replace('/', '_'))
         runBatch(
             upload = false,
             label = entry.name,
             prepare = {
-                // 只留这一个:别让缓存越堆越大。
-                dir.listFiles()?.forEach { runCatching { it.delete() } }
+                // 只清别的批,别动正在排队的。
+                File(context.cacheDir, "open").listFiles()?.forEach { old ->
+                    if (old.name != batchId) runCatching { old.deleteRecursively() }
+                }
                 dir.mkdirs()
                 listOf(
                     Step(
@@ -355,19 +402,119 @@ class RemoteFiles(session: Session, private val scope: CoroutineScope) {
                             )
                             pfd.use { withSftp { it.downloadToFd(entry.path, pfd.detachFd(), listener) } }
                         },
-                        undo = { file.delete() },
+                        undo = { file.delete(); runCatching { dir.delete() } },
                     ),
                 )
             },
         ) { sent, _, failure, wasCancelled ->
             when {
-                wasCancelled -> notify(FileText.of(R.string.files_cancelled))
-                failure != null -> notify(FileText.of(R.string.files_open_failed, failure.reason()), error = true)
+                wasCancelled -> {
+                    runCatching { dir.deleteRecursively() }
+                    notify(FileText.of(R.string.files_cancelled))
+                }
+                failure != null -> {
+                    runCatching { dir.deleteRecursively() }
+                    notify(FileText.of(R.string.files_open_failed, failure.reason()), error = true)
+                }
                 sent == 1 -> {
                     val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.files", file)
+                    synchronized(lock) { cachedUris[entry.path] = uri; _cacheEpoch.value++ }
                     view(context, uri, entry.name)
                 }
             }
+        }
+    }
+
+    /**
+     * 分享:下载到 share/<批号>/(目录递归展开成文件),再交给系统分享面板。
+     * 走同一条传输队列,忙时自动排队。成功后 URI 写入 [cachedUris],Pad/Fold 鼠标可再拖出。
+     */
+    fun share(entries: List<RemoteEntry>, context: Context) {
+        if (entries.isEmpty()) return
+        val batchId = UUID.randomUUID().toString()
+        val dir = File(context.cacheDir, "share/$batchId")
+        val created = mutableListOf<Pair<String, File>>() // remote path → local file
+        runBatch(
+            upload = false,
+            label = entries.singleOrNull()?.name
+                ?: context.resources.getQuantityString(R.plurals.files_items, entries.size, entries.size),
+            prepare = { s ->
+                File(context.cacheDir, "share").listFiles()?.forEach { old ->
+                    if (old.name != batchId) runCatching { old.deleteRecursively() }
+                }
+                dir.mkdirs()
+                val jobs = mutableListOf<Pair<List<String>, RemoteEntry>>()
+                entries.forEach { plan(s, it, emptyList(), jobs) }
+                if (jobs.isEmpty()) emptyList()
+                else jobs.map { (rel, entry) ->
+                    val local = File(dir, (rel + entry.name.replace('/', '_')).joinToString("/"))
+                    Step(
+                        name = entry.name,
+                        size = entry.size.toLong(),
+                        run = { listener ->
+                            local.parentFile?.mkdirs()
+                            val pfd = ParcelFileDescriptor.open(
+                                local,
+                                ParcelFileDescriptor.MODE_WRITE_ONLY or ParcelFileDescriptor.MODE_CREATE or
+                                    ParcelFileDescriptor.MODE_TRUNCATE,
+                            )
+                            pfd.use { withSftp { it.downloadToFd(entry.path, pfd.detachFd(), listener) } }
+                            created += entry.path to local
+                        },
+                        undo = { local.delete() },
+                    )
+                }
+            },
+        ) { sent, steps, failure, wasCancelled ->
+            when {
+                wasCancelled -> {
+                    runCatching { dir.deleteRecursively() }
+                    notify(
+                        if (sent > 0) FileText.plural(R.plurals.files_cancelled_downloaded, sent, sent)
+                        else FileText.of(R.string.files_cancelled),
+                    )
+                }
+                failure != null -> {
+                    runCatching { dir.deleteRecursively() }
+                    notify(FileText.of(R.string.files_share_failed, failure.reason()), error = true)
+                }
+                steps.isEmpty() -> {
+                    runCatching { dir.deleteRecursively() }
+                    notify(FileText.of(R.string.files_nothing_to_share))
+                }
+                else -> {
+                    val uris = created.map { (remote, file) ->
+                        val uri = androidx.core.content.FileProvider.getUriForFile(
+                            context,
+                            "${context.packageName}.files",
+                            file,
+                        )
+                        synchronized(lock) { cachedUris[remote] = uri }
+                        uri
+                    }
+                    if (uris.isNotEmpty()) _cacheEpoch.value++
+                    shareOut(context, uris, created.map { it.second.name })
+                }
+            }
+        }
+    }
+
+    private fun shareOut(context: Context, uris: List<Uri>, names: List<String>) {
+        if (uris.isEmpty()) return
+        val intent = if (uris.size == 1) {
+            Intent(Intent.ACTION_SEND)
+                .setType(viewMime(names[0]))
+                .putExtra(Intent.EXTRA_STREAM, uris[0])
+        } else {
+            Intent(Intent.ACTION_SEND_MULTIPLE)
+                .setType("*/*")
+                .putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(uris))
+        }
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        try {
+            context.startActivity(Intent.createChooser(intent, context.getString(R.string.files_share)))
+        } catch (_: ActivityNotFoundException) {
+            notify(FileText.of(R.string.files_no_app, names.firstOrNull() ?: ""), error = true)
         }
     }
 
@@ -425,7 +572,10 @@ class RemoteFiles(session: Session, private val scope: CoroutineScope) {
     }
 
     fun close() {
-        cancelled.set(true)
+        currentCancel?.set(true)
+        batches.cancelPending()
+        _queued.value = 0
+        synchronized(lock) { cachedUris.clear() }
         val old = synchronized(lock) {
             closed = true
             sftp.also { sftp = null }

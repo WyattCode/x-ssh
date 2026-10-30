@@ -115,6 +115,12 @@
     <string name="files_terminal">终端</string>
     <string name="files_time_this_year">M月d日 HH:mm</string>
     <string name="files_transfer_busy">还有传输没完成</string>
+    <string name="files_share">分享</string>
+    <string name="files_share_failed">分享失败:%1$s</string>
+    <string name="files_nothing_to_share">没有可分享的文件</string>
+    <string name="files_drag_cached_only">先分享或打开下载到本地,再拖出</string>
+    <string name="files_cancel_all">全部取消</string>
+    <string name="files_queue_n">还有 %1$d 批</string>
     <string name="files_up">上一级</string>
     <string name="files_upload">上传</string>
     <string name="files_upload_failed">上传失败:%1$s</string>
@@ -329,6 +335,12 @@
     <string name="term_pane_focused">已聚焦</string>
     <string name="term_unlock_subtitle">用生物识别或锁屏密码继续</string>
     <string name="term_unlock_title">解锁已保存的凭据</string>
+    <plurals name="files_transfer_queued">
+        <item quantity="other">已排队 · 第 %1$d 批</item>
+    </plurals>
+    <plurals name="files_queue_cleared">
+        <item quantity="other">已清空 %1$d 批排队</item>
+    </plurals>
     <plurals name="files_cancelled_downloaded">
         <item quantity="other">已取消(已下载 %d 个)</item>
     </plurals>

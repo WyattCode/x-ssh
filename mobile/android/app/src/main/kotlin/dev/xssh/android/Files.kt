@@ -1,5 +1,6 @@
 package dev.xssh.android
 
+import android.content.ClipData
 import android.net.Uri
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
@@ -30,7 +31,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.draganddrop.dragAndDropTarget
+import androidx.compose.foundation.draganddrop.dragAndDropSource
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -78,6 +81,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draganddrop.DragAndDropEvent
 import androidx.compose.ui.draganddrop.DragAndDropTarget
 import androidx.compose.ui.draganddrop.toAndroidDragEvent
+import androidx.compose.ui.draganddrop.DragAndDropTransferData
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
@@ -95,6 +99,8 @@ import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.isShiftPressed
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -285,6 +291,8 @@ fun FilesPane(
     // 走过的目录(手机:返回键一级一级退回去,退空了才离开这一页)。
     val history = remember { mutableStateListOf<String>() }
     val transfer by files.transfer.collectAsState()
+    val queued by files.queued.collectAsState()
+    val cacheEpoch by files.cacheEpoch.collectAsState()
     val notice by files.notice.collectAsState()
     val changed by files.changed.collectAsState()
 
@@ -392,7 +400,7 @@ fun FilesPane(
         if (tree != null && targets != null) files.downloadTo(targets, tree, context)
     }
     fun downloadTo(targets: List<RemoteEntry>) {
-        if (targets.isEmpty() || files.busy()) return
+        if (targets.isEmpty()) return
         pendingTargets[0] = targets
         pickTree.launch(null)
     }
@@ -442,10 +450,15 @@ fun FilesPane(
         }
     }
     fun pickFiles() {
-        if (!files.busy()) pickUpload.launch(arrayOf("*/*"))
+        pickUpload.launch(arrayOf("*/*"))
     }
     fun pickFolderToUpload() {
-        if (!files.busy()) pickFolder.launch(null)
+        pickFolder.launch(null)
+    }
+
+    fun share(targets: List<RemoteEntry>) {
+        if (targets.isEmpty()) return
+        files.share(targets, context)
     }
 
     fun open(entry: RemoteEntry) {
@@ -471,6 +484,7 @@ fun FilesPane(
         if (targets.size > 1) {
             add(MenuAction(res.getQuantityString(R.plurals.files_download_n, targets.size, targets.size), shortcut = "Ctrl+D") { download(targets) })
             add(MenuAction(res.getString(R.string.files_download_to)) { downloadTo(targets) })
+            add(MenuAction(res.getString(R.string.files_share)) { share(targets) })
             add(MenuAction(res.getString(R.string.files_copy_path), shortcut = "Ctrl+C") { copyPaths(targets) })
             add(
                 MenuAction(res.getQuantityString(R.plurals.files_delete_n_ellipsis, targets.size, targets.size), danger = true, shortcut = "Delete") {
@@ -482,6 +496,7 @@ fun FilesPane(
         add(MenuAction(res.getString(R.string.files_open), shortcut = res.getString(R.string.files_key_enter)) { open(entry) })
         add(MenuAction(res.getString(R.string.files_download), shortcut = "Ctrl+D") { download(targets) })
         add(MenuAction(res.getString(R.string.files_download_to)) { downloadTo(targets) })
+        add(MenuAction(res.getString(R.string.files_share)) { share(targets) })
         add(MenuAction(res.getString(R.string.files_copy_path), shortcut = "Ctrl+C") { copyPaths(targets) })
         add(MenuAction(res.getString(R.string.files_rename_ellipsis), shortcut = "F2") { dialog = FilesDialog.Rename(entry) })
         add(MenuAction(res.getString(R.string.files_select_multiple)) {
@@ -678,11 +693,20 @@ fun FilesPane(
                 count = marked.size,
                 onDownload = { download(selection()) },
                 onDownloadTo = { downloadTo(selection()) },
+                onShare = { share(selection()) },
                 onDelete = { selection().takeIf { it.isNotEmpty() }?.let { dialog = FilesDialog.Delete(it) } },
                 onDone = ::clearSelection,
             )
         }
-        transfer?.let { TransferBar(it, inset = barInset, onCancel = files::cancelTransfer) }
+        transfer?.let {
+            TransferBar(
+                it,
+                queued = queued,
+                inset = barInset,
+                onCancel = files::cancelTransfer,
+                onCancelAll = files::cancelAllTransfers,
+            )
+        }
         NoticeBar(notice, inset = barInset)
     }
     val dropModifier = Modifier
@@ -724,9 +748,18 @@ fun FilesPane(
                 select = { only(it.path) },
                 download = { download(listOf(it)) },
                 downloadTo = { downloadTo(listOf(it)) },
+                share = { share(listOf(it)) },
                 copyPath = { copyPaths(listOf(it)) },
                 rename = { dialog = FilesDialog.Rename(it) },
                 delete = { dialog = FilesDialog.Delete(listOf(it)) },
+                cachedUri = { cacheEpoch; files.cachedUri(it.path) },
+                prepareDrag = { entry ->
+                    if (entry.isDir) files.notify(FileText.of(R.string.files_drag_cached_only))
+                    else {
+                        files.notify(FileText.of(R.string.files_drag_cached_only))
+                        share(listOf(entry))
+                    }
+                },
             ),
             bars = bars,
         )
@@ -909,9 +942,14 @@ private class PhoneFileActions(
     val select: (RemoteEntry) -> Unit,
     val download: (RemoteEntry) -> Unit,
     val downloadTo: (RemoteEntry) -> Unit,
+    val share: (RemoteEntry) -> Unit,
     val copyPath: (RemoteEntry) -> Unit,
     val rename: (RemoteEntry) -> Unit,
     val delete: (RemoteEntry) -> Unit,
+    /** 已缓存的本地 URI(打开 / 分享后),供详情栏鼠标拖出。 */
+    val cachedUri: (RemoteEntry) -> android.net.Uri? = { null },
+    /** 还没缓存时点拖:走分享下载。 */
+    val prepareDrag: (RemoteEntry) -> Unit = {},
 )
 
 /**
@@ -1235,9 +1273,12 @@ private fun FileDetailPane(
                 .verticalScroll(rememberScrollState())
                 .padding(start = Gutter * 2, end = endPad, top = Gutter),
         ) {
+            val dragUri = if (!entry.isDir) actions.cachedUri(entry) else null
             Text(
                 entry.name,
-                Modifier.offset(x = -TitleOptical),
+                Modifier
+                    .offset(x = -TitleOptical)
+                    .remoteDragOut(dragUri, entry.name) { actions.prepareDrag(entry) },
                 color = p.text,
                 fontSize = 28.sp,
                 fontWeight = FontWeight.Bold,
@@ -1278,6 +1319,9 @@ private fun FileDetailPane(
                 XsshButton(stringResource(R.string.files_download_to), kind = ButtonKind.Ghost, modifier = Modifier.weight(1f)) {
                     actions.downloadTo(entry)
                 }
+            }
+            XsshButton(stringResource(R.string.files_share), kind = ButtonKind.Ghost, modifier = Modifier.fillMaxWidth()) {
+                actions.share(entry)
             }
             Row(horizontalArrangement = Arrangement.spacedBy(GapItem)) {
                 XsshButton(stringResource(R.string.files_rename), kind = ButtonKind.Ghost, modifier = Modifier.weight(1f)) { actions.rename(entry) }
@@ -1398,6 +1442,7 @@ private fun SelectionBar(
     count: Int,
     onDownload: () -> Unit,
     onDownloadTo: () -> Unit,
+    onShare: () -> Unit,
     onDelete: () -> Unit,
     onDone: () -> Unit,
 ) {
@@ -1419,6 +1464,7 @@ private fun SelectionBar(
             if (count > 0) {
                 ToolbarTextButton(stringResource(R.string.files_download), p.accent) { onDownload() }
                 ToolbarTextButton(stringResource(R.string.files_download_to), p.accent) { onDownloadTo() }
+                ToolbarTextButton(stringResource(R.string.files_share), p.accent) { onShare() }
                 ToolbarTextButton(stringResource(R.string.files_delete), p.danger) { onDelete() }
             }
             ToolbarTextButton(stringResource(R.string.files_done), p.text, bold = true) { onDone() }
@@ -1687,9 +1733,15 @@ private fun CenterNote(text: String, action: (@Composable () -> Unit)? = null) {
     }
 }
 
-/** 底部的传输条:文件名、进度、已传 / 总共,右边「取消」。 */
+/** 底部的传输条:文件名、进度、已传 / 总共;排队批数;「取消」当前 / 「全部取消」。 */
 @Composable
-private fun TransferBar(t: Transfer, inset: androidx.compose.ui.unit.Dp, onCancel: () -> Unit) {
+private fun TransferBar(
+    t: Transfer,
+    queued: Int,
+    inset: androidx.compose.ui.unit.Dp,
+    onCancel: () -> Unit,
+    onCancelAll: () -> Unit,
+) {
     val p = LocalXssh.current
     val fraction = if (t.total > 0) (t.done.toFloat() / t.total).coerceIn(0f, 1f) else 0f
     Column(Modifier.fillMaxWidth().background(p.cardBg)) {
@@ -1715,6 +1767,10 @@ private fun TransferBar(t: Transfer, inset: androidx.compose.ui.unit.Dp, onCance
                         overflow = TextOverflow.MiddleEllipsis,
                         modifier = Modifier.weight(1f),
                     )
+                    if (queued > 0) {
+                        Text(stringResource(R.string.files_queue_n, queued), color = p.textFaint, fontSize = 12.sp)
+                        Spacer(Modifier.width(10.dp))
+                    }
                     if (t.count > 1) {
                         Text("${t.index + 1}/${t.count}", color = p.textFaint, fontSize = 12.sp)
                         Spacer(Modifier.width(12.dp))
@@ -1737,6 +1793,9 @@ private fun TransferBar(t: Transfer, inset: androidx.compose.ui.unit.Dp, onCance
                 }
             }
             Spacer(Modifier.width(8.dp))
+            if (queued > 0) {
+                ToolbarTextButton(stringResource(R.string.files_cancel_all), p.danger) { onCancelAll() }
+            }
             ToolbarTextButton(stringResource(R.string.files_cancel), p.danger) { onCancel() }
         }
     }
@@ -1893,3 +1952,73 @@ private fun NameDialog(
         LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
     }
 }
+
+/**
+ * 双栏详情文件名上的拖出(Pad / Fold 接鼠标)。
+ * 已有本地 URI → [dragAndDropSource] 拖给别的应用;尚未缓存 → 鼠标拖一下触发 [onNeedCache](分享下载)。
+ * **只认鼠标 / 触控笔**,手指滑动仍交给详情滚动;列表长按菜单不受影响。
+ */
+@OptIn(ExperimentalFoundationApi::class)
+private fun Modifier.remoteDragOut(uri: android.net.Uri?, label: String, onNeedCache: () -> Unit): Modifier {
+    if (uri != null) {
+        return this.dragAndDropSource {
+            awaitPointerEventScope {
+                while (true) {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    if (down.type != PointerType.Mouse && down.type != PointerType.Stylus) continue
+                    val slop = viewConfiguration.touchSlop
+                    var dx = 0f
+                    var dy = 0f
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                        if (!change.pressed) break
+                        dx += change.positionChange().x
+                        dy += change.positionChange().y
+                        if ((dx * dx + dy * dy) > slop * slop) {
+                            change.consume()
+                            startTransfer(DragAndDropTransferData(clipData = ClipData.newUri(null, label, uri)))
+                            while (true) {
+                                val ev = awaitPointerEvent()
+                                val c = ev.changes.firstOrNull { it.id == down.id } ?: break
+                                c.consume()
+                                if (!c.pressed) break
+                            }
+                            break
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return this.pointerInput(label) {
+        awaitPointerEventScope {
+            while (true) {
+                val down = awaitFirstDown(requireUnconsumed = false)
+                if (down.type != PointerType.Mouse && down.type != PointerType.Stylus) continue
+                val slop = viewConfiguration.touchSlop
+                var dx = 0f
+                var dy = 0f
+                while (true) {
+                    val event = awaitPointerEvent()
+                    val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                    if (!change.pressed) break
+                    dx += change.positionChange().x
+                    dy += change.positionChange().y
+                    if ((dx * dx + dy * dy) > slop * slop) {
+                        change.consume()
+                        onNeedCache()
+                        while (true) {
+                            val ev = awaitPointerEvent()
+                            val c = ev.changes.firstOrNull { it.id == down.id } ?: break
+                            c.consume()
+                            if (!c.pressed) break
+                        }
+                        break
+                    }
+                }
+            }
+        }
+    }
+}
+
