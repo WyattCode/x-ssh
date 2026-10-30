@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useSessions } from '../stores/sessions'
 import { useI18n } from '../lib/i18n'
 import { canRevealHistory } from '../lib/transferHistory'
@@ -12,6 +12,7 @@ import {
   histStatusLabel,
   isCancelled
 } from '../lib/transferFormat'
+import { allPausedFlag, prunePaused, toggleId } from '../lib/transferPause'
 import type { SftpProgress, TransferHistoryItem } from '../../../shared/types'
 import Icon from './Icon.vue'
 
@@ -45,6 +46,10 @@ function togglePauseAll(): void {
   else pausedIds.clear()
   window.api.sftp.pauseAll(allPaused.value)
 }
+// A plain Set is not reactive in Vue 3, so every mutation *replaces* the Set
+// (see lib/transferPause) — otherwise the per-row glyph only flips on the next
+// progress tick.
+const pausedIds = ref<Set<string>>(new Set())
 
 // Live rows (all sessions), kept in arrival order. Failed/cancelled transfers
 // linger in `store.transfers` for a few seconds before cleanup — keep them here
@@ -57,6 +62,40 @@ const active = computed(() =>
 
 // Rows that are still running (pause/cancel apply only to these).
 const running = computed(() => active.value.filter((x) => !isResidual(x)))
+// True only while every running row is paused: a new job (or a finished one)
+// flips it back, so the header stops offering 「全部继续」.
+const allPaused = computed(() =>
+  allPausedFlag(active.value.map((x) => x.id), pausedIds.value)
+)
+
+function togglePause(id: string): void {
+  const paused = !pausedIds.value.has(id)
+  pausedIds.value = toggleId(pausedIds.value, id, paused)
+  window.api.sftp.pause(id, paused)
+}
+function togglePauseAll(): void {
+  const pause = !allPaused.value
+  // Bulk pause mirrors the main process's set: pause adds every active id,
+  // resume clears them, so per-row icons stay truthful.
+  if (pause) {
+    const next = new Set(pausedIds.value)
+    for (const x of active.value) next.add(x.id)
+    pausedIds.value = next
+  } else {
+    pausedIds.value = new Set()
+  }
+  window.api.sftp.pauseAll(pause)
+}
+
+// A finished / cancelled row leaves `active`: forget its pause flag so a later
+// job that happens to reuse the id does not start out looking paused.
+watch(
+  () => active.value.map((x) => x.id),
+  (ids) => {
+    const pruned = prunePaused(pausedIds.value, ids)
+    if (pruned !== pausedIds.value) pausedIds.value = pruned
+  }
+)
 
 // Recent finished transfers for the clean status badge.
 const recent = computed(() => store.transferHistory.slice(0, 12))
@@ -106,7 +145,7 @@ function eta(x: SftpProgress): string {
     <section class="tpanel">
       <header class="tp-head">
         <span class="tp-title">{{ t('tpanel.title') }}</span>
-        <button class="tp-x" title="Close" @click="store.toggleTransferPanel(false)">
+        <button class="tp-x" :title="t('sfp.close')" @click="store.toggleTransferPanel(false)">
           <Icon name="close" :size="16" />
         </button>
       </header>

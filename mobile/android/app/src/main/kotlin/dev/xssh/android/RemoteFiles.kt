@@ -26,6 +26,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withContext
 import uniffi.xssh_ffi.FfiException
 import uniffi.xssh_ffi.RemoteEntry
@@ -162,7 +163,27 @@ class RemoteFiles(session: Session, private val scope: CoroutineScope) {
             if (closed) throw FileTextException(FileText.of(R.string.files_disconnected))
             sftp ?: session.openSftp().also { sftp = it }
         }
-        return block(s)
+        try {
+            return block(s)
+        } catch (t: CancellationException) {
+            // 换目录会 cancel 上一次 list —— 通道本身没坏,别丢掉。
+            throw t
+        } catch (t: Throwable) {
+            // 通道坏了(EOF、连接断了、子系统挂了):别把死句柄留给下一次调用 ——
+            // 否则换目录 / 再传一次都还是同一个坏通道,要等用户点「重试」才会重开。
+            // 只在它还是当前那一个时才丢(并发的 reset / rebind 可能已经换过了),
+            // 释放照 reset() 的做法丢到 IO 线程,别在调用线程上等。
+            val dropped = synchronized(lock) {
+                if (shouldDropSftpHandle(sftp, s)) {
+                    sftp = null
+                    true
+                } else {
+                    false
+                }
+            }
+            if (dropped) scope.launch(Dispatchers.IO) { release(s) }
+            throw t
+        }
     }
 
     /** 丢掉当前通道,下次用到时重开(列目录失败后点「重试」)。 */
