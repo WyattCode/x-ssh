@@ -2797,7 +2797,7 @@ export class SshManager {
   historyList(): { sessionId: string; label: string; text: string }[] {
     const out: { sessionId: string; label: string; text: string }[] = []
     for (const [id, s] of this.sessions) {
-      if (s.history) out.push({ sessionId: id, label: s.label ?? '会话', text: s.history })
+      if (s.history) out.push({ sessionId: id, label: s.label ?? '', text: s.history })
     }
     return out
   }

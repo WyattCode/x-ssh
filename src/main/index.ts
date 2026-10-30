@@ -1285,8 +1285,10 @@ function registerIpc(): void {
           a.name.localeCompare(b.name, 'zh')
         const entries = dirs.sort(sort).concat(files.sort(sort))
         return { path: resolved, entries }
-      } catch {
-        return { path: resolved, entries: [] }
+      } catch (e) {
+        // Surface to the drawer (refreshLocal catch → sfp.localErr). Returning
+        // an empty listing made EACCES / ENOENT look like an empty folder.
+        throw e
       }
     }
   )
@@ -2161,12 +2163,16 @@ function registerIpc(): void {
   // http/https on purpose: the URL comes from whatever the remote host printed,
   // and handing an arbitrary scheme to the OS would let it launch local
   // protocol handlers (file:, smb:, ms-*:).
-  ipcMain.handle(IPC.openExternal, (_e, url: string) => {
+  ipcMain.handle(IPC.openExternal, async (_e, url: string) => {
     if (!isWebUrl(url)) return false
     // openExternal REJECTS when the OS has no handler for the URL; an
     // unhandled rejection in main is fatal on current Node defaults.
-    shell.openExternal(url).catch(() => undefined)
-    return true
+    try {
+      await shell.openExternal(url)
+      return true
+    } catch {
+      return false
+    }
   })
 
   // Native notification (session drop, transfer completion…). The renderer
