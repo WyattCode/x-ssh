@@ -212,6 +212,8 @@
     <string name="set_language">语言</string>
     <string name="set_selected">已选中</string>
     <string name="set_terminal_font">终端字体</string>
+    <string name="set_terminal_theme">终端配色</string>
+    <string name="set_term_theme_system">跟随外观</string>
     <string name="set_title">设置</string>
     <string name="snip_cancel">取消</string>
     <string name="snip_command">命令</string>

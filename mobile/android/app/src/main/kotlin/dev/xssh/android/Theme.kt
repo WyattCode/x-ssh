@@ -77,6 +77,8 @@ data class XsshPalette(
     val termBg: Color,
     val termFg: Color,
     val termCursor: Color,
+    /** 选区叠色(含透明度);具名配色方案可覆盖。 */
+    val termSelection: Color,
     /** 终端 16 色(ANSI 0..15),交给 Rust 解析颜色时用。浅色底上不能沿用深色那套。 */
     val term16: List<Long>,
 )
@@ -110,6 +112,7 @@ val DarkPalette = XsshPalette(
     termBg = Color(0xFF000000),
     termFg = Color(0xFFF2F2F7),
     termCursor = Color(0xFF0A84FF),
+    termSelection = Color(0xFF0A84FF).copy(alpha = 0.32f),
     // 与 Rust 核心的默认 16 色一致(深色底上对比度够的一组)。
     term16 = listOf(
         0x000000, 0xCD3131, 0x0DBC79, 0xE5E510, 0x2472C8, 0xBC3FBC, 0x11A8CD, 0xE5E5E5,
@@ -152,6 +155,7 @@ val LightPalette = XsshPalette(
     termBg = Color(0xFFFFFFFF),
     termFg = Color(0xFF1C1C1E),
     termCursor = Color(0xFF007AFF),
+    termSelection = Color(0xFF007AFF).copy(alpha = 0.32f),
     // 白底终端配色:"白色"文字在白底上看不见,换成中灰;黄色压暗。
     term16 = listOf(
         0x000000, 0xCD3131, 0x00A000, 0x949800, 0x0451A5, 0xBC05BC, 0x0598BC, 0x555555,
@@ -253,7 +257,9 @@ fun XsshTheme(mode: ThemeMode = ThemeMode.System, content: @Composable () -> Uni
         ThemeMode.Dark -> true
         ThemeMode.System -> isSystemInDarkTheme()
     }
-    val palette = if (dark) DarkPalette else LightPalette
+    val base = if (dark) DarkPalette else LightPalette
+    // 设置里选的终端配色叠在 term* 上;UI 铬色仍跟外观走。
+    val palette = base.withTerminalScheme(TerminalSchemeChoice.currentId)
 
     // 状态栏、导航条的图标颜色跟着主题翻:浅色底上要深色图标,否则时间和电量都看不见。
     val view = LocalView.current

@@ -333,6 +333,19 @@ class UiPrefs(context: Context) {
             prefs.edit().putString(KEY_TERM_FONT, value).apply()
         }
 
+    /**
+     * 终端配色方案 id(与桌面 `terminalTheme` 同名:nord / dracula …)。
+     * null 或空 = 跟随外观。
+     */
+    var terminalTheme: String?
+        get() = prefs.getString(KEY_TERM_THEME, null)?.takeIf { it.isNotEmpty() }
+        set(value) {
+            val v = value?.takeIf { it.isNotEmpty() }
+            val edit = prefs.edit()
+            if (v == null) edit.remove(KEY_TERM_THEME) else edit.putString(KEY_TERM_THEME, v)
+            edit.apply()
+        }
+
     /** 终端字号。手指缩放调过之后要记住,否则每开一个会话都得重新捏一次。 */
     var terminalFontSize: Float
         get() = prefs.getFloat(KEY_FONT, 14f).coerceIn(FONT_MIN, FONT_MAX)
@@ -398,5 +411,6 @@ class UiPrefs(context: Context) {
         const val FONT_MAX = 30f
         private const val KEY_FONT = "terminalFontSize"
         private const val KEY_TERM_FONT = "terminalFont"
+        private const val KEY_TERM_THEME = "terminalTheme"
     }
 }

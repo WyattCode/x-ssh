@@ -10,7 +10,6 @@ export interface TerminalPalette {
   cursorAccent: string
   selectionBackground: string
   black: string
-  brightBlack: string
   red: string
   green: string
   yellow: string
@@ -18,6 +17,14 @@ export interface TerminalPalette {
   magenta: string
   cyan: string
   white: string
+  brightBlack: string
+  brightRed: string
+  brightGreen: string
+  brightYellow: string
+  brightBlue: string
+  brightMagenta: string
+  brightCyan: string
+  brightWhite: string
 }
 
 export interface TerminalPreset {
@@ -40,7 +47,14 @@ const systemDark: TerminalPalette = {
   blue: '#6ea8fe',
   magenta: '#da77f2',
   cyan: '#3bc9db',
-  white: '#e6e8ec'
+  white: '#e6e8ec',
+  brightRed: '#ff6b6b',
+  brightGreen: '#51cf66',
+  brightYellow: '#ffd43b',
+  brightBlue: '#6ea8fe',
+  brightMagenta: '#da77f2',
+  brightCyan: '#3bc9db',
+  brightWhite: '#e6e8ec'
 }
 
 const systemLight: TerminalPalette = {
@@ -57,7 +71,14 @@ const systemLight: TerminalPalette = {
   blue: '#2f6fed',
   magenta: '#ae3ec9',
   cyan: '#1098ad',
-  white: '#5c636e'
+  white: '#5c636e',
+  brightRed: '#e03131',
+  brightGreen: '#2f9e44',
+  brightYellow: '#f08c00',
+  brightBlue: '#2f6fed',
+  brightMagenta: '#ae3ec9',
+  brightCyan: '#1098ad',
+  brightWhite: '#5c636e'
 }
 
 export const PRESETS: TerminalPreset[] = [
@@ -78,7 +99,14 @@ export const PRESETS: TerminalPreset[] = [
       blue: '#81a1c1',
       magenta: '#b48ead',
       cyan: '#88c0d0',
-      white: '#e5e9f0'
+      white: '#e5e9f0',
+      brightRed: '#bf616a',
+      brightGreen: '#a3be8c',
+      brightYellow: '#ebcb8b',
+      brightBlue: '#81a1c1',
+      brightMagenta: '#b48ead',
+      brightCyan: '#88c0d0',
+      brightWhite: '#e5e9f0'
     }
   },
   {
@@ -98,7 +126,14 @@ export const PRESETS: TerminalPreset[] = [
       blue: '#bd93f9',
       magenta: '#ff79c6',
       cyan: '#8be9fd',
-      white: '#f8f8f2'
+      white: '#f8f8f2',
+      brightRed: '#ff5555',
+      brightGreen: '#50fa7b',
+      brightYellow: '#f1fa8c',
+      brightBlue: '#bd93f9',
+      brightMagenta: '#ff79c6',
+      brightCyan: '#8be9fd',
+      brightWhite: '#f8f8f2'
     }
   },
   {
@@ -118,7 +153,14 @@ export const PRESETS: TerminalPreset[] = [
       blue: '#268bd2',
       magenta: '#d33682',
       cyan: '#2aa198',
-      white: '#eee8d5'
+      white: '#eee8d5',
+      brightRed: '#dc322f',
+      brightGreen: '#859900',
+      brightYellow: '#b58900',
+      brightBlue: '#268bd2',
+      brightMagenta: '#d33682',
+      brightCyan: '#2aa198',
+      brightWhite: '#eee8d5'
     }
   },
   {
@@ -138,7 +180,14 @@ export const PRESETS: TerminalPreset[] = [
       blue: '#61afef',
       magenta: '#c678dd',
       cyan: '#56b6c2',
-      white: '#d0d7e5'
+      white: '#d0d7e5',
+      brightRed: '#e06c75',
+      brightGreen: '#98c379',
+      brightYellow: '#e5c07b',
+      brightBlue: '#61afef',
+      brightMagenta: '#c678dd',
+      brightCyan: '#56b6c2',
+      brightWhite: '#d0d7e5'
     }
   },
   {
@@ -158,7 +207,14 @@ export const PRESETS: TerminalPreset[] = [
       blue: '#83a598',
       magenta: '#d3869b',
       cyan: '#8ec07c',
-      white: '#ebdbb2'
+      white: '#ebdbb2',
+      brightRed: '#fb4934',
+      brightGreen: '#b8bb26',
+      brightYellow: '#fabd2f',
+      brightBlue: '#83a598',
+      brightMagenta: '#d3869b',
+      brightCyan: '#8ec07c',
+      brightWhite: '#ebdbb2'
     }
   },
   {
@@ -178,7 +234,14 @@ export const PRESETS: TerminalPreset[] = [
       blue: '#66d9ef',
       magenta: '#ae81ff',
       cyan: '#a1efe4',
-      white: '#f9f8f5'
+      white: '#f9f8f5',
+      brightRed: '#f92672',
+      brightGreen: '#a6e22e',
+      brightYellow: '#f4bf75',
+      brightBlue: '#66d9ef',
+      brightMagenta: '#ae81ff',
+      brightCyan: '#a1efe4',
+      brightWhite: '#f9f8f5'
     }
   }
 ]
