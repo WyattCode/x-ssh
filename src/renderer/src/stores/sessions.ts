@@ -1594,6 +1594,10 @@ export const useSessions = defineStore('sessions', {
         const host = hostKeyHost ?? found.pane.params.host
         const r = await window.api.ssh.trustHostKey(host, hostKeyPort ?? (found.pane.params.port || 22), hostKey)
         if (!r?.ok) {
+          toast(
+            r?.code === 'corrupt' ? t('app.trustFailCorrupt') : t('app.trustFail'),
+            'error'
+          )
           await this.reconnect(paneId)
           return
         }

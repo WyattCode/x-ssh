@@ -4,6 +4,14 @@ import { mkdir } from 'node:fs/promises'
 import { parseJson, readDurable, writeDurable } from './durableFile'
 import type { KnownHostEntry } from '../shared/types'
 
+/** Thrown when known_hosts.json (+.bak) is unreadable and a write would wipe prior fingerprints. */
+export class KnownHostsCorruptError extends Error {
+  constructor(message = 'known_hosts.json is unreadable; refusing to overwrite it') {
+    super(message)
+    this.name = 'KnownHostsCorruptError'
+  }
+}
+
 /**
  * Trust-on-first-use store of server host-key fingerprints, keyed by
  * "host:port". First connection records the SHA-256 fingerprint; a later
@@ -35,13 +43,16 @@ export class KnownHosts {
       }
     } catch {
       this.map = {}
+      this.loadFailed = true
     }
     this.loaded = true
   }
 
-  private async persist(): Promise<void> {
-    // Unreadable file and nothing trusted this session: leave it for recovery.
-    if (this.loadFailed && Object.keys(this.map).length === 0) return
+  private async persist(force = false): Promise<void> {
+    // Corrupt file: refuse any write that isn't a deliberate full restore (importAll).
+    // The old guard only skipped when map was empty — trusting one new host then
+    // wrote {thatOne} and wiped every other fingerprint.
+    if (this.loadFailed && !force) throw new KnownHostsCorruptError()
     await mkdir(this.dir, { recursive: true })
     await writeDurable(this.file, JSON.stringify(this.map, null, 2))
     this.loadFailed = false
@@ -56,6 +67,7 @@ export class KnownHosts {
   }
 
   async set(host: string, port: number, fingerprint: string): Promise<void> {
+    if (this.loadFailed) throw new KnownHostsCorruptError()
     const k = KnownHosts.key(host, port)
     const existing = this.map[k]
     // A replaced key is a new key: its age starts now (firstSeen drives the
@@ -65,12 +77,14 @@ export class KnownHosts {
   }
 
   async forget(host: string, port: number): Promise<void> {
+    if (this.loadFailed) throw new KnownHostsCorruptError()
     delete this.map[KnownHosts.key(host, port)]
     await this.persist()
   }
 
   /** Replaces the whole map from a backup (known-host entries from an export).
-   *  Used by data:importAll so a full restore is symmetric with the export. */
+   *  Used by data:importAll so a full restore is symmetric with the export.
+   *  A user-chosen full restore is allowed to overwrite a corrupt file. */
   async importAll(entries: KnownHostEntry[]): Promise<void> {
     const map: Record<string, { fp: string; firstSeen?: number }> = {}
     for (const e of entries) {
@@ -78,7 +92,7 @@ export class KnownHosts {
       map[KnownHosts.key(e.host, e.port)] = { fp: e.fingerprint, firstSeen: e.firstSeen }
     }
     this.map = map
-    await this.persist()
+    await this.persist(true)
   }
 
   /** All known hosts, sorted by host for the settings page. */
@@ -95,5 +109,10 @@ export class KnownHosts {
         }
       })
       .sort((a, b) => a.host.localeCompare(b.host) || a.port - b.port)
+  }
+
+  /** Whether known_hosts.json failed to parse this session (writes refused). */
+  status(): { loadFailed: boolean } {
+    return { loadFailed: this.loadFailed }
   }
 }

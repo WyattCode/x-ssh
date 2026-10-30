@@ -1,3 +1,9 @@
+> **M3.165(分支 `fix/review-polish-m3165`,基于 main @ 5946b1f)—— 请勿合并,待复核**
+> - **A. `known_hosts.json` 损坏时 fail-closed**:`KnownHosts` 新增 `KnownHostsCorruptError`;`load()` 解析失败(主文件与 `.bak` 都读不出)时置 `loadFailed`,`set()` / `forget()` 在**改动内存 map 之前**直接抛错,`persist()` 在 `loadFailed` 且非 `force` 时拒绝写入 —— 旧逻辑只在 map 为空时跳过,信任一台新主机就会把 `{那一台}` 写回去、抹掉其余全部指纹。`importAll()`(用户主动的整份恢复)走 `persist(true)`,允许覆盖损坏文件并清掉 `loadFailed`。新增 `status()` 供主进程判断;`list()` 不抛错(设置页照常显示空列表)。
+> - **B. 信任失败提示**:`ssh:trustHostKey` 返回 `{ ok, code?: 'corrupt' | 'rejected' | 'error', error? }`;渲染层 `trustAndReconnect` 按 `code === 'corrupt'` 弹 `app.trustFailCorrupt`(说明已拒绝写入、请修复或从备份恢复),其余弹 `app.trustFail`。`knownHosts:forget` / `ssh:forgetHostKey` 改为 `{ ok }` / `{ ok: false, error }`(与 #63 同形,便于合并),设置页删除失败会提示 `set.sec.forgetFail`。
+> - 新增 `src/main/knownHosts.test.ts`(4 条:损坏时 set / forget 抛错且文件字节不变、`importAll` 可覆盖并清标志、正常 load 后 set 生效)。
+> - 仅 Windows 这一片;未动 macOS / iOS / Android。
+
 # X-SSH 交接文档
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。
