@@ -619,6 +619,8 @@ private fun HostListPane(
                     val open = host.id == openId
                     SwipeActions(
                         open = open,
+                        // 它被别的哪些主机当作跳板机:确认删除时要说清楚。
+                        jumpUsedBy = LocalHosts.current.count { it.jumpHostId == host.id },
                         onDragStart = { if (openId != host.id) openId = null },
                         onOpenChange = { nowOpen ->
                             openId = if (nowOpen) host.id else null
@@ -976,6 +978,8 @@ private val RevealWidth = ActionTile * 2 + ActionGap * 2
 @Composable
 private fun SwipeActions(
     open: Boolean,
+    /** 有几台主机把它当跳板机(0 = 没有):只影响「确认删除」的文案,不拦删除。 */
+    jumpUsedBy: Int = 0,
     modifier: Modifier = Modifier,
     onDragStart: () -> Unit,
     onOpenChange: (Boolean) -> Unit,
@@ -1021,6 +1025,12 @@ private fun SwipeActions(
     val progress = (-offset.value / reveal).coerceIn(0f, 1f)
     val editLabel = stringResource(R.string.host_edit)
     val deleteLabel = stringResource(R.string.host_delete)
+    // 确认那一下要说清楚"删了它,还有几台主机连不上"(它被当作跳板机时)。
+    val confirmLabel = if (jumpUsedBy > 0) {
+        stringResource(R.string.host_confirm_delete_jump, jumpUsedBy)
+    } else {
+        stringResource(R.string.host_confirm_delete)
+    }
     Box(
         modifier
             .fillMaxWidth()
@@ -1058,7 +1068,7 @@ private fun SwipeActions(
         ) {
             Spacer(Modifier.width(ActionGap))
             if (confirming) {
-                SwipeTile(stringResource(R.string.host_confirm_delete), p.bg, p.danger, Modifier.width(ActionTile * 2 + ActionGap)) {
+                SwipeTile(confirmLabel, p.bg, p.danger, Modifier.width(ActionTile * 2 + ActionGap)) {
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                     deleteOnce()
                 }

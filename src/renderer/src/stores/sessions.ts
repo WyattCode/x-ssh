@@ -113,6 +113,13 @@ function toPlain<T>(value: T): T {
 // would otherwise orphan a live SSH session by overwriting its id.
 const inFlight = new Set<string>()
 
+// Panes whose host key is being trusted right now. A double-click (or Enter +
+// click) on the trust button used to run trustAndReconnect twice: the first
+// call consumes the rejection, the second gets `{ ok: false }` and still
+// reconnects while the first write is in flight. Android's HostKeyGate has
+// ignored re-entry since M3.105; this is the desktop equivalent.
+const trustingPanes = new Set<string>()
+
 // Sessions the store has deliberately closed (a reconnect replacing a dead
 // session, a tab being torn down). Main still emits their final error/closed
 // event, which would otherwise be attributed to whatever pane now holds that
@@ -1987,10 +1994,30 @@ export const useSessions = defineStore('sessions', {
           // bring the rejection card back with no explanation.
           toast(t('app.trustFail'), 'error')
           return
+      // Ignore re-entry: the second click would find the rejection already
+      // consumed and reconnect on top of the first call's in-flight write.
+      if (trustingPanes.has(paneId)) return
+      trustingPanes.add(paneId)
+      try {
+        const found = this.findPane(paneId)
+        if (!found) return
+        const { hostKey, hostKeyHost, hostKeyPort } = found.pane
+        // Main only accepts the key it just refused for that host:port; with no
+        // fingerprint captured there is nothing to trust — reconnecting shows the
+        // card again with the key the server presents.
+        if (hostKey) {
+          const host = hostKeyHost ?? found.pane.params.host
+          const r = await window.api.ssh.trustHostKey(host, hostKeyPort ?? (found.pane.params.port || 22), hostKey)
+          if (!r?.ok) {
+            await this.reconnect(paneId)
+            return
+          }
         }
+        await this.loadKnownHosts()
+        await this.reconnect(paneId)
+      } finally {
+        trustingPanes.delete(paneId)
       }
-      await this.loadKnownHosts()
-      await this.reconnect(paneId)
     },
 
     /** Reconnects a tab's currently-active pane (used by the tab context menu). */

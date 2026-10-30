@@ -356,6 +356,16 @@
 3. **remote-exit:N**:`remoteExec` 非零退出码改为稳定码;PublishKeyDialog `mapError` + 三语 `keyPub.remoteExit`。
 
 **验证**:`typecheck` + `lint:i18n` + vitest **337** / 30 文件全绿(+3 formatTransferName)。未跑 Gradle。未合并。
+# 会话记录:连续改进 M3.145(2026-10-30,复核打磨:SFTP 上传失败 toast + 桌面信任防双击 + 删除跳板主机警告)
+
+功能清单已够,本轮按站立规则做开源复核打磨(不合并)。未动 PR #4–#79(尤其 #79 auth_failed / oldFingerprint;#78 jump_missing;#77 SFTP rename/create/delete;#67 theme;#65/#64 host save/delete toast;#63/#62 forward remove / trust persist)。
+
+**修了**:
+1. **SFTP 上传失败可感知**:`uploadLocalSelection` / `uploadPick` / `uploadDirPick` / `onDrop` / `runDeploy` 在写 `error.value` 的同时 toast。并发成功上传触发的 `load()` 会清空 banner,以前看起来像没反应;下载路径早已 toast。
+2. **桌面信任防重入**:`trustAndReconnect` 用 `trustingPanes` Set 挡住双击/回车+点击。Android HostKeyGate 自 M3.105 已有 `trustOnce`;本轮不改 `!ok` 仍 reconnect 的行为(#62 管 toast / 持久化顺序)。
+3. **删除被当作跳板的主机要警告**:HostsPage / HostEditor 确认文案换 `hosts.deleteConfirmJump`;Android `HostActions` + 左滑 `SwipeActions(jumpUsedBy)` 用 `host_confirm_delete_jump`。只警告不拦删。
+
+**验证**:`typecheck` + `lint:i18n`(桌面 750/750/750,移动端对称) + vitest **334** / 30 文件全绿。未跑 Gradle。未合并。本地 DeepSeek via ds.py tag `xssh-m3145-a`,HAND_APPLY 21/21,无 hand-fix。
 
 ---
 

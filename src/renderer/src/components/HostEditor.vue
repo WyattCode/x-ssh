@@ -468,7 +468,14 @@ function onEnter(e: KeyboardEvent): void {
 
 async function remove(): Promise<void> {
   if (!props.host) return
-  const ok = await confirm(t('hosts.deleteConfirm', { name: props.host.label }), {
+  const host = props.host
+  // Same warning as the host list: other hosts may point at this one as their
+  // jump host, and they stop connecting once it is gone.
+  const deps = store.hosts.filter((x) => x.jumpHostId === host.id)
+  const msg = deps.length
+    ? t('hosts.deleteConfirmJump', { name: host.label, n: deps.length })
+    : t('hosts.deleteConfirm', { name: host.label })
+  const ok = await confirm(msg, {
     title: t('hosts.delete'),
     confirmText: t('hosts.delete'),
     danger: true
@@ -482,6 +489,7 @@ async function remove(): Promise<void> {
     toast(t('hosts.deleteFail'), 'error')
     return
   }
+  store.hosts = await window.api.hosts.delete(host.id)
   emit('close')
 }
 </script>

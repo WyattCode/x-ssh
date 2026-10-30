@@ -876,6 +876,7 @@ const zh: Dict = {
   'hosts.deleteFail': '删除主机失败',
 
   'hosts.saveFail': '保存主机失败',
+  'hosts.deleteConfirmJump': '删除主机「{name}」?另有 {n} 台主机把它当作跳板机,删除后那些主机将无法连接。保存的密码也会一起删除。',
   'hosts.copyOf': '{name} 副本',
   'host.tags': '标签',
   'host.tagsPh': '输入后按回车',
@@ -1771,6 +1772,7 @@ const en: Dict = {
   'hosts.deleteFail': 'Could not delete host',
 
   'hosts.saveFail': 'Could not save host',
+  'hosts.deleteConfirmJump': 'Delete host "{name}"? {n} other host(s) use it as a jump host and will not be able to connect. Its saved password is deleted too.',
   'hosts.copyOf': '{name} copy',
   'host.tags': 'Tags',
   'host.tagsPh': 'Type, then Enter',
@@ -2679,6 +2681,7 @@ const zhTW: Dict = {
   'hosts.deleteFail': '刪除主機失敗',
 
   'hosts.saveFail': '儲存主機失敗',
+  'hosts.deleteConfirmJump': '刪除主機「{name}」?另有 {n} 台主機把它當作跳板機,刪除後那些主機將無法連線。儲存的密碼也會一併刪除。',
   'hosts.copyOf': '{name} 副本',
   'host.tags': '標籤',
   'host.tagsPh': '輸入後按 Enter',

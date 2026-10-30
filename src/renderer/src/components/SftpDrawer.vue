@@ -851,6 +851,14 @@ async function downloadSelectionToLocal(): Promise<void> {
   const paths = localSelectedNames().map((n) => localJoin(localPath.value, n))
   const r = await window.api.sftp.uploadPaths(props.sessionId, path.value, paths, store.transferConcurrency)
   if (!r.ok && !r.canceled) error.value = sftpErr(r.error, 'sfp.uploadFail')
+  if (!r.ok && !r.canceled) {
+    // A concurrent load() (e.g. the reload a *successful* upload triggers)
+    // clears `error`, so the banner alone can vanish without a trace — toast it
+    // too, like the download paths already do.
+    const msg = r.error ?? tt('sfp.uploadFail')
+    error.value = msg
+    toast(msg, 'error')
+  }
 }
 async function downloadSelectionToLocal(): Promise<void> {
   if (!props.sessionId || !localPath.value || !selected.value.size) return
@@ -1168,6 +1176,9 @@ async function runDeploy(): Promise<void> {
       // The drawer's banner sits behind this dialog — report the failure here.
       deploy.error = up.error ?? tt('sfp.deployFail')
       error.value = sftpErr(up.error, 'sfp.deployFail')
+      const msg = up.error ?? tt('sfp.deployFail')
+      error.value = msg
+      toast(msg, 'error')
     }
   } finally {
     deploy.busy = false
@@ -1219,6 +1230,11 @@ async function uploadPick(): Promise<void> {
   try {
     const r = await window.api.sftp.upload(props.sessionId, path.value, store.transferConcurrency)
     if (!r.ok && !r.canceled) error.value = sftpErr(r.error, 'sfp.uploadFail')
+    if (!r.ok && !r.canceled) {
+      const msg = r.error ?? tt('sfp.uploadFail')
+      error.value = msg
+      toast(msg, 'error')
+    }
   } finally {
     busy.value = false
   }
@@ -1229,6 +1245,11 @@ async function uploadDirPick(): Promise<void> {
   try {
     const r = await window.api.sftp.uploadDir(props.sessionId, path.value, store.transferConcurrency)
     if (!r.ok && !r.canceled) error.value = sftpErr(r.error, 'sfp.uploadFail')
+    if (!r.ok && !r.canceled) {
+      const msg = r.error ?? tt('sfp.uploadFail')
+      error.value = msg
+      toast(msg, 'error')
+    }
   } finally {
     busy.value = false
   }
@@ -1260,6 +1281,11 @@ async function onDrop(e: DragEvent): Promise<void> {
   // but do surface failures, or a drop that never starts looks like a no-op.
   const r = await window.api.sftp.uploadPaths(props.sessionId, path.value, paths, store.transferConcurrency)
   if (!r.ok && !r.canceled) error.value = sftpErr(r.error, 'sfp.uploadFail')
+  if (!r.ok && !r.canceled) {
+    const msg = r.error ?? tt('sfp.uploadFail')
+    error.value = msg
+    toast(msg, 'error')
+  }
 }
 function startRename(entry: FileEntry): void {
   renamingName.value = entry.name

@@ -230,6 +230,14 @@ const removing = ref(false)
 async function remove(h: Host): Promise<void> {
   if (removing.value) return
   const ok = await confirm(t('hosts.deleteConfirm', { name: h.label }), {
+  // Deleting a host that others use as their jump host breaks every one of
+  // them (connecting through a deleted jump fails closed since M3.143), so say
+  // so before it happens instead of leaving them looking broken afterwards.
+  const deps = store.hosts.filter((x) => x.jumpHostId === h.id)
+  const msg = deps.length
+    ? t('hosts.deleteConfirmJump', { name: h.label, n: deps.length })
+    : t('hosts.deleteConfirm', { name: h.label })
+  const ok = await confirm(msg, {
     title: t('hosts.delete'),
     confirmText: t('hosts.delete'),
     danger: true

@@ -135,6 +135,7 @@
     <string name="host_cancel">取消</string>
     <string name="host_close_search">關閉搜尋</string>
     <string name="host_confirm_delete">確認刪除</string>
+    <string name="host_confirm_delete_jump">確認刪除(被 %1$d 台當作跳板)</string>
     <string name="host_connect">連線</string>
     <string name="host_credentials">憑證</string>
     <string name="host_delete">刪除</string>

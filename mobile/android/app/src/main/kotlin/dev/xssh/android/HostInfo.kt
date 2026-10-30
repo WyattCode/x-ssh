@@ -261,6 +261,9 @@ fun HostActions(
     onEdit: (Host) -> Unit,
     onDelete: (Host) -> Unit,
 ) {
+    // 还有几台主机把它当跳板机:删掉它,那些主机就连不上了(见 M3.143 的 fail-closed)。
+    // 只用来把「确认删除」写清楚,不拦删除。
+    val jumpUsedBy = LocalHosts.current.count { it.jumpHostId == host.id }
     Column(Modifier.widthIn(max = PageMaxWidth)) {
         // 连上 / 确认删除都只认第一次点:双击在 :disabled 生效前就能把终端推两遍,
         // 或者让 onDelete 在页面离开组合之前跑两次。
@@ -283,8 +286,13 @@ fun HostActions(
                     SessionRegistry.close(host.id)
                 }
             } else {
+                val deleteLabel = if (confirming && jumpUsedBy > 0) {
+                    stringResource(R.string.host_confirm_delete_jump, jumpUsedBy)
+                } else {
+                    stringResource(if (confirming) R.string.host_confirm_delete else R.string.host_delete)
+                }
                 XsshButton(
-                    stringResource(if (confirming) R.string.host_confirm_delete else R.string.host_delete),
+                    deleteLabel,
                     kind = ButtonKind.Danger,
                     modifier = Modifier.weight(1f),
                 ) {

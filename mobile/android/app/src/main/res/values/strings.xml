@@ -136,6 +136,7 @@
     <string name="host_cancel">Cancel</string>
     <string name="host_close_search">Close search</string>
     <string name="host_confirm_delete">Confirm delete</string>
+    <string name="host_confirm_delete_jump">Confirm delete (jump for %1$d)</string>
     <string name="host_connect">Connect</string>
     <string name="host_credentials">Credentials</string>
     <string name="host_delete">Delete</string>
