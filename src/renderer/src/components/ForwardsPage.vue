@@ -143,6 +143,9 @@ async function add(): Promise<void> {
       const r = await store.addForwardTo(pane, rule)
       if (!r.ok) {
         err.value = r.error ?? t('fw.fail')
+        // The form can be closed/collapsed, so the inline line alone is easy to
+        // miss: toast the same message the load path already uses.
+        toast(err.value, 'error')
         return
       }
     }

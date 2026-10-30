@@ -6,6 +6,7 @@ const dialogEl = ref<HTMLElement>()
 useFocusTrap(dialogEl, () => store.replayOpen)
 import { useSessions } from '../stores/sessions'
 import { useI18n } from '../lib/i18n'
+import { useToast } from '../composables/toast'
 import Icon from './Icon.vue'
 
 const store = useSessions()
@@ -18,6 +19,7 @@ watch(
   }
 )
 const { t } = useI18n()
+const { toast } = useToast()
 
 const path = ref('')
 const content = ref('')
@@ -39,6 +41,9 @@ async function load(p: string): Promise<void> {
   if (!r.ok) {
     err.value = r.error ?? t('replay.readFail')
     content.value = ''
+    // The dialog is dismissible (backdrop/Esc/X), so the inline line alone
+    // would vanish with it: toast the same message so the read failure sticks.
+    toast(err.value, 'error')
     return
   }
   content.value = r.content ?? ''
