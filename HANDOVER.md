@@ -197,6 +197,18 @@
 1. **PublishKeyDialog**:`publish`/`revoke` 重入闸 + try/finally;按钮互斥 disabled(抛错不再卡死)。
 2. **SftpDrawer** `downloadSelected`:busy 闸 + try/finally(与 pack 对称;未动 pack/del/sync)。
 3. **Android HostInfo HostActions**:`actOnce` 包住连接与确认删除,防双推终端 / 双删。
+# 会话记录:连续改进 M3.97(2026-10-30,复核打磨:备份 finally + SFTP 跨栏 busy + 首页滑动确认删除一次)
+
+功能清单已够,本轮按站立规则做开源复核打磨(不合并)。未动 PR #31 / #30–#12 与更早的 #4–#11。
+
+**核过已过时 / 已在未合并 PR(本轮不重做)**:
+1–19. 同 M3.96 所列 PR #12–#30。
+20. PublishKeyDialog finally + SftpDrawer downloadSelected busy + HostActions actOnce —— PR #31。
+
+**修了**:
+1. **SettingsDialog** `backupNow`:重入闸 + try/finally(抛错不再卡死备份按钮)。
+2. **SftpDrawer** `uploadLocalSelection` / `downloadSelectionToLocal`:busy 闸 + try/finally(跨栏箭头;未动 downloadSelected/pack/del/sync)。
+3. **Android HomeScreen SwipeActions**:确认删除 `deleteOnce` + 关合重置,防双删。
 
 **验证**:`typecheck` + vitest **334** / 30 文件全绿。未跑 Gradle。未合并。
 

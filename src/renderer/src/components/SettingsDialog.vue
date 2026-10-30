@@ -664,10 +664,14 @@ function onBackupHours(e: Event): void {
   void store.rescheduleBackup()
 }
 async function backupNow(): Promise<void> {
+  if (backupBusy.value) return
   backupBusy.value = true
-  const r = await window.api.data.backupNow()
-  backupBusy.value = false
-  toast(r.ok ? t('set.sec.backupDone') : (r.error ?? t('set.sec.backupFail')), r.ok ? 'success' : 'error')
+  try {
+    const r = await window.api.data.backupNow()
+    toast(r.ok ? t('set.sec.backupDone') : (r.error ?? t('set.sec.backupFail')), r.ok ? 'success' : 'error')
+  } finally {
+    backupBusy.value = false
+  }
 }
 
 // ---- App master-lock ----
