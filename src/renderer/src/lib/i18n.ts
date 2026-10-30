@@ -381,6 +381,7 @@ const zh: Dict = {
   'term.off': '关',
   'term.logStart': '记录日志',
   'term.logStop': '停止记录',
+  'term.logFail': '无法开始记录日志',
   'term.searchPlaceholder': '搜索输出…',
   'term.caseTip': '区分大小写',
   'term.prevTip': '上一个 (Shift+Enter)',
@@ -632,6 +633,9 @@ const zh: Dict = {
   'pal.snapRestoreConfirm': '当前有活跃会话。恢复快照会断开它们并替换全部标签,确定继续?',
   'pal.snapRestoreTitle': '恢复会话快照',
   'pal.snapRestoreOk': '恢复',
+  'pal.snapDelete': '删除此快照',
+  'pal.snapDeleteConfirm': '删除快照“{name}”？此操作不可撤销。',
+  'pal.snapEmpty': '当前没有标签,无法保存快照',
 
   // history search
   'hist.placeholder': '搜索所有会话输出…',
@@ -1184,6 +1188,7 @@ const en: Dict = {
   'term.off': 'off',
   'term.logStart': 'Start logging',
   'term.logStop': 'Stop logging',
+  'term.logFail': 'Could not start session log',
   'term.searchPlaceholder': 'Search output…',
   'term.caseTip': 'Case sensitive',
   'term.prevTip': 'Previous (Shift+Enter)',
@@ -1435,6 +1440,9 @@ const en: Dict = {
   'pal.snapRestoreConfirm': 'You have live sessions. Restoring a snapshot disconnects them and replaces every tab. Continue?',
   'pal.snapRestoreTitle': 'Restore session snapshot',
   'pal.snapRestoreOk': 'Restore',
+  'pal.snapDelete': 'Delete this snapshot',
+  'pal.snapDeleteConfirm': 'Delete snapshot "{name}"? This cannot be undone.',
+  'pal.snapEmpty': 'No tabs open — nothing to snapshot',
 
   // history search
   'hist.placeholder': 'Search all session output…',
@@ -1996,6 +2004,7 @@ const zhTW: Dict = {
   'term.off': '關',
   'term.logStart': '記錄日誌',
   'term.logStop': '停止記錄',
+  'term.logFail': '無法開始記錄日誌',
   'term.searchPlaceholder': '搜尋輸出…',
   'term.caseTip': '區分大小寫',
   'term.prevTip': '上一個 (Shift+Enter)',
@@ -2248,6 +2257,9 @@ const zhTW: Dict = {
   'pal.snapRestoreConfirm': '目前有作用中的工作階段。還原快照會中斷它們並取代全部頁簽,確定繼續?',
   'pal.snapRestoreTitle': '還原工作階段快照',
   'pal.snapRestoreOk': '還原',
+  'pal.snapDelete': '刪除此快照',
+  'pal.snapDeleteConfirm': '要刪除快照「{name}」嗎？此操作無法復原。',
+  'pal.snapEmpty': '目前沒有分頁,無法儲存快照',
 
   // history search
   'hist.placeholder': '搜尋所有工作階段的輸出…',

@@ -108,6 +108,22 @@
 4. **known_hosts 当日龄**:`keyAge` 对不足一天返回 `''`(与 JSDoc「太新不显示」一致),不再画误导的 `0d` 徽章。
 
 **验证**:`lint:i18n` + vitest **334** 全绿(无新增纯函数测试)。本环境未跑 Gradle / typecheck Electron。未合并。
+# 会话记录:连续改进 M3.91(2026-10-30,复核打磨:快照删除/空布局 + 跟随药丸恢复跟随 + 日志失败提示 + Android 对话框双提交)
+
+功能清单已够,本轮按站立规则做开源复核打磨(不合并)。未动 PR #25 / #24 / #23–#12 与更早的 #4–#11。
+
+**核过已过时 / 已在未合并 PR(本轮不重做)**:
+1–12. 同 M3.90 所列 PR #12–#23。
+13. 粘贴行数/死会话 + 同步对话框 busy/错误 + ForwardsPage 列表 + Android 粘贴消毒 —— PR #24。
+14. 密钥生成 busy + 回收公钥确认 + Android 主机保存 busy + known_hosts 当日龄 —— PR #25。
+
+**修了**:
+1. **快照 UI**:命令面板快照行改为 `kind: 'snapshot'`,右侧垃圾桶 + 确认后 `deleteSnapshot`(此前 API 存在但无入口);空标签保存 toast `pal.snapEmpty`,store 侧也拒绝写入空布局。
+2. **跟随药丸**:`jumpFollow` 在滚到底的同时把 `followOutput` 重新打开,与 `followTip`「自动跟随」文案一致;菜单「滚到底」仍只滚动。
+3. **会话日志失败**:`startLog` 非取消失败时 toast `term.logFail`(不再静默)。
+4. **Android SFTP 对话框双提交**:`NameDialog` / `ConfirmDialog` 用 `done` 闸,Enter+按钮连点不会双改名/双删。
+
+**验证**:`lint:i18n` + `typecheck` + vitest **334** 全绿。未跑 Gradle。未合并。
 
 ---
 

@@ -1080,6 +1080,8 @@ export const useSessions = defineStore('sessions', {
       this.transferPanelOpen = open ?? !this.transferPanelOpen
     },    /** Captures the current tab layout (minus secrets) as a named snapshot. */
     async saveSnapshot(name: string): Promise<void> {
+      // An empty layout is not worth storing: restoring it would wipe the workspace.
+      if (!this.tabs.length) return
       const snap: Snapshot = {
         id: uid('snap'),
         name,
