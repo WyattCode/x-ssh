@@ -461,9 +461,11 @@ class UiPrefs(context: Context) {
     /** 外观:跟随系统 / 浅色 / 深色。 */
     var themeMode: ThemeMode
         get() = ThemeMode.entries.firstOrNull { it.name == prefs.getString(KEY_THEME, null) } ?: ThemeMode.System
-        set(value) {
-            prefs.edit().putString(KEY_THEME, value.name).apply()
-        }
+        set(value) { setThemeMode(value) }
+
+    /** Persist theme. Returns false when SharedPreferences.commit failed. */
+    fun setThemeMode(value: ThemeMode): Boolean =
+        prefs.edit().putString(KEY_THEME, value.name).commit()
 
     /** 平板侧边栏是否展开(收起后终端独占整个宽度,下次打开保持用户的选择)。 */
     var sidebarVisible: Boolean

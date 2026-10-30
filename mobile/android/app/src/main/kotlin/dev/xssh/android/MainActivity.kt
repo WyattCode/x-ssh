@@ -127,9 +127,14 @@ class MainActivity : ComponentActivity() {
                     LocalAdaptive provides rememberAdaptive(),
                     LocalChrome provides remember { detectChrome(this) },
                     LocalThemeControl provides ThemeControl(mode) {
-                        mode = it
-                        prefs.themeMode = it
-                        applyNightMode(this, it)
+                        if (prefs.setThemeMode(it)) {
+                            mode = it
+                            applyNightMode(this, it)
+                        } else {
+                            android.widget.Toast
+                                .makeText(this, R.string.theme_persist_failed, android.widget.Toast.LENGTH_LONG)
+                                .show()
+                        }
                     },
                 ) {
                     App(dev)

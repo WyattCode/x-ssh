@@ -352,6 +352,7 @@
     <plurals name="files_queue_cleared">
         <item quantity="other">已清空 %1$d 批排队</item>
     </plurals>
+    <string name="theme_persist_failed">主题保存失败,请重试</string>
     <plurals name="files_cancelled_downloaded">
         <item quantity="other">已取消(已下载 %d 个)</item>
     </plurals>

@@ -546,6 +546,11 @@ typecheck / lint:i18n(桌面 752/752/752) / vitest **334** / 30 全绿。未在�
 ## M3.136（分支 `fix/review-polish-m3136`，**未合并**）
 - 修复：`setActivePane` 持久化当前面板（`activeIndex`）；新增 `openTabsActiveIndex` 的保存/恢复，`setActive` / `nextTab` / `closeOthers` 同步持久化当前标签；`persistTabs` 失败时提示 `app.tabsPersistFail`。
 - 说明：PR #70–#12 均未合并；本轮未重做 splitPane/divider、queue*、theme、setLang、addSftpRecent、applyLayoutPreset、openSnapshot、closeOthers 确认逻辑等既有改动。
+> **M3.159(分支 `fix/review-polish-m3159`,基于 main @ 5946b1f,未合并)**:三个 P1 修复,只动 Windows + Android。
+> - **A. 安卓外观切换**:`UiPrefs.themeMode` 的 setter 改走 `setThemeMode()`(`commit()` 并返回成败);`MainActivity` 的 `ThemeControl` 只在写入成功时才改 `mode` / 夜间模式,失败弹 `theme_persist_failed` 并保持旧主题(不再"界面变了、重启又回去")。三份 `strings.xml` 各加一条。
+> - **B. 发布公钥对话框**:`keys.list()` 失败不再抛到控制台 —— 记 `keysFailed`、清空列表、toast `keyPub.listFail`,并在下拉框下给一个「重试」按钮(`keyPub.retry`,三字典)。
+> - **C. SFTP 抽屉**:本机主目录 `local.home()` 失败时落到 `localError`(`sfp.localErr`),不再静默无反应。
+> 未重做 #4–#93(尤其 HostEditor #93、HostStore.save #92)。**不要合并。**
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。
 

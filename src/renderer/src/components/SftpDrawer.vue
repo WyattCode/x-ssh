@@ -146,10 +146,14 @@ function toggleLocal(): void {
   localOpen.value = !localOpen.value
   if (!localOpen.value) return
   if (!localPath.value) {
-    void window.api.local.home().then((h) => {
-      localPath.value = h
-      void refreshLocal()
-    })
+    void window.api.local.home()
+      .then((h) => {
+        localPath.value = h
+        void refreshLocal()
+      })
+      .catch(() => {
+        localError.value = tt('sfp.localErr')
+      })
   } else void refreshLocal()
 }
 function localEnter(entry: LocalEntry): void {
