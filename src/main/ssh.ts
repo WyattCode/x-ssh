@@ -1120,7 +1120,7 @@ export class SshManager {
         const session = this.sessions.get(id)
         if (session) {
           if (session.shellExit) this.emit({ sessionId: id, status: 'closed' })
-          else this.emit({ sessionId: id, status: 'error', message: '连接已断开' })
+          else this.emit({ sessionId: id, status: 'error', message: 'connection-lost' })
         }
         if (jumpClient) jumpClient.end()
         this.stopLog(id)
@@ -1212,7 +1212,7 @@ export class SshManager {
     for (const sid of [...m.sessions]) {
       const s = this.sessions.get(sid)
       if (s) {
-        this.emit({ sessionId: sid, status: 'error', message: '连接已断开' })
+        this.emit({ sessionId: sid, status: 'error', message: 'connection-lost' })
         this.stopLog(sid)
         this.closeForwards(s)
         s.stream?.end()

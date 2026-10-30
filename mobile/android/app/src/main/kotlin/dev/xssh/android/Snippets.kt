@@ -316,11 +316,13 @@ private fun SnippetEditor(
         deleted = true
         onDelete(initial)
     }
+    var saving by remember { mutableStateOf(false) }
     val commandFocus = remember { FocusRequester() }
     val valid = text.isNotBlank()
 
     fun save() {
-        if (!valid) return
+        if (!valid || saving) return
+        saving = true
         onSave(
             initial.copy(
                 title = title.trim(),

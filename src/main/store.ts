@@ -176,7 +176,7 @@ export class HostStore {
    *  scheduled auto-backup uses so it keeps running unattended. */
   async exportJson(allowLocked = false): Promise<string> {
     await this.ensureLoaded()
-    if (this.locked && !allowLocked) throw new Error('已锁定，请先解锁')
+    if (this.locked && !allowLocked) throw new Error('app-locked')
     const hosts = this.hosts.map((h) => ({
       ...h,
       password: this.secrets[h.id] ?? '',
@@ -190,7 +190,7 @@ export class HostStore {
   async importJson(json: string): Promise<{ count: number }> {
     await this.ensureLoaded()
     const data = JSON.parse(json)
-    if (!data || !Array.isArray(data.hosts)) throw new Error('无效的备份文件')
+    if (!data || !Array.isArray(data.hosts)) throw new Error('invalid-backup')
     const imported: Host[] = []
     const newSecrets: Record<string, string> = {}
     for (const h of data.hosts) {
@@ -211,7 +211,7 @@ export class HostStore {
    *  NOT exported (identity files / agent are referenced, never embedded). */
   async exportSshConfig(): Promise<string> {
     await this.ensureLoaded()
-    if (this.locked) throw new Error('已锁定，请先解锁')
+    if (this.locked) throw new Error('app-locked')
     const byId = new Map(this.hosts.map((h) => [h.id, h]))
     const blocks = this.hosts.map((h) => {
       const lines: string[] = [`Host ${this.configAlias(h)}`]

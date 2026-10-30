@@ -4,6 +4,8 @@
  */
 export function friendlyError(msg: string | undefined): string {
   const raw = msg ?? ''
+  // Stable machine codes (kebab-case) are mapped in the renderer; do not rewrite them.
+  if (/^[a-z][a-z0-9]*(?:-[a-z0-9]+)+$/.test(raw)) return raw
   const m = raw.toLowerCase()
   const has = (s: string): boolean => m.includes(s)
 

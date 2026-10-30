@@ -73,7 +73,7 @@ export class MasterLock {
    *  against, which is why that one requires the passphrase too. */
   async setPassphrase(passphrase: string): Promise<void> {
     if (!passphrase) throw new Error('口令不能为空')
-    if (this.enabled && !this.unlocked) throw new Error('已锁定，请先解锁')
+    if (this.enabled && !this.unlocked) throw new Error('app-locked')
     const salt = randomBytes(16).toString('hex')
     this.salt = salt
     this.hash = this.derive(passphrase, salt)
