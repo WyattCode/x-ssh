@@ -83,6 +83,9 @@ export const MAIN_ONLY_KEYS = new Set([
   // native theme to it in the same step.
   'theme',
   'windowBounds',
+  // Windows Hello key-use gate (main/userVerify.ts). Toggled only through the
+  // userVerify:setEnabled IPC, which validates the platform first.
+  'winHelloKeyGate',
 ])
 
 /**

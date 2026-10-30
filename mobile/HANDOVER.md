@@ -2836,3 +2836,4 @@ M3.51 已有「用生物识别解锁」开关,连私钥密文(`lockedKeyData` / 
 
 **未做:** Windows Hello(功能清单另项);忘记单枚指纹(仍是整台删除)。
 
+- 桌面 M3.76：Windows Hello 仅为 UI/会话门禁（弱于安卓 Keystore 生物识别锁）。

@@ -19,7 +19,7 @@ import { useConfirm } from '../composables/confirm'
 import { useTheme } from '../composables/theme'
 import type { SettingsTab } from '../stores/sessions'
 import type { KnownHostEntry } from '../../../shared/types'
-import { isMac } from '../composables/platform'
+import { isMac, isWin } from '../composables/platform'
 
 const store = useSessions()
 const { langPref, setLang, t } = useI18n()
@@ -199,7 +199,10 @@ watch(
 watch(
   () => store.settingsOpen && store.settingsTab === 'security',
   (show) => {
-    if (show) void loadConnLog()
+    if (show) {
+      void loadConnLog()
+      void loadHelloStatus()
+    }
   }
 )
 
@@ -651,6 +654,36 @@ async function backupNow(): Promise<void> {
 // ---- App master-lock ----
 const lockNewPass = ref('')
 const lockBusy = ref(false)
+const helloSupported = ref(false)
+const helloEnabled = ref(false)
+const helloAvailable = ref<'available' | 'unavailable' | 'unsupported'>('unsupported')
+const helloBusy = ref(false)
+async function loadHelloStatus(): Promise<void> {
+  if (!isWin) return
+  try {
+    const s = await window.api.userVerify.status()
+    helloSupported.value = s.supported
+    helloEnabled.value = s.enabled
+    helloAvailable.value = s.available
+  } catch { /* ignore */ }
+}
+async function toggleHello(): Promise<void> {
+  if (!helloSupported.value || helloAvailable.value === 'unavailable') return
+  helloBusy.value = true
+  try {
+    const s = await window.api.userVerify.setEnabled(!helloEnabled.value)
+    helloEnabled.value = s.enabled
+    helloAvailable.value = s.available
+  } finally { helloBusy.value = false }
+}
+async function testHello(): Promise<void> {
+  helloBusy.value = true
+  try {
+    const r = await window.api.userVerify.test()
+    if (r.outcome === 'verified') toast(t('hello.testOk'), 'success')
+    else toast(t('hello.testFail'), 'error')
+  } finally { helloBusy.value = false }
+}
 const currentPass = ref('')
 async function saveMasterLock(): Promise<void> {
   if (!lockNewPass.value) {
@@ -1191,6 +1224,26 @@ async function resetMasterLock(): Promise<void> {
               <p class="foot-note">{{ t('lock.setHint') }}</p>
             </section>
 
+            <section v-if="isWin && helloSupported" class="group">
+              <h3>{{ t('hello.title') }}</h3>
+              <p class="g-desc">{{ t('hello.desc') }}</p>
+              <div class="card">
+                <label
+                  class="row toggle"
+                  :class="{ disabled: helloAvailable === 'unavailable' || helloBusy }"
+                  @click="toggleHello"
+                >
+                  <div class="r-text">
+                    <span class="r-title">{{ t('hello.toggle') }}</span>
+                    <span v-if="helloAvailable === 'unavailable'" class="r-desc">{{ t('hello.unavailable') }}</span>
+                  </div>
+                  <span class="switch" :class="{ on: helloEnabled }"><i /></span>
+                </label>
+                <div class="row actions-row">
+                  <button class="btn sm" :disabled="helloBusy || helloAvailable === 'unavailable'" @click="testHello">{{ t('hello.test') }}</button>
+                </div>
+              </div>
+            </section>
             <section class="group">
               <h3>{{ t('set.sec.backup') }}</h3>
               <div class="card">
