@@ -754,6 +754,7 @@ fun CredentialFields(
     val generatedKeyName = stringResource(R.string.edit_key_generated_name)
     val publicKeyCopied = stringResource(R.string.edit_public_key_copied)
     val generateFailed = stringResource(R.string.edit_generate_failed)
+    val keyUnusable = stringResource(R.string.edit_err_key_unusable)
     val passwordLabel = stringResource(R.string.edit_password)
     val privateKeyLabel = stringResource(R.string.edit_private_key)
     FormGroup {
@@ -854,6 +855,10 @@ fun CredentialFields(
                     if (line != null) {
                         copyText(context, line)
                         onMessage(publicKeyCopied)
+                    } else {
+                        // Mirror generateKey: inspectKey fail / bad passphrase used
+                        // to look like a no-op tap.
+                        onMessage(keyUnusable)
                     }
                 }
             }

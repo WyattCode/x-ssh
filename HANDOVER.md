@@ -1,3 +1,13 @@
+# M3.170 — 复核打磨(分支 `fix/review-polish-m3170`,基于 main @ 5946b1f,**勿合并**)
+
+> 一条 P1 + 两条 P2;只动 Windows + Android,不碰 macOS / iOS。
+
+- **A(Android)复制公钥失败可感知**:`HostEditor`「复制公钥」在 `publicKey()` 返回 null 时原先无 `onMessage`(像没点);现在 `onMessage(edit_err_key_unusable)`,与生成密钥失败对称。
+- **B(桌面)目录对比失败 toast**:`DirDiffDialog.run` 在写 dialog `err` 的同时 toast(`dirDiff.fail` / catch message)。关掉对话框后以前像没反应。
+- **C(桌面)本地新建/重命名失败 toast**:`SftpDrawer.localSubmit` 在写 `localModal.error` 的同时 toast(`sfp.createFail` / `sfp.renameFail`),与远端 #103 对称。
+
+---
+
 # X-SSH 交接文档
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。
