@@ -303,7 +303,8 @@ export interface ConnectResult {
   sessionId?: string
   error?: string
   /** Machine-readable failure code: 'host_key_unknown' (first connect),
-   *  'host_key_changed', 'jump_needs_password', 'locked', 'forward:*'. */
+   *  'host_key_changed', 'jump_needs_password', 'jump_needs_key', 'locked',
+   *  'forward:*'. */
   code?: string
   /** Fingerprint the server presented when a host-key rejection failed the
    *  connect — what the user is being asked to trust. */

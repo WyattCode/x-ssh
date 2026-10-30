@@ -1,3 +1,16 @@
+# 会话记录:连续改进 M3.146(2026-10-30,复核打磨:批量跳板 fail-closed + 跳板候选 Android 对齐 + jump_needs_key)
+
+功能清单已够,本轮按站立规则做开源复核打磨(不合并)。未动 PR #4–#80(尤其 #80 SFTP 上传 toast / trustingPanes / 删除跳板警告;#79 auth_failed;#78 jump_missing 于 ssh:connect / HostEditor jumpGone/jumpBlocked;#67 桌面主题持久化;#65/#64 主机存删 toast;#63/#62 转发移除;#106 withTempHosts 主机缺失/锁定码)。
+
+**修了**:
+1. **`withTempHosts`(发布/吊销密钥)跳板 fail-closed**:跳板已删不再悄悄直连;密码跳板无存密、密钥跳板无 keyPath 直接按主机推失败结果(交互连接路径早已有 `jump_needs_password`,批量路径以前没有)。
+2. **HostEditor 跳板候选对齐 Android**:`jumpCandidates` 排除自身已设跳板的主机(只支持一层);遗留嵌套选择用 `host.jumpNested` 提示,可选框仍可清掉。
+3. **桌面 `jump_needs_key`**:`ssh:connect` 在密钥跳板无 keyPath 时提前返回(对齐 Android `term_err_jump_no_key`);`sessions`/`i18n`/`types`/`reconnect.test` 一并接上。未改 #78 的 `jump_missing` 分支。
+
+**验证**:`typecheck` + `lint:i18n`(桌面 751/751/751,移动端对称) + vitest **334** / 30 文件全绿。未跑 Gradle。未合并。本地 DeepSeek via ds.py tag `xssh-m3146-a`,HAND_APPLY 14/14,无 hand-fix。
+
+---
+
 # X-SSH 交接文档
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。

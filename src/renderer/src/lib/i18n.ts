@@ -79,6 +79,7 @@ const zh: Dict = {
   'app.closeExitTitle': '关闭活跃会话',
   'app.closeExitOk': '发送 exit 并关闭',
   'app.jumpNeedsPassword': '跳板机需要密码,但没有已保存的密码。请在「主机」编辑页为跳板主机设置密码后重试,或改用密钥认证。',
+  'app.jumpNeedsKey': '跳板机未选择私钥文件。请在「主机」编辑页为跳板主机导入私钥后重试,或改用密码认证。',
 
   // settings tabs
   'tab.general': '通用',
@@ -678,6 +679,7 @@ const zh: Dict = {
   'host.jump': '跳板机 (ProxyJump)',
   'host.jumpNone': '无(直接连接)',
   'host.jumpHint': '连接本机前先通过所选主机建立隧道(需其已保存且可认证)',
+  'host.jumpNested': '所选跳板机自己还经另一台跳板连接。本应用只支持一层跳板,请改选一台直连主机,或先清掉那台的跳板设置。',
   'host.forwards': '本地端口转发',
   'host.fwMode': '类型',
   'host.fwLocalMode': '本地 -L',
@@ -861,6 +863,7 @@ const en: Dict = {
   'app.closeExitTitle': 'Close active session',
   'app.closeExitOk': 'Send exit & close',
   'app.jumpNeedsPassword': 'The jump host requires a password, but none is saved. Set one on the jump host profile (or switch to key auth) and retry.',
+  'app.jumpNeedsKey': 'The jump host has no private key selected. Import a key on the jump host profile (or switch to password auth) and retry.',
 
   'tab.general': 'General',
   'tab.terminal': 'Terminal',
@@ -1451,6 +1454,7 @@ const en: Dict = {
   'host.jump': 'Jump host (ProxyJump)',
   'host.jumpNone': 'None (direct)',
   'host.jumpHint': 'Tunnel through the selected host first (must be saved & authenticatable)',
+  'host.jumpNested': 'The selected jump host itself uses another jump. Only one hop is supported — pick a direct host, or clear that host\'s jump first.',
   'host.forwards': 'Local port forwards',
   'host.fwMode': 'Type',
   'host.fwLocalMode': 'Local -L',
@@ -1636,6 +1640,7 @@ const zhTW: Dict = {
   'app.closeExitTitle': '關閉作用中的工作階段',
   'app.closeExitOk': '傳送 exit 並關閉',
   'app.jumpNeedsPassword': '跳板機需要密碼,但沒有已儲存的密碼。請在「主機」編輯頁為跳板主機設定密碼後重試,或改用金鑰驗證。',
+  'app.jumpNeedsKey': '跳板機未選擇私鑰檔。請在「主機」編輯頁為跳板主機匯入私鑰後重試,或改用密碼驗證。',
 
   // settings tabs
   'tab.general': '一般',
@@ -2236,6 +2241,7 @@ const zhTW: Dict = {
   'host.jump': '跳板機 (ProxyJump)',
   'host.jumpNone': '無(直接連線)',
   'host.jumpHint': '連線此主機前先透過所選主機建立通道(該主機需已儲存且可驗證)',
+  'host.jumpNested': '所選跳板機自己還經另一台跳板連線。本應用只支援一層跳板,請改選一台直連主機,或先清掉那台的跳板設定。',
   'host.forwards': '本機連接埠轉送',
   'host.fwMode': '類型',
   'host.fwLocalMode': '本機 -L',
