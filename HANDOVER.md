@@ -247,6 +247,19 @@
 1. **SftpDrawer** `commitCreate` / `commitRename`:API 失败时还原 inline 编辑器与已输入名并 `focusEdit`(避免只剩横幅、名字丢光)。
 2. **TerminalView** `toggleLog`:非取消失败 toast;`term.logFail` 三语补齐。
 3. **Android HomeScreen SwipeActions**:TalkBack 删除与视觉一致两步确认(第一下 `confirming`,第二下才 `onDelete`)。
+# 会话记录:连续改进 M3.101(2026-10-30,复核打磨:断线清 logOn + 忘记主机密钥确认 + HostEditor 保存一次)
+
+功能清单已够,本轮按站立规则做开源复核打磨(不合并)。未动 PR #35 / #34–#12 与更早的 #4–#11。本轮优先实质逻辑/状态/无障碍/i18n。
+
+**核过已过时 / 已在未合并 PR(本轮不重做)**:
+1–23. 同 M3.100 所列 PR #12–#34。
+24. SFTP create/rename 失败还原编辑器 + toggleLog 失败 toast + TalkBack 两步删除 —— PR #35。
+25. RESERVED_CHORDS / downloadMany cancel 返回 —— 已在 main。
+
+**修了**:
+1. **TerminalView**:`watch` pane `status !== 'connected'` 时清 `logOn`(主进程断线已 stopLog,菜单徽章不再挂着「停止记录」)。
+2. **SettingsDialog** `forgetKnownHost`:危险确认 + `set.sec.forgetConfirm` 三语(误点 X 不再静默抹掉信任)。
+3. **Android HostEditorScreen** `save()`:`saving` 闸 + try/finally(✓ / Ctrl+S / onDone 并发不再双存双跳)。
 
 **验证**:`typecheck` + `lint:i18n` + vitest **334** / 30 文件全绿。未跑 Gradle。未合并。
 

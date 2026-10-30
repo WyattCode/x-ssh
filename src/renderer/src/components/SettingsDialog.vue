@@ -551,6 +551,11 @@ async function forgetKnownHost(k: KnownHostEntry): Promise<void> {
   // Forgetting a trusted key is destructive: the next connect re-prompts (and
   // a changed key would otherwise be silently accepted). Confirm first.
   const ok = await confirm(t('set.sec.forgetConfirm', { host: `${k.host}:${k.port}` }), { danger: true })
+  const ok = await confirm(t('set.sec.forgetConfirm', { host: `${k.host}:${k.port}` }), {
+    title: t('set.sec.delete'),
+    confirmText: t('set.sec.delete'),
+    danger: true
+  })
   if (!ok) return
   await window.api.knownHosts.forget(k.host, k.port)
   await store.loadKnownHosts()

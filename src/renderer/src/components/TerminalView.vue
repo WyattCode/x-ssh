@@ -221,6 +221,15 @@ async function toggleLog(): Promise<void> {
   }
 }
 
+// Main stops the session log on disconnect; keep the menu badge in sync so
+// "停止记录" does not linger on a dead pane.
+watch(
+  () => store.paneBySession(props.sessionId)?.status,
+  (s) => {
+    if (s !== 'connected') logOn.value = false
+  }
+)
+
 function openMenu(e: MouseEvent): void {
   e.preventDefault()
   menu.hasSel = !!term?.hasSelection()
