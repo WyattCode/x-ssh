@@ -45,6 +45,14 @@ function sftpErr(err: string | undefined, fallbackKey: string): string {
   const m = err && /^delete-failed:(\d+)$/.exec(err)
   if (m) return tt('sfp.deletePartial', { n: Number(m[1]) })
   if (err === 'extract-failed') return tt('sfp.extractFail')
+/** Main-process errors arrive as machine codes (session-missing, …) so the UI
+ *  can localize them; anything else is shown as-is, with the caller's fallback
+ *  key when there is no message at all. */
+function sftpErr(err: string | undefined, fallbackKey: string): string {
+  if (err === 'session-missing') return tt('sfp.sessionMissing')
+  if (err === 'session-gone') return tt('sfp.sessionGone')
+  if (err === 'remote-timeout') return tt('sfp.remoteTimeout')
+  if (err === 'unsafe-filename') return tt('sfp.unsafeFilename')
   return err ?? tt(fallbackKey)
 }
 
@@ -660,7 +668,7 @@ async function load(p?: string): Promise<void> {
     if (res.path !== '/') void store.addSftpRecent(res.path)
   } catch (e) {
     if (seq !== loadSeq || sidAtCall !== props.sessionId) return
-    error.value = (e as Error).message || tt('sfp.readDirFail')
+    error.value = sftpErr((e as Error).message || undefined, 'sfp.readDirFail')
   } finally {
     if (seq === loadSeq && sidAtCall === props.sessionId) loading.value = false
   }

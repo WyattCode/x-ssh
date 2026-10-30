@@ -35,6 +35,16 @@ const sizeDiff = ref<string[]>([])
 
 const canRun = computed(() => !!local.value && !!remote.value && !busy.value)
 
+/** Main-process errors arrive as machine codes; localize the ones we know and
+ *  fall back to the generic "diff failed" for anything else. */
+function diffErr(err: string | undefined): string {
+  if (err === 'session-missing') return tt('sfp.sessionMissing')
+  if (err === 'session-gone') return tt('sfp.sessionGone')
+  if (err === 'remote-timeout') return tt('sfp.remoteTimeout')
+  if (err === 'unsafe-filename') return tt('sfp.unsafeFilename')
+  return err ?? tt('dirDiff.fail')
+}
+
 /** The three result groups, empty ones dropped. */
 const groups = computed(() =>
   [
@@ -56,6 +66,7 @@ async function run(): Promise<void> {
     const r = await window.api.sftp.diffDirs(props.sessionId, local.value, remote.value)
     if (!r.ok) {
       err.value = r.error === 'sync-list-failed' ? tt('dirDiff.listFailed') : (r.error ?? tt('dirDiff.fail'))
+      err.value = diffErr(r.error)
       done.value = false
       return
     }
@@ -64,7 +75,7 @@ async function run(): Promise<void> {
     sizeDiff.value = r.sizeDiff ?? []
     done.value = true
   } catch (e) {
-    err.value = (e as Error).message
+    err.value = diffErr((e as Error).message || undefined)
     done.value = false
   } finally {
     busy.value = false

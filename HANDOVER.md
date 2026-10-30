@@ -522,6 +522,21 @@ Continue continuous-improve from origin/main on a new branch; do **not** touch/m
 
 ### Next
 Continue continuous-improve from origin/main on a new branch; do **not** touch/merge this PR or #46–#12 / #4–#11. Prefer substantive P0/P1 over busy-gates.
+## HANDOVER M3.113 — review polish (backup-not-configured / session-gone / remote-timeout / unsafe-filename)
+
+**Branch:** `fix/review-polish-m3113` (from origin/main). **Do NOT merge.** Open PR (see report).
+**Skipped / do not redo:** PR #47 `fix/review-polish-m3112` (delete-failed / extract-failed / sync-items-failed / tmux attach) and #46–#12, #4–#11. Features / intentional deferrals / M3.77–M3.112 done items.
+
+### Fixes shipped
+1. **backupNow conflated errors** — distinguish `backup-not-configured` vs `backup-failed`; Settings maps `set.sec.backupNotConfigured` / `set.sec.backupWriteFail`.
+2. **SFTP session / timeout / unsafe name Chinese** — `session-missing` / `session-gone` / `remote-timeout` / `unsafe-filename`; SftpDrawer `sftpErr` + DirDiffDialog `diffErr`; connect.test expects `remote-timeout`.
+
+### Verify
+- typecheck OK; lint:i18n OK (desktop 755/755/755); vitest **334**/30 green.
+- Model: DeepSeek-V4.1-Flash-1017 via ds.py; thinking=off medium; 41/41 HAND_APPLY clean. No product hand-fix. Incidents: none.
+
+### Next
+Continue continuous-improve from origin/main on a new branch; do **not** touch/merge this PR or #47–#12 / #4–#11. Prefer substantive P0/P1 over busy-gates.
 
 ---
 
