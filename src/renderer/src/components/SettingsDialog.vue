@@ -486,6 +486,7 @@ const snippetForm = reactive({
   hostId: '',
   defaultVars: ''
 })
+const savingSnippet = ref(false)
 function startNewSnippet(): void {
   snippetForm.open = true
   snippetForm.id = ''
@@ -519,17 +520,25 @@ function parseDefaultVars(s: string): Record<string, string> | undefined {
   return Object.keys(out).length ? out : undefined
 }
 async function saveSnippet(): Promise<void> {
-  if (!snippetForm.title.trim() || !snippetForm.text.trim()) return
-  await store.saveSnippet({
-    id: snippetForm.id || `snip-${Date.now()}-${Math.floor(Math.random() * 1e6)}`,
-    title: snippetForm.title.trim(),
-    text: snippetForm.text,
-    confirm: snippetForm.confirm || undefined,
-    group: snippetForm.group.trim() || undefined,
-    defaultVars: parseDefaultVars(snippetForm.defaultVars),
-    hostId: snippetForm.hostId || undefined
-  })
-  snippetForm.open = false
+  if (savingSnippet.value || !snippetForm.title.trim() || !snippetForm.text.trim()) return
+  savingSnippet.value = true
+  try {
+    if (!snippetForm.id) {
+      snippetForm.id = `snip-${Date.now()}-${Math.floor(Math.random() * 1e6)}`
+    }
+    await store.saveSnippet({
+      id: snippetForm.id,
+      title: snippetForm.title.trim(),
+      text: snippetForm.text,
+      confirm: snippetForm.confirm || undefined,
+      group: snippetForm.group.trim() || undefined,
+      defaultVars: parseDefaultVars(snippetForm.defaultVars),
+      hostId: snippetForm.hostId || undefined
+    })
+    snippetForm.open = false
+  } finally {
+    savingSnippet.value = false
+  }
 }
 async function deleteSnippet(id: string): Promise<void> {
   // Deleting a snippet is one-way; confirm first, naming it so a misclick on
@@ -1042,7 +1051,7 @@ function onLockPassEnter(e: KeyboardEvent): void {
                     </label>
                     <span class="spacer" />
                     <button class="btn sm" @click="snippetForm.open = false">{{ t('set.gen.cancel') }}</button>
-                    <button class="btn sm btn-primary" :disabled="!snippetForm.title.trim() || !snippetForm.text.trim()" @click="saveSnippet">{{ t('set.gen.save') }}</button>
+                    <button class="btn sm btn-primary" :disabled="savingSnippet || !snippetForm.title.trim() || !snippetForm.text.trim()" @click="saveSnippet">{{ t('set.gen.save') }}</button>
                   </div>
                 </div>
                 <button v-else class="row add-row" @click="startNewSnippet"><Icon name="plus" :size="14" />{{ t('set.gen.newSnippet') }}</button>

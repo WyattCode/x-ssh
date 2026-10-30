@@ -73,7 +73,11 @@ async function previewFile(entry: FileEntry): Promise<void> {
   preview.value = { open: true, name: entry.name, url: '', error: '' }
   const r = await window.api.sftp.readBinary(props.sessionId, posixJoin(path.value, entry.name))
   if (r.ok && r.base64) preview.value.url = `data:image/${fileExt(entry.name)};base64,${r.base64}`
-  else preview.value.error = r.error ?? '无法预览'
+  else {
+    const err = r.error
+    preview.value.error =
+      err === 'preview-too-large' ? tt('sfp.previewTooLarge') : (err ?? tt('sfp.previewFail'))
+  }
 }
 
 // ---- local (dual-panel) pane: browse the machine's own filesystem ----
@@ -1010,14 +1014,16 @@ async function diffWithLocal(entry: FileEntry): Promise<void> {
   if (!props.sessionId) return
   const remote = await window.api.sftp.readText(props.sessionId, posixJoin(path.value, entry.name))
   if (!remote.ok) {
-    error.value = remote.error ?? tt('sfp.diffFail')
+    error.value =
+      remote.error === 'file-too-large' ? tt('sfp.fileTooLarge') : (remote.error ?? tt('sfp.diffFail'))
     return
   }
   const picked = await window.api.local.pickFile()
   if (!picked.ok || !picked.path) return
   const local = await window.api.local.readText(picked.path)
   if (!local.ok || local.content === undefined) {
-    error.value = local.error ?? tt('sfp.diffFail')
+    error.value =
+      local.error === 'file-too-large' ? tt('sfp.fileTooLarge') : (local.error ?? tt('sfp.diffFail'))
     return
   }
   diff.remoteName = entry.name

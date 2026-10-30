@@ -299,6 +299,21 @@
 3. **Android Tablet ConfirmDialog**:`confirmOnce`,防回车+按钮双删/双覆盖(Files/片段确认共用)。
 
 **验证**:`typecheck` + `lint:i18n` + vitest **334** / 30 文件全绿。未跑 Gradle。未合并。
+# 会话记录:连续改进 M3.105(2026-10-30,复核打磨:文件过大/预览 i18n + 片段防双存 + Android 主机密钥信任防双击)
+
+功能清单已够,本轮按站立规则做开源复核打磨(不合并)。未动 PR #39 / #38–#12 与更早的 #4–#11。本轮优先实质逻辑/状态/无障碍/i18n。
+
+**核过已过时 / 已在未合并 PR(本轮不重做)**:
+1–28. 同 M3.104 所列 PR #12–#38。
+29. OpenSSH 导入 toast + Android NameDialog/ConfirmDialog —— PR #39。
+30. keyGen busy / sync busy 等 —— 更早未合并 PR。
+
+**修了**:
+1. **文件过大 / 预览错误 i18n**:`readTextFile` / `readBinaryFile` / `localReadText` 返回稳定码 `file-too-large` / `preview-too-large`;SftpDrawer 预览与对比、TextEditor、SessionReplay 映射到 `sfp.previewFail` / `sfp.previewTooLarge` / `sfp.fileTooLarge` 三语(英文界面不再见硬编码中文)。
+2. **桌面片段保存**:`savingSnippet` + 先写死 `snippetForm.id`,防双击/双回车生成两个不同 id 的重复片段。
+3. **Android HostKeyGate**:`trustOnce`,防回车+按钮双信任/双重连(Compose remember 置顶)。
+
+**验证**:`typecheck` + `lint:i18n`(752) + vitest **334** / 30 文件全绿。未跑 Gradle。未合并。
 
 ---
 

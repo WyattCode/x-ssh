@@ -99,6 +99,7 @@ fun HostKeyGate(
     val p = LocalXssh.current
     // Enter and the primary button both trust. A double Enter (or Enter + tap)
     // used to fire onTrust twice and kick two overlapping reconnects.
+
     var trusted by remember { mutableStateOf(false) }
     fun trustOnce() {
         if (trusted) return
@@ -123,6 +124,7 @@ fun HostKeyGate(
         },
         noteColor = if (changed) p.danger else p.textDim,
         onEnter = if (changed) null else ({ trustOnce() }),
+        onEnter = if (changed) null else trustOnce,
         body = {
             if (changed) {
                 // 可能已信任多把:全部列出来,方便对照"是不是轮换还是中间人"。
@@ -149,6 +151,7 @@ fun HostKeyGate(
                 ),
                 primaryKind = if (changed) ButtonKind.Danger else ButtonKind.Primary,
                 onPrimary = { trustOnce() },
+                onPrimary = trustOnce,
                 secondary = stringResource(R.string.host_cancel),
                 onSecondary = onExit,
             )

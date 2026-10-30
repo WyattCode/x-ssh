@@ -1258,7 +1258,7 @@ function registerIpc(): void {
       // Same ceiling as the remote side (sftpReadText): this feeds the compare
       // view, and an unbounded read of a big file stalls the whole main process.
       const info = await stat(target)
-      if (info.size > 2 * 1024 * 1024) return { ok: false, error: '文件过大(超过 2 MB),无法在此处打开' }
+      if (info.size > 2 * 1024 * 1024) return { ok: false, error: 'file-too-large' }
       const content = await readFile(target, 'utf8')
       return { ok: true, content }
     } catch (e) {

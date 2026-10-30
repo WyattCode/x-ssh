@@ -2549,7 +2549,7 @@ export class SshManager {
       sftp.stat(path, (e, s) => (e ? rej(e) : res(s as never)))
     )
     if (st.size > 2 * 1024 * 1024) {
-      throw new Error('文件超过 2MB,请用外部编辑器打开')
+      throw new Error('file-too-large')
     }
     const buf = await new Promise<Buffer>((res, rej) =>
       sftp.readFile(path, (e, d) => (e ? rej(e) : res(d as never)))
@@ -2564,7 +2564,7 @@ export class SshManager {
       sftp.stat(path, (e, s) => (e ? rej(e) : res(s as never)))
     )
     if (st.size > maxBytes) {
-      throw new Error('文件过大,无法预览')
+      throw new Error('preview-too-large')
     }
     const buf = await new Promise<Buffer>((res, rej) =>
       sftp.readFile(path, (e, d) => (e ? rej(e) : res(d as never)))
