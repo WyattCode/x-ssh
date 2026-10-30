@@ -1,3 +1,12 @@
+# M3.173 — 复核打磨(分支 `fix/review-polish-m3173`,基于 main @ 5946b1f,**勿合并**)
+
+- SftpDrawer load(): 目录 list 失败在 banner 之外再 toast(sfp.readDirFail / e.message)。
+- previewFile: 预览失败 toast(同一字符串);不碰 #85 的 previewFail i18n 映射。
+- refreshLocal: 本机目录读失败 toast(sfp.localErr);不碰 #94 local.home / #105 localSubmit。
+- 未合并。未动 #4–#107。
+
+---
+
 # X-SSH 交接文档
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。
