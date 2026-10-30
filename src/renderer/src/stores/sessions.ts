@@ -182,6 +182,8 @@ let sftpProgressInit = false
 const sftpSpeedMeta = new Map<string, { bytes: number; time: number }>()
 // Timers that prune finished transfers from the live list.
 const sftpCleanupTimers = new Set<number>()
+// Whether a refused openTabs write has already been toasted this streak.
+let tabsPersistFailToasted = false
 
 /** One terminal session. A tab holds one or more panes (split view). */
 export interface Pane {
@@ -951,6 +953,18 @@ export const useSessions = defineStore('sessions', {
           }
         } catch {
           toast(t('app.tabsPersistFail'), 'error')
+        try {
+          const r = await window.api.settings.set('openTabs', serializeTabs(this.tabs))
+          if (r && r.ok === false) throw new Error(r.error ?? 'refused')
+          tabsPersistFailToasted = false
+        } catch {
+          // A refused write leaves disk with the old layout while memory has the
+          // new one — the next launch silently loses splits/order. Toast once per
+          // streak so a burst of tab mutations doesn't spam.
+          if (!tabsPersistFailToasted) {
+            tabsPersistFailToasted = true
+            toast(t('app.tabsPersistFail'), 'error')
+          }
         }
       })()
     },
@@ -1313,6 +1327,16 @@ export const useSessions = defineStore('sessions', {
       if (r && r.ok === false) {
         this.snapshots = prev
         toast(t('pal.snapFail'), 'error')
+      const prev = this.snapshots
+      this.snapshots = [snap, ...this.snapshots].slice(0, 30)
+      try {
+        const r = await window.api.settings.set('snapshots', toPlain(this.snapshots))
+        if (r && r.ok === false) throw new Error(r.error ?? 'refused')
+      } catch {
+        // A refused write would leave the new snapshot in memory only — it
+        // vanishes on the next launch. Roll back and say so.
+        this.snapshots = prev
+        toast(t('app.snapPersistFail'), 'error')
       }
     },
     async deleteSnapshot(id: string): Promise<void> {
@@ -1322,6 +1346,12 @@ export const useSessions = defineStore('sessions', {
       if (r && r.ok === false) {
         this.snapshots = prev
         toast(t('pal.snapDeleteFail'), 'error')
+      try {
+        const r = await window.api.settings.set('snapshots', toPlain(this.snapshots))
+        if (r && r.ok === false) throw new Error(r.error ?? 'refused')
+      } catch {
+        this.snapshots = prev
+        toast(t('app.snapPersistFail'), 'error')
       }
     },
     /** Replaces the current tabs with a saved snapshot (disconnected). */

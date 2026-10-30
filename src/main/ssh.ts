@@ -2852,6 +2852,12 @@ export class SshManager {
     if (packed.code !== 0) {
       await this.execRemote(sessionId, `rm -f "${tmp}"`).catch(() => {})
       return { ok: false, error: 'pack-failed' }
+    const pack = await this.execRemote(sessionId, buildPackCommand(parent, tmp, names))
+    // A non-zero tar exit means the archive was never (fully) written; downloading
+    // it anyway would hand back a missing or truncated file as "success".
+    if (pack.code !== 0) {
+      await this.execRemote(sessionId, `rm -f "${tmp}"`).catch(() => {})
+      return { ok: false, error: pack.out.trim() || '打包失败' }
     }
     const name = archiveName || (items.length === 1 ? items[0].name : 'archive') + '.tar.gz'
     const outPath = resolve(localDir, name).replace(/\.tar\.gz$/, '.tar.gz')
@@ -2867,6 +2873,13 @@ export class SshManager {
       if (dl.cancelled) return { ok: false, canceled: true }
       // Leave the Chinese failures string alone — PR #45 remaps files-failed:N.
       if (dl.failures) return { ok: false, error: `${dl.failures} 个文件失败` }
+      const r = await this.downloadJob(sessionId, [{ path: tmp, name, isDir: false }], localDir, randomUUID(), 1)
+      await this.execRemote(sessionId, `rm -f "${tmp}"`).catch(() => {})
+      // downloadJob reports per-file failures / cancellation in its return value
+      // instead of throwing, so a partial archive used to come back as ok:true.
+      if (r.cancelled) return { ok: false, canceled: true }
+      if (r.failures) return { ok: false, error: `${r.failures} 个文件失败` }
+      if (!r.files) return { ok: false, error: '打包/下载失败' }
       return { ok: true, localPath: outPath }
     } catch (e) {
       await this.execRemote(sessionId, `rm -f "${tmp}"`).catch(() => {})
