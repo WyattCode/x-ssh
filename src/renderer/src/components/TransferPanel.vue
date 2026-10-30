@@ -6,6 +6,8 @@ import { useSessions } from '../stores/sessions'
 import { useI18n } from '../lib/i18n'
 import { useToast } from '../composables/toast'
 import { canRevealHistory } from '../lib/transferHistory'
+import { localJoin } from '../../../shared/fsUtils'
+import { useToast } from '../composables/toast'
 import {
   pct as pctOf,
   formatBytes,
@@ -35,6 +37,7 @@ function onPanelKey(e: KeyboardEvent): void {
 }
 onMounted(() => window.addEventListener('keydown', onPanelKey))
 onUnmounted(() => window.removeEventListener('keydown', onPanelKey))
+
 
 
 // Paused job ids (in-memory, main-driven). Tracked here so the resume button
@@ -151,6 +154,15 @@ async function reveal(h: TransferHistoryItem): Promise<void> {
   if (!target) return
   const r = await window.api.sftp.revealLocal(target)
   if (!r.ok) toast(r.error === 'path-invalid' ? t('sfp.pathInvalid') : (r.error ?? t('sfp.revealFail')), 'error')
+async function reveal(h: TransferHistoryItem): Promise<void> {
+  const target =
+    h.direction === 'up'
+      ? h.localPaths?.[0]
+      : h.localDir
+        ? localJoin(h.localDir, h.name)
+        : undefined
+  if (!target) return
+  const r = await window.api.sftp.revealLocal(target)
   if (!r.ok) toast(r.error ?? t('sfp.revealFail'), 'error')
 }
 // History rows only expose "reveal" for finished down/up transfers.
