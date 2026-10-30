@@ -28,6 +28,7 @@ async function list(): Promise<void> {
 function attach(name: string): void {
   const id = sid()
   if (!id) return
+  if (busy.value) return
   // Attaching types into the terminal: show it.
   store.setPage('terminal')
   busy.value = true
@@ -65,7 +66,7 @@ watch(
       </div>
       <div class="tm-body">
         <p v-if="!sessions.length" class="tm-empty">{{ t('tmux.empty') }}</p>
-        <button v-for="s in sessions" :key="s" class="tm-sess" @click="attach(s)">
+        <button v-for="s in sessions" :key="s" class="tm-sess" :disabled="busy" @click="attach(s)">
           <Icon name="terminal" :size="13" />
           <span>{{ s }}</span>
         </button>
@@ -75,6 +76,7 @@ watch(
             v-model="newName"
             :placeholder="t('tmux.newPh')"
             spellcheck="false"
+            :disabled="busy"
           />
           <button class="tm-btn" type="submit" :disabled="busy || !newName.trim()">
             {{ t('tmux.attachCreate') }}
@@ -153,6 +155,10 @@ watch(
 }
 .tm-sess:hover {
   background: var(--accent-soft);
+}
+.tm-sess:disabled {
+  opacity: 0.55;
+  cursor: default;
 }
 .tm-new {
   display: flex;
