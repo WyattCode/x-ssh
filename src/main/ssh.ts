@@ -1780,7 +1780,7 @@ export class SshManager {
         // on Windows unlinking a still-open handle fails with EPERM and would
         // leave the partial file behind.
         if (err && cleanupOnError) {
-          const rm = (): void => void unlink(cleanupOnError).catch(() => undefined)
+          const rm = (): void => void unlink(this.longPath(cleanupOnError)).catch(() => undefined)
           if ((writable as { closed?: boolean }).closed) rm()
           else writable.once('close', rm)
         }
@@ -1888,7 +1888,7 @@ export class SshManager {
       if (this.cancelledJobs.has(jobId) || depth > 64) return
       const local = this.safeLocalJoin(base, name)
       if (isDir) {
-        await mkdir(local, { recursive: true })
+        await mkdir(this.longPath(local), { recursive: true })
         let list: { filename: string; attrs: { size: number; isDirectory(): boolean } }[]
         try {
           list = await this.readdirFull(sftp, remote)
@@ -1946,13 +1946,13 @@ export class SshManager {
                 prior.remoteSize === remote.size &&
                 prior.remoteMtimeMs === remote.mtimeMs
               if (resumable) offset = localSize
-              else await unlink(item.local)
+              else await unlink(this.longPath(item.local))
             }
           } catch {
             /* no existing local file — start fresh */
           }
           read = offset ? sftp.createReadStream(item.remote, { start: offset }) : sftp.createReadStream(item.remote)
-          write = createWriteStream(item.local, offset ? { flags: 'a' } : undefined)
+          write = createWriteStream(this.longPath(item.local), offset ? { flags: 'a' } : undefined)
           await this.pipeStream(
             jobId,
             read,
@@ -2325,7 +2325,7 @@ export class SshManager {
     const local = this.safeLocalJoin(localBase, name)
     if (isDir) {
       if (depth > 64) return local // guard against server-reported cyclic dirs
-      await mkdir(local, { recursive: true })
+      await mkdir(this.longPath(local), { recursive: true })
       let list: { filename: string; attrs: { size: number; isDirectory(): boolean } }[]
       try {
         list = await this.readdirFull(sftp, remotePath)
@@ -2340,7 +2340,7 @@ export class SshManager {
         }
       }
     } else {
-      await this.pipeStream(randomUUID(), sftp.createReadStream(remotePath), createWriteStream(local), () => undefined, local)
+      await this.pipeStream(randomUUID(), sftp.createReadStream(remotePath), createWriteStream(this.longPath(local)), () => undefined, this.longPath(local))
     }
     return local
   }
@@ -2349,7 +2349,7 @@ export class SshManager {
   async putFileSilent(sessionId: string, localPath: string, remoteDir: string, name: string): Promise<void> {
     const sftp = await this.getSftp(sessionId)
     const remote = this.posixJoin(remoteDir, name)
-    await this.pipeStream(randomUUID(), createReadStream(localPath), sftp.createWriteStream(remote), () => undefined)
+    await this.pipeStream(randomUUID(), createReadStream(this.longPath(localPath)), sftp.createWriteStream(remote), () => undefined)
   }
 
   async mkdir(sessionId: string, path: string): Promise<void> {

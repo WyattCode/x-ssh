@@ -121,6 +121,10 @@
 - 如版本号增加,改 `package.json` + 更新 `CHANGELOG.md` 后 `npm.cmd run dist` 重打包。
 - 大规模改动前先跑 `npm.cmd run typecheck && npm.cmd run build` 与 `npm.cmd run lint:i18n` 保证通过。
 
+# 会话记录:M3.182(Windows 深路径下载修复)
+
+- **`downloadJob` / `downloadTree` / `putFileSilent` 补 `longPath`**:`\\?\` 前缀原来只在 `syncJob` 里用,下载(含拖出 / 外部编辑器回写)的 `mkdir` / `unlink` / `createWriteStream` / `createReadStream`,以及 `pipeStream` 失败清理的 `unlink` 都漏了 —— Windows 上深目录(node_modules 等)下载会失败或留下半截文件,而同一棵树的同步却正常。现在全部走 `this.longPath(...)`。
+
 # 会话记录:第二十四次会话(2026-10-29,中文输入法的回车 + 测试套件自己会漏跑)
 
 > **本会话总览**
