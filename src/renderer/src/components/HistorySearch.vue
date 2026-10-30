@@ -5,11 +5,13 @@ const trapEl = ref<HTMLElement>()
 useFocusTrap(trapEl, () => store.historyOpen)
 import { useSessions } from '../stores/sessions'
 import { useI18n } from '../lib/i18n'
+import { useToast } from '../composables/toast'
 import { isImeKey } from '../lib/ime'
 import Icon from './Icon.vue'
 
 const store = useSessions()
 const { t } = useI18n()
+const { toast } = useToast()
 
 const query = ref('')
 const inputEl = ref<HTMLInputElement>()
@@ -102,7 +104,14 @@ function pick(hit: Hit): void {
   store.toggleHistory(false)
 }
 function copy(hit: Hit): void {
-  window.api.clipboard.writeText(hit.line)
+  // writeText 是同步的:写失败(剪贴板被别的程序锁住、内容过大)会直接抛出来。
+  // 原来不管成没成都关掉对话框 —— 用户以为复制成功了,粘出来却是旧内容。
+  try {
+    window.api.clipboard.writeText(hit.line)
+  } catch {
+    toast(t('hist.copyFail'), 'error')
+    return
+  }
   store.toggleHistory(false)
 }
 function onKey(e: KeyboardEvent): void {

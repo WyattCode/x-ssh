@@ -1,3 +1,31 @@
+# M3.155 — paste/clipboard toast + HistorySearch copyFail + SnippetStore commit (2026-10-30)
+
+> 分支 `fix/review-polish-m3155`(从 `origin/main` 切出)。**未合并**;PR #4–#89 一律没碰。
+
+## 修了什么
+
+1. **安卓终端粘贴 / 拖放读剪贴板静默失败**(`TerminalScreen.kt`)。`primaryClip` / `coerceToText` 抛 `SecurityException`、或没有 `ClipboardManager` 时,粘贴 lambda 直接崩掉,看起来像"点了没反应"。现在 null CM / `SecurityException` → Toast `clipboard_unavailable`(三语言,与 #87/#88 同文案,主线尚无此键);空剪贴板仍静默。`onDrop` 同样包住。
+2. **桌面 History 搜索复制假成功**(`HistorySearch.vue` / `i18n.ts`)。`clipboard.writeText` 是同步 void,抛错后仍 `toggleHistory(false)` 关对话框。现在 try/catch,失败 toast `hist.copyFail`(三语)并保持对话框打开。未动 `exportLog`(#84)。
+3. **安卓命令片段保存用 `apply()` 假成功**(`Snippets.kt`)。`save` 改 `commit(): Boolean`;调用方先组 `next` 再落盘,成功才改内存/关编辑页,失败 Toast `snip_save_failed` / `snip_delete_failed` 并留在编辑页。
+
+## 验证
+
+```
+npm run typecheck
+npm run lint:i18n
+npm run test
+```
+
+typecheck / lint:i18n / vitest **334** / 30 全绿。安卓只改了 Kotlin + strings(没动 Rust)。**没有在真机/模拟器上点过** 剪贴板拒绝 / 片段写盘失败路径。
+
+## 注意
+
+- **不要合并**:这一批是 review 修复,等人工过一遍再合。
+- 未触碰的开放 PR:#4–#89(尤其 #88 TransferPanel reveal / paste CM-null / persist empty;#87 copySelection/copyText;#86 publicKey/symlink;#85 diff/preview;#84 export/pack toast)。`clipboard_unavailable` 文案与 #87/#88 对齐以便合并。
+- 未触碰 `/workspace/MCode`。
+
+---
+
 # X-SSH 交接文档
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。

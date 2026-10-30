@@ -2,6 +2,7 @@ package dev.xssh.android
 
 import android.content.Context
 import android.view.KeyEvent as AndroidKeyEvent
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -123,7 +124,12 @@ class SnippetStore(context: Context) {
         }.getOrDefault(emptyList())
     }
 
-    fun save(list: List<Snippet>) {
+    /**
+     * 存盘。**返回到底写没写进去** —— 用 commit 而不是 apply:
+     * apply 是丢给后台线程的,写失败(磁盘满、存储被卸载)也一声不响,
+     * 调用方于是照样关掉编辑页、内存里留着一条其实没存下来的片段。
+     */
+    fun save(list: List<Snippet>): Boolean {
         val array = JSONArray()
         list.forEach { s ->
             array.put(
@@ -136,7 +142,7 @@ class SnippetStore(context: Context) {
                     .put("hostId", s.hostId ?: ""),
             )
         }
-        prefs.edit().putString(KEY_LIST, array.toString()).apply()
+        return prefs.edit().putString(KEY_LIST, array.toString()).commit()
     }
 
     private companion object {
@@ -249,14 +255,24 @@ fun SnippetSheet(
             tablet = tablet,
             onSave = { saved ->
                 val index = all.indexOfFirst { it.id == saved.id }
-                all = if (index >= 0) all.toMutableList().also { it[index] = saved } else all + saved
-                store.save(all)
-                editing = null
+                val next = if (index >= 0) all.toMutableList().also { it[index] = saved } else all + saved
+                // 先写盘,写进去了才改内存、才关编辑页:写失败时列表和磁盘还是一致的,
+                // 用户也还留在编辑页上,可以再点一次保存。
+                if (store.save(next)) {
+                    all = next
+                    editing = null
+                } else {
+                    Toast.makeText(context, R.string.snip_save_failed, Toast.LENGTH_SHORT).show()
+                }
             },
             onDelete = { gone ->
-                all = all.filterNot { it.id == gone.id }
-                store.save(all)
-                editing = null
+                val next = all.filterNot { it.id == gone.id }
+                if (store.save(next)) {
+                    all = next
+                    editing = null
+                } else {
+                    Toast.makeText(context, R.string.snip_delete_failed, Toast.LENGTH_SHORT).show()
+                }
             },
             onDismiss = { editing = null },
         )

@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- 由 scratchpad/i18n/merge.py 从各组的 JSON 生成;改文案请改这里的对应条目(三种语言一起改)。 -->
 <resources>
+    <string name="clipboard_unavailable">无法访问剪贴板</string>
     <string name="edit_address">地址</string>
     <string name="edit_appearance">外观:%1$s</string>
     <string name="edit_back">返回</string>
@@ -210,6 +211,7 @@
     <string name="snip_command">命令</string>
     <string name="snip_delete">删除这条片段</string>
     <string name="snip_delete_confirm">确认删除这条片段</string>
+    <string name="snip_delete_failed">片段删除失败</string>
     <string name="snip_edit">编辑</string>
     <string name="snip_edit_title">编辑片段</string>
     <string name="snip_empty">还没有片段。点 ＋ 把常用命令存下来，以后点一下就发出去。</string>
@@ -220,6 +222,7 @@
     <string name="snip_run">执行</string>
     <string name="snip_run_title">执行「%1$s」?</string>
     <string name="snip_save">保存</string>
+    <string name="snip_save_failed">片段保存失败</string>
     <string name="snip_switch_confirm">执行前确认</string>
     <string name="snip_switch_enter">发送后回车</string>
     <string name="snip_switch_only_host">只在「%1$s」上显示</string>

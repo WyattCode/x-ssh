@@ -2,6 +2,7 @@
 <!-- 由 scratchpad/i18n/merge.py 从各组的 JSON 生成;改文案请改这里的对应条目(三种语言一起改)。 -->
 <resources>
     <string name="app_name" translatable="false">X-SSH</string>
+    <string name="clipboard_unavailable">Couldn\'t access the clipboard</string>
     <string name="edit_address">Address</string>
     <string name="edit_appearance">Appearance: %1$s</string>
     <string name="edit_back">Back</string>
@@ -211,6 +212,7 @@
     <string name="snip_command">Command</string>
     <string name="snip_delete">Delete this snippet</string>
     <string name="snip_delete_confirm">Confirm deleting this snippet</string>
+    <string name="snip_delete_failed">Couldn\'t delete the snippet</string>
     <string name="snip_edit">Edit</string>
     <string name="snip_edit_title">Edit snippet</string>
     <string name="snip_empty">No snippets yet. Tap ＋ to save a command you use often, then send it with one tap.</string>
@@ -221,6 +223,7 @@
     <string name="snip_run">Run</string>
     <string name="snip_run_title">Run “%1$s”?</string>
     <string name="snip_save">Save</string>
+    <string name="snip_save_failed">Couldn\'t save the snippet</string>
     <string name="snip_switch_confirm">Confirm before running</string>
     <string name="snip_switch_enter">Press Enter after sending</string>
     <string name="snip_switch_only_host">Show only on “%1$s”</string>
