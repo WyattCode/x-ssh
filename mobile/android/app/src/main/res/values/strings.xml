@@ -33,6 +33,7 @@
     <string name="edit_key_generated_name">Generated on device · ed25519</string>
     <string name="edit_key_has_passphrase">This private key has a passphrase</string>
     <string name="edit_key_invalid_file">Not a usable private key file</string>
+    <string name="edit_key_lock_unavailable">No screen lock — key not protected</string>
     <string name="edit_key_none">Not imported</string>
     <string name="edit_login_method">Login</string>
     <string name="edit_name">Name</string>

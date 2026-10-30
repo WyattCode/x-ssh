@@ -32,6 +32,7 @@
     <string name="edit_key_generated_name">本机生成 · ed25519</string>
     <string name="edit_key_has_passphrase">这把私钥有口令</string>
     <string name="edit_key_invalid_file">不是可用的私钥文件</string>
+    <string name="edit_key_lock_unavailable">未设锁屏，私钥未加锁</string>
     <string name="edit_key_none">未导入</string>
     <string name="edit_login_method">登录方式</string>
     <string name="edit_name">名称</string>

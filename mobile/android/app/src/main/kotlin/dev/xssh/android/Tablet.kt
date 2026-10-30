@@ -1336,7 +1336,7 @@ private fun HostSheet(
                         if (uri != null) {
                             importKeyFrom(context, uri, draft)
                         } else {
-                            draft.importKey(item.coerceToText(context).toString(), context.getString(R.string.tab_dropped_key_name))?.resolve(context)
+                            draft.importKey(item.coerceToText(context).toString(), context.getString(R.string.tab_dropped_key_name), Secrets.lockAvailable(context))?.resolve(context)
                         }
                     }
                 }

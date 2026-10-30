@@ -357,6 +357,8 @@ class HostDraft(private val initial: Host?) {
     var error by mutableStateOf<UiText?>(null)
 
     var lockSecrets by mutableStateOf(initial?.lockSecrets ?: false)
+    /** 用户亲手拨过「用生物识别解锁」开关的值;null = 还没碰过。导入 / 生成私钥时据此决定要不要默认上锁。 */
+    var lockUserChoice by mutableStateOf<Boolean?>(null)
     var tmux by mutableStateOf(initial?.tmux ?: false)
     /** 跳板机(另一台主机的 id,空 = 直连)。 */
     var jumpHostId by mutableStateOf(initial?.jumpHostId ?: "")
@@ -421,8 +423,11 @@ class HostDraft(private val initial: Host?) {
     /**
      * 导入一把私钥。返回要给用户看的一句话:null = 成功;带口令时返回提示并露出口令格
      * (私钥先收下,保存时再验口令)。在 IO 线程调用 —— 带口令的私钥解一次要几百毫秒。
+     *
+     * [lockAvailable] 是这台设备有没有可用的门禁;有的话,导入成功就默认打开「用生物识别解锁」
+     * (用户亲手关过则听用户的,见 [LockPolicy])。
      */
-    fun importKey(text: String, fileName: String): UiText? {
+    fun importKey(text: String, fileName: String, lockAvailable: Boolean = false): UiText? {
         val pem = text.trim()
         return try {
             val info = uniffi.xssh_ffi.inspectKey(pem, keyPassphrase.ifEmpty { null })
@@ -431,6 +436,7 @@ class HostDraft(private val initial: Host?) {
             keyPublicFingerprint = info.fingerprint
             keyLocked = keyPassphrase.isNotEmpty()
             auth = AuthKind.KEY
+            lockSecrets = LockPolicy.afterKeyAdded(lockAvailable, lockUserChoice, lockSecrets)
             error = null
             null
         } catch (e: uniffi.xssh_ffi.FfiException.KeyEncrypted) {
@@ -439,6 +445,7 @@ class HostDraft(private val initial: Host?) {
             keyPublicFingerprint = ""
             keyLocked = true
             auth = AuthKind.KEY
+            lockSecrets = LockPolicy.afterKeyAdded(lockAvailable, lockUserChoice, lockSecrets)
             UiText(R.string.edit_key_has_passphrase)
         } catch (e: Exception) {
             UiText(R.string.edit_key_invalid_file)
@@ -449,8 +456,9 @@ class HostDraft(private val initial: Host?) {
      * 在本机生成一把 ed25519 密钥并用上它。返回公钥一行(贴进服务器的 authorized_keys);失败返回 null。
      * 不加口令:私钥本身经密钥库加密存在应用里,口令只会让每次连接多一步。在 IO 线程调用。
      * [label] 是存下来的私钥名(「本机生成 · ed25519」),调用方按当前语言给。
+     * [lockAvailable] 同 [importKey]:有门禁就默认上锁。
      */
-    fun generateKey(label: String): String? = runCatching {
+    fun generateKey(label: String, lockAvailable: Boolean = false): String? = runCatching {
         val comment = "x-ssh@" + android.os.Build.MODEL.replace(' ', '-')
         val key = uniffi.xssh_ffi.generateKey(comment, null)
         keyData = key.pem
@@ -459,6 +467,7 @@ class HostDraft(private val initial: Host?) {
         keyPassphrase = ""
         keyLocked = false
         auth = AuthKind.KEY
+        lockSecrets = LockPolicy.afterKeyAdded(lockAvailable, lockUserChoice, lockSecrets)
         error = null
         key.info.publicKey
     }.getOrNull()
@@ -710,7 +719,7 @@ fun importKeyFrom(context: android.content.Context, uri: android.net.Uri, draft:
         }
     }.getOrNull() ?: return context.getString(R.string.edit_err_read_file)
     if (bytes.size > MaxKeyBytes) return context.getString(R.string.edit_key_invalid_file)
-    return draft.importKey(String(bytes, Charsets.UTF_8), name)?.resolve(context)
+    return draft.importKey(String(bytes, Charsets.UTF_8), name, Secrets.lockAvailable(context))?.resolve(context)
 }
 
 /**
@@ -842,7 +851,7 @@ fun CredentialFields(
             FormDivider()
             FormAction(stringResource(R.string.edit_generate_key)) {
                 scope.launch {
-                    val line = withContext(Dispatchers.IO) { draft.generateKey(generatedKeyName) }
+                    val line = withContext(Dispatchers.IO) { draft.generateKey(generatedKeyName, lockAvailable) }
                     if (line != null) {
                         copyText(context, line)
                         onMessage(publicKeyCopied)
@@ -863,6 +872,17 @@ fun CredentialFields(
                 }
             }
         }
+        // 设备没有门禁(没设锁屏 / 没录指纹)时,私钥只能静态加密、读的时候不验人。
+        // 开关本身不显示(显示了也打不开),这里补一句,免得用户以为它受保护。
+        if (draft.hasKey && !lockAvailable) {
+            FormDivider()
+            Text(
+                stringResource(R.string.edit_key_lock_unavailable),
+                Modifier.fillMaxWidth().padding(horizontal = BoxPad, vertical = 12.dp),
+                color = p.textDim,
+                fontSize = 13.sp,
+            )
+        }
     }
     // 这道锁管的是"已保存的密码 / 私钥 / 口令",和上面选密码还是私钥无关,所以单独一组。
     if (lockAvailable) {
@@ -874,7 +894,10 @@ fun CredentialFields(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(stringResource(R.string.edit_biometric_unlock), color = p.text, fontSize = 16.sp, modifier = Modifier.weight(1f))
-                XsshSwitch(draft.lockSecrets) { draft.lockSecrets = it }
+                XsshSwitch(draft.lockSecrets) {
+                    draft.lockUserChoice = it
+                    draft.lockSecrets = it
+                }
             }
         }
     }
