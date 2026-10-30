@@ -864,7 +864,22 @@ export const useSessions = defineStore('sessions', {
     /** Persists every tab (layout + panes, minus secrets) so it can be restored. */
     persistTabs(): void {
       if (!this.restoreTabs) return
-      void window.api.settings.set('openTabs', serializeTabs(this.tabs))
+      void (async () => {
+        const tabs = serializeTabs(this.tabs)
+        const idx = this.tabs.findIndex((t) => t.id === this.activeId)
+        try {
+          const r1 = await window.api.settings.set('openTabs', tabs)
+          const r2 = await window.api.settings.set(
+            'openTabsActiveIndex',
+            idx >= 0 ? idx : 0
+          )
+          if ((r1 && r1.ok === false) || (r2 && r2.ok === false)) {
+            toast(t('app.tabsPersistFail'), 'error')
+          }
+        } catch {
+          toast(t('app.tabsPersistFail'), 'error')
+        }
+      })()
     },
 
     /** Recreates last session's tabs (layout + splits). If `restoreConnect` is
@@ -875,6 +890,14 @@ export const useSessions = defineStore('sessions', {
       const list = await window.api.settings.get<PersistedTab[]>('openTabs')
       if (!list?.length) return
       this.restoreTabsFrom(list)
+      const activeIdx = await window.api.settings.get<number>('openTabsActiveIndex')
+      if (
+        typeof activeIdx === 'number' &&
+        activeIdx >= 0 &&
+        activeIdx < this.tabs.length
+      ) {
+        this.activeId = this.tabs[activeIdx].id
+      }
       if (this.restoreConnect) {
         // While the app is locked, don't reconnect (saved secrets are gated and
         // every attempt fails with code 'locked'). Defer to after unlock.
@@ -1274,11 +1297,16 @@ export const useSessions = defineStore('sessions', {
     },
 
     setActive(id: string): void {
+      if (this.activeId === id) return
       this.activeId = id
+      this.persistTabs()
     },
     setActivePane(tabId: string, paneId: string): void {
       const tab = this.tabs.find((t) => t.id === tabId)
-      if (tab && tab.panes.some((p) => p.id === paneId)) tab.activePaneId = paneId
+      if (!tab || !tab.panes.some((p) => p.id === paneId)) return
+      if (tab.activePaneId === paneId) return
+      tab.activePaneId = paneId
+      this.persistTabs()
     },
 
     togglePalette(open?: boolean): void {
@@ -2124,6 +2152,7 @@ export const useSessions = defineStore('sessions', {
       }
       otherTabs.forEach((t) => this.closeTab(t.id))
       this.activeId = id
+      this.persistTabs()
     },
 
     /** Closes every tab. Confirms first when any of them has a live session,
@@ -2171,7 +2200,7 @@ export const useSessions = defineStore('sessions', {
       if (this.tabs.length < 2) return
       const idx = this.tabs.findIndex((t) => t.id === this.activeId)
       const next = (idx + dir + this.tabs.length) % this.tabs.length
-      this.activeId = this.tabs[next].id
+      this.setActive(this.tabs[next].id)
     }
   }
 })

@@ -370,6 +370,9 @@
 3. **续传队列 / 传输历史静默回滚**:`queueUpload` / `queueDownload` / `setDownloadQueue` / `pushTransferHistory` 原来先改内存再 fire-and-forget `settings.set`,主进程返回 `{ ok: false }`(或抛错)时界面上的续传条 / 历史会显示下次启动就消失的条目(`setDownloadQueue` 更糟:以为消费掉的续传操作其实还留在磁盘上)。现在四个都先存 `prev`,失败或抛错时**静默回滚**,**不弹 toast**(后台 / 自动路径,与 #69 `addSftpRecent` 同类;#67 已经给用户主动的清空操作加了提示)。`clearTransferQueue` / `clearDownloadQueue` / `clearTransferHistory` / `removeTransferHistory` 属 #67,未动。
 
 **状态说明**:#69–#12 这批 PR **都还没合并**,本分支也不包含它们;上面第 3 条只是沿用 #69 的「静默回滚」写法,不依赖它落地。
+## M3.136（分支 `fix/review-polish-m3136`，**未合并**）
+- 修复：`setActivePane` 持久化当前面板（`activeIndex`）；新增 `openTabsActiveIndex` 的保存/恢复，`setActive` / `nextTab` / `closeOthers` 同步持久化当前标签；`persistTabs` 失败时提示 `app.tabsPersistFail`。
+- 说明：PR #70–#12 均未合并；本轮未重做 splitPane/divider、queue*、theme、setLang、addSftpRecent、applyLayoutPreset、openSnapshot、closeOthers 确认逻辑等既有改动。
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。
 
