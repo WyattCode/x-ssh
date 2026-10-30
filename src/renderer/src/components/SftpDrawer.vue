@@ -1169,8 +1169,12 @@ async function packDownloadSelected(): Promise<void> {
   busy.value = true
   try {
     const r = await window.api.sftp.packDownload(props.sessionId, payload)
-    if (!r.ok && !r.canceled) error.value = r.error ?? tt('sfp.packFail')
-    else if (r.ok) await load(path.value)
+    if (!r.ok && !r.canceled) {
+      error.value =
+        r.error === 'pack-empty'
+          ? tt('sfp.packEmpty')
+          : (r.error ?? tt('sfp.packFail'))
+    } else if (r.ok) await load(path.value)
   } finally {
     busy.value = false
   }
@@ -1180,8 +1184,9 @@ async function uploadExtractPick(): Promise<void> {
   busy.value = true
   try {
     const r = await window.api.sftp.uploadExtract(props.sessionId, path.value, store.transferConcurrency)
-    if (!r.ok && !r.canceled) error.value = r.error ?? tt('sfp.extractFail')
-    else if (r.ok) await load(path.value)
+    if (!r.ok && !r.canceled) {
+      error.value = r.error === 'extract-failed' ? tt('sfp.extractFail') : (r.error ?? tt('sfp.extractFail'))
+    } else if (r.ok) await load(path.value)
   } finally {
     busy.value = false
   }

@@ -1,3 +1,31 @@
+# M3.154 — HostStore seal-fail toast + extract/pack empty i18n codes (2026-10-30)
+
+> 分支 `fix/review-polish-m3154`(从 `origin/main` 切出)。**未合并**;PR #4–#88 一律没碰。
+
+## 修了什么
+
+1. **安卓 `HostStore.writeSecret` 封失败静默撒谎**(`HostStore.kt` / `MainActivity.kt`)。`Secrets.seal` / `writeLocked` 失败时沿用旧密文只打 `Log.w`,`save` 仍成功 → 用户以为新密码已存。现在 `save` 返回是否发生 seal 回退,`persist` 用 Toast `host_seal_failed`(三语言)说明"密码没存上,其他改动已保存"。空表拒绝落盘仍属 #88,未动。
+2. **桌面 `extractArchive` 空 stderr 中文兜底**(`ssh.ts` / `SftpDrawer.vue`)。`out.trim() || '解压失败'` 让 EN UI 看到中文;改为机器码 `extract-failed`,渲染层映射到已有 `sfp.extractFail`。(#51 只改了 pack-failed;#84 只加 toast,未改此码。)
+3. **桌面 `packAndDownload` 空列表中文**(`ssh.ts` / `SftpDrawer.vue` / `i18n.ts`)。`没有可打包的项` → 机器码 `pack-empty` + 新键 `sfp.packEmpty`(三语)。未动 #51 的 tar 退出码路径(主线尚无)。
+
+## 验证
+
+```
+npm run typecheck
+npm run lint:i18n
+npm run test
+```
+
+typecheck / lint:i18n / vitest **334** / 30 全绿。安卓只改了 Kotlin + strings(没动 Rust)。**没有在真机/模拟器上点过** seal 失败路径。
+
+## 注意
+
+- **不要合并**:这一批是 review 修复,等人工过一遍再合。
+- 未触碰的开放 PR:#4–#88(尤其 #88 TransferPanel reveal / paste / persist empty;#87 copySelection;#86 publicKey/symlink;#85 diff/preview;#84 export/pack toast;#51 pack-failed)。
+- 未触碰 `/workspace/MCode`。
+
+---
+
 # X-SSH 交接文档
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。
