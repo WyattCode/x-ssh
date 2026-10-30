@@ -106,10 +106,13 @@ fun HostEditorScreen(
     val scope = rememberCoroutineScope()
     var keyMessage by remember { mutableStateOf<String?>(null) }
     val importKey = rememberKeyImporter(draft) { keyMessage = it }
+    // 保存可能停在生物识别解锁上;没有这道闸,再点一次 ✓ / Ctrl+S 会再起一个协程。
+    var saving by remember { mutableStateOf(false) }
 
     val context = LocalContext.current
 
     fun save() {
+        if (saving) return
         // 用私钥登录时要验一次口令(解私钥要几百毫秒)、加锁开关要用密钥库并可能弹一次
         // 解锁,都放到 IO 之外由 buildHostForSave 自己安排;这里只管收结果。
         val activity = hostActivity(context)
@@ -118,8 +121,13 @@ fun HostEditorScreen(
             return
         }
         scope.launch {
-            val host = buildHostForSave(activity, draft)
-            host?.let(onSave)
+            saving = true
+            try {
+                val host = buildHostForSave(activity, draft)
+                host?.let(onSave)
+            } finally {
+                saving = false
+            }
         }
     }
 

@@ -554,7 +554,7 @@ async function forgetKnownHost(k: KnownHostEntry): Promise<void> {
 function keyAge(firstSeen?: number): string {
   if (!firstSeen) return ''
   const days = Math.floor((Date.now() - firstSeen) / 86400000)
-  if (days < 1) return '0d'
+  if (days < 1) return ''
   if (days < 30) return `${days}d`
   if (days < 365) return `${Math.floor(days / 30)}mo`
   return `${Math.floor(days / 365)}y`
