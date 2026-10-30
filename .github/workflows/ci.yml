@@ -6,6 +6,10 @@ on:
     tags: ['v*']
   pull_request:
     branches: [main]
+  # Lets a maintainer re-run the checks without an empty commit — useful after
+  # a runner/spending failure, where the red X describes the account and not
+  # the code.
+  workflow_dispatch:
 
 jobs:
   test-build:
