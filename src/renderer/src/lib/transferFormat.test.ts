@@ -8,6 +8,7 @@ import {
   formatEta,
 
   formatTransferName,
+  transferErrorText,
   transferStatusText,
   histStatusLabel,
   CANCELLED_MARKER
@@ -153,6 +154,13 @@ describe('formatTransferName', () => {
   it('passes a plain filename through unchanged', () => {
     expect(formatTransferName('report.txt', trName)).toBe('report.txt')
     expect(formatTransferName('同步', trName)).toBe('同步')
+describe('transferErrorText', () => {
+  it('maps a checksum-mismatch code to display text', () => {
+    expect(transferErrorText('checksum-mismatch:3', tr)).toBe('sfp.checksumMismatch:{"n":3}')
+  })
+
+  it('passes other errors through unchanged', () => {
+    expect(transferErrorText('No space left', tr)).toBe('No space left')
   })
 })
 
@@ -174,6 +182,12 @@ describe('transferStatusText', () => {
     expect(transferStatusText({ error: 'No space left' }, tr)).toBe('No space left')
   })
 
+  it('maps a checksum-mismatch error via the status text', () => {
+    expect(transferStatusText({ error: 'checksum-mismatch:2' }, tr)).toBe(
+      'sfp.checksumMismatch:{"n":2}'
+    )
+  })
+
   it('reports done and in-progress', () => {
     expect(transferStatusText({ done: true }, tr)).toBe('sfp.done')
     expect(transferStatusText({ total: 100, transferred: 40 }, tr)).toBe('40%')
@@ -187,3 +201,4 @@ describe('histStatusLabel', () => {
     expect(histStatusLabel('done', tr)).toBe('sfp.done')
   })
 })
+

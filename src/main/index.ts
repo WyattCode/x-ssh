@@ -1771,6 +1771,9 @@ function registerIpc(): void {
         )
         if (r.cancelled) return { ok: false, canceled: true }
         if (r.failures) return { ok: false, error: `files-failed:${r.failures}` }
+        if (r.walkError) return { ok: false, error: r.walkError }
+        if (r.failures) return { ok: false, error: `${r.failures} 个文件失败` }
+        if (r.checksumFails) return { ok: false, error: `checksum-mismatch:${r.checksumFails}` }
         return { ok: true }
       } catch (e) {
         return { ok: false, error: friendlyError((e as Error).message) }
@@ -1791,6 +1794,7 @@ function registerIpc(): void {
         const r = await sshManager.uploadJob(sessionId, res.filePaths, remoteDir, randomUUID(), concurrency, await defaultTransferRate(), policy)
         if (r.failures) return { ok: false, count: r.files, error: `files-failed:${r.failures}` }
         if (r.cancelled) return { ok: false, canceled: true, count: r.files }
+        if (r.walkError) return { ok: false, count: r.files, error: r.walkError }
         if (r.failures) return { ok: false, count: r.files, error: `${r.failures} 个文件失败` }
         return { ok: true, count: r.files }
       } catch (e) {
@@ -1823,6 +1827,9 @@ function registerIpc(): void {
         const r = await sshManager.downloadJob(sessionId, items, res.filePaths[0], randomUUID(), concurrency, await defaultTransferRate(), await verifyChecksumsEnabled())
         if (r.cancelled) return { ok: false, canceled: true }
         if (r.failures) return { ok: false, error: `files-failed:${r.failures}` }
+        if (r.walkError) return { ok: false, error: r.walkError }
+        if (r.failures) return { ok: false, error: `${r.failures} 个文件失败` }
+        if (r.checksumFails) return { ok: false, error: `checksum-mismatch:${r.checksumFails}` }
         return { ok: true, count: r.files }
       } catch (e) {
         return { ok: false, error: friendlyError((e as Error).message) }
@@ -1868,6 +1875,9 @@ function registerIpc(): void {
         const r = await sshManager.downloadJob(sessionId, items, targetDir, randomUUID(), concurrency, await defaultTransferRate(), await verifyChecksumsEnabled())
         if (r.cancelled) return { ok: false, canceled: true }
         if (r.failures) return { ok: false, error: `files-failed:${r.failures}` }
+        if (r.walkError) return { ok: false, error: r.walkError }
+        if (r.failures) return { ok: false, error: `${r.failures} 个文件失败` }
+        if (r.checksumFails) return { ok: false, error: `checksum-mismatch:${r.checksumFails}` }
         return { ok: true, count: r.files }
       } catch (e) {
         return { ok: false, error: friendlyError((e as Error).message) }
@@ -1889,6 +1899,7 @@ function registerIpc(): void {
         const r = await sshManager.uploadJob(sessionId, res.filePaths, remoteDir, randomUUID(), concurrency, await defaultTransferRate(), policy)
         if (r.failures) return { ok: false, count: r.files, error: `files-failed:${r.failures}` }
         if (r.cancelled) return { ok: false, canceled: true, count: r.files }
+        if (r.walkError) return { ok: false, count: r.files, error: r.walkError }
         if (r.failures) return { ok: false, count: r.files, error: `${r.failures} 个文件失败` }
         return { ok: true, count: r.files }
       } catch (e) {
@@ -1906,6 +1917,7 @@ function registerIpc(): void {
         const r = await sshManager.uploadJob(sessionId, paths, remoteDir, randomUUID(), concurrency, await defaultTransferRate(), policy)
         if (r.failures) return { ok: false, count: r.files, error: `files-failed:${r.failures}` }
         if (r.cancelled) return { ok: false, canceled: true, count: r.files }
+        if (r.walkError) return { ok: false, count: r.files, error: r.walkError }
         if (r.failures) return { ok: false, count: r.files, error: `${r.failures} 个文件失败` }
         return { ok: true, count: r.files }
       } catch (e) {
@@ -2020,6 +2032,7 @@ function registerIpc(): void {
         if (r.failures) return { ok: false, error: `files-failed:${r.failures}` }
         // A cancelled upload must not fall through to the extract below.
         if (r.cancelled) return { ok: false, canceled: true }
+        if (r.walkError) return { ok: false, error: r.walkError }
         if (r.failures) return { ok: false, error: `${r.failures} 个文件失败` }
         const name = basename(res.filePaths[0])
         return await sshManager.extractArchive(sessionId, remoteDir, name)

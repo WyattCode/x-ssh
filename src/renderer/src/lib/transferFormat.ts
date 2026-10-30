@@ -135,12 +135,21 @@ export function formatTransferName(
   const m = /^items:(\d+)$/.exec(name) || /^(\d+) 项$/.exec(name)
   if (m) return translate('sfp.nItems', { n: Number(m[1]) })
   return name
+/** Maps a machine-readable transfer error code from main to display text.
+ *  Unknown errors pass through unchanged. */
+export function transferErrorText(
+  error: string,
+  translate: (key: string, vars?: Record<string, number>) => string
+): string {
+  const m = /^checksum-mismatch:(\d+)$/.exec(error)
+  if (m) return translate('sfp.checksumMismatch', { n: Number(m[1]) })
+  return error
 }
 
 /** The status label for a running or finished transfer. */
 export function transferStatusText(
   t: Partial<Pick<SftpProgress, 'error' | 'done' | 'total' | 'transferred'>> & Cancellable,
-  translate: (key: string) => string
+  translate: (key: string, vars?: Record<string, number>) => string
 ): string {
   if (isCancelled(t)) return translate('sfp.cancelled')
   if (t.error) {
@@ -149,6 +158,7 @@ export function transferStatusText(
     const tr = translate as unknown as (key: string, vars?: Record<string, string | number>) => string
     return formatTransferError(t.error, tr)
   }
+  if (t.error) return transferErrorText(t.error, translate)
   if (t.done) return translate('sfp.done')
   return `${pct({ total: t.total ?? 0, transferred: t.transferred ?? 0, done: t.done })}%`
 }

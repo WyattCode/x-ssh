@@ -1187,6 +1187,10 @@ openSnapshot/closeOthers/saveSetting (#68), theme/transfer clears (#67), bookmar
 - 未触碰:M3.143/#78 jump_missing / HostEditor jumpGone;M3.142–M3.137 设置开关 / SFTP / closePane;theme / HostEditor save-delete / trustAndReconnect / ForwardsPage.remove / known_hosts / SFTP upload 波。
 - 仍按原计划搁置:`fontSize` 未使用、`local.home` 静默、StatusBar configured-vs-live、`setWindowOpenHandler`、预览「无法预览」。
 
+## M3.175(分支 `fix/review-polish-m3175`,勿合并)
+- 下载校验和不匹配不再当成功:`downloadJob` 返回 `checksumFails`,三条下载 IPC 回 `ok:false` + `checksum-mismatch:N`;界面按 `sfp.checksumMismatch` 显示(zh / zh-TW / en)。
+- 下载 / 上传的目录遍历失败(`walkError`)同样回 `ok:false`,不再把半截传输报成成功。
+- 只动 Windows / Android 相关路径;未碰 macOS / iOS。
 
 ## 项目概述
 - 极简、键盘优先的 SSH 客户端。Electron + Vue 3 (Vite) + TypeScript。

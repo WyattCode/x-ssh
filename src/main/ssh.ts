@@ -2057,7 +2057,13 @@ export class SshManager {
     concurrency?: number,
     rateBytesPerSec = 0,
     verifyChecksums = false
-  ): Promise<{ files: number; failures: number; cancelled: boolean }> {
+  ): Promise<{
+    files: number
+    failures: number
+    cancelled: boolean
+    checksumFails: number
+    walkError?: string
+  }> {
     this.jobSession.set(jobId, sessionId)
     if (rateBytesPerSec > 0) this.jobRate.set(jobId, rateBytesPerSec)
     // If the SFTP channel can't be opened the job never emits a terminal event,
@@ -2249,7 +2255,13 @@ export class SshManager {
     }
     // Callers report these: a cancelled or failed download used to come back to
     // the renderer as ok with the item count.
-    return { files: filesDone, failures: failures.length, cancelled }
+    return {
+      files: filesDone,
+      failures: failures.length,
+      cancelled,
+      checksumFails: sumFails.length,
+      walkError: walkError ? friendlyError((walkError as Error).message) : undefined
+    }
   }
 
   /** Compares a just-downloaded file's SHA-256 against the remote copy.
@@ -2322,6 +2334,7 @@ export class SshManager {
     rateBytesPerSec = 0,
     overwrite: UploadOverwrite = 'overwrite'
   ): Promise<{ files: number; failures: number; cancelled: boolean }> {
+  ): Promise<{ files: number; failures: number; walkError?: string }> {
     this.jobSession.set(jobId, sessionId)
     if (rateBytesPerSec > 0) this.jobRate.set(jobId, rateBytesPerSec)
     const conc = clampConcurrency(concurrency ?? SshManager.CONCURRENCY, SshManager.CONCURRENCY)
@@ -2338,6 +2351,7 @@ export class SshManager {
     // the caller can tell a cancelled upload from a completed one (a cancelled
     // job used to come back as ok, and a deploy/extract then ran anyway).
     let cancelled = false
+    let walkError: Error | null = null
     const queue: { local: string; remote: string; name: string }[] = []
     let walkDone = false
     const emit = (name: string, done?: boolean, error?: string, withPaths = false): void =>
@@ -2466,7 +2480,6 @@ export class SshManager {
       }
 
       emit(label)
-      let walkError: Error | null = null
       const walkP = (async () => {
         try {
           for (const p of localPaths) {
@@ -2512,6 +2525,11 @@ export class SshManager {
     // bumps `failures`, and both counts used to be dropped on the floor — so
     // uploading a path that does not exist answered "ok, 1 file".
     return { files: filesDone, failures, cancelled }
+    return {
+      files: filesDone,
+      failures,
+      walkError: walkError ? friendlyError((walkError as Error).message) : undefined
+    }
   }
 
   /** Windows caps ordinary paths at 260 chars, which a deep folder (node_modules

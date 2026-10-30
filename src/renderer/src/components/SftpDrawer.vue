@@ -11,6 +11,8 @@ import {
   formatAgo,
   formatTransferError,
   transferStatusText
+  transferStatusText,
+  transferErrorText
 } from '../lib/transferFormat'
 import { globMatch } from '../lib/glob'
 import { isImeKey } from '../lib/ime'
@@ -1468,6 +1470,7 @@ async function downloadSelected(): Promise<void> {
     error.value = msg
     toast(msg, 'error')
   }
+  if (!r.ok && !r.canceled) error.value = r.error ? transferErrorText(r.error, tt) : tt('sfp.downloadFail')
 }
 async function packDownloadSelected(): Promise<void> {
   if (!props.sessionId) return
