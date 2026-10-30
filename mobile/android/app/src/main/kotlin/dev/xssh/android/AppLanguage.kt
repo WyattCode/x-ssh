@@ -50,14 +50,15 @@ object AppLanguages {
      * `configChanges="locale|layoutDirection"`,**不重建**,Compose 原地重组换文字,界面不闪。
      * 更早的系统没有按应用语言,只能 recreate(会闪一下,这几台机器都用不到)。
      */
-    fun apply(activity: Activity, language: AppLanguage) {
+    fun apply(activity: Activity, language: AppLanguage): Boolean {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            val manager = activity.getSystemService(LocaleManager::class.java) ?: return
+            val manager = activity.getSystemService(LocaleManager::class.java) ?: return false
             manager.applicationLocales = language.tag?.let { LocaleList.forLanguageTags(it) } ?: LocaleList.getEmptyLocaleList()
-        } else {
-            prefs(activity).edit().putString(KEY, language.name).apply()
-            activity.recreate()
+            return true
         }
+        val ok = prefs(activity).edit().putString(KEY, language.name).commit()
+        if (ok) activity.recreate()
+        return ok
     }
 
     /**

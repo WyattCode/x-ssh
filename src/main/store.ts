@@ -92,6 +92,12 @@ export class HostStore {
 
   async list(): Promise<Host[]> {
     await this.ensureLoaded()
+    // Corrupt hosts.json (and .bak) leaves hosts=[] while persist() refuses to
+    // overwrite. Returning [] made the Connect page look like "no hosts".
+    // Reject so the renderer can keep its prior list and toast.
+    if (this.hostsLoadFailed) {
+      throw new Error('hosts-load-failed: hosts.json could not be read')
+    }
     return [...this.hosts]
       .sort((a, b) => (b.lastUsedAt ?? 0) - (a.lastUsedAt ?? 0))
       .map((h) => ({

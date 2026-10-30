@@ -1,3 +1,13 @@
+# M3.161 — 复核打磨(分支 `fix/review-polish-m3161`,基于 main @ 5946b1f,**勿合并**)
+
+> 三条 P1 修复;只动 Windows + Android,不碰 macOS / iOS。
+
+- **A(桌面)hosts.json 损坏不再静默变空表**:`HostStore.list()` 在 `hostsLoadFailed` 时抛 `hosts-load-failed`;`loadHosts` try/catch 保留上一份列表并 toast `hosts.loadFail`(只弹一次)。
+- **B(Android)终端字体选择落盘失败回滚**:`UiPrefs.setTerminalFont` 用 `commit()`,`TerminalFontChoice.choose` 失败回滚并 toast `font_persist_failed`。
+- **C(Android <13)语言选择落盘失败不 recreate**:`AppLanguages.apply` 返回 Boolean,失败 toast `lang_persist_failed` 并回滚勾选。
+
+---
+
 # X-SSH 交接文档
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。

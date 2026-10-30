@@ -43,9 +43,9 @@ describe('HostStore durability', () => {
   it('an unreadable host list with no backup is never overwritten with an empty list', async () => {
     await writeFile(hostsFile(), '[{"id": "a", "na', 'utf8')
     const store = new HostStore()
-    expect(await store.list()).toEqual([])
+    await expect(store.list()).rejects.toThrow(/hosts-load-failed/)
     await store.touch('a') // no host found → nothing to persist
-    await store.delete('zzz') // persists — must not blank the file
+    await expect(store.delete('zzz')).rejects.toThrow(/hosts-load-failed/)
     expect(await readFile(hostsFile(), 'utf8')).toBe('[{"id": "a", "na')
   })
 

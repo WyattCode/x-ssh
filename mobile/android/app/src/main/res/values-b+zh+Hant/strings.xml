@@ -121,6 +121,7 @@
     <string name="files_upload_folder">上傳資料夾…</string>
     <string name="files_uploaded_one">已上傳「%1$s」</string>
     <string name="font_noto">思源等寬</string>
+    <string name="font_persist_failed">字型設定沒能儲存,下次啟動會恢復原樣</string>
     <string name="font_style">%1$s 風格</string>
     <string name="host_address">位址</string>
     <string name="host_after_connect">連線後</string>
@@ -203,6 +204,7 @@
     <string name="set_done">完成</string>
     <string name="set_lang_system">跟隨系統</string>
     <string name="set_language">語言</string>
+    <string name="lang_persist_failed">語言設定沒能儲存,下次啟動會恢復原樣</string>
     <string name="set_selected">已選取</string>
     <string name="set_terminal_font">終端機字型</string>
     <string name="set_title">設定</string>

@@ -122,6 +122,7 @@
     <string name="files_upload_folder">Upload folder…</string>
     <string name="files_uploaded_one">Uploaded “%1$s”</string>
     <string name="font_noto">Source Han Mono</string>
+    <string name="font_persist_failed">Font choice could not be saved — it will reset on next launch</string>
     <string name="font_style">%1$s style</string>
     <string name="host_address">Address</string>
     <string name="host_after_connect">After connecting</string>
@@ -204,6 +205,7 @@
     <string name="set_done">Done</string>
     <string name="set_lang_system">Follow system</string>
     <string name="set_language">Language</string>
+    <string name="lang_persist_failed">Language choice could not be saved — it will reset on next launch</string>
     <string name="set_selected">Selected</string>
     <string name="set_terminal_font">Terminal font</string>
     <string name="set_title">Settings</string>

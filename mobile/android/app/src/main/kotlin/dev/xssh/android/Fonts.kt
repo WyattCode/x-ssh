@@ -213,16 +213,27 @@ object TerminalFontChoice {
     var current by androidx.compose.runtime.mutableStateOf(TerminalFont.Iosevka)
         private set
     private var prefs: UiPrefs? = null
+    private var appContext: android.content.Context? = null
 
     fun load(context: android.content.Context) {
         val p = UiPrefs(context)
         prefs = p
+        appContext = context.applicationContext
         current = TerminalFont.of(p.terminalFont)
     }
 
-    fun choose(font: TerminalFont) {
+    /** 选字体并落盘。返回 false = 没写进磁盘(UI 回滚并 toast)。 */
+    fun choose(font: TerminalFont): Boolean {
+        val prev = current
         current = font
-        prefs?.terminalFont = font.id
+        val ok = prefs?.setTerminalFont(font.id) ?: false
+        if (!ok) {
+            current = prev
+            appContext?.let {
+                android.widget.Toast.makeText(it, R.string.font_persist_failed, android.widget.Toast.LENGTH_SHORT).show()
+            }
+        }
+        return ok
     }
 }
 
