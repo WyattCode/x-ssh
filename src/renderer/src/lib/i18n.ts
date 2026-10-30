@@ -212,6 +212,7 @@ const zh: Dict = {
   'set.gen.snipPlaceholder': '要发送的命令(可多行)',
   'set.gen.cancel': '取消',
   'set.gen.save': '保存',
+  'set.gen.writeFail': '设置保存失败',
   'set.gen.addForward': '+ 添加',
 
   // settings terminal
@@ -991,6 +992,7 @@ const en: Dict = {
   'set.gen.snipPlaceholder': 'Command to send (multi-line)',
   'set.gen.cancel': 'Cancel',
   'set.gen.save': 'Save',
+  'set.gen.writeFail': 'Could not save setting',
   'set.gen.addForward': '+ Add',
 
   'set.term.appearance': 'Appearance',
@@ -1769,6 +1771,7 @@ const zhTW: Dict = {
   'set.gen.snipPlaceholder': '要傳送的指令(可多行)',
   'set.gen.cancel': '取消',
   'set.gen.save': '儲存',
+  'set.gen.writeFail': '設定儲存失敗',
   'set.gen.addForward': '+ 新增',
 
   // settings terminal

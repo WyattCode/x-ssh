@@ -146,7 +146,16 @@ async function add(): Promise<void> {
         return
       }
     }
-    if (save && host) await store.saveHost({ ...host, portForwards: [...(host.portForwards ?? []), rule] })
+    if (save && host) {
+      try {
+        await store.saveHost({ ...host, portForwards: [...(host.portForwards ?? []), rule] })
+      } catch {
+        // Live forward (if any) already started — leave it; tell the user the
+        // host profile was not updated so next connect will not reopen this rule.
+        err.value = t('ed.saveFail')
+        return
+      }
+    }
     form.localPort = ''
     form.remotePort = ''
     form.host = ''
