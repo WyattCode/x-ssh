@@ -161,7 +161,7 @@ pub fn verify_host_key(known: Option<&str>, actual: &str) -> HostKeyVerdict {
         .unwrap_or_default();
     if keys.is_empty() {
         HostKeyVerdict::Unknown
-    } else if keys.iter().any(|k| *k == actual) {
+    } else if keys.contains(&actual) {
         HostKeyVerdict::Trusted
     } else {
         HostKeyVerdict::Changed
@@ -788,7 +788,7 @@ impl Ssh {
                 map.remove(&port);
             }
             let handle = self.handle.clone();
-            let _ = self.runtime.block_on(async {
+            self.runtime.block_on(async {
                 let _ = handle.cancel_tcpip_forward("127.0.0.1", port).await;
             });
         }
@@ -811,7 +811,7 @@ impl Ssh {
                     map.remove(&port);
                 }
                 let handle = self.handle.clone();
-                let _ = self.runtime.block_on(async {
+                self.runtime.block_on(async {
                     let _ = handle.cancel_tcpip_forward("127.0.0.1", port).await;
                 });
             }

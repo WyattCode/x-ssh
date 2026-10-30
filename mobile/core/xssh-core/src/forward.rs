@@ -117,7 +117,7 @@ pub fn socks5_greeting(buf: &[u8]) -> Option<Result<[u8; 2], SocksErr>> {
         return None;
     }
     let methods = &buf[2..2 + nmethods];
-    if methods.iter().any(|&m| m == 0x00) {
+    if methods.contains(&0x00) {
         Some(Ok([0x05, 0x00]))
     } else {
         Some(Err(SocksErr::NoAcceptableMethod))
