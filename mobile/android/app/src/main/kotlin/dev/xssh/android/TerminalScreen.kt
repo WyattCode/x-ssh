@@ -607,7 +607,16 @@ private fun TerminalView(
     }
 
     val paste: () -> Unit = {
-        val clip = context.getSystemService(android.content.ClipboardManager::class.java)?.primaryClip
+        val mgr = context.getSystemService(android.content.ClipboardManager::class.java)
+        if (mgr == null) {
+            android.widget.Toast.makeText(
+                context,
+                context.getString(R.string.clipboard_unavailable),
+                android.widget.Toast.LENGTH_SHORT,
+            ).show()
+            return@paste
+        }
+        val clip = mgr.primaryClip
         val text = clip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty()
         if (text.isNotEmpty()) live.paste(text)
     }

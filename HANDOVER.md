@@ -1,3 +1,31 @@
+# M3.153 — TransferPanel reveal 路径 + 粘贴/空表落盘 Toast(2026-10-30)
+
+> 分支 `fix/review-polish-m3153`(从 `origin/main` 切出)。**未合并**;PR #4–#87 一律没碰。
+
+## 修了什么
+
+1. **桌面 TransferPanel「在文件夹中显示」下错路径且静默**(`TransferPanel.vue` 的 `reveal`)。下载完成项原来把 `h.localDir`(目录)交给 `revealLocal`,只打开文件夹、不选中文件;`SftpDrawer.revealHistory` 已用 `localJoin(h.localDir, h.name)`。现在对齐路径,并 `await` + 失败 toast `sfp.revealFail`(主线上 #74 只补了 toast、未修路径;本切片路径是新的)。
+2. **安卓终端粘贴在剪贴板服务缺失时静默**(`TerminalScreen.kt`)。先取 `ClipboardManager`,为 null 时 Toast `clipboard_unavailable` 后返回;有服务但内容为空仍静默(无内容可粘)。`clipboard_unavailable` 三语言新增(与未合的 #87 文案一致)。
+3. **安卓 `persist` 拒绝空表落盘只打 Log**(`MainActivity.kt`)。数据安全护栏拒绝用空内存覆盖非空磁盘时,补 Toast `hosts_persist_refused`(三语言),避免用户以为删/存成功。
+
+## 验证
+
+```
+npm run typecheck
+npm run lint:i18n
+npm run test
+```
+
+安卓侧只改了 Kotlin + strings(没动 Rust)。**没有在真机/模拟器上点过**剪贴板服务不可用与空表落盘护栏。
+
+## 注意
+
+- **不要合并**:这一批是 review 修复,等人工过一遍再合。
+- 未触碰的开放 PR:#4–#87(尤其 #87 的 copySelection/copyText;#86 publicKey/symlink/stopWatch;#85 diff/preview/GoTo;#84 export/pack;#74 TransferPanel reveal toast;#57 openExternal)。
+- 未触碰 `/workspace/MCode`。
+
+---
+
 # X-SSH 交接文档
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。

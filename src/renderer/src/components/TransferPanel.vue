@@ -3,6 +3,8 @@ import { computed, ref } from 'vue'
 import { useSessions } from '../stores/sessions'
 import { useI18n } from '../lib/i18n'
 import { canRevealHistory } from '../lib/transferHistory'
+import { localJoin } from '../../../shared/fsUtils'
+import { useToast } from '../composables/toast'
 import {
   pct as pctOf,
   formatBytes,
@@ -14,6 +16,7 @@ import Icon from './Icon.vue'
 
 const store = useSessions()
 const { t } = useI18n()
+const { toast } = useToast()
 
 // Paused job ids (in-memory, main-driven). Tracked here so the resume button
 // shows only for paused rows, and a global "resume all" reflects the state.
@@ -48,10 +51,16 @@ function histStatus(h: TransferHistoryItem): string {
   if (h.status === 'error') return h.error || t('sfp.failed')
   return t('sfp.done')
 }
-function reveal(h: TransferHistoryItem): void {
+async function reveal(h: TransferHistoryItem): Promise<void> {
   const target =
-    h.direction === 'down' ? h.localDir : h.localPaths?.[0]
-  if (target) void window.api.sftp.revealLocal(target)
+    h.direction === 'up'
+      ? h.localPaths?.[0]
+      : h.localDir
+        ? localJoin(h.localDir, h.name)
+        : undefined
+  if (!target) return
+  const r = await window.api.sftp.revealLocal(target)
+  if (!r.ok) toast(r.error ?? t('sfp.revealFail'), 'error')
 }
 // History rows only expose "reveal" for finished down/up transfers.
 function canReveal(h: TransferHistoryItem): boolean {
