@@ -103,6 +103,7 @@ const zh: Dict = {
   'app.socks5AddrType': 'SOCKS5 代理响应地址类型无效',
   'app.httpProxyFailed': 'HTTP 代理隧道失败',
   'app.jumpMissing': '这台主机的跳板机已被删除。请在主机编辑页重新选择跳板机,或改为直接连接。',
+  'app.jumpNeedsKey': '跳板机未选择私钥文件。请在「主机」编辑页为跳板主机导入私钥后重试,或改用密码认证。',
 
   // settings tabs
   'tab.general': '通用',
@@ -795,6 +796,7 @@ const zh: Dict = {
   'host.jumpDeleted': '已删除',
   'host.jumpGone': '原来选的跳板机已经删除了。',
   'host.jumpBlocked': '它是「{name}」的跳板机,不能再经过别的跳板机。',
+  'host.jumpNested': '所选跳板机自己还经另一台跳板连接。本应用只支持一层跳板,请改选一台直连主机,或先清掉那台的跳板设置。',
   'host.forwards': '本地端口转发',
   'host.fwMode': '类型',
   'host.fwLocalMode': '本地 -L',
@@ -1008,6 +1010,7 @@ const en: Dict = {
   'app.socks5AddrType': 'SOCKS5 proxy returned an invalid address type',
   'app.httpProxyFailed': 'HTTP proxy tunnel failed',
   'app.jumpMissing': 'This host\'s jump host has been deleted. Pick another jump host in the editor, or connect directly.',
+  'app.jumpNeedsKey': 'The jump host has no private key selected. Import a key on the jump host profile (or switch to password auth) and retry.',
 
   'tab.general': 'General',
   'tab.terminal': 'Terminal',
@@ -1692,6 +1695,7 @@ const en: Dict = {
   'host.jumpDeleted': 'Deleted',
   'host.jumpGone': 'The jump host chosen earlier has been deleted.',
   'host.jumpBlocked': 'It\'s the jump host for "{name}", so it can\'t go through another jump host.',
+  'host.jumpNested': 'The selected jump host itself uses another jump. Only one hop is supported — pick a direct host, or clear that host\'s jump first.',
   'host.forwards': 'Local port forwards',
   'host.fwMode': 'Type',
   'host.fwLocalMode': 'Local -L',
@@ -1907,6 +1911,7 @@ const zhTW: Dict = {
   'app.socks5AddrType': 'SOCKS5 代理回應位址類型無效',
   'app.httpProxyFailed': 'HTTP 代理通道失敗',
   'app.jumpMissing': '這台主機的跳板機已被刪除。請在主機編輯頁重新選擇跳板機,或改為直接連線。',
+  'app.jumpNeedsKey': '跳板機未選擇私鑰檔。請在「主機」編輯頁為跳板主機匯入私鑰後重試,或改用密碼驗證。',
 
   // settings tabs
   'tab.general': '一般',
@@ -2600,6 +2605,7 @@ const zhTW: Dict = {
   'host.jumpDeleted': '已刪除',
   'host.jumpGone': '原本選的跳板機已經刪除了。',
   'host.jumpBlocked': '它是「{name}」的跳板機,不能再經過其他跳板機。',
+  'host.jumpNested': '所選跳板機自己還經另一台跳板連線。本應用只支援一層跳板,請改選一台直連主機,或先清掉那台的跳板設定。',
   'host.forwards': '本機連接埠轉送',
   'host.fwMode': '類型',
   'host.fwLocalMode': '本機 -L',

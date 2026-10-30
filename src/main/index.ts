@@ -593,18 +593,46 @@ async function withTempHosts(
       params.multiplex = (await settings.get<boolean>('connectionMultiplex')) === true
       if (h.jumpHostId) {
         const jh = (await store.list()).find((x) => x.id === h.jumpHostId)
-        if (jh) {
-          const jump: JumpConfig = {
-            host: jh.host,
-            port: jh.port,
-            username: jh.username,
-            auth: jh.auth,
-            keyPath: jh.keyPath
-          }
-          if (jh.auth === 'password') jump.password = store.isLocked ? undefined : await store.getPassword(jh.id)
-          if (jh.auth === 'key') jump.passphrase = store.isLocked ? undefined : await store.getPassphrase(jh.id)
-          params.jump = jump
+        // A deleted jump host must not silently turn into a direct connection:
+        // the batch path (publish / revoke) would then reach the target from
+        // the wrong network position without a word.
+        if (!jh) {
+          results.push({
+            host: hostLabel,
+            ok: false,
+            error: '跳板机已被删除,请在主机编辑页重新选择跳板机或改为直接连接。'
+          })
+          continue
         }
+        const jump: JumpConfig = {
+          host: jh.host,
+          port: jh.port,
+          username: jh.username,
+          auth: jh.auth,
+          keyPath: jh.keyPath
+        }
+        if (jh.auth === 'password') jump.password = store.isLocked ? undefined : await store.getPassword(jh.id)
+        if (jh.auth === 'key') jump.passphrase = store.isLocked ? undefined : await store.getPassphrase(jh.id)
+        // Same fail-closed checks the interactive connect path makes: without
+        // them the hop fails deep in the handshake (or throws late as a missing
+        // key file) and the per-host result says nothing actionable.
+        if (jh.auth === 'password' && !jump.password) {
+          results.push({
+            host: hostLabel,
+            ok: false,
+            error: '跳板机需要密码,但没有已保存的密码。请在主机编辑页为跳板主机设置密码后重试。'
+          })
+          continue
+        }
+        if (jh.auth === 'key' && !jh.keyPath) {
+          results.push({
+            host: hostLabel,
+            ok: false,
+            error: '跳板机未选择私钥文件,请在主机编辑页为跳板主机导入私钥后重试。'
+          })
+          continue
+        }
+        params.jump = jump
       }
       {
         const gate = await gateKeyConnect(userVerify, params)
@@ -1487,6 +1515,16 @@ function registerIpc(): void {
               ok: false,
               code: 'jump_needs_password',
               error: `跳板机 ${jh.host} 需要密码,但没有已保存的密码。请在「主机」编辑页为 ${jh.label} 设置密码后重试,或更换认证方式。`
+            }
+            // A key jump host with no key file would throw late ("未选择私钥文件")
+            // after the target's handshake already started; refuse it up front
+            // with the same actionable wording Android uses.
+            if (jh.auth === 'key' && !jh.keyPath) {
+              return {
+                ok: false,
+                code: 'jump_needs_key',
+                error: `跳板机 ${jh.host} 未选择私钥文件。请在「主机」编辑页为 ${jh.label} 导入私钥后重试。`
+              }
             }
           }
         }

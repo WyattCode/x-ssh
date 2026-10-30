@@ -179,6 +179,15 @@ const jumpUsedBy = computed(() =>
 // already someone else's hop (one hop only). A stale/legacy jumpHostId must
 // still be clearable.
 const jumpBlocked = computed(() => jumpUsedBy.value.length > 0 && !form.jumpHostId)
+// One hop only (same rule as Android): a host that itself uses a jump can't be
+// picked, because core ignores the second hop and the connect then looks like a
+// mysterious network failure.
+const jumpCandidates = computed(() => store.hosts.filter((h) => h.id !== form.id && !h.jumpHostId))
+// A selection saved before that filter existed can still point at a nested hop;
+// warn about it (the select stays usable so the user can clear it).
+const jumpNested = computed(
+  () => !!form.jumpHostId && store.hosts.some((h) => h.id === form.jumpHostId && !!h.jumpHostId)
+)
 
 // Pasting "user@host:port" into 主机 fills all three. Only on an unambiguous
 // shape: a single colon (so IPv6 literals are left alone).
@@ -684,6 +693,7 @@ async function remove(): Promise<void> {
               <p v-if="jumpGone || jumpBlocked" class="sub-hint jump-hint">
                 {{ jumpGone ? t('host.jumpGone') : t('host.jumpBlocked', { name: jumpUsedBy[0].label }) }}
               </p>
+              <p v-if="jumpNested" class="sub-hint jump-hint">{{ t('host.jumpNested') }}</p>
 
               <button type="button" class="row disclosure" @click="sections.proxy = !sections.proxy">
                 <span class="r-label wide">{{ t('host.proxy') }}</span>
@@ -1156,6 +1166,10 @@ input[type='number']::-webkit-inner-spin-button {
 }
 .jump-hint + .row {
   border-top: 1px solid var(--border);
+}
+/* The jump row's warning sits directly under the select, inside the card. */
+.jump-hint {
+  padding: 0 16px 10px;
 }
 .panel:focus {
   outline: none;

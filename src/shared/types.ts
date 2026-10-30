@@ -310,6 +310,7 @@ export interface ConnectResult {
   error?: string
   /** Machine-readable failure code: 'host_key_unknown' (first connect),
    *  'host_key_changed', 'auth_failed', 'jump_needs_password', 'locked',
+   *  'host_key_changed', 'jump_needs_password', 'jump_needs_key', 'locked',
    *  'forward:*'. */
   code?: string
   /** Fingerprint the server presented when a host-key rejection failed the

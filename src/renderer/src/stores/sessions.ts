@@ -1857,6 +1857,8 @@ export const useSessions = defineStore('sessions', {
                 ? t('app.noPrivateKey')
             : result.code === 'jump_missing'
               ? t('app.jumpMissing')
+            : result.code === 'jump_needs_key'
+              ? t('app.jumpNeedsKey')
               : result.code === 'locked'
                 ? t('app.locked')
                 : result.code === 'host_key_unknown'
@@ -1896,6 +1898,7 @@ export const useSessions = defineStore('sessions', {
                   : result.code === 'auth_failed'
                     ? t('app.authFailed')
                     : (result.error ?? t('app.connectFail'))
+
         live.pane.message = msg
         live.pane.errorCode = result.code
         // A refusal that carries a retry delay (the server's connection-rate
