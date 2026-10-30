@@ -754,6 +754,7 @@ fun CredentialFields(
     val generatedKeyName = stringResource(R.string.edit_key_generated_name)
     val publicKeyCopied = stringResource(R.string.edit_public_key_copied)
     val generateFailed = stringResource(R.string.edit_generate_failed)
+    val clipboardFailed = stringResource(R.string.clipboard_unavailable)
     val passwordLabel = stringResource(R.string.edit_password)
     val privateKeyLabel = stringResource(R.string.edit_private_key)
     FormGroup {
@@ -839,8 +840,8 @@ fun CredentialFields(
                 scope.launch {
                     val line = withContext(Dispatchers.IO) { draft.generateKey(generatedKeyName) }
                     if (line != null) {
-                        copyText(context, line)
-                        onMessage(publicKeyCopied)
+                        if (copyText(context, line)) onMessage(publicKeyCopied)
+                        else onMessage(clipboardFailed)
                     } else {
                         onMessage(generateFailed)
                     }
@@ -852,8 +853,8 @@ fun CredentialFields(
                 scope.launch {
                     val line = withContext(Dispatchers.IO) { draft.publicKey() }
                     if (line != null) {
-                        copyText(context, line)
-                        onMessage(publicKeyCopied)
+                        if (copyText(context, line)) onMessage(publicKeyCopied)
+                        else onMessage(clipboardFailed)
                     }
                 }
             }

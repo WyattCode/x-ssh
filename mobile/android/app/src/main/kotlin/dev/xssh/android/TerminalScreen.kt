@@ -615,7 +615,14 @@ private fun TerminalView(
     // 选中的文字(鼠标拖选 / 双击选词 / 三击选行 / 手指长按)。选区在核心里,跟着内容滚动,
     // 能一直选进回滚历史;这里只拿它落在视口里的那一段来画。一敲键盘、点一下终端就清掉。
     val selection: () -> TermSelection? = { frameState.value.selection?.toTermSelection() }
-    val copySelection: () -> Unit = { live.copySelection { copyText(context, it) } }
+    val clipboardUnavailable = stringResource(R.string.clipboard_unavailable)
+    val copySelection: () -> Unit = {
+        live.copySelection { text ->
+            val ok = copyText(context, text)
+            if (!ok) android.widget.Toast.makeText(context, clipboardUnavailable, android.widget.Toast.LENGTH_SHORT).show()
+            ok
+        }
+    }
     // 判据是"核心里有没有选区"(`live.hasSelection`),**不是**"这一帧的视口里看不看得见"。
     // 用后者的话,选区滚出视口之后 `frame.selection` 变成 null,这里就直接短路了 ——
     // 核心里那份一直留着:打字不清它,回滚上去高亮还在,`Ctrl+Shift+C` 还会把它复制走。

@@ -275,8 +275,8 @@ async function deleteKey(k: ManagedKey): Promise<void> {
   if (r.ok) {
     if (form.keyPath === k.path) form.keyPath = ''
     await loadKeys()
-  } else if (r.error) {
-    toast(r.error, 'error')
+  } else {
+    toast(r.error ?? t('host.keyDeleteFail'), 'error')
   }
   panelEl.value?.focus()
 }

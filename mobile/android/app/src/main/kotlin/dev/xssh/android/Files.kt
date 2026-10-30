@@ -461,7 +461,10 @@ fun FilesPane(
     }
 
     fun copyPaths(targets: List<RemoteEntry>) {
-        if (targets.isNotEmpty()) copyText(context, targets.joinToString("\n") { it.path })
+        if (targets.isEmpty()) return
+        if (!copyText(context, targets.joinToString("\n") { it.path })) {
+            files.notify(FileText.of(R.string.clipboard_unavailable), error = true)
+        }
     }
 
     // 菜单项在菜单弹出时才建(不在组合里),文字用 context 取。
@@ -502,7 +505,13 @@ fun FilesPane(
         })
         add(MenuAction(context.getString(R.string.files_refresh), shortcut = "Ctrl+R") { refresh() })
         add(MenuAction(context.getString(R.string.files_go_to_path_ellipsis), shortcut = "Ctrl+L") { dialog = FilesDialog.GoTo })
-        path?.let { add(MenuAction(context.getString(R.string.files_copy_current_path)) { copyText(context, it) }) }
+        path?.let { current ->
+            add(MenuAction(context.getString(R.string.files_copy_current_path)) {
+                if (!copyText(context, current)) {
+                    files.notify(FileText.of(R.string.clipboard_unavailable), error = true)
+                }
+            })
+        }
     }
 
     var typed by remember { mutableStateOf("") }
@@ -582,7 +591,13 @@ fun FilesPane(
                 e.keyCode == AndroidKeyEvent.KEYCODE_A -> marked = list.mapTo(HashSet()) { it.path }
                 e.keyCode == AndroidKeyEvent.KEYCODE_C -> {
                     val picked = selection()
-                    if (picked.isEmpty()) copyText(context, path ?: return@handler false) else copyPaths(picked)
+                    if (picked.isEmpty()) {
+                        if (!copyText(context, path ?: return@handler false)) {
+                            files.notify(FileText.of(R.string.clipboard_unavailable), error = true)
+                        }
+                    } else {
+                        copyPaths(picked)
+                    }
                 }
                 e.keyCode == AndroidKeyEvent.KEYCODE_L -> dialog = FilesDialog.GoTo
                 else -> return@handler false
