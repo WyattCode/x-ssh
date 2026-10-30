@@ -50,6 +50,9 @@
 # 会话记录:连续改进 M3.80(2026-10-30,复核打磨:TransferPanel 暂停图标响应式 + Android 坏 SFTP 通道丢弃 + ForwardDialog Enter)
 
 功能清单已够,本轮按站立规则做开源复核打磨(不合并)。未动 PR #14 / #13 / #12 与更早的 #4–#11。
+# 会话记录:连续改进 M3.81(2026-10-30,复核打磨:snippet 发送前活会话复核 + known_hosts/片段删除确认 + ForwardsPage 切 mode 清错)
+
+功能清单已够,本轮按站立规则做开源复核打磨(不合并)。未动 PR #15 / #14 / #13 / #12 与更早的 #4–#11。
 
 **核过已过时 / 已在未合并 PR(本轮不重做)**:
 1. TransferPanel 失败原因 / ETA —— PR #12。
@@ -64,6 +67,15 @@
 3. **桌面 ForwardDialog**:端口/主机框 Enter 提交(IME 守卫);切 mode 清掉过期 `err`。
 
 **验证**:`typecheck` + vitest **343** 全绿(原 334;+`transferPause` 9)。Android:新增 `SftpHandle.kt` + `SftpHandleTest.kt`(本机无 SDK,未跑 `testDebugUnitTest`;CI / 有 SDK 时再跑)。未合并。
+5. TransferPanel 暂停图标响应式 / Android 坏 SFTP 句柄丢弃 / ForwardDialog Enter —— PR #15。
+
+**修了**:
+1. **桌面 sendSnippet 对话框后仍往死会话打字**:确认 / 填变量 `await` 之后用 `liveSnippetSessionId` + `paneBySession` 复核原 `sid` 仍是 connected 且匹配,否则 toast `app.needLiveSession`;`lib/snippetSession.ts` + 5 条单测。
+2. **设置 → 安全 known_hosts 删除无确认**:`forgetKnownHost` 先 `confirm(set.sec.forgetConfirm)`(danger)。
+3. **设置 → 常规片段删除无确认**:`deleteSnippet` 先 `confirm(set.gen.snipDeleteConfirm)`(danger,带标题)。
+4. **端口转发页切 mode 残留坏端口错**:`watch(() => form.mode, …)` 清 `err`(与 #15 ForwardDialog 同口径)。
+
+**验证**:`typecheck` + `lint:i18n` + vitest **339** 全绿(原 334;+`snippetSession` 5)。Android 本轮未改。未合并。
 
 ---
 

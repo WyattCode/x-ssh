@@ -525,6 +525,11 @@ async function saveSnippet(): Promise<void> {
   snippetForm.open = false
 }
 async function deleteSnippet(id: string): Promise<void> {
+  // Deleting a snippet is one-way; confirm first, naming it so a misclick on
+  // the wrong row is obvious. Fall back to the id if the row is already gone.
+  const title = store.snippets.find((s) => s.id === id)?.title ?? id
+  const ok = await confirm(t('set.gen.snipDeleteConfirm', { title }), { danger: true })
+  if (!ok) return
   await store.deleteSnippet(id)
 }
 function oneLine(s: string): string {
@@ -536,6 +541,10 @@ function hostLabel(id: string): string {
 
 // ---- known hosts / SSH config ----
 async function forgetKnownHost(k: KnownHostEntry): Promise<void> {
+  // Forgetting a trusted key is destructive: the next connect re-prompts (and
+  // a changed key would otherwise be silently accepted). Confirm first.
+  const ok = await confirm(t('set.sec.forgetConfirm', { host: `${k.host}:${k.port}` }), { danger: true })
+  if (!ok) return
   await window.api.knownHosts.forget(k.host, k.port)
   await store.loadKnownHosts()
 }
