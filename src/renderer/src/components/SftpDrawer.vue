@@ -9,7 +9,8 @@ import {
   formatBytes,
   formatSpeed,
   formatAgo,
-  transferStatusText
+  transferStatusText,
+  transferErrorText
 } from '../lib/transferFormat'
 import { globMatch } from '../lib/glob'
 import { isImeKey } from '../lib/ime'
@@ -1155,7 +1156,7 @@ async function downloadSelected(): Promise<void> {
     isDir: e.isDir
   }))
   const r = await window.api.sftp.downloadMany(props.sessionId, payload, store.transferConcurrency)
-  if (!r.ok && !r.canceled) error.value = r.error ?? tt('sfp.downloadFail')
+  if (!r.ok && !r.canceled) error.value = r.error ? transferErrorText(r.error, tt) : tt('sfp.downloadFail')
 }
 async function packDownloadSelected(): Promise<void> {
   if (!props.sessionId) return

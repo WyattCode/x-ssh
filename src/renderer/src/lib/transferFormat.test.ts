@@ -5,6 +5,7 @@ import {
   formatBytes,
   formatSpeed,
   formatAgo,
+  transferErrorText,
   transferStatusText,
   CANCELLED_MARKER
 } from './transferFormat'
@@ -95,6 +96,16 @@ describe('formatAgo', () => {
   })
 })
 
+describe('transferErrorText', () => {
+  it('maps a checksum-mismatch code to display text', () => {
+    expect(transferErrorText('checksum-mismatch:3', tr)).toBe('sfp.checksumMismatch:{"n":3}')
+  })
+
+  it('passes other errors through unchanged', () => {
+    expect(transferErrorText('No space left', tr)).toBe('No space left')
+  })
+})
+
 describe('transferStatusText', () => {
   it('labels a cancelled transfer as cancelled, not failed', () => {
     // The bug the shared helper fixes: one of the two copies compared against a
@@ -105,6 +116,12 @@ describe('transferStatusText', () => {
 
   it('passes a genuine error through', () => {
     expect(transferStatusText({ error: 'No space left' }, tr)).toBe('No space left')
+  })
+
+  it('maps a checksum-mismatch error via the status text', () => {
+    expect(transferStatusText({ error: 'checksum-mismatch:2' }, tr)).toBe(
+      'sfp.checksumMismatch:{"n":2}'
+    )
   })
 
   it('reports done and in-progress', () => {

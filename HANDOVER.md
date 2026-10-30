@@ -2,6 +2,11 @@
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。
 
+## M3.175(分支 `fix/review-polish-m3175`,勿合并)
+- 下载校验和不匹配不再当成功:`downloadJob` 返回 `checksumFails`,三条下载 IPC 回 `ok:false` + `checksum-mismatch:N`;界面按 `sfp.checksumMismatch` 显示(zh / zh-TW / en)。
+- 下载 / 上传的目录遍历失败(`walkError`)同样回 `ok:false`,不再把半截传输报成成功。
+- 只动 Windows / Android 相关路径;未碰 macOS / iOS。
+
 ## 项目概述
 - 极简、键盘优先的 SSH 客户端。Electron + Vue 3 (Vite) + TypeScript。
 - 平台: Windows (`win32`)。目录: `D:\Documents\Claude Code\X-SSH`。
