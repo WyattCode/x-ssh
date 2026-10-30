@@ -8,6 +8,7 @@ import { clampConcurrency } from '../../../shared/fsUtils'
 import { decideStatusEvent, nextReconnectFloorMs, retryDelayMs, shouldReviveOnOnline } from '../lib/reconnect'
 import { decideStatusEvent, retryDelayMs, shouldReviveOnOnline } from '../lib/reconnect'
 import { liveSnippetSessionId } from '../lib/snippetSession'
+import { hasLiveConnectedPane, closeOthersNeedsConfirm } from '../lib/snapshotGuard'
 import {
   buildFlatTree,
   buildGrid,
@@ -1095,6 +1096,15 @@ export const useSessions = defineStore('sessions', {
     async openSnapshot(id: string): Promise<void> {
       const s = this.snapshots.find((x) => x.id === id)
       if (!s) return
+      if (hasLiveConnectedPane(this.tabs)) {
+        const ok = await confirm(t('pal.snapRestoreConfirm'), {
+          danger: true,
+          title: t('pal.snapRestoreTitle'),
+          confirmText: t('pal.snapRestoreOk'),
+          cancelText: t('confirm.cancel')
+        })
+        if (!ok) return
+      }
       const ids = this.tabs.map((t) => t.id)
       ids.forEach((tid) => this.closeTab(tid))
       this.restoreTabsFrom(s.tabs)
@@ -1829,7 +1839,22 @@ export const useSessions = defineStore('sessions', {
       this.closeTab(id)
     },
 
-    closeOthers(id: string): void {
+    async closeOthers(id: string): Promise<void> {
+      if (closeOthersNeedsConfirm(this.confirmClose, this.tabs, id)) {
+        const ok = await confirm(t('tabbar.closeOthersConfirm'), {
+          danger: true,
+          title: t('app.closeExitTitle'),
+          confirmText: t('app.closeExitOk'),
+          cancelText: t('confirm.cancel')
+        })
+        if (!ok) return
+        for (const tab of this.tabs) {
+          if (tab.id === id) continue
+          for (const p of tab.panes) {
+            if (p.status === 'connected' && p.sshSessionId) void window.api.ssh.input(p.sshSessionId, 'exit\n')
+          }
+        }
+      }
       const others = this.tabs.filter((t) => t.id !== id).map((t) => t.id)
       others.forEach((oid) => this.closeTab(oid))
       this.activeId = id

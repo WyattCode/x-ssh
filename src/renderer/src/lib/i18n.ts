@@ -628,6 +628,9 @@ const zh: Dict = {
   'pal.snapDefault': '快照',
   'pal.snapDelete': '删除「{name}」',
   'pal.snapDeleteDesc': '从已保存的快照里去掉',
+  'pal.snapRestoreConfirm': '当前有活跃会话。恢复快照会断开它们并替换全部标签,确定继续?',
+  'pal.snapRestoreTitle': '恢复会话快照',
+  'pal.snapRestoreOk': '恢复',
 
   // history search
   'hist.placeholder': '搜索所有会话输出…',
@@ -804,7 +807,8 @@ const zh: Dict = {
   'tabbar.rename': '重命名',
   'tabbar.filter': '过滤标签…',
   'tabbar.closeTab': '关闭',
-  'tabbar.closeOthers': '关闭其他'
+  'tabbar.closeOthers': '关闭其他',
+  'tabbar.closeOthersConfirm': '其他标签仍有活跃会话,确定全部关闭吗?关闭前会先发送 exit。'
 }
 
 const en: Dict = {
@@ -1417,6 +1421,9 @@ const en: Dict = {
   'pal.snapDefault': 'Snapshot',
   'pal.snapDelete': 'Delete “{name}”',
   'pal.snapDeleteDesc': 'Remove from saved snapshots',
+  'pal.snapRestoreConfirm': 'You have live sessions. Restoring a snapshot disconnects them and replaces every tab. Continue?',
+  'pal.snapRestoreTitle': 'Restore session snapshot',
+  'pal.snapRestoreOk': 'Restore',
 
   // history search
   'hist.placeholder': 'Search all session output…',
@@ -1591,7 +1598,8 @@ const en: Dict = {
   'tabbar.rename': 'Rename',
   'tabbar.filter': 'Filter tabs…',
   'tabbar.closeTab': 'Close',
-  'tabbar.closeOthers': 'Close others'
+  'tabbar.closeOthers': 'Close others',
+  'tabbar.closeOthersConfirm': 'Other tabs still have active sessions. Close them all? An `exit` is sent first.'
 }
 
 /** Traditional Chinese, Taiwan usage. Keys missing here fall back to `zh`. */
@@ -2216,6 +2224,9 @@ const zhTW: Dict = {
   'pal.snapDefault': '快照',
   'pal.snapDelete': '刪除「{name}」',
   'pal.snapDeleteDesc': '從已儲存的快照裡移除',
+  'pal.snapRestoreConfirm': '目前有作用中的工作階段。還原快照會中斷它們並取代全部頁簽,確定繼續?',
+  'pal.snapRestoreTitle': '還原工作階段快照',
+  'pal.snapRestoreOk': '還原',
 
   // history search
   'hist.placeholder': '搜尋所有工作階段的輸出…',
@@ -2392,7 +2403,8 @@ const zhTW: Dict = {
   'tabbar.rename': '重新命名',
   'tabbar.filter': '篩選分頁…',
   'tabbar.closeTab': '關閉',
-  'tabbar.closeOthers': '關閉其他分頁'
+  'tabbar.closeOthers': '關閉其他分頁',
+  'tabbar.closeOthersConfirm': '其他分頁仍有作用中的工作階段,確定要全部關閉嗎?關閉前會先傳送 exit。'
 }
 
 const dicts: Record<Lang, Dict> = { zh, 'zh-TW': zhTW, en }

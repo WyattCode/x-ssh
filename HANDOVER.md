@@ -53,6 +53,9 @@
 # 会话记录:连续改进 M3.81(2026-10-30,复核打磨:snippet 发送前活会话复核 + known_hosts/片段删除确认 + ForwardsPage 切 mode 清错)
 
 功能清单已够,本轮按站立规则做开源复核打磨(不合并)。未动 PR #15 / #14 / #13 / #12 与更早的 #4–#11。
+# 会话记录:连续改进 M3.82(2026-10-30,复核打磨:快照恢复确认 + 关闭其他尊重 confirmClose + 侧栏按下缩小)
+
+功能清单已够,本轮按站立规则做开源复核打磨(不合并)。未动 PR #16 / #15 / #14 / #13 / #12 与更早的 #4–#11。
 
 **核过已过时 / 已在未合并 PR(本轮不重做)**:
 1. TransferPanel 失败原因 / ETA —— PR #12。
@@ -76,6 +79,15 @@
 4. **端口转发页切 mode 残留坏端口错**:`watch(() => form.mode, …)` 清 `err`(与 #15 ForwardDialog 同口径)。
 
 **验证**:`typecheck` + `lint:i18n` + vitest **339** 全绿(原 334;+`snippetSession` 5)。Android 本轮未改。未合并。
+5. TransferPanel 暂停图标响应式 / Android 坏 SFTP 句柄丢弃 / ForwardDialog Enter —— PR #15。
+6. sendSnippet 活会话复核 / known_hosts·片段删除确认 / ForwardsPage 切 mode 清错 —— PR #16。
+
+**修了**:
+1. **命令面板恢复快照静默掐断活会话**:`openSnapshot` 在任一 pane `connected` 时先 `confirm(pal.snapRestoreConfirm)`(danger),取消则不动;`lib/snapshotGuard.ts` `hasLiveConnectedPane` + 单测。
+2. **标签栏「关闭其他」绕过 confirmClose**:`closeOthers` 改 async,`closeOthersNeedsConfirm` 为真时一次确认并先对各活会话发 `exit`(与 `closeTabSafe` 同口径)。
+3. **侧栏 nav / 底栏按钮缺按下缩小**:`AppSidebar` `.nav-item:active` / `.foot-btn:active` 补 `transform: scale(0.97)`(+ transition)。分组标签按下仍在未合并的 #14,本轮不碰 HostsPage。
+
+**验证**:`typecheck` + `lint:i18n` + vitest **345** 全绿(原 334;+`snapshotGuard` 11)。Android 本轮未改。未合并。
 
 ---
 
