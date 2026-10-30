@@ -8,12 +8,14 @@ import { useSessions } from '../stores/sessions'
 import { useI18n } from '../lib/i18n'
 import { useConfirm } from '../composables/confirm'
 import { isImeKey } from '../lib/ime'
+import { useToast } from '../composables/toast'
 import type { ForwardMode } from '../../../shared/types'
 import Icon from './Icon.vue'
 
 const store = useSessions()
 const { t } = useI18n()
 const { confirm } = useConfirm()
+const { toast } = useToast()
 // Mounted for the app's lifetime and shown by its own v-if, so an onMounted
 // focus ran once at startup with no element and never again.
 watch(
@@ -102,6 +104,10 @@ async function remove(mode: ForwardMode | undefined, localPort: number): Promise
   } finally {
     removing.value = false
   }
+  // Await the result: a failed stop used to leave the rule in the list with no
+  // error at all (the page already awaits + toasts; this dialog did not).
+  const r = await store.removeForward(mode, localPort)
+  if (!r.ok) toast(r.error ?? t('fw.removeFail'), 'error')
 }
 </script>
 

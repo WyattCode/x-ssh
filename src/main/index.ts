@@ -1538,9 +1538,21 @@ function registerIpc(): void {
       // or hostile renderer can't write keys into known_hosts.
       if (typeof host !== 'string' || !host || !isFingerprintHex(fingerprint)) return { ok: false }
       const p = typeof port === 'number' && Number.isInteger(port) && port > 0 && port < 65536 ? port : 22
-      if (!sshManager?.takeRejectedKey(host, p, fingerprint)) return { ok: false }
-      await knownHosts.load()
-      await knownHosts.set(host, p, fingerprint.toLowerCase())
+      // Gate on a non-consuming check: the pending rejection is only consumed
+      // once the key is actually persisted. Consuming it first meant a failed
+      // write (disk full, durable-write error) left the slot empty, so a second
+      // click on "Trust" answered { ok: false } until the user reconnected.
+      const mgr = sshManager
+      if (!mgr?.matchesRejectedKey(host, p, fingerprint)) return { ok: false }
+      try {
+        await knownHosts.load()
+        await knownHosts.set(host, p, fingerprint.toLowerCase())
+      } catch {
+        // Persisting failed: keep the rejection so the user can retry.
+        return { ok: false }
+      }
+      // Written: now consume the rejection so it can't be trusted twice.
+      mgr.takeRejectedKey(host, p, fingerprint)
       void pushConnLog({ at: Date.now(), event: 'connect', host, port: p, username: '', detail: 'trust-host-key' }).catch(() => undefined)
       return { ok: true }
     }

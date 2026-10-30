@@ -2927,6 +2927,11 @@ export class SshManager {
     return true
   }
 
+  /** True when `fp` is the key last refused for host:port (does not consume). */
+  matchesRejectedKey(host: string, port: number | undefined, fp: string): boolean {
+    return this.rejectedKeys.get(`${host}:${port || 22}`) === String(fp).toLowerCase()
+  }
+
   /** Background, read-only: logs in without a terminal, runs one command on an
    *  exec channel, returns its stdout and disconnects. Nothing is emitted to the
    *  renderer and no session is registered. Only for a server whose host key is
