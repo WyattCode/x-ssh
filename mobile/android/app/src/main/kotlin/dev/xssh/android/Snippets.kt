@@ -310,6 +310,12 @@ private fun SnippetEditor(
     var confirm by remember { mutableStateOf(initial.confirm) }
     var onlyHere by remember { mutableStateOf(initial.hostId != null) }
     var confirmingDelete by remember { mutableStateOf(false) }
+    var deleted by remember { mutableStateOf(false) }
+    fun deleteOnce() {
+        if (deleted) return
+        deleted = true
+        onDelete(initial)
+    }
     val commandFocus = remember { FocusRequester() }
     val valid = text.isNotBlank()
 
@@ -362,7 +368,7 @@ private fun SnippetEditor(
             if (!isNew) {
                 FormGroup {
                     FormAction(if (confirmingDelete) stringResource(R.string.snip_delete_confirm) else stringResource(R.string.snip_delete), danger = true) {
-                        if (confirmingDelete) onDelete(initial) else confirmingDelete = true
+                        if (confirmingDelete) deleteOnce() else confirmingDelete = true
                     }
                 }
             }

@@ -221,6 +221,18 @@
 1. **HostsPage** `remove`:removing 闸 + try/finally(未动 connectingId / connect / duplicate)。
 2. **SettingsDialog** `unlockNow` / `disableMasterLock` / `resetMasterLock`:共用 lockBusy + unlock/reset 按钮 disabled(未动 backupNow / accent / saveMasterLock)。
 3. **Android HostEditorScreen**:确认删除 `deleteOnce`(Sessions 在 swipe/HostActions 之外)。
+# 会话记录:连续改进 M3.99(2026-10-30,复核打磨:检查更新 finally + 本地 SFTP 删除 busy + 片段确认删除一次)
+
+功能清单已够,本轮按站立规则做开源复核打磨(不合并)。未动 PR #33 / #32–#12 与更早的 #4–#11。
+
+**核过已过时 / 已在未合并 PR(本轮不重做)**:
+1–21. 同 M3.98 所列 PR #12–#32。
+22. HostsPage remove busy + Settings lockBusy unlock/disable/reset + HostEditor deleteOnce —— PR #33。
+
+**修了**:
+1. **SettingsDialog** `checkForUpdates`:try/finally 清 `checking`(未动 lock/backup/accent)。
+2. **SftpDrawer** `localDelete` / `localDelSelected`:共用 busy 闸 + try/finally(本地栏;未动远程 upload/download/pack/del)。
+3. **Android Snippets**:确认删除 `deleteOnce`(Sessions 在 HostEditor 删除之外)。
 
 **验证**:`typecheck` + vitest **334** / 30 文件全绿。未跑 Gradle。未合并。
 

@@ -451,21 +451,24 @@ async function checkForUpdates(): Promise<void> {
   if (updateState.checking) return
   updateState.checking = true
   updateState.error = ''
-  const r = await window.api.checkUpdate()
-  updateState.checking = false
-  if (!r.ok) {
-    updateState.error = r.error ?? t('set.gen.updateErr')
-    return
-  }
-  if (r.fresh) {
-    updateState.fresh = true
-    updateState.latest = r.latest ?? ''
-  } else {
-    updateState.fresh = false
-    updateState.latest = r.latest ?? ''
-    updateState.name = r.name ?? ''
-    updateState.url = r.url ?? ''
-    updateState.notes = r.notes ?? ''
+  try {
+    const r = await window.api.checkUpdate()
+    if (!r.ok) {
+      updateState.error = r.error ?? t('set.gen.updateErr')
+      return
+    }
+    if (r.fresh) {
+      updateState.fresh = true
+      updateState.latest = r.latest ?? ''
+    } else {
+      updateState.fresh = false
+      updateState.latest = r.latest ?? ''
+      updateState.name = r.name ?? ''
+      updateState.url = r.url ?? ''
+      updateState.notes = r.notes ?? ''
+    }
+  } finally {
+    updateState.checking = false
   }
 }
 function openUpdatePage(): void {
