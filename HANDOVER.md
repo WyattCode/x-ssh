@@ -870,6 +870,14 @@ openSnapshot/closeOthers/saveSetting (#68), theme/transfer clears (#67), bookmar
 - **连接/启动开关写盘失败会撒谎(P1)**:设置里「启动恢复上次标签」「自动重连」「关闭前确认」「桌面通知」四个开关同样先翻再 `void saveSetting`。改为 `settings.set` 直写,失败回滚 + toast `set.gen.writeFail`。其它开关 / 片段 / 编辑器 / 连接日志仍归 #66 等,未动。
 - i18n 新增 `set.gen.writeFail`(zh / en / zh-TW;文案与 #66/#68 对齐便于并行合并)。
 - 未触碰:`closePane` / `focusSession` / `openSftpFor` / `splitPane` / `setActive*` / `persistTabs` / `nextTab` / `closeOthers` / `openSnapshot` / `applyLayoutPreset` / `queue*` / `clearTransfer*` / `theme` / `setLang` / `addSftpRecent` / `saveSetting` / `trustAndReconnect` / `zoom` / `fontSize` / `SftpDrawer` / `HostEditor` / `HostsPage` / `PaneNode` / `HistorySearch`。
+## M3.140(分支 `fix/review-polish-m3140`,**未合并**)
+
+> 只做缺陷 / 界面打磨,不加功能。**#74–#12、#4–#11 的 PR 都还没合并**,这一批也不含它们。
+
+- **启动/窗口剩余开关写盘失败会撒谎(P1)**:设置里「恢复时自动连接」「恢复工作目录」「最小化到托盘」「通知提示音」四个开关原来先翻内存再 `void saveSetting`,主进程拒键或写盘失败时开关一直停在错的状态,直到重启才回退(与 M3.139 的 restoreTabs/autoReconnect/confirmClose/notifications 同款)。现在直接 `settings.set`,失败回滚并 toast `set.gen.writeFail`。M3.139 那四个未动。
+- **终端粘贴/选择开关写盘失败会撒谎(P1)**:「粘贴前确认」「清理粘贴」「选中即复制」「中键粘贴」「右键粘贴」五个开关同样先翻再 fire-and-forget。改为 `settings.set` 直写,失败回滚 + toast `set.gen.writeFail`。光标/字体/主题/数字框/其它开关/快捷键/强调色未动。
+- i18n 新增 `set.gen.writeFail`(zh / en / zh-TW;文案与 #66/#68/#74 对齐便于并行合并)。
+- 未触碰:`closePane` / `focusSession` / `openSftpFor` / `splitPane` / `setActive*` / `persistTabs` / sidebar/hosts setters / `TransferPanel` / `SftpDrawer` / `saveSetting` / `zoom` / `fontSize` / M3.139 四个启动开关。
 - 仍按原计划搁置:`fontSize` 未使用、`zoom` 不持久化、`local.home` 静默、StatusBar configured-vs-live、`setWindowOpenHandler`、预览「无法预览」。
 
 

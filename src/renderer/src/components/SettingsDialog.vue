@@ -329,25 +329,75 @@ function onTheme(e: Event): void {
   store.terminalTheme = v
   void store.saveSetting('terminalTheme', v)
 }
-function toggleConfirmPaste(): void {
-  store.confirmPaste = !store.confirmPaste
-  void store.saveSetting('confirmPaste', store.confirmPaste)
+async function toggleConfirmPaste(): Promise<void> {
+  const next = !store.confirmPaste
+  store.confirmPaste = next
+  try {
+    const r = await window.api.settings.set('confirmPaste', next)
+    if (r && r.ok === false) {
+      store.confirmPaste = !next
+      toast(t('set.gen.writeFail'), 'error')
+    }
+  } catch {
+    store.confirmPaste = !next
+    toast(t('set.gen.writeFail'), 'error')
+  }
 }
-function toggleSanitizePaste(): void {
-  store.sanitizePaste = !store.sanitizePaste
-  void store.saveSetting('sanitizePaste', store.sanitizePaste)
+async function toggleSanitizePaste(): Promise<void> {
+  const next = !store.sanitizePaste
+  store.sanitizePaste = next
+  try {
+    const r = await window.api.settings.set('sanitizePaste', next)
+    if (r && r.ok === false) {
+      store.sanitizePaste = !next
+      toast(t('set.gen.writeFail'), 'error')
+    }
+  } catch {
+    store.sanitizePaste = !next
+    toast(t('set.gen.writeFail'), 'error')
+  }
 }
-function toggleCopyOnSelect(): void {
-  store.copyOnSelect = !store.copyOnSelect
-  void store.saveSetting('copyOnSelect', store.copyOnSelect)
+async function toggleCopyOnSelect(): Promise<void> {
+  const next = !store.copyOnSelect
+  store.copyOnSelect = next
+  try {
+    const r = await window.api.settings.set('copyOnSelect', next)
+    if (r && r.ok === false) {
+      store.copyOnSelect = !next
+      toast(t('set.gen.writeFail'), 'error')
+    }
+  } catch {
+    store.copyOnSelect = !next
+    toast(t('set.gen.writeFail'), 'error')
+  }
 }
-function toggleMiddleClickPaste(): void {
-  store.middleClickPaste = !store.middleClickPaste
-  void store.saveSetting('middleClickPaste', store.middleClickPaste)
+async function toggleMiddleClickPaste(): Promise<void> {
+  const next = !store.middleClickPaste
+  store.middleClickPaste = next
+  try {
+    const r = await window.api.settings.set('middleClickPaste', next)
+    if (r && r.ok === false) {
+      store.middleClickPaste = !next
+      toast(t('set.gen.writeFail'), 'error')
+    }
+  } catch {
+    store.middleClickPaste = !next
+    toast(t('set.gen.writeFail'), 'error')
+  }
 }
-function toggleRightClickPaste(): void {
-  store.rightClickPaste = !store.rightClickPaste
-  void store.saveSetting('rightClickPaste', store.rightClickPaste)
+async function toggleRightClickPaste(): Promise<void> {
+  const next = !store.rightClickPaste
+  store.rightClickPaste = next
+  try {
+    const r = await window.api.settings.set('rightClickPaste', next)
+    if (r && r.ok === false) {
+      store.rightClickPaste = !next
+      toast(t('set.gen.writeFail'), 'error')
+    }
+  } catch {
+    store.rightClickPaste = !next
+    toast(t('set.gen.writeFail'), 'error')
+  }
 }
 function onKeepalive(e: Event): void {
   // Clearing mid-edit must not persist a default (0 = keepalive off) and must
@@ -426,13 +476,33 @@ async function toggleAutoReconnect(): Promise<void> {
     toast(t('set.gen.writeFail'), 'error')
   }
 }
-function toggleRestoreConnect(): void {
-  store.restoreConnect = !store.restoreConnect
-  void store.saveSetting('restoreConnect', store.restoreConnect)
+async function toggleRestoreConnect(): Promise<void> {
+  const next = !store.restoreConnect
+  store.restoreConnect = next
+  try {
+    const r = await window.api.settings.set('restoreConnect', next)
+    if (r && r.ok === false) {
+      store.restoreConnect = !next
+      toast(t('set.gen.writeFail'), 'error')
+    }
+  } catch {
+    store.restoreConnect = !next
+    toast(t('set.gen.writeFail'), 'error')
+  }
 }
-function toggleRestoreCwd(): void {
-  store.restoreCwd = !store.restoreCwd
-  void store.saveSetting('restoreCwd', store.restoreCwd)
+async function toggleRestoreCwd(): Promise<void> {
+  const next = !store.restoreCwd
+  store.restoreCwd = next
+  try {
+    const r = await window.api.settings.set('restoreCwd', next)
+    if (r && r.ok === false) {
+      store.restoreCwd = !next
+      toast(t('set.gen.writeFail'), 'error')
+    }
+  } catch {
+    store.restoreCwd = !next
+    toast(t('set.gen.writeFail'), 'error')
+  }
 }
 async function toggleNotifications(): Promise<void> {
   const next = !store.notifications
@@ -448,9 +518,19 @@ async function toggleNotifications(): Promise<void> {
     toast(t('set.gen.writeFail'), 'error')
   }
 }
-function toggleNotifySound(): void {
-  store.notifySound = !store.notifySound
-  void store.saveSetting('notifySound', store.notifySound)
+async function toggleNotifySound(): Promise<void> {
+  const next = !store.notifySound
+  store.notifySound = next
+  try {
+    const r = await window.api.settings.set('notifySound', next)
+    if (r && r.ok === false) {
+      store.notifySound = !next
+      toast(t('set.gen.writeFail'), 'error')
+    }
+  } catch {
+    store.notifySound = !next
+    toast(t('set.gen.writeFail'), 'error')
+  }
 }
 async function toggleConfirmClose(): Promise<void> {
   const next = !store.confirmClose
@@ -466,9 +546,19 @@ async function toggleConfirmClose(): Promise<void> {
     toast(t('set.gen.writeFail'), 'error')
   }
 }
-function toggleMinimizeToTray(): void {
-  store.minimizeToTray = !store.minimizeToTray
-  void store.saveSetting('minimizeToTray', store.minimizeToTray)
+async function toggleMinimizeToTray(): Promise<void> {
+  const next = !store.minimizeToTray
+  store.minimizeToTray = next
+  try {
+    const r = await window.api.settings.set('minimizeToTray', next)
+    if (r && r.ok === false) {
+      store.minimizeToTray = !next
+      toast(t('set.gen.writeFail'), 'error')
+    }
+  } catch {
+    store.minimizeToTray = !next
+    toast(t('set.gen.writeFail'), 'error')
+  }
 }
 function toggleConnectionMultiplex(): void {
   store.connectionMultiplex = !store.connectionMultiplex
