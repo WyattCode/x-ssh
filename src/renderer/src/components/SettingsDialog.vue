@@ -469,6 +469,22 @@ async function checkForUpdates(): Promise<void> {
     }
   } finally {
     updateState.checking = false
+  const r = await window.api.checkUpdate()
+  updateState.checking = false
+  if (!r.ok) {
+    updateState.error =
+      r.error === 'update-parse-failed' ? t('set.gen.updateParseFail') : (r.error ?? t('set.gen.updateErr'))
+    return
+  }
+  if (r.fresh) {
+    updateState.fresh = true
+    updateState.latest = r.latest ?? ''
+  } else {
+    updateState.fresh = false
+    updateState.latest = r.latest ?? ''
+    updateState.name = r.name ?? ''
+    updateState.url = r.url ?? ''
+    updateState.notes = r.notes ?? ''
   }
 }
 function openUpdatePage(): void {

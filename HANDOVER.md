@@ -457,6 +457,23 @@ Continue continuous-improve from origin/main on a new branch; do **not** touch/m
 ### Next
 Continue continuous-improve from origin/main on a new branch; do **not** touch/merge this PR or #42–#12 / #4–#11. Prefer substantive P0/P1 over busy-gates.
 
+## HANDOVER M3.109 — review polish (key import codes / update-parse / history export toast)
+
+**Branch:** `fix/review-polish-m3109` (from origin/main). **Do NOT merge.** Open PR (see report).
+**Skipped / do not redo:** PR #43 `fix/review-polish-m3108` (path-invalid / no-public-key / nothing-to-pack) and #42–#12, #4–#11. Features / intentional deferrals / M3.77–M3.108 done items.
+
+### Fixes shipped
+1. **Key import/delete Chinese errors** — `keyManager` throws `invalid-private-key` / `illegal-key-id`; HostEditor `keyOpError()` maps to `host.invalidPrivateKey` / `host.illegalKeyId`.
+2. **Update check parse fail** — `update-parse-failed` + Settings maps `set.gen.updateParseFail`.
+3. **History export silent fail** — `exportLog` awaits result and toasts success/fail (`hist.exported` / `hist.exportFail`).
+
+### Verify
+- typecheck OK; lint:i18n OK (desktop symmetric); vitest **334**/30 green.
+- Model: DeepSeek-V4.1-Flash-1017 via ds.py; thinking=off medium; 19/19 HAND_APPLY first try. No hand-fix. Incidents: none.
+
+### Next
+Continue continuous-improve from origin/main on a new branch; do **not** touch/merge this PR or #43–#12 / #4–#11. Prefer substantive P0/P1 over busy-gates.
+
 ---
 
 ## 项目概述

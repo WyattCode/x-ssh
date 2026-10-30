@@ -189,6 +189,7 @@ export class KeyManager {
       await rm(`${priv}.pub`, { force: true }).catch(() => {})
       // Stable marker: main turns this into KeyErrorCode 'invalid-key'.
       throw new Error('invalid-key')
+      throw new Error('invalid-private-key')
     }
     const label = basename(srcPath).replace(/\.(pem|key|pub)$/i, '')
     const labels = await this.readLabels()
@@ -203,6 +204,7 @@ export class KeyManager {
     await this.ensureDir()
     // Stable marker: main turns this into KeyErrorCode 'bad-id'.
     if (basename(id) !== id) throw new Error('bad-id')
+    if (basename(id) !== id) throw new Error('illegal-key-id')
     const priv = join(this.keysDir, id)
     try {
       return (await readFile(`${priv}.pub`, 'utf8')).trim()
@@ -218,6 +220,7 @@ export class KeyManager {
     // Only ever operate inside the key dir: refuse path traversal in the id,
     // since it arrives over IPC from the renderer.
     if (basename(id) !== id) throw new Error('bad-id')
+    if (basename(id) !== id) throw new Error('illegal-key-id')
     const priv = join(this.keysDir, id)
     await rm(priv, { force: true })
     await rm(`${priv}.pub`, { force: true })

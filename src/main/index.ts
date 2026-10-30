@@ -2196,7 +2196,7 @@ function registerIpc(): void {
         body?: string
       }
       const latest = (data.tag_name ?? '').replace(/^v/i, '')
-      if (!latest) return { ok: false, error: '无法解析最新版本' }
+      if (!latest) return { ok: false, error: 'update-parse-failed' }
       const fresh = compareVersions(current, latest) >= 0
       return {
         ok: true,
