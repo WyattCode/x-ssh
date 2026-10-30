@@ -1,3 +1,18 @@
+## M3.151 — 复核打磨:三处「失败看起来和成功一样」(分支 `fix/review-polish-m3151`)
+
+> 只修静默失败,不加功能。**不要合并**;**不要碰已开的 PR #4–#85**(尤其 #85 SFTP diff toast / previewFail i18n / Android GoTo `~`;#84 历史导出 / pack/extract/sync/watchStart / 多选下载 toast;#83 needs_passphrase / HostEditor 加密私钥 / 静默 OS 探测;#82 keyRequired;#81 withTempHosts;#80 upload*/onDrop/runDeploy toast / trustingPanes / jump-delete warn;#79 auth_failed;#78 jump_missing;#77 rename/create/delete;#76 单文件下载;#74 TransferPanel reveal;#73/#75 prefs;#67 主题;#65/#64 主机保存/删除;#58 链接 toast;#54 isCancelled;#42 editExternal/openWith;#22 TextEditor 保存失败横幅)。
+
+1. **Android 复制公钥失败完全静默**(`HostEditorScreen.kt` 的 `CredentialFields`):`draft.publicKey()` 返回 null(口令错 / 私钥不可用)时按钮什么都不做,和复制成功长得一模一样。补 `else { onMessage(publicKeyFailed) }`,新增字符串 `edit_public_key_failed`(values / values-zh / values-b+zh+Hant 三份对称)。生成密钥 / 导入 / 加锁开关那条路没动。
+2. **Android SFTP 打开符号链接时 `isDir` 失败被吞成「当文件打开」**(`Files.kt` 的 `open()`):`runCatching { files.isDir(...) }.getOrDefault(false)` 把异常变成 false,目录符号链接会被当文件下载。改成 `onSuccess` / `onFailure`,失败时 `files.notify(FileText.of(R.string.files_open_failed, e.reason()), error = true)`(复用已有字符串),`CancellationException` 照旧不提示。`entry.isDir` / 非链接的 `files.open` / GoTo `~` 没动。
+3. **桌面 SFTP `stopWatch` 假装成功**(`src/main/index.ts` + `SftpDrawer.vue`):主进程在 `sshManager` 为空时仍返回 `{ ok: true }`,渲染层无条件清 `watchActive` —— 药丸消失、其实什么都没停。主进程改成 `if (!sshManager) return { ok: false }`;渲染层只在 `r.ok` 时清状态,`!ok` 或抛异常时 toast `sfp.syncFail`(不新增 i18n 键)。`startSync` / `watchStart` / pack / extract 没动。
+
+验证:
+- 桌面:`npm.cmd run typecheck`、`npm.cmd run lint:i18n`、`npm.cmd run test`、`npm.cmd run build`
+- 安卓:`./gradlew :app:assembleDebug`(或 `installDebug`);`npm.cmd run lint:i18n` 会跑 `lint-i18n-mobile.mjs`,三份资源必须对称
+- 人工:安卓编辑页用错口令点「复制公钥」应看到「无法读取公钥」;桌面开连续同步后让 `sshManager` 失效(关窗 / 会话结束)再点停止,应弹 `sfp.syncFail` 而不是静默消失。
+
+---
+
 # X-SSH 交接文档
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。

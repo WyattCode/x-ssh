@@ -45,6 +45,7 @@
     <string name="edit_port">Port</string>
     <string name="edit_private_key">Private key</string>
     <string name="edit_public_key_copied">Public key copied</string>
+    <string name="edit_public_key_failed">Couldn\'t read the public key</string>
     <string name="edit_replace_key">Replace private key…</string>
     <string name="edit_save">Save</string>
     <string name="edit_selected">Selected</string>

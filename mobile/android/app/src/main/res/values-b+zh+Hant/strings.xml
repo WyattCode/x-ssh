@@ -44,6 +44,7 @@
     <string name="edit_port">連接埠</string>
     <string name="edit_private_key">私鑰</string>
     <string name="edit_public_key_copied">已複製公鑰</string>
+    <string name="edit_public_key_failed">無法讀取公鑰</string>
     <string name="edit_replace_key">更換私鑰…</string>
     <string name="edit_save">儲存</string>
     <string name="edit_selected">已選取</string>

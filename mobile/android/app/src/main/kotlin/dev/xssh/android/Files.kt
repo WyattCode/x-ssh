@@ -453,8 +453,13 @@ fun FilesPane(
         when {
             entry.isDir -> load(entry.path)
             entry.isLink -> scope.launch {
-                val dir = runCatching { files.isDir(entry.path) }.getOrDefault(false)
-                if (dir) load(entry.path) else files.open(entry, context)
+                runCatching { files.isDir(entry.path) }
+                    .onSuccess { dir -> if (dir) load(entry.path) else files.open(entry, context) }
+                    .onFailure { e ->
+                        if (e !is CancellationException) {
+                            files.notify(FileText.of(R.string.files_open_failed, e.reason()), error = true)
+                        }
+                    }
             }
             else -> files.open(entry, context)
         }
