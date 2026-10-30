@@ -6,6 +6,20 @@ import { join } from 'node:path'
 // settings.ts imports `app` from electron only for the default folder; tests pass a folder.
 vi.mock('electron', () => ({ app: { getPath: () => tmpdir() } }))
 
+// A switchable failure for the durable write, so the "disk full" path can be
+// exercised on any platform (chmod on a directory is a no-op on Windows).
+const durable = vi.hoisted(() => ({ failWrites: false }))
+vi.mock('./durableFile', async (importOriginal) => {
+  const real = (await importOriginal()) as typeof import('./durableFile')
+  return {
+    ...real,
+    writeDurable: async (file: string, data: string) => {
+      if (durable.failWrites) throw new Error('disk full')
+      return real.writeDurable(file, data)
+    }
+  }
+})
+
 const { SettingsStore } = await import('./settings')
 
 let dir: string
@@ -17,6 +31,7 @@ beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'xssh-settings-'))
 })
 afterEach(async () => {
+  durable.failWrites = false
   await rm(dir, { recursive: true, force: true })
 })
 
@@ -85,6 +100,21 @@ describe('SettingsStore', () => {
     void s.set('windowBounds', { width: 1200, height: 800, maximized: false })
     await s.flush()
     expect((await readJson(file())).windowBounds).toEqual({ width: 1200, height: 800, maximized: false })
+  })
+
+  // 写盘失败必须让调用方(IPC)看到,而不是记一条日志就当成功 —— 否则界面乐观
+  // 更新了、下次启动又变回旧值。同时一次失败不能把后面的写全堵死。
+  it('a write failure rejects the caller but does not poison later sets', async () => {
+    const s = new SettingsStore(dir)
+    await s.set('lang', 'zh')
+    durable.failWrites = true
+    await expect(s.set('zoom', 1.2)).rejects.toBeTruthy()
+    durable.failWrites = false
+    // flush() 只等队列,不该把上一次的失败再抛一遍。
+    await expect(s.flush()).resolves.toBeUndefined()
+    await s.set('lang', 'en')
+    expect(await s.get('lang')).toBe('en')
+    expect((await readJson(file())).lang).toBe('en')
   })
 
   it('clearing a value removes the key', async () => {

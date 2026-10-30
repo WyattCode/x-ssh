@@ -1052,7 +1052,7 @@ function createWindow(saved?: SavedBounds, prefs: UiPrefs = {}): void {
     // always larger than that and passes through.
     const width = Math.abs(b.width - reqW) <= 8 ? reqW : b.width
     const height = Math.abs(b.height - reqH) <= 8 ? reqH : b.height
-    void settings.set('windowBounds', { width, height, maximized: win.isMaximized() })
+    void settings.set('windowBounds', { width, height, maximized: win.isMaximized() }).catch(() => undefined)
   }
   const schedulePersist = (): void => {
     if (saveTimer) clearTimeout(saveTimer)
@@ -1122,7 +1122,7 @@ function createWindow(saved?: SavedBounds, prefs: UiPrefs = {}): void {
             ...(existing ?? []),
             ...live.map((s) => ({ label: s.label, text: s.text }))
           ]
-          void settings.set('sessionHistory', merged.slice(-300))
+          void settings.set('sessionHistory', merged.slice(-300)).catch(() => undefined)
         })
     }
     for (const stop of [...editCleanups.values()]) stop()
@@ -2150,8 +2150,15 @@ function registerIpc(): void {
       return { ok: false, error: `refusing to write settings key: ${String(key)}` }
     }
     if (key === 'minimizeToTray') minimizeToTray = Boolean(value)
-    await settings.set(key, value)
-    return { ok: true }
+    try {
+      await settings.set(key, value)
+      return { ok: true }
+    } catch {
+      // A durable-write failure must reach the renderer: it optimistically
+      // updated its copy, and "saved" that vanishes on the next launch is the
+      // bug class this whole store exists to prevent.
+      return { ok: false, error: 'settings-write-failed' }
+    }
   })
   ipcMain.handle(IPC.hostsProbe, async (_e, ids?: unknown) => {
     const all = await store.list()

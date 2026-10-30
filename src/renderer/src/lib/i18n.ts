@@ -695,6 +695,8 @@ const zh: Dict = {
   'pal.snapDelete': '删除此快照',
   'pal.snapDeleteConfirm': '删除快照“{name}”？此操作不可撤销。',
   'pal.snapEmpty': '当前没有标签,无法保存快照',
+  'pal.snapFail': '快照保存失败',
+  'pal.snapDeleteFail': '快照删除失败',
 
   // history search
   'hist.placeholder': '搜索所有会话输出…',
@@ -849,6 +851,7 @@ const zh: Dict = {
   'hosts.duplicate': '复制',
   'hosts.delete': '删除',
   'hosts.deleteConfirm': '删除主机「{name}」?保存的密码也会一起删除。',
+  'hosts.deleteFail': '删除主机失败',
   'hosts.copyOf': '{name} 副本',
   'host.tags': '标签',
   'host.tagsPh': '输入后按回车',
@@ -1567,6 +1570,8 @@ const en: Dict = {
   'pal.snapDelete': 'Delete this snapshot',
   'pal.snapDeleteConfirm': 'Delete snapshot "{name}"? This cannot be undone.',
   'pal.snapEmpty': 'No tabs open — nothing to snapshot',
+  'pal.snapFail': 'Could not save snapshot',
+  'pal.snapDeleteFail': 'Could not delete snapshot',
 
   // history search
   'hist.placeholder': 'Search all session output…',
@@ -1719,6 +1724,7 @@ const en: Dict = {
   'hosts.duplicate': 'Duplicate',
   'hosts.delete': 'Delete',
   'hosts.deleteConfirm': 'Delete host "{name}"? Its saved password is deleted too.',
+  'hosts.deleteFail': 'Could not delete host',
   'hosts.copyOf': '{name} copy',
   'host.tags': 'Tags',
   'host.tagsPh': 'Type, then Enter',
@@ -2448,6 +2454,8 @@ const zhTW: Dict = {
   'pal.snapDelete': '刪除此快照',
   'pal.snapDeleteConfirm': '要刪除快照「{name}」嗎？此操作無法復原。',
   'pal.snapEmpty': '目前沒有分頁,無法儲存快照',
+  'pal.snapFail': '快照儲存失敗',
+  'pal.snapDeleteFail': '快照刪除失敗',
 
   // history search
   'hist.placeholder': '搜尋所有工作階段的輸出…',
@@ -2602,6 +2610,7 @@ const zhTW: Dict = {
   'hosts.duplicate': '複製',
   'hosts.delete': '刪除',
   'hosts.deleteConfirm': '刪除主機「{name}」?儲存的密碼也會一併刪除。',
+  'hosts.deleteFail': '刪除主機失敗',
   'hosts.copyOf': '{name} 副本',
   'host.tags': '標籤',
   'host.tagsPh': '輸入後按 Enter',

@@ -1118,12 +1118,24 @@ export const useSessions = defineStore('sessions', {
         savedAt: Date.now(),
         tabs: serializeTabs(this.tabs)
       }
+      // Optimistic update, but main can refuse the key or fail the disk write —
+      // then the snapshot would show up here and be gone on the next launch.
+      const prev = this.snapshots
       this.snapshots = [snap, ...this.snapshots].slice(0, 30)
-      await window.api.settings.set('snapshots', toPlain(this.snapshots))
+      const r = await window.api.settings.set('snapshots', toPlain(this.snapshots))
+      if (r && r.ok === false) {
+        this.snapshots = prev
+        toast(t('pal.snapFail'), 'error')
+      }
     },
     async deleteSnapshot(id: string): Promise<void> {
+      const prev = this.snapshots
       this.snapshots = this.snapshots.filter((s) => s.id !== id)
-      await window.api.settings.set('snapshots', toPlain(this.snapshots))
+      const r = await window.api.settings.set('snapshots', toPlain(this.snapshots))
+      if (r && r.ok === false) {
+        this.snapshots = prev
+        toast(t('pal.snapDeleteFail'), 'error')
+      }
     },
     /** Replaces the current tabs with a saved snapshot (disconnected). */
     async openSnapshot(id: string): Promise<void> {

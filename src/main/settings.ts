@@ -56,14 +56,19 @@ export class SettingsStore {
     // read-modify-write and drop one of the two keys. Join the queue
     // *synchronously* (loading happens inside it): the window-close path calls
     // set() without awaiting and quits right after — if set() awaited anything
-    // before queueing, flush() at quit time would not see this write yet.
-    this.writes = this.writes
+    // before joining, flush() at quit time would not see this write yet.
+    // Recover from a prior failure so one disk error cannot block every later
+    // key; still reject `op` so callers (and IPC) see this write failed.
+    const op = this.writes
+      .catch(() => undefined)
       .then(async () => {
         await this.ensure()
         await this.write(key, value)
       })
-      .catch((e) => console.error('settings write failed:', key, (e as Error).message))
-    return this.writes
+    this.writes = op.catch((e) => {
+      console.error('settings write failed:', key, (e as Error).message)
+    })
+    return op
   }
 
   /** Resolves once every write queued so far is on disk (call before quitting). */
