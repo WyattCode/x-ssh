@@ -13,6 +13,7 @@ import {
 } from '../lib/transferFormat'
 import { globMatch } from '../lib/glob'
 import { isImeKey } from '../lib/ime'
+import { pruneSelection } from '../lib/selectionPrune'
 import { useFocusTrap } from '../composables/focusTrap'
 import type { DownloadQueueOp } from '../stores/sessions'
 import { useConfirm } from '../composables/confirm'
@@ -435,6 +436,18 @@ function setLocalSort(key: 'name' | 'size' | 'mtime'): void {
     localSort.asc = true
   }
 }
+
+// After a refresh in the same directory (upload/delete/external change) the
+// selection can keep names that no longer exist, making the footer count lie.
+// Prune it to what the pane actually shows, mirroring the remote pane.
+watch(localSorted, (rows) => {
+  if (!localSelSet.value.size) return
+  const next = pruneSelection(localSelSet.value, rows.map((r) => r.name))
+  if (next !== localSelSet.value) {
+    localSelSet.value = next
+    if (localAnchor.value && !next.has(localAnchor.value)) localAnchor.value = null
+  }
+})
 
 const menu = reactive({ open: false, x: 0, y: 0, target: null as FileEntry | null })
 const renamingName = ref<string | null>(null)

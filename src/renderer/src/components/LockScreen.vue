@@ -24,6 +24,12 @@ function focus(): void {
 // typing the moment it appears, not after the user clicks it.
 onMounted(focus)
 
+// A wrong-attempt message should lift as soon as the user starts retyping,
+// rather than lingering until the next submit.
+function onInput(): void {
+  if (error.value) error.value = ''
+}
+
 async function unlock(): Promise<void> {
   if (busy.value) return
   const v = pass.value
@@ -73,6 +79,7 @@ const onKey = (e: KeyboardEvent): void => {
         :placeholder="t('lock.placeholder')"
         autocomplete="off"
         @keydown="onKey"
+        @input="onInput"
       />
       <p v-if="error" class="lock-error">{{ error }}</p>
       <button class="lock-btn" :disabled="busy" @click="unlock">

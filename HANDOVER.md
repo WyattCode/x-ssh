@@ -10,6 +10,9 @@
 # 会话记录:连续改进 M3.86(2026-10-30,复核打磨:TooltipLayer 失焦粘滞 + 片段变量重入/焦点 + 改地址清 reach)
 
 功能清单已够,本轮按站立规则做开源复核打磨(不合并)。未动 PR #20 / #19 / #18 / #17 / #16 / #15 / #14 / #13 / #12 与更早的 #4–#11。
+# 会话记录:连续改进 M3.87(2026-10-30,复核打磨:TextEditor Esc/保存错误/会话冻结 + SFTP 本机选区修剪 + 命令面板主机搜索)
+
+功能清单已够,本轮按站立规则做开源复核打磨(不合并)。未动 PR #21 / #20 / #19 / #18 / #17 / #16 / #15 / #14 / #13 / #12 与更早的 #4–#11。
 
 **核过已过时 / 已在未合并 PR(本轮不重做)**:
 1. TransferPanel 失败原因 / ETA + Android 罚分地板 —— PR #12。
@@ -52,6 +55,18 @@
 3. **改地址 / 删主机清 reach**:`sessions.clearReach`;HostsPage 在地址/端口变更后先清再探,避免还亮着旧 IP 的绿点;删除主机顺手丢掉孤儿 reach。
 
 **验证**:`typecheck` + `lint:i18n` + vitest **342** 全绿(原 334;+`tooltipDismiss` 4 + `snippetVars` 4)。Android 本轮未改。未合并。
+7. OSC52 空白 base64 + 主锁 Enter/busy + 离线点透明度 —— PR #18。
+8. 主题循环竞态 + 关闭全部确认 + 连接日志 disconnect/滚动 —— PR #19。
+9. ZoomHud 失焦粘滞 + 窗格失焦 blur + keyManager IPC 错误码 —— PR #20。
+10. TooltipLayer 失焦粘滞 + 片段变量重入/焦点 + 改地址清 reach —— PR #21。
+
+**修了**:
+1. **TextEditor**:`Esc` 真正关窗(脚注早已写着 Esc 退出);保存失败拆成 `saveError` 横幅,不再用 `error` 整页盖住未存正文;`frozenSessionId` 开编辑时钉死会话,切标签不会读/写错会话;加载用 `loadSeq` 丢掉过期响应。
+2. **SFTP 双栏本机选区**:`pruneSelection` + `watch(localSorted)` —— 同目录刷新后幽灵文件名不再撑大「已选 n」(对齐远程面板)。
+3. **命令面板搜索**:`paletteHostScore` 对齐连接页(label/host/user/user@host/group/tags/os);换查询重置选中行;高亮用 `qTrim` 与打分一致。
+4. **LockScreen**:输错后开始重打就清掉红色错误(Settings 的 lockBusy 仍在未合并的 #18,本轮不动)。
+
+**验证**:`typecheck` + `lint:i18n` + vitest **343** 全绿(原 334;+`selectionPrune` 4 + `paletteHostScore` 5)。Android 本轮未改(复核目标区未见新的 P0)。未合并。
 
 ---
 
