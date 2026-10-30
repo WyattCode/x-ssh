@@ -624,6 +624,8 @@ const zh: Dict = {
   'hist.hostFilter': '按主机过滤',
   'hist.allHosts': '所有主机',
   'hist.export': '导出当前结果',
+  'hist.loadFail': '无法读取历史记录',
+  'hist.retry': '重试',
 
   // host editor
   'host.titleNew': '新建主机',
@@ -653,6 +655,8 @@ const zh: Dict = {
   'host.keyType': '密钥类型',
   'host.keyGenFail': '生成密钥失败',
   'host.keyImportFail': '导入密钥失败',
+  'host.keyListFail': '无法读取密钥列表',
+  'host.retry': '重试',
   'host.keyUnprotected': '该密钥未设置密码短语,建议为其添加密码短语以加密私钥文件',
   'host.deleteKey': '删除该密钥',
   'host.keyDeleteConfirm': '删除密钥“{name}”？该操作不可撤销',
@@ -1398,6 +1402,8 @@ const en: Dict = {
   'hist.hostFilter': 'Filter by host',
   'hist.allHosts': 'All hosts',
   'hist.export': 'Export current results',
+  'hist.loadFail': 'Could not load history',
+  'hist.retry': 'Retry',
 
   'host.titleNew': 'New host',
   'host.titleEdit': 'Edit host',
@@ -1426,6 +1432,8 @@ const en: Dict = {
   'host.keyType': 'Key type',
   'host.keyGenFail': 'Key generation failed',
   'host.keyImportFail': 'Key import failed',
+  'host.keyListFail': 'Could not load the key list',
+  'host.retry': 'Retry',
   'host.keyUnprotected': 'This key has no passphrase — consider adding one to encrypt the private key file',
   'host.deleteKey': 'Delete this key',
   'host.keyDeleteConfirm': 'Delete key "{name}"? This cannot be undone',
@@ -2182,6 +2190,8 @@ const zhTW: Dict = {
   'hist.hostFilter': '依主機篩選',
   'hist.allHosts': '所有主機',
   'hist.export': '匯出目前結果',
+  'hist.loadFail': '無法讀取歷程記錄',
+  'hist.retry': '重試',
 
   // host editor
   'host.titleNew': '新增主機',
@@ -2211,6 +2221,8 @@ const zhTW: Dict = {
   'host.keyType': '金鑰類型',
   'host.keyGenFail': '產生金鑰失敗',
   'host.keyImportFail': '匯入金鑰失敗',
+  'host.keyListFail': '無法讀取金鑰清單',
+  'host.retry': '重試',
   'host.keyUnprotected': '此金鑰未設定密碼短語,建議為其加上密碼短語以加密私鑰檔案',
   'host.deleteKey': '刪除此金鑰',
   'host.keyDeleteConfirm': '要刪除金鑰「{name}」嗎？此操作無法復原',

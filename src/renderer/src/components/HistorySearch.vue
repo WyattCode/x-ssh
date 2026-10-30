@@ -5,11 +5,13 @@ const trapEl = ref<HTMLElement>()
 useFocusTrap(trapEl, () => store.historyOpen)
 import { useSessions } from '../stores/sessions'
 import { useI18n } from '../lib/i18n'
+import { useToast } from '../composables/toast'
 import { isImeKey } from '../lib/ime'
 import Icon from './Icon.vue'
 
 const store = useSessions()
 const { t } = useI18n()
+const { toast } = useToast()
 
 const query = ref('')
 const inputEl = ref<HTMLInputElement>()
@@ -18,21 +20,33 @@ const active = ref(0)
 const hostFilter = ref('')
 /** Stripped, flattened lines built once per load (not per keystroke). */
 const lines = ref<{ sessionId: string; label: string; line: string }[]>([])
+/** The last load threw (history file unreadable): show a retry instead of
+ *  the plain "no matches" empty state, which would read as "nothing recorded". */
+const loadFailed = ref(false)
 
 async function load(): Promise<void> {
-  const sessions = await window.api.history.list()
-  const flat: { sessionId: string; label: string; line: string }[] = []
-  for (const s of sessions) {
-    if (!s.text) continue
-    for (const raw of strip(s.text).split('\n')) {
-      const line = raw.trim()
-      if (line) flat.push({ sessionId: s.sessionId, label: s.label, line })
+  try {
+    const sessions = await window.api.history.list()
+    const flat: { sessionId: string; label: string; line: string }[] = []
+    for (const s of sessions) {
+      if (!s.text) continue
+      for (const raw of strip(s.text).split('\n')) {
+        const line = raw.trim()
+        if (line) flat.push({ sessionId: s.sessionId, label: s.label, line })
+      }
     }
+    lines.value = flat
+    loadFailed.value = false
+    // Keep the host filter choice in sync with the (re)loaded session set.
+    const available = new Set(flat.map((l) => l.label))
+    if (hostFilter.value && !available.has(hostFilter.value)) hostFilter.value = ''
+  } catch {
+    // Main could not read the history file (missing, half-written, locked).
+    // Without this the panel just showed "no matches" and looked empty.
+    lines.value = []
+    loadFailed.value = true
+    toast(t('hist.loadFail'), 'error')
   }
-  lines.value = flat
-  // Keep the host filter choice in sync with the (re)loaded session set.
-  const available = new Set(flat.map((l) => l.label))
-  if (hostFilter.value && !available.has(hostFilter.value)) hostFilter.value = ''
 }
 
 /** Unique host lineages represented in the loaded history. */
@@ -149,7 +163,13 @@ function onKey(e: KeyboardEvent): void {
       </div>
 
       <div class="list">
-        <div v-if="!results.length" class="empty">{{ t('hist.empty') }}</div>
+        <div v-if="!results.length" class="empty">
+          <template v-if="loadFailed">
+            <span>{{ t('hist.loadFail') }}</span>
+            <button type="button" class="retry" @click="load">{{ t('hist.retry') }}</button>
+          </template>
+          <template v-else>{{ t('hist.empty') }}</template>
+        </div>
         <button
           v-for="(hit, i) in results"
           :key="i"
@@ -260,6 +280,18 @@ function onKey(e: KeyboardEvent): void {
   text-align: center;
   color: var(--text-faint);
   font-size: 13px;
+}
+.empty .retry {
+  margin-left: 8px;
+  padding: 2px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-pill);
+  font-size: 12px;
+  color: var(--accent);
+  transition: background 0.16s var(--ease);
+}
+.empty .retry:hover {
+  background: var(--accent-soft);
 }
 .row {
   display: flex;

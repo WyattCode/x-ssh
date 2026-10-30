@@ -1,3 +1,28 @@
+# M3.158 — HistorySearch/HostEditor 列表失败提示 + StatusBar 实时转发计数 (2026-10-30)
+
+> 分支 `fix/review-polish-m3158`(从 `origin/main` 切出)。**未合并**;PR #4–#92 一律没碰。
+
+## 修了什么
+
+1. **桌面历史搜索加载失败静默**(`HistorySearch.vue`)。`history.list` 拒绝时对话框空列表读成「无匹配」。现 try/catch + toast `hist.loadFail`，空态可点 `hist.retry`。
+2. **桌面主机编辑密钥列表失败静默**(`HostEditor.vue`)。`keys.list` 拒绝时下拉像「没有密钥」。现 try/catch + toast `host.keyListFail`，失败态可点重试。
+3. **StatusBar 端口转发角标少计**(`StatusBar.vue` + `lib/forwards.ts`)。原先用 `pane.params.portForwards.length`（仅临时规则）；主机已保存规则由主进程连上时打开，从不进 params。现按 `forwardGroups` 的 `running` 行计数（`liveForwardCount`）。
+
+## 验证
+
+```
+npm run typecheck
+npm run lint:i18n
+npm run test
+```
+
+## 注意
+
+- **不要合并**:这一批是 review 修复,等人工过一遍再合。
+- 未触碰的开放 PR:#4–#92。未触碰 `/workspace/MCode`。未改 Android。
+
+---
+
 # X-SSH 交接文档
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。

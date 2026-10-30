@@ -202,9 +202,19 @@ async function pickKey(): Promise<void> {
 
 // ---- SSH key library ----
 const managedKeys = ref<ManagedKey[]>([])
+/** The key list could not be read: show a retry instead of the "browse"
+ *  button, which would look like "you have no keys". */
+const keysFailed = ref(false)
 const keyModal = reactive({ open: false, name: '', type: 'ed25519', passphrase: '', error: '' })
 async function loadKeys(): Promise<void> {
-  managedKeys.value = await window.api.keys.list()
+  try {
+    managedKeys.value = await window.api.keys.list()
+    keysFailed.value = false
+  } catch {
+    managedKeys.value = []
+    keysFailed.value = true
+    toast(t('host.keyListFail'), 'error')
+  }
 }
 // Dropdown text identifies a key: friendly label + algorithm (and a short SHA
 // fingerprint when present), so several keys aren't confused by name alone.
@@ -477,6 +487,9 @@ async function remove(): Promise<void> {
                     </select>
                     <Icon name="chevron-down" :size="14" class="caret" />
                   </div>
+                  <button v-else-if="keysFailed" type="button" class="r-pick" :title="t('host.keyListFail')" @click="loadKeys">
+                    <span class="dim">{{ t('host.keyListFail') }} · {{ t('host.retry') }}</span>
+                  </button>
                   <button v-else type="button" class="r-pick" :title="form.keyPath || t('host.browse')" @click="pickKey">
                     <span :class="{ dim: !form.keyPath }">{{ form.keyPath || t('host.noKey') }}</span>
                   </button>
