@@ -235,7 +235,7 @@ class HostStore(context: Context) {
      */
     private fun readSecret(sealed: String): String = Secrets.open(sealed)
 
-    fun save(hosts: List<Host>) {
+    fun save(hosts: List<Host>): Boolean {
         val array = JSONArray()
         val disk = diskRecords()
         hosts.forEach { host ->
@@ -280,7 +280,7 @@ class HostStore(context: Context) {
             item.put("pinned", host.pinned)
             array.put(item)
         }
-        prefs.edit().putString(KEY_LIST, array.toString()).apply()
+        return prefs.edit().putString(KEY_LIST, array.toString()).commit()
     }
 
     /**

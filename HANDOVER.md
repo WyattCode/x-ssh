@@ -2,6 +2,11 @@
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。
 
+## M3.180(分支 `fix/review-polish-m3180`,**勿合并**)
+- **下载子目录建不出来不再静默跳过**:`downloadJob` 的 `walk` 在子项 `walk` 抛错时只 `/* skip */`,不记 `failures` —— 嵌套目录 `mkdir` 全失败(EACCES/EPERM)时 `discovered` 与 `failures` 都是 0,IPC 对非空远端文件夹返回 `{ok:true, count:0}`。现在子项 catch 记进 `failures`,如实报「N 个文件失败」。
+- **下载目标目录建不出来不再继续**:`downloadJob` 开头 `mkdir(localBase)` 原来 `.catch(() => undefined)`,目标不可写时仍往下跑、每个文件写失败。现在失败即清理 `jobSession`/`jobRate` 并抛出,IPC 返回 `ok:false`。
+- **安卓保存主机失败会提示并回滚**:`HostStore.save` 改用 `commit()` 并返回 `Boolean`,`MainActivity.persist` 写盘失败时弹 `hosts_save_failed` 并把内存列表退回(磁盘满 / 写入被拒不再「界面说存好了、下次启动回退」)。
+
 ## 项目概述
 - 极简、键盘优先的 SSH 客户端。Electron + Vue 3 (Vite) + TypeScript。
 - 平台: Windows (`win32`)。目录: `D:\Documents\Claude Code\X-SSH`。
