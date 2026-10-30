@@ -2,12 +2,14 @@
 import { ref, computed, watch, nextTick } from 'vue'
 import { useFocusTrap } from '../composables/focusTrap'
 import { useConfirm } from '../composables/confirm'
+import { useToast } from '../composables/toast'
 import { useI18n } from '../lib/i18n'
 import { highlight, langFromName } from '../lib/highlight'
 import Icon from './Icon.vue'
 import { isMac } from '../composables/platform'
 
 const { confirm } = useConfirm()
+const { toast } = useToast()
 const { t } = useI18n()
 
 const props = defineProps<{
@@ -99,6 +101,10 @@ watch(
       loadError.value = r.error ?? t('ed.loadFail')
       error.value =
         r.error === 'file-too-large' ? t('sfp.fileTooLarge') : (r.error ?? t('ed.loadFail'))
+      error.value = r.error ?? t('ed.loadFail')
+      // The inline line is the only signal and it goes away with the editor:
+      // surface the same message as a toast so a failed SFTP read isn't silent.
+      toast(error.value, 'error')
     }
   }
 )
@@ -113,6 +119,11 @@ async function save(): Promise<void> {
     original.value = content.value
     emit('saved')
   } else saveError.value = r.error ?? t('ed.saveFail')
+  } else {
+    error.value = r.error ?? t('ed.saveFail')
+    // Same string as the inline error, but a failed write must not be missable.
+    toast(error.value, 'error')
+  }
 }
 
 async function close(): Promise<void> {

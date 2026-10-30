@@ -604,6 +604,12 @@ typecheck / lint:i18n(桌面 752/752/752) / vitest **334** / 30 全绿。未在�
 - HostEditor generateKey: 失败 toast,与 importKey 对齐(保留 keyModal.error)。
 - ForwardDialog add: 绑定失败 toast(fw.fail);badPort 仍只写 dialog err。
 - 未合并。未动 #4–#105。
+# M3.172 — 复核打磨(分支 `fix/review-polish-m3172`,基于 main @ 5946b1f,**勿合并**)
+
+- TextEditor: SFTP load/save 失败在 inline error 之外再 toast(ed.loadFail / ed.saveFail)。
+- SessionReplayDialog: 读失败 toast(replay.readFail);不碰 #40/#43 的 code→i18n 映射。
+- ForwardsPage add: 直播绑定失败 toast(fw.fail);校验分支仍只写 page err;不碰 #76 saveHost catch。
+- 未合并。未动 #4–#106。
 
 ---
 
