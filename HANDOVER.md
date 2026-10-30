@@ -557,6 +557,11 @@ typecheck / lint:i18n(桌面 752/752/752) / vitest **334** / 30 全绿。未在�
 - **B(Android)片段列表 JSON 解析失败不再被空表覆盖**:`hasProtectedDiskData()` + `loadFailed` toast `snip_load_failed`;`save` 改 commit 并拒空覆盖。
 
 ---
+> **M3.164 — 分支 `fix/review-polish-m3164`(基于 main @ 5946b1f)· 请勿合并(do not merge)**
+> - Windows 密钥库 `.labels.json` 改为 fail-closed:主文件与 `.bak` 都解析不出来时**不再用 `{}` 覆盖**,`generate` / `import` 直接拒绝;新增 `keys:labelsStatus` IPC,主机编辑页打开时提示一次。
+> - 命令片段列表读取失败不再把列表清空(看起来像「没有片段」),保留旧列表并 toast `snip.loadFail`。
+> - 主机编辑页密钥列表读取失败提示 `host.keyListFail`(PICK C)。
+> - 仅 Windows 切片;未动 macOS / iOS / Android;未改 #63 的 `writeLabels(...).catch(...)` 与 generate/import 回滚。
 
 # X-SSH 交接文档
 

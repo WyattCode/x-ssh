@@ -247,6 +247,7 @@ const keyBusy = ref(false)
 /** The key list could not be read: show a retry instead of the "browse"
  *  button, which would look like "you have no keys". */
 const keysFailed = ref(false)
+const labelsWarned = ref(false)
 const keyModal = reactive({ open: false, name: '', type: 'ed25519', passphrase: '', error: '' })
 // The generate-key sheet is a modal of its own inside the panel: without its
 // own trap, Tab walked out of the sheet into the host form behind it.
@@ -265,6 +266,18 @@ async function loadKeys(): Promise<void> {
     managedKeys.value = []
     keysFailed.value = true
     toast(t('host.keyListFail'), 'error')
+  } catch {
+    toast(t('host.keyListFail'), 'error')
+    return
+  }
+  try {
+    const st = await window.api.keys.labelsStatus()
+    if (st.loadFailed && !labelsWarned.value) {
+      labelsWarned.value = true
+      toast(t('host.keyLabelsLoadFail'), 'error')
+    }
+  } catch {
+    /* status is best-effort */
   }
 }
 // Dropdown text identifies a key: friendly label + algorithm (and a short SHA
@@ -278,7 +291,10 @@ function keyOptionLabel(k: ManagedKey): string {
 watch(
   () => props.open,
   (open) => {
-    if (open) void loadKeys()
+    if (open) {
+      labelsWarned.value = false
+      void loadKeys()
+    }
   },
   { immediate: true }
 )

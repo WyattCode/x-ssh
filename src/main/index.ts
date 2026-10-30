@@ -2410,6 +2410,7 @@ function registerIpc(): void {
     return { ok: false, error: friendlyError(msg) }
   }
   ipcMain.handle(IPC.keysList, () => keyManager.list())
+  ipcMain.handle(IPC.keysLabelsStatus, () => keyManager.labelsStatus())
   ipcMain.handle(
     IPC.keysGenerate,
     async (_e, opts: { name: string; type?: string; passphrase?: string; bits?: number }) => {

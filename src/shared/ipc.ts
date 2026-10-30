@@ -24,6 +24,7 @@ export const IPC = {
   keysGenerate: 'keys:generate',
   keysImport: 'keys:import',
   keysDelete: 'keys:delete',
+  keysLabelsStatus: 'keys:labelsStatus',
   keysPublicKey: 'keys:publicKey', // read a managed key's public line
   keysPublish: 'keys:publish', // append a public key to selected hosts
 
