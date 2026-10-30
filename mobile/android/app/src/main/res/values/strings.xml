@@ -225,6 +225,7 @@
     <string name="snip_command">Command</string>
     <string name="snip_delete">Delete this snippet</string>
     <string name="snip_delete_confirm">Confirm deleting this snippet</string>
+    <string name="snip_delete_failed">Couldn\'t delete the snippet</string>
     <string name="snip_edit">Edit</string>
     <string name="snip_edit_title">Edit snippet</string>
     <string name="snip_empty">No snippets yet. Tap ＋ to save a command you use often, then send it with one tap.</string>
@@ -235,6 +236,7 @@
     <string name="snip_run">Run</string>
     <string name="snip_run_title">Run “%1$s”?</string>
     <string name="snip_save">Save</string>
+    <string name="snip_save_failed">Couldn\'t save the snippet</string>
     <string name="snip_switch_confirm">Confirm before running</string>
     <string name="snip_switch_enter">Press Enter after sending</string>
     <string name="snip_switch_only_host">Show only on “%1$s”</string>

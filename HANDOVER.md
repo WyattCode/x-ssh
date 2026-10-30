@@ -473,6 +473,15 @@
 1. **安卓 `HostStore.writeSecret` 封失败静默撒谎**(`HostStore.kt` / `MainActivity.kt`)。`Secrets.seal` / `writeLocked` 失败时沿用旧密文只打 `Log.w`,`save` 仍成功 → 用户以为新密码已存。现在 `save` 返回是否发生 seal 回退,`persist` 用 Toast `host_seal_failed`(三语言)说明"密码没存上,其他改动已保存"。空表拒绝落盘仍属 #88,未动。
 2. **桌面 `extractArchive` 空 stderr 中文兜底**(`ssh.ts` / `SftpDrawer.vue`)。`out.trim() || '解压失败'` 让 EN UI 看到中文;改为机器码 `extract-failed`,渲染层映射到已有 `sfp.extractFail`。(#51 只改了 pack-failed;#84 只加 toast,未改此码。)
 3. **桌面 `packAndDownload` 空列表中文**(`ssh.ts` / `SftpDrawer.vue` / `i18n.ts`)。`没有可打包的项` → 机器码 `pack-empty` + 新键 `sfp.packEmpty`(三语)。未动 #51 的 tar 退出码路径(主线尚无)。
+# M3.155 — paste/clipboard toast + HistorySearch copyFail + SnippetStore commit (2026-10-30)
+
+> 分支 `fix/review-polish-m3155`(从 `origin/main` 切出)。**未合并**;PR #4–#89 一律没碰。
+
+## 修了什么
+
+1. **安卓终端粘贴 / 拖放读剪贴板静默失败**(`TerminalScreen.kt`)。`primaryClip` / `coerceToText` 抛 `SecurityException`、或没有 `ClipboardManager` 时,粘贴 lambda 直接崩掉,看起来像"点了没反应"。现在 null CM / `SecurityException` → Toast `clipboard_unavailable`(三语言,与 #87/#88 同文案,主线尚无此键);空剪贴板仍静默。`onDrop` 同样包住。
+2. **桌面 History 搜索复制假成功**(`HistorySearch.vue` / `i18n.ts`)。`clipboard.writeText` 是同步 void,抛错后仍 `toggleHistory(false)` 关对话框。现在 try/catch,失败 toast `hist.copyFail`(三语)并保持对话框打开。未动 `exportLog`(#84)。
+3. **安卓命令片段保存用 `apply()` 假成功**(`Snippets.kt`)。`save` 改 `commit(): Boolean`;调用方先组 `next` 再落盘,成功才改内存/关编辑页,失败 Toast `snip_save_failed` / `snip_delete_failed` 并留在编辑页。
 
 ## 验证
 
@@ -485,6 +494,7 @@ npm run test
 安卓侧只改了 Kotlin(没动 Rust),`assembleDebug` / `installDebug` 照常;**没有在真机上点过**复制失败那条路(要造一个剪贴板服务不可用的环境)。
 安卓侧只改了 Kotlin + strings(没动 Rust)。**没有在真机/模拟器上点过**剪贴板服务不可用与空表落盘护栏。
 typecheck / lint:i18n / vitest **334** / 30 全绿。安卓只改了 Kotlin + strings(没动 Rust)。**没有在真机/模拟器上点过** seal 失败路径。
+typecheck / lint:i18n / vitest **334** / 30 全绿。安卓只改了 Kotlin + strings(没动 Rust)。**没有在真机/模拟器上点过** 剪贴板拒绝 / 片段写盘失败路径。
 
 ## 注意
 
@@ -492,6 +502,7 @@ typecheck / lint:i18n / vitest **334** / 30 全绿。安卓只改了 Kotlin + st
 - 未触碰的开放 PR:#4–#86(尤其 #86 的 `publicKey()` null-else / symlink `isDir` / 桌面 `stopWatch`;#85 的 SFTP diff toast / `previewFail` / GoTo `~`;#84 的 history export / pack / extract / sync / multi-download;#83 passphrase;#60 log-start;#58 link;#42 editExternal;#40 preview i18n)。
 - 未触碰的开放 PR:#4–#87(尤其 #87 的 copySelection/copyText;#86 publicKey/symlink/stopWatch;#85 diff/preview/GoTo;#84 export/pack;#74 TransferPanel reveal toast;#57 openExternal)。
 - 未触碰的开放 PR:#4–#88(尤其 #88 TransferPanel reveal / paste / persist empty;#87 copySelection;#86 publicKey/symlink;#85 diff/preview;#84 export/pack toast;#51 pack-failed)。
+- 未触碰的开放 PR:#4–#89(尤其 #88 TransferPanel reveal / paste CM-null / persist empty;#87 copySelection/copyText;#86 publicKey/symlink;#85 diff/preview;#84 export/pack toast)。`clipboard_unavailable` 文案与 #87/#88 对齐以便合并。
 - 未触碰 `/workspace/MCode`。
 
 ---

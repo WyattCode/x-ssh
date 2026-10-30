@@ -62,6 +62,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.foundation.border
 import kotlin.math.roundToInt
 import android.util.Log
+import android.widget.Toast
 import uniffi.xssh_ffi.StyledRun
 import uniffi.xssh_ffi.ScreenRow
 import androidx.compose.ui.text.style.TextDecoration
@@ -676,6 +677,21 @@ private fun TerminalView(
         }
         val clip = mgr.primaryClip
         val text = clip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty()
+    // 读剪贴板可能被系统拒绝(SecurityException),也可能根本没有 ClipboardManager(个别精简系统)。
+    // 原来这两种都会让这个 lambda 直接抛出去 —— 点「粘贴」看着像没反应。现在说一句「读不到剪贴板」。
+    // 剪贴板是空的仍然什么都不说:那不是错误。
+    val paste: () -> Unit = paste@{
+        val mgr = context.getSystemService(android.content.ClipboardManager::class.java)
+        if (mgr == null) {
+            Toast.makeText(context, R.string.clipboard_unavailable, Toast.LENGTH_SHORT).show()
+            return@paste
+        }
+        val text = try {
+            mgr.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty()
+        } catch (_: SecurityException) {
+            Toast.makeText(context, R.string.clipboard_unavailable, Toast.LENGTH_SHORT).show()
+            return@paste
+        }
         if (text.isNotEmpty()) live.paste(text)
     }
 
@@ -802,6 +818,15 @@ private fun TerminalView(
                 val raw = (0 until clip.itemCount)
                     .joinToString("\n") { clip.getItemAt(it).coerceToText(context).toString() }
                 val text = PasteSanitize.sanitize(raw)
+                // 拖进来的内容也要过一遍 coerceToText:它同样可能抛 SecurityException。
+                // 抛了就说明白,别让用户以为"拖了但没反应";内容为空仍旧安静地返回 false。
+                val text = try {
+                    (0 until clip.itemCount)
+                        .joinToString("\n") { clip.getItemAt(it).coerceToText(context).toString() }
+                } catch (_: SecurityException) {
+                    Toast.makeText(context, R.string.clipboard_unavailable, Toast.LENGTH_SHORT).show()
+                    return false
+                }
                 if (text.isEmpty()) return false
                 live.paste(text)
                 return true
