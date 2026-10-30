@@ -380,9 +380,11 @@ class UiPrefs(context: Context) {
     /** 平板侧边栏是否展开(收起后终端独占整个宽度,下次打开保持用户的选择)。 */
     var sidebarVisible: Boolean
         get() = prefs.getBoolean(KEY_SIDEBAR, true)
-        set(value) {
-            prefs.edit().putBoolean(KEY_SIDEBAR, value).apply()
-        }
+        set(value) { setSidebarVisible(value) }
+
+    /** 写侧边栏展开状态。返回 false = 没写进磁盘(下次冷启动会回到旧值)。 */
+    fun setSidebarVisible(value: Boolean): Boolean =
+        prefs.edit().putBoolean(KEY_SIDEBAR, value).commit()
 
     companion object {
         private const val KEY_SIDEBAR = "sidebarVisible"

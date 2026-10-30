@@ -263,6 +263,7 @@
     <string name="tab_search">搜索</string>
     <string name="tab_search_results">搜索结果</string>
     <string name="tab_sessions">会话</string>
+    <string name="tab_sidebar_persist_failed">侧边栏设置没能保存,下次启动会恢复原样</string>
     <string name="tab_show_sidebar">显示侧边栏</string>
     <string name="term_channel_desc">显示后台仍在连接的 SSH 会话</string>
     <string name="term_channel_name">会话保持</string>

@@ -546,8 +546,15 @@ function keyStale(firstSeen?: number): boolean {
 }
 // ---- connection audit log ----
 const connLog = ref<{ at: number; event: string; host: string; port: number; username: string; detail?: string; bytes?: number }[]>([])
+const connLogError = ref('')
 async function loadConnLog(): Promise<void> {
-  connLog.value = await window.api.connLog.list()
+  try {
+    connLog.value = await window.api.connLog.list()
+    connLogError.value = ''
+  } catch {
+    connLogError.value = t('set.sec.connLogLoadFail')
+    toast(connLogError.value, 'error')
+  }
 }
 async function clearConnLog(): Promise<void> {
   // One-way wipe of the audit trail; everything else destructive here confirms
@@ -1274,14 +1281,15 @@ async function resetMasterLock(): Promise<void> {
               <h3>{{ t('set.sec.connLog') }}</h3>
               <p class="g-desc">{{ t('set.sec.connLogDesc') }}</p>
               <div class="card">
+                <div v-if="connLogError" class="row empty err">{{ connLogError }}</div>
                 <div v-for="(l, i) in connLog" :key="i" class="row log">
                   <span class="log-time">{{ connTime(l.at) }}</span>
                   <span class="log-event" :class="l.event">{{ eventLabel(l.event) }}</span>
                   <span class="mono grow ellipsis">{{ l.username }}@{{ l.host }}:{{ l.port }}</span>
                   <span v-if="l.detail" class="mono faint ellipsis log-detail">{{ l.detail }}<template v-if="l.bytes != null"> · {{ fmtBytes(l.bytes) }}</template></span>
                 </div>
-                <div v-if="!connLog.length" class="row empty">{{ t('set.sec.connLogEmpty') }}</div>
-                <div v-else class="row actions-row">
+                <div v-if="!connLog.length && !connLogError" class="row empty">{{ t('set.sec.connLogEmpty') }}</div>
+                <div v-else-if="connLog.length" class="row actions-row">
                   <span class="spacer" />
                   <button class="btn sm btn-danger" @click="clearConnLog">{{ t('set.sec.connLogClear') }}</button>
                 </div>
