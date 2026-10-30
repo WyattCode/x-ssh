@@ -1566,16 +1566,14 @@ export class SshManager {
   }
 
   /** Names at `dir` that already exist (used to ask the user how to handle an
-   *  upload that would overwrite them). Empty if the dir can't be read. */
+   *  upload that would overwrite them). Throws if the dir can't be read — the
+   *  caller must fail closed (cancel the upload) rather than treat an unreadable
+   *  dir as "nothing conflicts" and overwrite silently. */
   async remoteConflicts(sessionId: string, dir: string, names: string[]): Promise<string[]> {
-    try {
-      const sftp = await this.getSftp(sessionId)
-      const list = await this.readdirFull(sftp, dir)
-      const existing = new Set(list.map((i) => i.filename))
-      return names.filter((n) => existing.has(n))
-    } catch {
-      return []
-    }
+    const sftp = await this.getSftp(sessionId)
+    const list = await this.readdirFull(sftp, dir)
+    const existing = new Set(list.map((i) => i.filename))
+    return names.filter((n) => existing.has(n))
   }
 
   /** Finds an unused remote path next to `path` by appending " (n)" before the
@@ -2115,7 +2113,12 @@ export class SshManager {
         try {
           list = await this.readdirFull(sftp, remote)
         } catch {
-          return // skip unreadable directory
+          // A top-level folder that can't be listed would otherwise "succeed"
+          // with zero files (an empty local dir, nothing queued) and the IPC
+          // would answer ok:true. Report it as a failure instead. Nested
+          // unreadable dirs stay best-effort skips.
+          if (depth === 0) failures.push(name)
+          return
         }
         for (const it of list) if (!it.attrs.isDirectory()) knownTotal += it.attrs.size
         for (const it of list) {

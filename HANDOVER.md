@@ -1207,6 +1207,10 @@ openSnapshot/closeOthers/saveSetting (#68), theme/transfer clears (#67), bookmar
 - **标签布局写盘失败会提示**:`persistTabs` 的 `openTabs` 写入被拒 / 抛错时,toast 一次 `app.tabsPersistFail`(同一段失败只提示一次,写成功即复位),不再让内存里的新布局和磁盘上的旧布局悄悄分叉。
 - **快照写盘失败回滚**:`saveSnapshot` / `deleteSnapshot` 写入被拒时回滚 `snapshots` 并 toast `app.snapPersistFail`,界面不再显示一个下次启动就消失的快照。
 - 新增 i18n 键:`app.tabsPersistFail`、`app.snapPersistFail`(zh / zh-TW / en 三份)。
+## M3.179(分支 `fix/review-polish-m3179`,**勿合并**)
+- **下载顶层目录读不出来不再假成功**:`downloadJob` 的 `walk` 在 `readdir` 失败时一律静默跳过,顶层文件夹读不出来就变成「建了个空目录、0 个文件、返回 ok:true」。现在 `depth === 0` 记进 `failures`,IPC 如实报「N 个文件失败」;嵌套目录仍按原样尽力跳过。
+- **上传冲突检查失败不再静默覆盖**:`remoteConflicts` 原来任何错误都返回 `[]`,被 `resolveUploadOverwrite` 当成「没有冲突」直接按覆盖上传。现在失败即抛出,`resolveUploadOverwrite` 捕获后返回 `'cancel'`(失败关闭,不传)。
+- **本地覆盖确认不再把 EACCES 当「不存在」**:`confirmOverwriteLocal` 原来 `stat` 任何错误都当文件不存在,锁住/无权限的本地文件会被静默覆盖。现在只有 `ENOENT` 算不存在,其余错误按「已存在」处理、照常弹确认。
 
 ## 项目概述
 - 极简、键盘优先的 SSH 客户端。Electron + Vue 3 (Vite) + TypeScript。
