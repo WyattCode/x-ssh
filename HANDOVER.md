@@ -567,6 +567,10 @@ typecheck / lint:i18n(桌面 752/752/752) / vitest **334** / 30 全绿。未在�
 > - **B. 信任失败提示**:`ssh:trustHostKey` 返回 `{ ok, code?: 'corrupt' | 'rejected' | 'error', error? }`;渲染层 `trustAndReconnect` 按 `code === 'corrupt'` 弹 `app.trustFailCorrupt`(说明已拒绝写入、请修复或从备份恢复),其余弹 `app.trustFail`。`knownHosts:forget` / `ssh:forgetHostKey` 改为 `{ ok }` / `{ ok: false, error }`(与 #63 同形,便于合并),设置页删除失败会提示 `set.sec.forgetFail`。
 > - 新增 `src/main/knownHosts.test.ts`(4 条:损坏时 set / forget 抛错且文件字节不变、`importAll` 可覆盖并清标志、正常 load 后 set 生效)。
 > - 仅 Windows 这一片;未动 macOS / iOS / Android。
+> **M3.166(分支 `fix/review-polish-m3166`,基于 main @ 5946b1f)—— 请勿合并,待复核**
+> - **D. Android 空表落盘拒绝时 Toast**:`MainActivity.persist` 在 `diskCount()>0` 护栏命中时除 `Log.e` 外弹出 `hosts_persist_refused`(en/zh/zh-Hant)。不引入 `hasProtectedDiskData` / `loadFailed`(属 #97)。
+> - **C. Windows 本机多选删除只弹一次失败 Toast**:`SftpDrawer.localDelSelected` 收集首个错误,循环后单次 `toast`,去掉 per-item + summary 的 N+1。
+> - Windows + Android;未动 macOS / iOS。
 
 # X-SSH 交接文档
 

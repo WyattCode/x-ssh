@@ -203,6 +203,7 @@
     <string name="hosts_persist_refused">无法更新主机列表，已保留已保存的数据</string>
     <string name="hosts_persist_failed">主机列表保存失败</string>
     <string name="hosts_load_failed">部分已保存的主机无法读取。磁盘上的文件未被覆盖;若主机缺失,请从备份恢复。</string>
+    <string name="hosts_persist_refused">没能保存空的主机列表——磁盘上还有受保护的数据。</string>
     <string name="main_sc_close_session">断开当前会话</string>
     <string name="main_sc_edit_host">编辑主机</string>
     <string name="main_sc_ime">终端里切换输入法 / 英文直通</string>

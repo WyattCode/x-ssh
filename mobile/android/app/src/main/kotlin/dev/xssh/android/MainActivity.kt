@@ -292,6 +292,7 @@ fun App(devTarget: DevTarget? = null) {
             android.widget.Toast.makeText(
                 context,
                 context.getString(R.string.hosts_persist_refused),
+                R.string.hosts_persist_refused,
                 android.widget.Toast.LENGTH_LONG,
             ).show()
             return
