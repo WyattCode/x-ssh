@@ -1,3 +1,24 @@
+# M3.150 — 复核打磨(三处静默失败)
+
+> 分支 `fix/review-polish-m3150`(自 `origin/main`)。**不合并**;PR #4–#84 全部未动(尤其 #84 历史导出 / 打包解压同步 / 多选下载提示、#83 needs_passphrase / HostEditor 加密密钥、#82 keyRequired、#81 withTempHosts / 跳板候选、#80 SFTP 上传 / onDrop / runDeploy、#79 auth_failed、#78 jump_missing、#77 重命名 / 新建 / 删除加载守卫、#76 单文件下载、#75–#72、#67 主题、#65/#64 主机保存 / 删除、#63/#62 转发移除、#58/#47 tmuxAttach、#54 sessions isCancelled、#42 editExternal / openWith、#39/#46 ssh-config 导入)。
+
+## 修了什么(都是静默失败,不是新功能)
+
+1. **SFTP「与本地对比」失败只有横幅**(`SftpDrawer.diffWithLocal`):远端读失败、本地读失败两条分支原来只写 `error`,而横幅会被下一次 `load()` 清掉 —— 和 #80/#84 的上传 / 打包提示同一类。现在两条分支都 `toast(msg, 'error')`;用户取消选文件(`!picked.ok || !picked.path`)仍然静默返回,不弹提示。
+2. **图片预览失败是硬编码简体中文**(`SftpDrawer.previewFile`):`readBinary` 失败且没有 `error` 时,英 / 繁界面会显示「无法预览」。改成 `tt('sfp.previewFail')`,三份字典各加一条(zh 无法预览 / en Preview failed / zh-TW 無法預覽)。
+3. **安卓 SFTP「前往路径」输入 `~` 时 `home()` 失败被吞**(`mobile/android/app/src/main/kotlin/dev/xssh/android/Files.kt`):原来只有 `onSuccess`,失败时对话框关掉、路径不变,看起来和成功一样。现在补 `onFailure`(跳过 `CancellationException`),用 `files.notify(FileText.of(R.string.files_cannot_read_folder, e.reason()), error = true)` 弹底部提示 —— 用户已经在浏览目录,不该整页变错误。复用现有字符串,没加新资源;首次加载 / 重试的 `home()` 路径未动。
+
+## 验证
+
+- `npm run typecheck`
+- `npm run lint:i18n`(桌面三份字典仍对称)
+- `npx vitest run`(期望 ≥334;`vitest.config.ts` 的 `singleFork` 不要改)
+
+## 没做 / 有意搁置
+
+- `fontSize` 未使用、桌面端 `local.home` 静默、StatusBar 配置 vs 实时、`setWindowOpenHandler` —— 都是有意保留的。
+- 本轮只碰上面三处;上传 / onDrop / runDeploy、打包 / 解压 / 同步、downloadMany / 单文件下载、history.export、needs_passphrase / auth_failed / withTempHosts、主题 setPref、ForwardsPage、TransferPanel reveal、SettingsDialog 开关 / importSshConfig、App.vue editExternal / openWith、sessions.ts isCancelled、TmuxDialog 全部未动。
+
 # X-SSH 交接文档
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。
