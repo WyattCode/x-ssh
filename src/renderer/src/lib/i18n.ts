@@ -735,6 +735,7 @@ const zh: Dict = {
   'hist.untitled': '会话',
   'hist.sessionGone': '该会话已关闭,无法跳转',
 
+
   // host editor
   'host.titleNew': '新建主机',
   'host.titleEdit': '编辑主机',
@@ -1640,6 +1641,7 @@ const en: Dict = {
   'hist.exported': 'Exported',
   'hist.untitled': 'Session',
   'hist.sessionGone': 'That session is already closed',
+
 
   'host.titleNew': 'New host',
   'host.titleEdit': 'Edit host',
@@ -2555,6 +2557,7 @@ const zhTW: Dict = {
   'hist.exported': '已匯出',
   'hist.untitled': '工作階段',
   'hist.sessionGone': '該工作階段已關閉,無法跳轉',
+
 
   // host editor
   'host.titleNew': '新增主機',

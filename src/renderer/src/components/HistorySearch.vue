@@ -21,6 +21,7 @@ function displayLabel(label: string): string {
 }
 
 
+
 const query = ref('')
 const inputEl = ref<HTMLInputElement>()
 const active = ref(0)
@@ -111,6 +112,9 @@ async function exportLog(): Promise<void> {
 function exportLog(): void {
   const text = results.value.map((h) => `[${displayLabel(h.label)}] ${h.line}`).join('\n')
   void window.api.history.export(text)
+  // A failed write (disk full / permission) used to look identical to success:
+  // the save dialog had already closed, so nothing on screen said it failed.
+  if (!r.ok && !r.canceled) toast(r.error ?? t('hist.exportFail'), 'error')
 }
 
 function pick(hit: Hit): void {

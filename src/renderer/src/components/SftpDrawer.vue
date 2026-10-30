@@ -1409,6 +1409,11 @@ async function downloadSelected(): Promise<void> {
   }))
   const r = await window.api.sftp.downloadMany(props.sessionId, payload, store.transferConcurrency)
   if (!r.ok && !r.canceled) error.value = sftpErr(r.error, 'sfp.downloadFail')
+  if (!r.ok && !r.canceled) {
+    const msg = r.error ?? tt('sfp.downloadFail')
+    error.value = msg
+    toast(msg, 'error')
+  }
 }
 async function packDownloadSelected(): Promise<void> {
   if (!props.sessionId) return
@@ -1432,6 +1437,12 @@ async function packDownloadSelected(): Promise<void> {
       // Main reports a failed tar as the machine code `pack-failed`; show the
       // localized wording rather than the raw token.
       error.value = r.error === 'pack-failed' ? tt('sfp.packFail') : (r.error ?? tt('sfp.packFail'))
+    if (!r.ok && !r.canceled) {
+      // The banner alone can be wiped by a concurrent load(), so a failed pack
+      // would look like a no-op; toast it the same way uploads do.
+      const msg = r.error ?? tt('sfp.packFail')
+      error.value = msg
+      toast(msg, 'error')
     } else if (r.ok) await load(path.value)
   } finally {
     busy.value = false
@@ -1444,6 +1455,11 @@ async function uploadExtractPick(): Promise<void> {
     const r = await window.api.sftp.uploadExtract(props.sessionId, path.value, store.transferConcurrency)
     if (!r.ok && !r.canceled) error.value = sftpErr(r.error, 'sfp.extractFail')
     else if (r.ok) await load(path.value)
+    if (!r.ok && !r.canceled) {
+      const msg = r.error ?? tt('sfp.extractFail')
+      error.value = msg
+      toast(msg, 'error')
+    } else if (r.ok) await load(path.value)
   } finally {
     busy.value = false
   }
@@ -1580,6 +1596,19 @@ function onSyncEnter(e: KeyboardEvent): void {
   if (!r.ok) error.value = sftpErr(r.error, 'sfp.syncFail')
   // Cancel is reported via the transfer row (CANCELLED_TEXT); don't toast syncFail.
   if (!r.ok && !r.canceled) error.value = r.error ?? tt('sfp.syncFail')
+    else {
+      const msg = r.error ?? tt('sfp.syncFail')
+      error.value = msg
+      toast(msg, 'error')
+    }
+    return
+  }
+  const r = await window.api.sftp.sync(props.sessionId, sync.local, sync.remote, sync.mode, sync.del, store.transferConcurrency)
+  if (!r.ok) {
+    const msg = r.error ?? tt('sfp.syncFail')
+    error.value = msg
+    toast(msg, 'error')
+  }
 }
 async function stopWatch(): Promise<void> {
   if (!props.sessionId) return
