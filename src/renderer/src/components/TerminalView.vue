@@ -11,6 +11,7 @@ import { useConfirm } from '../composables/confirm'
 import { themeFor } from '../lib/terminalThemes'
 import { useI18n } from '../lib/i18n'
 import { isImeKey } from '../lib/ime'
+import { decodeOsc52Payload } from '../lib/osc52'
 import { useSessions } from '../stores/sessions'
 import {
   DEFAULT_BINDINGS,
@@ -362,19 +363,18 @@ onMounted(() => {
   // Honor OSC 52 clipboard writes from remote programs (tmux, vim, nvim's
   // clipboard=osc52, Claude Code, etc.) so their "copy" lands on the local
   // system clipboard. Payload is "<selection>;<base64>" ('?' = query, ignored).
+  // The base64 is decoded by lib/osc52, which tolerates the whitespace/newlines
+  // some remotes (tmux wrapping, multi-line OSC) put inside it — atob() alone
+  // threw on those and the copy failed silently.
   term.parser.registerOscHandler(52, (data) => {
     const semi = data.indexOf(';')
     const payload = semi >= 0 ? data.slice(semi + 1) : data
-    // Ignore queries ('?') and refuse absurdly large payloads.
-    if (!payload || payload === '?' || payload.length > 2_000_000) return true
-    try {
-      const bytes = Uint8Array.from(atob(payload), (ch) => ch.charCodeAt(0))
-      const text = new TextDecoder().decode(bytes)
-      window.api.clipboard.writeText(text)
-      lastAppCopy = { text, at: Date.now() }
-    } catch {
-      return false
-    }
+    const text = decodeOsc52Payload(payload)
+    // Query, empty, oversized or undecodable: nothing to copy, but the sequence
+    // is still ours — don't let xterm fall through to its own handling.
+    if (text === null) return true
+    window.api.clipboard.writeText(text)
+    lastAppCopy = { text, at: Date.now() }
     return true
   })
 
