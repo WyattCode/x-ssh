@@ -358,8 +358,10 @@ const zh: Dict = {
 
   // terminal view
   'term.copy': '复制',
+  'term.copyFail': '复制失败',
   'term.shiftSelectHint': '程序占用了鼠标:按住 Shift 拖动来选择',
   'term.paste': '粘贴',
+  'term.pasteFail': '粘贴失败',
   'term.find': '查找',
   'term.selectAll': '全选',
   'term.clear': '清屏',
@@ -536,6 +538,7 @@ const zh: Dict = {
   'sfp.preview': '预览',
   'sfp.openWith': '打开方式…',
   'sfp.copyPath': '复制路径',
+  'sfp.copyFail': '复制路径失败',
   'sfp.perm': '更改权限',
   'sfp.rename': '重命名',
   'sfp.confirmDel': '确定删除“{name}”？',
@@ -1132,8 +1135,10 @@ const en: Dict = {
   'group.ui': 'Interface',
 
   'term.copy': 'Copy',
+  'term.copyFail': 'Couldn\'t copy',
   'term.shiftSelectHint': 'The program has the mouse: hold Shift and drag to select',
   'term.paste': 'Paste',
+  'term.pasteFail': 'Couldn\'t paste',
   'term.find': 'Find',
   'term.selectAll': 'Select all',
   'term.clear': 'Clear',
@@ -1311,6 +1316,7 @@ const en: Dict = {
   'sfp.preview': 'Preview',
   'sfp.openWith': 'Open with…',
   'sfp.copyPath': 'Copy path',
+  'sfp.copyFail': 'Couldn\'t copy path',
   'sfp.perm': 'Change permissions',
   'sfp.rename': 'Rename',
   'sfp.confirmDel': 'Delete "{name}"?',
@@ -1915,8 +1921,10 @@ const zhTW: Dict = {
 
   // terminal view
   'term.copy': '複製',
+  'term.copyFail': '複製失敗',
   'term.shiftSelectHint': '程式占用了滑鼠:按住 Shift 拖曳來選取',
   'term.paste': '貼上',
+  'term.pasteFail': '貼上失敗',
   'term.find': '尋找',
   'term.selectAll': '全選',
   'term.clear': '清除畫面',
@@ -2094,6 +2102,7 @@ const zhTW: Dict = {
   'sfp.preview': '預覽',
   'sfp.openWith': '開啟方式…',
   'sfp.copyPath': '複製路徑',
+  'sfp.copyFail': '複製路徑失敗',
   'sfp.perm': '變更權限',
   'sfp.rename': '重新命名',
   'sfp.confirmDel': '確定要刪除「{name}」？',

@@ -1,3 +1,31 @@
+# M3.156 — 终端/SFTP 剪贴板失败不再静默 (2026-10-30)
+
+> 分支 `fix/review-polish-m3156`(从 `origin/main` 切出)。**未合并**;PR #4–#90 一律没碰。
+
+## 修了什么
+
+1. **桌面终端复制失败静默**(`TerminalView.vue`)。`copySelection` / `copyFromMenu` / `copyOnSelect` 的 `clipboard.writeText` 原先无 try/catch;剪贴板锁住或超大时抛错 → 快捷键/右键复制/选中即复制看起来没反应。现在 try/catch + toast `term.copyFail`(三语言)。OSC 52 路径原本就有 catch,未动。
+2. **桌面 SFTP「复制路径」失败静默**(`SftpDrawer.vue` 的 `copySelectedPaths`)。同样包 try/catch + toast `sfp.copyFail`。
+3. **桌面终端粘贴 `readText` 失败静默**(`TerminalView.vue` 的 `pasteClipboard`)。`clipboard.readText` 抛错时 toast `term.pasteFail` 并返回;空剪贴板仍静默。
+
+## 验证
+
+```
+npm run typecheck
+npm run lint:i18n
+npm run test
+```
+
+typecheck / lint:i18n(桌面 752/752/752) / vitest **334** / 30 全绿。未在真机上模拟剪贴板锁定。
+
+## 注意
+
+- **不要合并**:这一批是 review 修复,等人工过一遍再合。
+- 未触碰的开放 PR:#4–#90(尤其 #90 HistorySearch.copyFail / Android paste SecurityException / Snippet commit;#87 Android copyText;#88 paste CM-null;#89 HostStore seal)。
+- 未触碰 `/workspace/MCode`。未改 preload 剪贴板签名。
+
+---
+
 # X-SSH 交接文档
 
 > 移动端(Android/iOS,共享 Rust 核心 + 双原生 UI)的工作见 [`mobile/HANDOVER.md`](mobile/HANDOVER.md)。
