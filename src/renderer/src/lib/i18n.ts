@@ -809,6 +809,8 @@ const zh: Dict = {
   'tabbar.closeTab': '关闭',
   'tabbar.closeOthers': '关闭其他',
   'tabbar.closeOthersConfirm': '其他标签仍有活跃会话,确定全部关闭吗?关闭前会先发送 exit。'
+  'tabbar.closeAll': '关闭全部',
+  'tabbar.closeAllConfirm': '关闭全部标签？仍在连接的会话会先收到 exit。'
 }
 
 const en: Dict = {
@@ -1600,6 +1602,8 @@ const en: Dict = {
   'tabbar.closeTab': 'Close',
   'tabbar.closeOthers': 'Close others',
   'tabbar.closeOthersConfirm': 'Other tabs still have active sessions. Close them all? An `exit` is sent first.'
+  'tabbar.closeAll': 'Close all',
+  'tabbar.closeAllConfirm': 'Close all tabs? Live sessions will receive exit first.'
 }
 
 /** Traditional Chinese, Taiwan usage. Keys missing here fall back to `zh`. */
@@ -2405,6 +2409,8 @@ const zhTW: Dict = {
   'tabbar.closeTab': '關閉',
   'tabbar.closeOthers': '關閉其他分頁',
   'tabbar.closeOthersConfirm': '其他分頁仍有作用中的工作階段,確定要全部關閉嗎?關閉前會先傳送 exit。'
+  'tabbar.closeAll': '關閉全部分頁',
+  'tabbar.closeAllConfirm': '關閉全部分頁？仍在連線的工作階段會先收到 exit。'
 }
 
 const dicts: Record<Lang, Dict> = { zh, 'zh-TW': zhTW, en }

@@ -1,6 +1,9 @@
 # 会话记录:连续改进 M3.83(2026-10-30,复核打磨:OSC52 空白 base64 + 主锁 Enter/busy + 离线点透明度)
 
 功能清单已够,本轮按站立规则做开源复核打磨(不合并)。未动 PR #17 / #16 / #15 / #14 / #13 / #12 与更早的 #4–#11。
+# 会话记录:连续改进 M3.84(2026-10-30,复核打磨:主题循环竞态 + 关闭全部确认 + 连接日志 disconnect/滚动)
+
+功能清单已够,本轮按站立规则做开源复核打磨(不合并)。未动 PR #18 / #17 / #16 / #15 / #14 / #13 / #12 与更早的 #4–#11。
 
 **核过已过时 / 已在未合并 PR(本轮不重做)**:
 1. TransferPanel 失败原因 / ETA + Android 罚分地板 —— PR #12。
@@ -16,6 +19,14 @@
 3. **连接页离线状态点缺设计透明度**:`.dot.offline` 补 `opacity: 0.6`(HANDOVER 原定;unknown 仍 0.8 空心圈)。
 
 **验证**:`typecheck` + `lint:i18n` + vitest **341** 全绿(原 334;+`osc52` 7)。Android 本轮未改。未合并。
+7. OSC52 空白 base64 + 主锁 Enter/busy + 离线点透明度 —— PR #18。
+
+**修了**:
+1. **主题循环竞态**:`composables/theme.ts` `setPref` 在 await IPC 前乐观写 `pref`,侧栏/设置连点不再吞掉一步;失败不回滚(避免闪),跟随系统时回读 media。
+2. **标签栏「关闭全部」+ confirmClose**:新纯函数 `lib/tabCloseGuard.ts` `closeAllNeedsConfirm`(+4 测);`sessions.closeAll` 有活会话且开了确认时弹一次危险确认并先发 `exit`;TabBar 右键菜单加入口。
+3. **连接日志 UI**:`.log-event.disconnect` 补中性灰芯片(原先无样式、和默认糊在一起);日志行包进 `.log-list`(`max-height:320px` 可滚),空态/清空按钮仍在外。
+
+**验证**:`typecheck` + `lint:i18n` + vitest **338** 全绿(原 334;+`tabCloseGuard` 4)。Android 本轮未改。未合并。
 
 ---
 
