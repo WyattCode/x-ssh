@@ -1196,6 +1196,12 @@ openSnapshot/closeOthers/saveSetting (#68), theme/transfer clears (#67), bookmar
 - 分支 `fix/review-polish-m3176`(基于 `main` @ `5946b1f`),**未合并**;只动 Windows / Android,不碰 macOS / iOS。
 - **增量同步不再把文件级失败报成成功**:`syncJob` 返回 `{ errors }`,IPC `sftp:sync` 有失败就 `ok:false` + `sync-items-failed:N`,抽屉用新键 `sfp.syncItemsFailed` 显示(zh / en / zh-TW)。取消语义与 `${errors} 项失败` 的 emit 文案没动(分别归 #53 / #47)。
 - **持续同步失败不推进基线**:`runWatchPass` 在同步抛错或有文件失败时保留旧基线,下一轮重试这些文件(原来会越过部分失败,失败文件因大小/时间"对上"而永远不再同步)。
+## M3.177
+
+- 分支 `fix/review-polish-m3177`(基于 main @ 5946b1f),**do-not-merge**,Windows + Android 专项。
+- A: `downloadTree` 读目录失败不再当空目录成功返回(重抛);子项全部失败时抛 `download-tree-empty:<name>`;部分成功仍保留。
+- B: 设置 → 外部编辑器 / 按扩展名打开程序,`settings.set` 被拒时回滚 store 并提示 `set.gen.writeFail`;表单只在成功后清空。
+- 新增 i18n 键:`set.gen.writeFail`(zh / zh-TW / en)。
 
 ## 项目概述
 - 极简、键盘优先的 SSH 客户端。Electron + Vue 3 (Vite) + TypeScript。

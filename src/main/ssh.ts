@@ -2551,8 +2551,10 @@ export class SshManager {
   }
 
   /** Silent recursive download (no progress) into localBase; used for drag-out.
-   *  Error-tolerant so one unreadable entry doesn't leave the folder undownloaded
-   *  (and thus undraggable). */
+   *  Best-effort: one unreadable entry doesn't leave the folder undownloaded
+   *  (and thus undraggable), but a folder that could not be read at all — or
+   *  whose every child failed — throws instead of resolving to an empty dir,
+   *  so the caller never reports a silent empty-folder success. */
   async downloadTree(
     sessionId: string,
     remotePath: string,
@@ -2569,15 +2571,26 @@ export class SshManager {
       let list: { filename: string; attrs: { size: number; isDirectory(): boolean } }[]
       try {
         list = await this.readdirFull(sftp, remotePath)
-      } catch {
-        return local
+      } catch (e) {
+        // A failed readdir must not look like an empty folder: the caller
+        // (prefetchDrag) treats a resolved promise as a complete download and
+        // hands Explorer an empty directory with no error. Rethrow so the
+        // caller's failure path (cleanup / eviction) runs.
+        throw e instanceof Error ? e : new Error(String(e))
       }
+      let skipped = 0
       for (const it of list) {
         try {
           await this.downloadTree(sessionId, this.posixJoin(remotePath, it.filename), local, it.filename, it.attrs.isDirectory(), depth + 1)
         } catch {
-          /* skip an entry we can't fetch */
+          // Best-effort: one unreadable entry must not block the whole drag.
+          skipped++
         }
+      }
+      // If every child failed, the result is an empty folder that would still
+      // be reported as success — surface it instead.
+      if (list.length > 0 && skipped === list.length) {
+        throw new Error(`download-tree-empty:${name}`)
       }
     } else {
       await this.pipeStream(randomUUID(), sftp.createReadStream(remotePath), createWriteStream(local), () => undefined, local)

@@ -225,7 +225,27 @@ async function clearEditor(): Promise<void> {
     toast(t('set.gen.writeFail'), 'error')
     return
   }
+  if (!p) return
+  const prev = store.externalEditor
+  store.externalEditor = p
+  try {
+    const r = await window.api.settings.set('externalEditor', p)
+    if (r && r.ok === false) throw new Error(r.error ?? '')
+  } catch {
+    store.externalEditor = prev
+    toast(t('set.gen.writeFail'), 'error')
+  }
+}
+async function clearEditor(): Promise<void> {
+  const prev = store.externalEditor
   store.externalEditor = null
+  try {
+    const r = await window.api.settings.set('externalEditor', '')
+    if (r && r.ok === false) throw new Error(r.error ?? '')
+  } catch {
+    store.externalEditor = prev
+    toast(t('set.gen.writeFail'), 'error')
+  }
 }
 
 // ---- per-extension default openers ----
@@ -234,12 +254,17 @@ async function upsertOpener(): Promise<void> {
   const ext = openerForm.ext.trim().toLowerCase().replace(/^\./, '')
   if (!ext) return
   const prev = { ...store.fileOpeners }
+  const prev = store.fileOpeners
   const next = { ...store.fileOpeners }
   if (openerForm.program) next[ext] = openerForm.program
   else delete next[ext]
   store.fileOpeners = next
   const r = await window.api.settings.set('fileOpeners', next)
   if (r && r.ok === false) {
+  try {
+    const r = await window.api.settings.set('fileOpeners', next)
+    if (r && r.ok === false) throw new Error(r.error ?? '')
+  } catch {
     store.fileOpeners = prev
     toast(t('set.gen.writeFail'), 'error')
     return
@@ -255,6 +280,13 @@ async function setOpenerProgram(ext: string): Promise<void> {
   store.fileOpeners = next
   const r = await window.api.settings.set('fileOpeners', next)
   if (r && r.ok === false) {
+  const prev = store.fileOpeners
+  const next = { ...store.fileOpeners, [ext]: p }
+  store.fileOpeners = next
+  try {
+    const r = await window.api.settings.set('fileOpeners', next)
+    if (r && r.ok === false) throw new Error(r.error ?? '')
+  } catch {
     store.fileOpeners = prev
     toast(t('set.gen.writeFail'), 'error')
   }
@@ -266,6 +298,14 @@ async function removeOpener(ext: string): Promise<void> {
   store.fileOpeners = next
   const r = await window.api.settings.set('fileOpeners', next)
   if (r && r.ok === false) {
+  const prev = store.fileOpeners
+  const next = { ...store.fileOpeners }
+  delete next[ext]
+  store.fileOpeners = next
+  try {
+    const r = await window.api.settings.set('fileOpeners', next)
+    if (r && r.ok === false) throw new Error(r.error ?? '')
+  } catch {
     store.fileOpeners = prev
     toast(t('set.gen.writeFail'), 'error')
   }
