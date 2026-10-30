@@ -109,6 +109,7 @@ const zh: Dict = {
   'app.needsPassphrase': '这把私钥有口令,但没有已保存的密码短语。请在「主机」编辑页填写后重试。',
   'app.badPassphrase': '私钥密码短语不正确。请在「主机」编辑页更正后重试。',
   'app.secretsLoadFail': '已保存的密码无法读取(密钥库不可用或 secrets.bin 来自另一台设备),本次不会覆盖原文件;请重新输入密码,或从备份恢复。',
+  'app.settingsLoadFail': '设置文件已损坏,本次不会写入以免覆盖原有数据(片段/快照/队列等);请检查 settings.json 或其 .bak,或从备份恢复。',
 
   // settings tabs
   'tab.general': '通用',
@@ -1040,6 +1041,7 @@ const en: Dict = {
   'app.needsPassphrase': 'This private key has a passphrase, but none is saved. Enter it on the host profile and retry.',
   'app.badPassphrase': 'Wrong private key passphrase. Correct it on the host profile and retry.',
   'app.secretsLoadFail': 'Saved passwords could not be read (OS key store unavailable, or secrets.bin came from another machine). The file is left untouched; re-enter passwords or restore a backup.',
+  'app.settingsLoadFail': 'Settings file is corrupt — writes are refused this launch so snippets, snapshots and queues are not overwritten. Check settings.json / .bak, or restore a backup.',
 
   'tab.general': 'General',
   'tab.terminal': 'Terminal',
@@ -1965,6 +1967,7 @@ const zhTW: Dict = {
   'app.needsPassphrase': '這把私鑰有密碼短語,但沒有已儲存的密碼短語。請在「主機」編輯頁填寫後重試。',
   'app.badPassphrase': '私鑰密碼短語不正確。請在「主機」編輯頁更正後重試。',
   'app.secretsLoadFail': '已儲存的密碼無法讀取(金鑰庫不可用或 secrets.bin 來自另一台裝置),本次不會覆蓋原檔;請重新輸入密碼,或從備份還原。',
+  'app.settingsLoadFail': '設定檔已損毀,本次不會寫入以免覆蓋原有資料(片段/快照/佇列等);請檢查 settings.json 或其 .bak,或從備份還原。',
 
   // settings tabs
   'tab.general': '一般',

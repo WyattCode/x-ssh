@@ -233,6 +233,7 @@
     <string name="snip_edit_title">編輯片段</string>
     <string name="snip_empty">還沒有片段。點 ＋ 把常用指令存起來，之後點一下就送出。</string>
     <string name="snip_fill">填入</string>
+    <string name="snip_load_failed">部分已儲存的指令片段無法讀取。磁碟上的檔案未被覆蓋;若片段缺失,請從備份還原。</string>
     <string name="snip_name_label">名稱（選填）</string>
     <string name="snip_name_placeholder">查看 GPU</string>
     <string name="snip_new">新增片段</string>

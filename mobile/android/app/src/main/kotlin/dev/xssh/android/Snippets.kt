@@ -106,7 +106,28 @@ internal fun snippetsFor(all: List<Snippet>, hostId: String): List<Snippet> =
 class SnippetStore(context: Context) {
     private val prefs = context.getSharedPreferences("xssh_snippets", Context.MODE_PRIVATE)
 
+    /** 上次 load 是否解析失败。只在内存里。 */
+    var loadFailed: Boolean = false
+        private set
+
+    /**
+     * 磁盘上是否还有值得保护的片段数据:能解析出记录,或原文非空却解析不了。
+     * 解析失败时不能再用「空表」去覆盖 KEY_LIST。
+     */
+    fun hasProtectedDiskData(): Boolean {
+        val raw = prefs.getString(KEY_LIST, null) ?: return false
+        if (raw.isBlank()) return false
+        return runCatching { JSONArray(raw).length() > 0 }.getOrDefault(true)
+    }
+
+    private fun keepCorruptCopy(raw: String) {
+        if (prefs.getString(KEY_CORRUPT, null) == null) {
+            prefs.edit().putString(KEY_CORRUPT, raw).apply()
+        }
+    }
+
     fun load(): List<Snippet> {
+        loadFailed = false
         val raw = prefs.getString(KEY_LIST, null) ?: return emptyList()
         return runCatching {
             val array = JSONArray(raw)
@@ -121,7 +142,11 @@ class SnippetStore(context: Context) {
                     hostId = item.optString("hostId").ifEmpty { null },
                 )
             }
-        }.getOrDefault(emptyList())
+        }.getOrElse {
+            loadFailed = true
+            keepCorruptCopy(raw)
+            emptyList()
+        }
     }
 
     /**
@@ -130,6 +155,14 @@ class SnippetStore(context: Context) {
      * 调用方于是照样关掉编辑页、内存里留着一条其实没存下来的片段。
      */
     fun save(list: List<Snippet>): Boolean {
+     * 存盘。用 commit 而不是 apply,好让调用方知道写没写进去。
+     * 空表且磁盘上仍有受保护数据时拒绝覆盖(坏 JSON 被当成「没有片段」后再保存会抹掉唯一副本)。
+     */
+    fun save(list: List<Snippet>): Boolean {
+        if (list.isEmpty() && hasProtectedDiskData()) {
+            android.util.Log.e("XsshData", "refusing to persist an empty snippet list over existing data")
+            return false
+        }
         val array = JSONArray()
         list.forEach { s ->
             array.put(
@@ -147,6 +180,7 @@ class SnippetStore(context: Context) {
 
     private companion object {
         const val KEY_LIST = "list"
+        const val KEY_CORRUPT = "list.corrupt"
     }
 }
 
@@ -166,6 +200,11 @@ fun SnippetSheet(
     val context = LocalContext.current
     val store = remember(context) { SnippetStore(context) }
     var all by remember { mutableStateOf(store.load()) }
+    LaunchedEffect(Unit) {
+        if (store.loadFailed) {
+            Toast.makeText(context, R.string.snip_load_failed, Toast.LENGTH_LONG).show()
+        }
+    }
     var editing by remember { mutableStateOf<Snippet?>(null) }
     var confirming by remember { mutableStateOf<Snippet?>(null) }
     val shown = snippetsFor(all, host.id)
@@ -258,6 +297,7 @@ fun SnippetSheet(
                 val next = if (index >= 0) all.toMutableList().also { it[index] = saved } else all + saved
                 // 先写盘,写进去了才改内存、才关编辑页:写失败时列表和磁盘还是一致的,
                 // 用户也还留在编辑页上,可以再点一次保存。
+
                 if (store.save(next)) {
                     all = next
                     editing = null

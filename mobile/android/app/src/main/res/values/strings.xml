@@ -234,6 +234,7 @@
     <string name="snip_edit_title">Edit snippet</string>
     <string name="snip_empty">No snippets yet. Tap ＋ to save a command you use often, then send it with one tap.</string>
     <string name="snip_fill">Insert</string>
+    <string name="snip_load_failed">Saved snippets could not be read. The file on disk was left untouched — restore a backup if snippets are missing.</string>
     <string name="snip_name_label">Name (optional)</string>
     <string name="snip_name_placeholder">Check GPU</string>
     <string name="snip_new">New snippet</string>

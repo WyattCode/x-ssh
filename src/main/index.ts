@@ -2253,6 +2253,7 @@ function registerIpc(): void {
 
   // ---- Settings ----
   ipcMain.handle(IPC.settingsGet, (_e, key: string) => settings.get(key))
+  ipcMain.handle(IPC.settingsStatus, () => settings.status())
   ipcMain.handle(IPC.settingsSet, async (_e, key: string, value: unknown) => {
     // The settings map also holds the master-lock record, the connection audit
     // log and the persisted session history. Without this check the renderer

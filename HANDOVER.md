@@ -549,6 +549,12 @@ typecheck / lint:i18n(桌面 752/752/752) / vitest **334** / 30 全绿。未在�
 
 - **A(桌面)secrets.bin 损坏不再静默变「未保存密码」**:`HostStore.secretsStatus()` + IPC;启动 toast `app.secretsLoadFail`;sshConnect 在无内联密码/口令且 vault bad 时返回 `secrets_load_failed`。
 - **B(Android)主机列表 JSON 整段解析失败不再被空表覆盖**:`hasProtectedDiskData()` 护栏替换 `diskCount()>0`;`loadFailed` + toast `hosts_load_failed`。
+# M3.163 — 复核打磨(分支 `fix/review-polish-m3163`,基于 main @ 5946b1f,**勿合并**)
+
+> 两条 P0 修复;只动 Windows + Android,不碰 macOS / iOS。
+
+- **A(桌面)settings.json 损坏不再被空表覆盖**:`SettingsStore.loadFailed` + `status()` IPC;启动 toast `app.settingsLoadFail`;双方 durable 都坏时 `set()` 拒绝写入。
+- **B(Android)片段列表 JSON 解析失败不再被空表覆盖**:`hasProtectedDiskData()` + `loadFailed` toast `snip_load_failed`;`save` 改 commit 并拒空覆盖。
 
 ---
 

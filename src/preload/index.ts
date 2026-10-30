@@ -304,7 +304,8 @@ const api = {
       ipcRenderer.invoke(IPC.settingsGet, key),
     /** Resolves `{ ok: false }` when main refuses the key — see SettingsWriteResult. */
     set: (key: string, value: unknown): Promise<SettingsWriteResult> =>
-      ipcRenderer.invoke(IPC.settingsSet, key, value)
+      ipcRenderer.invoke(IPC.settingsSet, key, value),
+    status: (): Promise<'ok' | 'bad'> => ipcRenderer.invoke(IPC.settingsStatus)
   },
   theme: {
     /** Saves the appearance choice and pins the native theme (title bar) to it.

@@ -13,6 +13,11 @@ import { parseJson, readDurable, sweepTemps, writeDurable } from './durableFile'
  * `set()` wrote a file holding only that one key. Reads and writes now go
  * through [readDurable] / [writeDurable] (backup + atomic replace), writes join
  * their queue synchronously, and the app waits for [flush] before quitting.
+ *
+ * Corrupt fail-closed: when neither settings.json nor its .bak parses, the
+ * store reports `status() === 'bad'` and refuses to write — otherwise the first
+ * `set()` (windowBounds on every close) would replace the unreadable file with
+ * a single-key one and wipe snippets, snapshots, queues, etc.
  */
 export class SettingsStore {
   private dir: string
@@ -20,6 +25,8 @@ export class SettingsStore {
   private data: Record<string, unknown> = {}
   private loaded = false
   private writes: Promise<void> = Promise.resolve()
+  /** settings.json (+.bak) existed but none parsed — do not overwrite with {}. */
+  private loadFailed = false
 
   /** [dir] is only for tests; the app uses its userData folder. */
   constructor(dir?: string) {
@@ -27,23 +34,34 @@ export class SettingsStore {
     this.file = join(this.dir, 'settings.json')
   }
 
-  /** Settings on disk (main file, else its backup). {} on first run; null when
-   *  files exist but none parses — callers then keep what they already have. */
-  private async readData(): Promise<Record<string, unknown> | null> {
+  /** Settings on disk (main file, else its backup). */
+  private async readData(): Promise<{
+    status: 'ok' | 'missing' | 'bad'
+    data: Record<string, unknown>
+  }> {
     const r = await readDurable(this.file, (buf) => {
       const v = parseJson<unknown>(buf)
       if (!v || typeof v !== 'object' || Array.isArray(v)) throw new Error('not an object')
       return v as Record<string, unknown>
     })
-    if (r.status === 'ok') return r.value
-    return r.status === 'missing' ? {} : null
+    if (r.status === 'ok') return { status: 'ok', data: r.value }
+    if (r.status === 'missing') return { status: 'missing', data: {} }
+    return { status: 'bad', data: {} }
   }
 
   private async ensure(): Promise<void> {
     if (this.loaded) return
-    this.data = (await this.readData()) ?? {}
+    const r = await this.readData()
+    this.data = r.data
+    this.loadFailed = r.status === 'bad'
     this.loaded = true
     void sweepTemps(this.file)
+  }
+
+  /** 'bad' = file(s) on disk unreadable this launch (left untouched). */
+  async status(): Promise<'ok' | 'bad'> {
+    await this.ensure()
+    return this.loadFailed ? 'bad' : 'ok'
   }
 
   async get<T = unknown>(key: string): Promise<T | undefined> {
@@ -79,13 +97,19 @@ export class SettingsStore {
   private async write(key: string, value: unknown): Promise<void> {
     // Instances run side by side and share this file, so re-read it first: a
     // stale in-memory copy would silently revert whatever another instance
-    // changed since we loaded. Keep our in-memory data if the re-read fails
-    // (rather than dropping keys).
+    // changed since we loaded.
     const fresh = await this.readData()
-    if (fresh) this.data = fresh
+    // Both main and .bak unreadable: refuse so we do not replace them with a
+    // single-key file (windowBounds on every close used to wipe snippets etc.).
+    if (fresh.status === 'bad') {
+      this.loadFailed = true
+      throw new Error('settings.json unreadable — refusing to overwrite')
+    }
+    if (fresh.status === 'ok') this.data = fresh.data
     if (value === undefined || value === null || value === '') delete this.data[key]
     else this.data[key] = value
     await mkdir(this.dir, { recursive: true })
     await writeDurable(this.file, JSON.stringify(this.data, null, 2))
+    this.loadFailed = false
   }
 }
