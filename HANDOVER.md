@@ -598,6 +598,12 @@ typecheck / lint:i18n(桌面 752/752/752) / vitest **334** / 30 全绿。未在�
 - **A(Android)复制公钥失败可感知**:`HostEditor`「复制公钥」在 `publicKey()` 返回 null 时原先无 `onMessage`(像没点);现在 `onMessage(edit_err_key_unusable)`,与生成密钥失败对称。
 - **B(桌面)目录对比失败 toast**:`DirDiffDialog.run` 在写 dialog `err` 的同时 toast(`dirDiff.fail` / catch message)。关掉对话框后以前像没反应。
 - **C(桌面)本地新建/重命名失败 toast**:`SftpDrawer.localSubmit` 在写 `localModal.error` 的同时 toast(`sfp.createFail` / `sfp.renameFail`),与远端 #103 对称。
+# M3.171 — 复核打磨(分支 `fix/review-polish-m3171`,基于 main @ 5946b1f,**勿合并**)
+
+- PublishKeyDialog: publish/revoke 失败在 dialog err 之外再 toast(keyPub.fail / revokeFail);不碰 #94 listFail。
+- HostEditor generateKey: 失败 toast,与 importKey 对齐(保留 keyModal.error)。
+- ForwardDialog add: 绑定失败 toast(fw.fail);badPort 仍只写 dialog err。
+- 未合并。未动 #4–#105。
 
 ---
 

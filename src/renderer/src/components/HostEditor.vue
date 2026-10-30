@@ -345,6 +345,17 @@ async function generateKey(e?: Event): Promise<void> {
   } finally {
     keyBusy.value = false
     keyModal.busy = false
+  const r = await window.api.keys.generate({
+    name,
+    type: keyModal.type,
+    passphrase: keyModal.passphrase || undefined
+  })
+  if (!r.ok || !r.key) {
+    // Match importKey: modal error alone is easy to miss; toast the same string.
+    const msg = r.error ?? t('host.keyGenFail')
+    keyModal.error = msg
+    toast(msg, 'error')
+    return
   }
 
   keyModal.open = false

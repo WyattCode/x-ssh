@@ -8,6 +8,7 @@ import { useSessions } from '../stores/sessions'
 import { useI18n } from '../lib/i18n'
 import { useConfirm } from '../composables/confirm'
 import { isImeKey } from '../lib/ime'
+
 import { useToast } from '../composables/toast'
 import type { ForwardMode } from '../../../shared/types'
 import Icon from './Icon.vue'
@@ -80,6 +81,21 @@ async function add(): Promise<void> {
     }
   } finally {
     busy.value = false
+  const r = await store.addForward({
+    mode: form.mode,
+    localPort: lp,
+    remoteHost: form.host.trim() || '127.0.0.1',
+    remotePort: form.mode === 'dynamic' ? 0 : rp
+  })
+  busy.value = false
+  if (!r.ok) {
+    // Dialog dismissible; keep inline err and toast so a bind failure is not lost.
+    const msg = r.error ?? t('fw.fail')
+    err.value = msg
+    toast(msg, 'error')
+  } else {
+    form.localPort = ''
+    form.remotePort = ''
   }
 }
 
