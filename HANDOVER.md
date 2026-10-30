@@ -889,6 +889,15 @@ openSnapshot/closeOthers/saveSetting (#68), theme/transfer clears (#67), bookmar
 - 未触碰:`closePane` / `focusSession` / `openSftpFor` / `splitPane` / `setActive*` / `persistTabs` / sidebar/hosts / `TransferPanel` / `saveSetting` / `zoom` / `fontSize` / `editExternal`/`openWith` / `saveHost`。
 - 仍按原计划搁置:`fontSize` 未使用、`zoom` 不持久化、`local.home` 静默、StatusBar configured-vs-live、`setWindowOpenHandler`、预览「无法预览」。
 
+## M3.142(分支 `fix/review-polish-m3142`,**未合并**)
+
+> 只做缺陷 / 界面打磨,不加功能。**#76–#4 的 PR 都还没合并**,这一批也不含它们。
+
+- **SFTP 重命名 / 新建 / 删除失败被 load 清掉(P1)**:`commitRename` / `commitCreate` / `delSelected` 失败时写了 `error`,随即 `await load()`,而 `load()` 开头把 `error` 清空 —— 权限不够 / 文件占用时点击像没反应。现在 rename/create 失败直接 return 不 reload;delete 在 load 之后把失败信息写回去。上传 / 下载 / pack 路径未动(#76 的单文件下载未碰)。
+- **缩放写盘失败会跨启动撒谎(P1)**:`zoom.ts` 立刻改 `webFrame` 缩放,再 debounce `settings.set('zoom')` 且不看结果。拒绝键 / 写盘失败时本会话看着缩了,下次启动静默回到旧值。现在 `persistZoom` 检查 `ok === false` 与 throw,失败 toast `app.zoomFail` 并滚回已持久化的级别;`restore` 同步 `persistedLevel`。不是「补做缩放持久化」(本来就会写),只是 fail-closed。
+- i18n 新增 `app.zoomFail`(zh / en / zh-TW)。
+- 未触碰:theme(#67)、HostEditor remove/save(#64/#65)、trustAndReconnect(#62)、ForwardsPage.remove(#63)、downloadSelected(#76)、设置开关波、fontSize / local.home / StatusBar / setWindowOpenHandler / preview 无法预览。
+- 仍按原计划搁置:`fontSize` 未使用、`local.home` 静默、StatusBar configured-vs-live、`setWindowOpenHandler`、预览「无法预览」。
 
 ## 项目概述
 - 极简、键盘优先的 SSH 客户端。Electron + Vue 3 (Vite) + TypeScript。
