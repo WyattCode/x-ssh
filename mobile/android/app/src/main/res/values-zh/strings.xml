@@ -130,6 +130,7 @@
     <string name="files_upload_folder">上传文件夹…</string>
     <string name="files_uploaded_one">已上传「%1$s」</string>
     <string name="font_noto">思源等宽</string>
+    <string name="font_persist_failed">字体设置没能保存,下次启动会恢复原样</string>
     <string name="font_style">%1$s 风格</string>
     <string name="host_address">地址</string>
     <string name="host_after_connect">连接后</string>
@@ -216,6 +217,7 @@
     <string name="set_done">完成</string>
     <string name="set_lang_system">跟随系统</string>
     <string name="set_language">语言</string>
+    <string name="lang_persist_failed">语言设置没能保存,下次启动会恢复原样</string>
     <string name="set_selected">已选中</string>
     <string name="set_terminal_font">终端字体</string>
     <string name="set_terminal_theme">终端配色</string>

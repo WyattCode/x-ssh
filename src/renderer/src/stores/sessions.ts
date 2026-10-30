@@ -73,6 +73,8 @@ function forwardError(r: { error?: string; code?: ForwardErrorCode }): string {
 // Background online probe: one full round at a time, and results from a round
 // that started before a newer probe of the same host are dropped.
 let probeRoundBusy = false
+// loadHosts: toast only on the first failure in a streak (boot + onChanged).
+let hostsLoadFailToasted = false
 let lastFullProbe = 0
 let probeSeq = 0
 const probeSeqOf = new Map<string, number>()
@@ -565,7 +567,18 @@ export const useSessions = defineStore('sessions', {
     },
 
     async loadHosts(): Promise<void> {
-      this.hosts = await window.api.hosts.list()
+      try {
+        this.hosts = await window.api.hosts.list()
+        hostsLoadFailToasted = false
+      } catch (e) {
+        // Keep the previous list: [] reads as "no hosts" on the Connect page.
+        // Do not rethrow — App.vue boot Promise.all must keep loading settings.
+        if (!hostsLoadFailToasted) {
+          hostsLoadFailToasted = true
+          toast(t('hosts.loadFail'), 'error')
+        }
+        console.error('hosts: load failed', e)
+      }
     },
 
     async loadSettings(): Promise<void> {

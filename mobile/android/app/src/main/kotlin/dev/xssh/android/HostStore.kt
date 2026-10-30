@@ -397,9 +397,11 @@ class UiPrefs(context: Context) {
     /** 终端字体([TerminalFont.id])。 */
     var terminalFont: String?
         get() = prefs.getString(KEY_TERM_FONT, null)
-        set(value) {
-            prefs.edit().putString(KEY_TERM_FONT, value).apply()
-        }
+        set(value) { setTerminalFont(value) }
+
+    /** 写终端字体。返回 false = 没写进磁盘(下次冷启动会回到旧字体)。 */
+    fun setTerminalFont(id: String?): Boolean =
+        prefs.edit().putString(KEY_TERM_FONT, id).commit()
 
     /**
      * 终端配色方案 id(与桌面 `terminalTheme` 同名:nord / dracula …)。

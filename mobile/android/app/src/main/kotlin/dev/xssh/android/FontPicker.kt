@@ -6,6 +6,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.foundation.focusable
 import android.view.KeyEvent as AndroidKeyEvent
+import android.widget.Toast
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -135,8 +136,7 @@ fun FontList(modifier: Modifier = Modifier, onPicked: (() -> Unit)? = null) {
                 modifier = Modifier.fillMaxWidth(),
                 highlight = selected,
                 onClick = {
-                    TerminalFontChoice.choose(font)
-                    onPicked?.invoke()
+                    if (TerminalFontChoice.choose(font)) onPicked?.invoke()
                 },
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -272,8 +272,13 @@ fun SettingsContent(onFontPicked: (() -> Unit)? = null) {
                     .heightIn(min = 52.dp)
                     .clickable {
                         if (language != current) {
+                            val prev = current
                             current = language
-                            hostActivity(context)?.let { AppLanguages.apply(it, language) }
+                            val ok = hostActivity(context)?.let { AppLanguages.apply(it, language) } ?: false
+                            if (!ok) {
+                                current = prev
+                                Toast.makeText(context, R.string.lang_persist_failed, Toast.LENGTH_SHORT).show()
+                            }
                         }
                     }
                     .padding(horizontal = BoxPad),
