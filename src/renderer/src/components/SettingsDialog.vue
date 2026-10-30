@@ -488,7 +488,10 @@ async function checkForUpdates(): Promise<void> {
   }
 }
 function openUpdatePage(): void {
-  if (updateState.url) void window.api.openExternal(updateState.url)
+  if (!updateState.url) return
+  void window.api.openExternal(updateState.url).then((ok) => {
+    if (!ok) toast(t('set.gen.updateOpenFail'), 'error')
+  })
 }
 
 // ---- command snippets ----

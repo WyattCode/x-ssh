@@ -629,10 +629,8 @@ export class SshManager {
     const mode = rule.mode ?? 'local'
     // Remote forwards are attached to the client's 'tcp connection' handler
     // (one shared listener), which openRemoteForward wires up on first use.
-    if (mode === 'remote') {
-      this.openRemoteForward(session, rule)
-      return []
-    }
+    // The caller awaits openRemoteForward itself (it reports forwardIn errors).
+    if (mode === 'remote') return []
     if (mode === 'dynamic') {
       const server = createServer((socket: Socket) => this.handleSocks(session, socket))
       server.on('error', () => {
@@ -679,13 +677,33 @@ export class SshManager {
     return [server]
   }
 
-  /** Opens port forwards per rule mode (used at connect time). */
-  private openForwards(session: Session, rules: HostForward[]): void {
+  /** Opens port forwards per rule mode (used at connect time). Awaits each
+   *  local/dynamic bind (and each remote forwardIn) so a busy port is dropped
+   *  instead of silently looking live. Returns the localPorts that failed. */
+  private async openForwards(session: Session, rules: HostForward[]): Promise<number[]> {
+    const failed: number[] = []
     const servers: Server[] = []
-    for (const rule of rules) servers.push(...this.openRule(session, rule))
+    for (const rule of rules) {
+      if (!rule.localPort) continue
+      const mode = rule.mode ?? 'local'
+      if (mode === 'remote') {
+        if (!(await this.openRemoteForward(session, rule))) failed.push(rule.localPort)
+        continue
+      }
+      const created = this.openRule(session, rule)
+      if (!created.length) continue
+      const bound = await Promise.all(created.map((s) => this.waitForListen(s)))
+      if (bound.some((b) => !b)) {
+        created.forEach((s) => s.close())
+        failed.push(rule.localPort)
+      } else {
+        servers.push(...created)
+      }
+    }
     if (servers.length) {
       session.forwardServers = (session.forwardServers ?? []).concat(servers)
     }
+    return failed
   }
 
   /** Adds a port forward to a live session at runtime. Returns ok/error.
@@ -699,6 +717,24 @@ export class SshManager {
     if (mode !== 'dynamic' && !rule.remotePort) return { ok: false, code: 'bad-port', error: 'missing remote port' }
     const key = `${mode}:${rule.localPort}`
     if (session.runtimeRules?.has(key)) return { ok: false, code: 'already', error: 'already forwarding' }
+    // Remote (-R) forwards have no local listener: openRule returns [] for them,
+    // so the forwardIn result has to be awaited here or a refused remote listen
+    // port would be recorded as live.
+    if (mode === 'remote') {
+      const ok = await this.openRemoteForward(session, rule)
+      if (!ok) {
+        return { ok: false, code: 'in-use', error: `remote listen port ${rule.localPort} in use` }
+      }
+      if (!session.runtimeRules) session.runtimeRules = new Map()
+      session.runtimeRules.set(key, {
+        mode,
+        localPort: rule.localPort,
+        remoteHost: rule.remoteHost || '127.0.0.1',
+        remotePort: rule.remotePort || 0,
+        servers: []
+      })
+      return { ok: true }
+    }
     const servers = this.openRule(session, rule)
     if (servers.length) {
       // A failed bind surfaces as an async 'error' after listen(); wait for all
@@ -773,7 +809,7 @@ export class SshManager {
   /** Remote forward (-R): listen on the server; each inbound connection is
    *  piped to the local destination. ssh2 reports these via a single client
    *  'tcp connection' event, keyed by the remote listen port. */
-  private openRemoteForward(session: Session, rule: HostForward): void {
+  private openRemoteForward(session: Session, rule: HostForward): Promise<boolean> {
     if (!session.remoteForwards) {
       session.remoteForwards = new Map()
       session.client.on('tcp connection', (info, accept, reject) => {
@@ -821,8 +857,15 @@ export class SshManager {
         inSock.pipe(dest).pipe(inSock)
       })
     })
-    session.client.forwardIn('127.0.0.1', rule.localPort, (err) => {
-      if (err) session.remoteForwards?.delete(rule.localPort)
+    return new Promise<boolean>((resolve) => {
+      session.client.forwardIn('127.0.0.1', rule.localPort, (err) => {
+        if (err) {
+          session.remoteForwards?.delete(rule.localPort)
+          resolve(false)
+          return
+        }
+        resolve(true)
+      })
     })
   }
 
@@ -1102,23 +1145,33 @@ export class SshManager {
               )
             }
 
-            // Open the session's local port forwards once the shell is up.
-            if (session && params.portForwards?.length) {
-              this.openForwards(session, params.portForwards)
-            }
+            // Open the session's port forwards once the shell is up. The bind is
+            // awaited so a busy local port is reported on the connect result
+            // instead of silently looking live; the SSH link itself stays up.
+            void (async () => {
+              let forwardCode: string | undefined
+              let forwardError: string | undefined
+              if (session && params.portForwards?.length) {
+                const failed = await this.openForwards(session, params.portForwards)
+                if (failed.length) {
+                  forwardCode = 'forward:in-use'
+                  forwardError = failed.join(',')
+                }
+              }
 
-            // Send the per-host startup command(s) after the shell is ready. An
-            // optional delay lets a slow login shell/MOTD finish first (values
-            // up to a few seconds are typical for `wait`-style startup hooks).
-            if (params.onConnect) {
-              const sendStartup = (): boolean => stream.write(params.onConnect + '\n')
-              const delay = params.onConnectDelayMs ?? 0
-              if (delay > 0) setTimeout(() => void sendStartup(), delay)
-              else sendStartup()
-            }
+              // Send the per-host startup command(s) after the shell is ready. An
+              // optional delay lets a slow login shell/MOTD finish first (values
+              // up to a few seconds are typical for `wait`-style startup hooks).
+              if (params.onConnect) {
+                const sendStartup = (): boolean => stream.write(params.onConnect + '\n')
+                const delay = params.onConnectDelayMs ?? 0
+                if (delay > 0) setTimeout(() => void sendStartup(), delay)
+                else sendStartup()
+              }
 
-            this.emit({ sessionId: id, status: 'connected' })
-            settle({ ok: true, sessionId: id })
+              this.emit({ sessionId: id, status: 'connected' })
+              settle({ ok: true, sessionId: id, code: forwardCode, error: forwardError })
+            })()
           }
         )
       })
@@ -1215,14 +1268,26 @@ export class SshManager {
               "[ -n \"$BASH_VERSION\" ] && { export PROMPT_COMMAND='printf \"\\033]7;%s\\a\" \"$PWD\"; [ \"$__xsi\" ] && { read -r __n __r < <(history 1); case \"$__r\" in *__xsi*) history -d \"$__n\" 2>/dev/null;; esac; unset __xsi __n __r; }'\"${PROMPT_COMMAND:+;$PROMPT_COMMAND}\"; __xsi=1; }; printf '\\033[3J\\033[2J\\033[H'\n"
             )
           }
-          if (session && params.portForwards?.length) this.openForwards(session, params.portForwards)
-          if (params.onConnect) {
-            const delay = params.onConnectDelayMs ?? 0
-            if (delay > 0) setTimeout(() => stream.write(params.onConnect + '\n'), delay)
-            else stream.write(params.onConnect + '\n')
-          }
-          this.emit({ sessionId: id, status: 'connected' })
-          settle({ ok: true, sessionId: id })
+          // Same fail-closed handling as the fresh-connect path: await the binds
+          // and report the ones that lost their port on the connect result.
+          void (async () => {
+            let forwardCode: string | undefined
+            let forwardError: string | undefined
+            if (session && params.portForwards?.length) {
+              const failed = await this.openForwards(session, params.portForwards)
+              if (failed.length) {
+                forwardCode = 'forward:in-use'
+                forwardError = failed.join(',')
+              }
+            }
+            if (params.onConnect) {
+              const delay = params.onConnectDelayMs ?? 0
+              if (delay > 0) setTimeout(() => stream.write(params.onConnect + '\n'), delay)
+              else stream.write(params.onConnect + '\n')
+            }
+            this.emit({ sessionId: id, status: 'connected' })
+            settle({ ok: true, sessionId: id, code: forwardCode, error: forwardError })
+          })()
         }
       )
     })

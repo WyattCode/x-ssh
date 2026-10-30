@@ -1560,6 +1560,12 @@ export const useSessions = defineStore('sessions', {
         live.pane.hostKey = undefined
         live.pane.hostKeyHost = undefined
         live.pane.hostKeyPort = undefined
+        // The SSH link is up, but a connect-time port forward could not bind its
+        // local port; main reports which ones so the user isn't left thinking
+        // the forward is live.
+        if (result.code === 'forward:in-use') {
+          toast(t('fw.connectBindFail', { ports: result.error || '?' }), 'error')
+        }
         // A first-ever connection may have just recorded the host key.
         void this.loadKnownHosts()
         // Return to the directory the pane last browsed (on restore / reconnect /
