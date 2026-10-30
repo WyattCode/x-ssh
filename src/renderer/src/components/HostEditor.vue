@@ -8,6 +8,7 @@ import { useToast } from '../composables/toast'
 import { useConfirm } from '../composables/confirm'
 import { isImeKey } from '../lib/ime'
 import { keyErrorMessage } from '../lib/keyError'
+import { jumpSelectBlocked, jumpSelectOptions, jumpUsedBy } from '../lib/jumpCandidates'
 import Icon from './Icon.vue'
 import OsIcon from './OsIcon.vue'
 import { PRESETS } from '../lib/terminalThemes'
@@ -148,7 +149,12 @@ watch(
   }
 )
 
-const jumpCandidates = computed(() => store.hosts.filter((h) => h.id !== form.id))
+// One hop only, like Android: a jump host must not jump itself, and a host that
+// others already tunnel through may not start a nest of its own (its existing
+// jump can still be cleared).
+const jumpOptions = computed(() => jumpSelectOptions(store.hosts, form.id || undefined, form.jumpHostId))
+const jumpBlocked = computed(() => jumpSelectBlocked(store.hosts, form.id || undefined, form.jumpHostId))
+const jumpBlockerLabel = computed(() => jumpUsedBy(store.hosts, form.id || undefined)[0]?.label ?? '')
 
 // Pasting "user@host:port" into 主机 fills all three. Only on an unambiguous
 // shape: a single colon (so IPv6 literals are left alone).
@@ -584,16 +590,17 @@ async function remove(): Promise<void> {
           <section class="group">
             <h3>{{ t('host.secMore') }}</h3>
             <div class="card">
-              <div class="row" :title="t('host.jumpHint')">
+              <div class="row" :title="jumpBlocked ? undefined : t('host.jumpHint')">
                 <span class="r-label wide">{{ t('host.jump') }}</span>
                 <div class="r-select end">
-                  <select v-model="form.jumpHostId">
+                  <select v-model="form.jumpHostId" :disabled="jumpBlocked">
                     <option value="">{{ t('host.jumpNone') }}</option>
-                    <option v-for="j in jumpCandidates" :key="j.id" :value="j.id">{{ j.label }} · {{ j.username }}@{{ j.host }}</option>
+                    <option v-for="j in jumpOptions" :key="j.id" :value="j.id">{{ j.label }} · {{ j.username }}@{{ j.host }}</option>
                   </select>
                   <Icon name="chevron-down" :size="14" class="caret" />
                 </div>
               </div>
+              <p v-if="jumpBlocked" class="sub-hint jump-hint">{{ t('host.jumpBlocked', { label: jumpBlockerLabel }) }}</p>
 
               <button type="button" class="row disclosure" @click="sections.proxy = !sections.proxy">
                 <span class="r-label wide">{{ t('host.proxy') }}</span>
@@ -1052,6 +1059,11 @@ input[type='number']::-webkit-inner-spin-button {
   font-size: 12px;
   line-height: 1.5;
   color: var(--text-dim);
+}
+/* The jump row's "already used as a bastion" note sits directly in the card,
+   so it carries the row's own horizontal padding. */
+.jump-hint {
+  padding: 0 16px 10px;
 }
 .panel:focus {
   outline: none;

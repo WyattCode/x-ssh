@@ -15,6 +15,14 @@ describe('pruneSelection', () => {
   it('drops names that are no longer shown', () => {
     const sel = new Set(['a', 'b'])
     const next = pruneSelection(sel, ['a', 'c'])
+  it('returns the same Set when `shown` is a Set that still holds everything', () => {
+    const sel = new Set(['a'])
+    expect(pruneSelection(sel, new Set(['a', 'b']))).toBe(sel)
+  })
+
+  it('drops a name that is gone, leaving the rest', () => {
+    const sel = new Set(['a', 'b'])
+    const next = pruneSelection(sel, ['a'])
     expect(next).not.toBe(sel)
     expect([...next]).toEqual(['a'])
   })
@@ -22,6 +30,10 @@ describe('pruneSelection', () => {
   it('clears the selection when nothing is shown', () => {
     const sel = new Set(['a', 'b'])
     const next = pruneSelection(sel, [])
+  it('clears everything when nothing is shown', () => {
+    const sel = new Set(['a', 'b'])
+    const next = pruneSelection(sel, [])
+    expect(next).not.toBe(sel)
     expect(next.size).toBe(0)
   })
 })

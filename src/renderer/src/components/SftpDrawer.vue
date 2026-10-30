@@ -671,11 +671,16 @@ function setSort(key: 'name' | 'size' | 'mtime'): void {
 
 // ---- selection ----
 const selCount = computed(() => selected.value.size)
-watch(sorted, (rows) => {
+// Prune against the directory listing, not the filtered view: typing in the
+// filter box must not drop files that still exist (only a reload / delete does).
+// A pruned anchor is cleared too, or shift-range would extend from a ghost.
+watch(entries, (rows) => {
   if (!selected.value.size) return
-  const shown = new Set(rows.map((r) => r.name))
-  const kept = [...selected.value].filter((n) => shown.has(n))
-  if (kept.length !== selected.value.size) selected.value = new Set(kept)
+  const next = pruneSelection(selected.value, rows.map((r) => r.name))
+  if (next !== selected.value) {
+    selected.value = next
+    if (anchor.value && !next.has(anchor.value)) anchor.value = null
+  }
 })
 // ---- What the page shows around the listing ----
 /** Total size of the selected files (folders count as 0), for the footer. */
@@ -986,15 +991,32 @@ async function diffWithLocal(entry: FileEntry): Promise<void> {
   diff.open = true
 }
 // ---- Deploy: upload selected local files then run a command ----
-const deploy = reactive({ open: false, cmd: '', busy: false })
+const deploy = reactive({ open: false, cmd: '', busy: false, error: '' })
 function openDeploy(): void {
   if (!props.sessionId || !localSelCount.value) return
   deploy.cmd = ''
+  deploy.error = ''
   deploy.open = true
 }
+/** Closing is refused while the upload runs: this dialog is the only progress
+ *  UI, and dismissing it would leave the transfer going with nothing shown. */
+function closeDeploy(): void {
+  if (deploy.busy) return
+  deploy.open = false
+  deploy.error = ''
+}
+/** Enter runs the deploy (Shift+Enter keeps the newline); the Enter that
+ *  commits an IME candidate belongs to the input method. */
+function onDeployKey(e: KeyboardEvent): void {
+  if (e.key !== 'Enter' || e.shiftKey || isImeEnter(e)) return
+  if (deploy.busy || !deploy.cmd.trim()) return
+  e.preventDefault()
+  void runDeploy()
+}
 async function runDeploy(): Promise<void> {
-  if (!props.sessionId || !localSelCount.value || !deploy.cmd.trim()) return
+  if (!props.sessionId || !localSelCount.value || !deploy.cmd.trim() || deploy.busy) return
   deploy.busy = true
+  deploy.error = ''
   try {
     const names = localSelectedNames()
     const paths = names.map((n) => localJoin(localPath.value, n))
@@ -1004,7 +1026,8 @@ async function runDeploy(): Promise<void> {
       toast(tt('sfp.deployDone'), 'success')
       deploy.open = false
     } else if (!up.canceled) {
-      error.value = up.error ?? tt('sfp.deployFail')
+      // The drawer's banner sits behind this dialog — report the failure here.
+      deploy.error = up.error ?? tt('sfp.deployFail')
     }
   } finally {
     deploy.busy = false
@@ -1910,11 +1933,11 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
       @close="dirDiff.open = false"
     />
 
-    <div v-if="deploy.open" class="dlg-layer" @mousedown.self="deploy.open = false">
-      <div ref="deployDlgEl" class="dlg" tabindex="-1" @keydown.esc="deploy.open = false">
+    <div v-if="deploy.open" class="dlg-layer" @mousedown.self="closeDeploy">
+      <div ref="deployDlgEl" class="dlg" tabindex="-1" @keydown.esc="closeDeploy">
         <div class="dlg-head">
           <h3>{{ tt('sfp.deploy') }}</h3>
-          <button class="ib sm" :title="tt('sfp.close')" @click="deploy.open = false"><Icon name="close" :size="14" /></button>
+          <button class="ib sm" :title="tt('sfp.close')" @click="closeDeploy"><Icon name="close" :size="14" /></button>
         </div>
         <div class="dlg-card">
           <label class="dlg-row">
@@ -1927,12 +1950,20 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
           </label>
           <label class="dlg-row top">
             <span>{{ tt('sfp.deployCmd') }}</span>
-            <textarea v-model="deploy.cmd" class="box mono ta" rows="3" spellcheck="false" :placeholder="tt('sfp.deployCmdPh')" />
+            <textarea
+              v-model="deploy.cmd"
+              class="box mono ta"
+              rows="3"
+              spellcheck="false"
+              :placeholder="tt('sfp.deployCmdPh')"
+              @keydown="onDeployKey"
+            />
           </label>
         </div>
         <p v-if="!deploy.cmd.trim()" class="dlg-err">{{ tt('sfp.deployCmdReq') }}</p>
+        <p v-if="deploy.error" class="dlg-err">{{ deploy.error }}</p>
         <div class="dlg-foot">
-          <button class="btn" @click="deploy.open = false">{{ tt('sfp.cancel') }}</button>
+          <button class="btn" @click="closeDeploy">{{ tt('sfp.cancel') }}</button>
           <button class="btn btn-primary" :disabled="deploy.busy || !deploy.cmd.trim()" @click="runDeploy">
             {{ deploy.busy ? tt('sfp.deploying') : tt('sfp.deployRun') }}
           </button>
