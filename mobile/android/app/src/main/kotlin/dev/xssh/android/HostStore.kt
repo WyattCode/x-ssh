@@ -321,6 +321,7 @@ class HostStore(context: Context) {
     fun save(hosts: List<Host>): Boolean {
         sealFellBack = false
     /** 存盘。用 commit 而不是 apply,好让调用方知道写没写进去。 */
+
     fun save(hosts: List<Host>): Boolean {
         val array = JSONArray()
         val disk = diskRecords()
@@ -374,6 +375,7 @@ class HostStore(context: Context) {
         val ok = prefs.edit().putString(KEY_LIST, array.toString()).commit()
         if (!ok) android.util.Log.e("XsshData", "host list persist commit failed")
         return ok
+
         return prefs.edit().putString(KEY_LIST, array.toString()).commit()
     }
 

@@ -306,6 +306,9 @@ fun App(devTarget: DevTarget? = null) {
             ).show()
             return
         }
+        // 落盘失败就把内存里的列表退回去 —— 否则界面显示的是"已保存"的新列表,
+        // 下次启动却从磁盘读回旧列表,用户以为改丢了(镜像 SnippetStore 的做法)。
+        val prev = hosts
         hosts = sorted
         // 密码 / 私钥 / 口令封不上时 save 会沿用旧密文 —— 其他字段照常存好了,
         // 但"新密码已保存"是假的,必须说出来,否则用户以为改成功了。
@@ -320,6 +323,10 @@ fun App(devTarget: DevTarget? = null) {
             Toast.makeText(context, R.string.hosts_persist_failed, Toast.LENGTH_LONG).show()
         }
 
+        if (!store.save(sorted)) {
+            hosts = prev
+            android.widget.Toast.makeText(context, R.string.hosts_save_failed, android.widget.Toast.LENGTH_LONG).show()
+        }
     }
 
     // 平板:窗口够宽(≥ 600dp)就是平板那一整套交互;小窗、窄分屏缩到手机宽度时退回手机的页面,

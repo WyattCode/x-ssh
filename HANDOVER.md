@@ -1211,6 +1211,10 @@ openSnapshot/closeOthers/saveSetting (#68), theme/transfer clears (#67), bookmar
 - **下载顶层目录读不出来不再假成功**:`downloadJob` 的 `walk` 在 `readdir` 失败时一律静默跳过,顶层文件夹读不出来就变成「建了个空目录、0 个文件、返回 ok:true」。现在 `depth === 0` 记进 `failures`,IPC 如实报「N 个文件失败」;嵌套目录仍按原样尽力跳过。
 - **上传冲突检查失败不再静默覆盖**:`remoteConflicts` 原来任何错误都返回 `[]`,被 `resolveUploadOverwrite` 当成「没有冲突」直接按覆盖上传。现在失败即抛出,`resolveUploadOverwrite` 捕获后返回 `'cancel'`(失败关闭,不传)。
 - **本地覆盖确认不再把 EACCES 当「不存在」**:`confirmOverwriteLocal` 原来 `stat` 任何错误都当文件不存在,锁住/无权限的本地文件会被静默覆盖。现在只有 `ENOENT` 算不存在,其余错误按「已存在」处理、照常弹确认。
+## M3.180(分支 `fix/review-polish-m3180`,**勿合并**)
+- **下载子目录建不出来不再静默跳过**:`downloadJob` 的 `walk` 在子项 `walk` 抛错时只 `/* skip */`,不记 `failures` —— 嵌套目录 `mkdir` 全失败(EACCES/EPERM)时 `discovered` 与 `failures` 都是 0,IPC 对非空远端文件夹返回 `{ok:true, count:0}`。现在子项 catch 记进 `failures`,如实报「N 个文件失败」。
+- **下载目标目录建不出来不再继续**:`downloadJob` 开头 `mkdir(localBase)` 原来 `.catch(() => undefined)`,目标不可写时仍往下跑、每个文件写失败。现在失败即清理 `jobSession`/`jobRate` 并抛出,IPC 返回 `ok:false`。
+- **安卓保存主机失败会提示并回滚**:`HostStore.save` 改用 `commit()` 并返回 `Boolean`,`MainActivity.persist` 写盘失败时弹 `hosts_save_failed` 并把内存列表退回(磁盘满 / 写入被拒不再「界面说存好了、下次启动回退」)。
 
 ## 项目概述
 - 极简、键盘优先的 SSH 客户端。Electron + Vue 3 (Vite) + TypeScript。

@@ -2088,7 +2088,16 @@ export class SshManager {
     // a directory the user deleted, and dragging onto a new folder passes one
     // that was never made. Without this every write failed with ENOENT and the
     // job still reported success, having written nothing.
-    await mkdir(this.longPath(localBase), { recursive: true }).catch(() => undefined)
+    try {
+      await mkdir(this.longPath(localBase), { recursive: true })
+    } catch (e) {
+      // Fail closed: if the target folder can't be created, every file write
+      // would fail anyway — clean up the job mappings and let the IPC report
+      // ok:false instead of a silent empty success.
+      this.jobSession.delete(jobId)
+      this.jobRate.delete(jobId)
+      throw e
+    }
     let bytesDone = 0
     let filesDone = 0
     let discovered = 0
@@ -2125,7 +2134,10 @@ export class SshManager {
           try {
             await walk(this.posixJoin(remote, it.filename), local, it.filename, it.attrs.isDirectory(), depth + 1)
           } catch {
-            /* skip an entry we can't process */
+            // A child that can't be walked (nested mkdir EACCES/EPERM, etc.)
+            // must be counted: otherwise a folder whose every child throws
+            // reports 0 discovered / 0 failures and the IPC answers ok:true.
+            failures.push(it.filename)
           }
         }
       } else {
