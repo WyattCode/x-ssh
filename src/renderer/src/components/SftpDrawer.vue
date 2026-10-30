@@ -1103,7 +1103,10 @@ async function commitRename(entry: FileEntry, e?: Event): Promise<void> {
     posixJoin(path.value, entry.name),
     posixJoin(path.value, next)
   )
-  if (!r.ok) error.value = r.error ?? tt('sfp.renameFail')
+  if (!r.ok) {
+    error.value = r.error ?? tt('sfp.renameFail')
+    return
+  }
   await load(path.value)
 }
 function startCreate(kind: 'folder' | 'file'): void {
@@ -1123,7 +1126,10 @@ async function commitCreate(e?: Event): Promise<void> {
     kind === 'folder'
       ? await window.api.sftp.mkdir(props.sessionId, target)
       : await window.api.sftp.createFile(props.sessionId, target)
-  if (!r.ok) error.value = r.error ?? tt('sfp.createFail')
+  if (!r.ok) {
+    error.value = r.error ?? tt('sfp.createFail')
+    return
+  }
   await load(path.value)
 }
 // ---- selection-aware operations (used by menu + shortcuts) ----
@@ -1196,12 +1202,15 @@ async function delSelected(): Promise<void> {
     : tt('sfp.delMany', { n: items.length })
   const ok = await confirm(msg, { title: tt('sfp.delTitle'), danger: true, confirmText: tt('sfp.delOk') })
   if (!ok) return
+  let failMsg = ''
   for (const it of items) {
     const r = await window.api.sftp.remove(props.sessionId, posixJoin(path.value, it.name), it.isDir)
-    if (!r.ok) error.value = r.error ?? tt('sfp.delFail')
+    if (!r.ok) failMsg = r.error ?? tt('sfp.delFail')
   }
   selected.value = new Set()
   await load(path.value)
+  // load() clears error at start — restore a delete failure so it is not a silent no-op.
+  if (failMsg) error.value = failMsg
 }
 
 function runMenu(fn: () => void): void {

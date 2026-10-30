@@ -1,4 +1,6 @@
 import { ref, computed } from 'vue'
+import { useI18n } from '../lib/i18n'
+import { useToast } from './toast'
 
 // Chromium zoom levels: factor = 1.2 ^ level. Half-level steps give the
 // familiar 100 → 110 → 120 … ladder; the range is 58 % … 249 %.
@@ -13,7 +15,12 @@ export function zoomPercent(level: number): number {
   return Math.round(zoomFactor(level) * 100)
 }
 
+const { t } = useI18n()
+const { toast } = useToast()
+
 const level = ref(window.api.zoom.get())
+/** The level the settings file actually holds; a refused write rolls back to it. */
+let persistedLevel = level.value
 /** The on-screen percentage pill; shown on every user zoom, fades by itself. */
 const hudOpen = ref(false)
 
@@ -38,13 +45,30 @@ function setZoom(next: number): void {
   // notches, and each write is a full re-read+rewrite of settings.json that a
   // second instance could be reading at the same moment.
   if (saveTimer) clearTimeout(saveTimer)
-  saveTimer = setTimeout(() => void window.api.settings.set('zoom', clamped), 300)
+  saveTimer = setTimeout(() => void persistZoom(clamped), 300)
+}
+
+/** Persists the level; a refused write rolls the UI back so the session never
+ *  shows a zoom the next launch would silently revert. */
+async function persistZoom(clamped: number): Promise<void> {
+  try {
+    const r: unknown = await window.api.settings.set('zoom', clamped)
+    if (r && typeof r === 'object' && (r as { ok?: boolean }).ok === false) {
+      throw new Error((r as { error?: string }).error ?? 'zoom')
+    }
+    persistedLevel = clamped
+  } catch {
+    window.api.zoom.set(persistedLevel)
+    level.value = persistedLevel
+    toast(t('app.zoomFail'), 'error')
+  }
 }
 
 /** Startup: re-apply the saved level quietly (no pill, no write-back). */
 function restore(saved: number): void {
   window.api.zoom.set(saved)
   level.value = saved
+  persistedLevel = saved
 }
 
 function setHover(on: boolean): void {
