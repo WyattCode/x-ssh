@@ -96,6 +96,7 @@ const imeAbort = new AbortController()
 const { confirm } = useConfirm()
 /** Guards against stacking paste-confirm dialogs when paste is triggered twice. */
 let pasteBusy = false
+
 const { toast } = useToast()
 async function copySelection(): Promise<void> {
   const sel = term?.getSelection()
@@ -206,6 +207,17 @@ async function toggleLog(): Promise<void> {
     const res = await window.api.ssh.startLog(props.sessionId)
     if (res.ok) logOn.value = true
     else if (!res.canceled) toast(t('term.logFail'), 'error')
+    return
+  }
+  // Starting the log can fail (no writable path, or the log manager is not
+  // ready yet and answers a bare { ok: false }). Without a toast the menu item
+  // just looks like it did nothing — the state stays "off" with no explanation.
+  const res: { ok: boolean; canceled?: boolean; error?: string } =
+    await window.api.ssh.startLog(props.sessionId)
+  if (res.ok) {
+    logOn.value = true
+  } else if (!res.canceled) {
+    toast(res.error ? String(res.error) : t('term.logFail'), 'error')
   }
 }
 
