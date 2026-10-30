@@ -1261,6 +1261,12 @@ export const useSessions = defineStore('sessions', {
       // A deleted host must not leave its last probe result behind: the stats
       // and any host that later reuses the id would read it as their own.
       this.clearReach([id])
+      // Drop the deleted host's probe result too — nothing else ever removes an
+      // id from `reach`, so it would sit there for the life of the process.
+      if (id in this.reach) {
+        const { [id]: _gone, ...rest } = this.reach
+        this.reach = rest
+      }
     },
     /** A copy under a fresh id. Saved passwords stay with the original (they're
      *  keyed by id); the copy asks on first connect. */

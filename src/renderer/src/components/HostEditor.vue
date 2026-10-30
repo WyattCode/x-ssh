@@ -220,6 +220,10 @@ const keyModal = reactive({ open: false, name: '', type: 'ed25519', passphrase: 
 const keySheetEl = ref<HTMLElement>()
 useFocusTrap(keySheetEl, () => keyModal.open)
 const keyModal = reactive({ open: false, name: '', type: 'ed25519', passphrase: '', error: '', busy: false })
+// In-flight guards: a double-clicked import opened two OS dialogs, and a
+// double-clicked trash stacked two confirms / two deletes.
+const importing = ref(false)
+const deletingId = ref<string | null>(null)
 async function loadKeys(): Promise<void> {
   managedKeys.value = await window.api.keys.list()
 }
@@ -290,11 +294,14 @@ async function generateKey(e?: Event): Promise<void> {
 async function importKey(): Promise<void> {
   if (keyBusy.value) return
   keyBusy.value = true
+  if (importing.value) return
+  importing.value = true
   try {
     const r = await window.api.keys.import()
     if (r.canceled) return
     if (!r.ok || !r.key) {
       toast(r.code || r.error ? keyErrorMessage(r, t) : t('host.keyImportFail'), 'error')
+      toast(r.error ?? t('host.keyImportFail'), 'error')
       return
     }
     form.keyPath = r.key.path
@@ -302,9 +309,11 @@ async function importKey(): Promise<void> {
     if (r.key.passphraseProtected === false) toast(t('host.keyUnprotected'), 'info')
   } finally {
     keyBusy.value = false
+    importing.value = false
   }
 }
 async function deleteKey(k: ManagedKey): Promise<void> {
+  if (deletingId.value) return
   const res = await confirm(t('host.keyDeleteConfirm', { name: k.name }))
   if (!res) return
   const r = await window.api.keys.del(k.id)
@@ -313,8 +322,19 @@ async function deleteKey(k: ManagedKey): Promise<void> {
     await loadKeys()
   } else {
     toast(keyErrorMessage(r, t), 'error')
+  deletingId.value = k.id
+  try {
+    const r = await window.api.keys.del(k.id)
+    if (r.ok) {
+      if (form.keyPath === k.path) form.keyPath = ''
+      await loadKeys()
+    } else if (r.error) {
+      toast(r.error, 'error')
+    }
+  } finally {
+    deletingId.value = null
+    panelEl.value?.focus()
   }
-  panelEl.value?.focus()
 }
 
 const canSave = (): boolean => !!form.host && !!form.username
@@ -519,7 +539,7 @@ async function remove(): Promise<void> {
                   <div class="r-actions">
                     <button type="button" class="link" @click="pickKey">{{ t('host.browse') }}</button>
                     <button type="button" class="link" @click="openGenerate">{{ t('host.generateKey') }}</button>
-                    <button type="button" class="link" @click="importKey">{{ t('host.importKey') }}</button>
+                    <button type="button" class="link" :disabled="importing" @click="importKey">{{ t('host.importKey') }}</button>
                   </div>
                 </div>
                 <label class="row">
@@ -541,7 +561,7 @@ async function remove(): Promise<void> {
                     <div v-for="k in managedKeys" :key="k.id" class="key-item">
                       <span class="key-name" :title="k.fingerprint">{{ k.name }}</span>
                       <span v-if="k.type" class="chip">{{ k.type }}</span>
-                      <button type="button" class="icon-x" :title="t('host.deleteKey')" @click="deleteKey(k)"><Icon name="trash" :size="13" /></button>
+                      <button type="button" class="icon-x" :title="t('host.deleteKey')" :disabled="!!deletingId" @click="deleteKey(k)"><Icon name="trash" :size="13" /></button>
                     </div>
                   </div>
                 </template>
