@@ -13,6 +13,7 @@ import { hasLiveConnectedPane, closeOthersNeedsConfirm } from '../lib/snapshotGu
 import { closeAllNeedsConfirm } from '../lib/tabCloseGuard'
 
 import { formatTransferName } from '../lib/transferFormat'
+import { isCancelled } from '../lib/transferFormat'
 import {
   buildFlatTree,
   buildGrid,

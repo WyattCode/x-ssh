@@ -616,6 +616,22 @@ Continue continuous-improve from origin/main on a new branch; do **not** touch/m
 
 ### Next
 Continue continuous-improve from origin/main on a new branch; do **not** touch/merge this PR or #52–#12 / #4–#11. Prefer substantive P0/P1 over busy-gates.
+## HANDOVER M3.119 — review polish (pack download cancel / palette overlay / shared isCancelled)
+
+**Branch:** `fix/review-polish-m3119` (from origin/main). **Do NOT merge.** Open PR (see report).
+**Skipped / do not redo:** PR #53 `fix/review-polish-m3118` (sync cancel / waitForListen 5s / items:N) and #52–#12, #4–#11. Features / intentional deferrals / M3.77–M3.118 done items.
+
+### Fixes shipped
+1. **packAndDownload ignored downloadJob cancel/failures** — archive download cancel (or per-file failures) still returned `{ ok: true }`. Now returns `{ ok: false, canceled: true }` / failures error. Did **not** add tar exit check (#51 `pack-failed`).
+2. **CommandPalette overlay vs Esc** — password / broadcast sub-views: overlay click now backs out like Esc instead of closing the whole palette.
+3. **sessions Chinese-only isCancelled** — deleted the local `error === '已取消'` helper; import shared `transferFormat.isCancelled` (prefers stamped `cancelled` flag; TransferPanel parity). Did **not** rename CANCELLED_TEXT (#45).
+
+### Verify
+- typecheck OK; lint:i18n OK; vitest **334**/30 green.
+- Model: DeepSeek-V4.1-Flash-1017 via ds.py; thinking=off medium; 5/5 HAND_APPLY first try. No hand-fix. Incidents: none.
+
+### Next
+Continue continuous-improve from origin/main on a new branch; do **not** touch/merge this PR or #53–#12 / #4–#11. Prefer substantive P0/P1 over busy-gates.
 
 ---
 

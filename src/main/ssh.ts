@@ -2708,8 +2708,17 @@ export class SshManager {
     const name = archiveName || (items.length === 1 ? items[0].name : 'archive') + '.tar.gz'
     const outPath = resolve(localDir, name).replace(/\.tar\.gz$/, '.tar.gz')
     try {
-      await this.downloadJob(sessionId, [{ path: tmp, name, isDir: false }], localDir, randomUUID(), 1)
+      const dl = await this.downloadJob(
+        sessionId,
+        [{ path: tmp, name, isDir: false }],
+        localDir,
+        randomUUID(),
+        1
+      )
       await this.execRemote(sessionId, `rm -f "${tmp}"`).catch(() => {})
+      if (dl.cancelled) return { ok: false, canceled: true }
+      // Leave the Chinese failures string alone — PR #45 remaps files-failed:N.
+      if (dl.failures) return { ok: false, error: `${dl.failures} 个文件失败` }
       return { ok: true, localPath: outPath }
     } catch (e) {
       await this.execRemote(sessionId, `rm -f "${tmp}"`).catch(() => {})

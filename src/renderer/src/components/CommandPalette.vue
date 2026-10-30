@@ -441,6 +441,11 @@ function onBroadcastEnter(e: KeyboardEvent): void {
 function onOverlayDown(): void {
   if (pending.value) {
     pending.value = null
+/** Overlay click: same as Esc — leave a sub-view first, only then close. */
+function onOverlayDismiss(): void {
+  if (pending.value) {
+    pending.value = null
+    password.value = ''
     nextTick(() => inputEl.value?.focus())
     return
   }
@@ -499,6 +504,7 @@ function onKey(e: KeyboardEvent): void {
 
 <template>
   <div v-if="store.paletteOpen" class="overlay" @mousedown.self="onOverlayDown">
+  <div v-if="store.paletteOpen" class="overlay" @mousedown.self="onOverlayDismiss">
     <div ref="trapEl" tabindex="-1" class="palette" @keydown="onKey">
       <!-- Broadcast command prompt -->
       <template v-if="broadcastOpen">
