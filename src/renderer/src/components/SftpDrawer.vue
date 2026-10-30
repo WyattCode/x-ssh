@@ -103,6 +103,7 @@ async function previewFile(entry: FileEntry): Promise<void> {
     preview.value.error =
       err === 'preview-too-large' ? tt('sfp.previewTooLarge') : (err ?? tt('sfp.previewFail'))
   }
+  else preview.value.error = r.error ?? tt('sfp.previewFail')
 }
 
 // ---- local (dual-panel) pane: browse the machine's own filesystem ----
@@ -1119,6 +1120,9 @@ async function diffWithLocal(entry: FileEntry): Promise<void> {
     error.value =
       remote.error === 'file-too-large' ? tt('sfp.fileTooLarge') : (remote.error ?? tt('sfp.diffFail'))
     error.value = sftpErr(remote.error, 'sfp.diffFail')
+    const msg = remote.error ?? tt('sfp.diffFail')
+    error.value = msg
+    toast(msg, 'error')
     return
   }
   const picked = await window.api.local.pickFile()
@@ -1129,6 +1133,9 @@ async function diffWithLocal(entry: FileEntry): Promise<void> {
       local.error === 'file-too-large' ? tt('sfp.fileTooLarge') : (local.error ?? tt('sfp.diffFail'))
       local.error === 'path-invalid' ? tt('sfp.pathInvalid') : (local.error ?? tt('sfp.diffFail'))
     error.value = sftpErr(local.error, 'sfp.diffFail')
+    const msg = local.error ?? tt('sfp.diffFail')
+    error.value = msg
+    toast(msg, 'error')
     return
   }
   diff.remoteName = entry.name

@@ -615,6 +615,7 @@ const zh: Dict = {
   'sfp.previewFail': '无法预览',
   'sfp.previewTooLarge': '文件过大，无法预览',
   'sfp.fileTooLarge': '文件超过 2MB，请用外部编辑器打开',
+
   'sfp.openWith': '打开方式…',
   'sfp.openFail': '无法打开文件',
   'sfp.invalidName': '文件名无效',
@@ -1523,6 +1524,7 @@ const en: Dict = {
   'sfp.previewFail': 'Preview failed',
   'sfp.previewTooLarge': 'File too large to preview',
   'sfp.fileTooLarge': 'File exceeds 2 MB; open it in an external editor',
+
   'sfp.openWith': 'Open with…',
   'sfp.openFail': 'Could not open file',
   'sfp.invalidName': 'Invalid file name',
@@ -2438,6 +2440,7 @@ const zhTW: Dict = {
   'sfp.previewFail': '無法預覽',
   'sfp.previewTooLarge': '檔案過大，無法預覽',
   'sfp.fileTooLarge': '檔案超過 2MB，請用外部編輯器開啟',
+
   'sfp.openWith': '開啟方式…',
   'sfp.openFail': '無法開啟檔案',
   'sfp.invalidName': '檔案名稱無效',
