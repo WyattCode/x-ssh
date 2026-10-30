@@ -90,6 +90,7 @@ let search: SearchAddon | null = null
 let webgl: WebglAddon | null = null
 let ro: ResizeObserver | null = null
 let offData: (() => void) | null = null
+let offLogFailed: (() => void) | null = null
 /** Removes the IME listeners added to xterm's textarea (and cancels a pending catch-up). */
 const imeAbort = new AbortController()
 
@@ -97,6 +98,7 @@ const imeAbort = new AbortController()
 const { confirm } = useConfirm()
 /** Guards against stacking paste-confirm dialogs when paste is triggered twice. */
 let pasteBusy = false
+
 
 
 const { toast } = useToast()
@@ -658,6 +660,15 @@ onMounted(() => {
       if (followOutput.value && !scrolledUp.value) term?.scrollToBottom()
     }
   })
+  // A live log stream can fail mid-write (disk full, dir removed). Main stops
+  // logging and tells us; clear the toggle so the caption and the next
+  // Start/Stop click match reality.
+  offLogFailed = window.api.ssh.onLogFailed((payload) => {
+    if (payload.sessionId === props.sessionId) {
+      logOn.value = false
+      toast(t('term.logWriteFail'), 'error')
+    }
+  })
   // Track whether the user has scrolled the terminal's scrollback, so follow
   // can pause while they read (and show a "jump to bottom" pill).
   term.onScroll(() => updateScrollState())
@@ -766,6 +777,7 @@ onBeforeUnmount(() => {
   if (fitTimer) clearTimeout(fitTimer)
   imeAbort.abort()
   offData?.()
+  offLogFailed?.()
   ro?.disconnect()
   term?.dispose()
   term = null

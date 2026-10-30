@@ -208,6 +208,7 @@
     <string name="hosts_save_failed">没能保存主机列表。改动没有写入磁盘。</string>
     <string name="sidebar_persist_failed">没能保存侧边栏偏好。</string>
     <string name="hosts_save_failed">保存主机失败,请重试。</string>
+    <string name="hosts_secret_seal_failed">新的密码/密钥没能安全保存,磁盘上仍是旧的。请重试。</string>
     <string name="main_sc_close_session">断开当前会话</string>
     <string name="main_sc_edit_host">编辑主机</string>
     <string name="main_sc_ime">终端里切换输入法 / 英文直通</string>

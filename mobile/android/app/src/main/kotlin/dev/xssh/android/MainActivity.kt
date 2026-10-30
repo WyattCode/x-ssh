@@ -326,6 +326,14 @@ fun App(devTarget: DevTarget? = null) {
         if (!store.save(sorted)) {
             hosts = prev
             android.widget.Toast.makeText(context, R.string.hosts_save_failed, android.widget.Toast.LENGTH_LONG).show()
+        store.save(sorted)
+        // 封存失败时旧密文还在盘上(不丢数据),但用户以为新密码存好了 —— 必须说出来。
+        if (store.lastSaveSealFailed) {
+            android.widget.Toast.makeText(
+                context,
+                context.getString(R.string.hosts_secret_seal_failed),
+                android.widget.Toast.LENGTH_LONG,
+            ).show()
         }
     }
 

@@ -249,6 +249,21 @@ export class SshManager {
           ws.end()
         } catch {
           /* already dead */
+        // A failed write (dir removed / disk full) shouldn't crash the session;
+        // stop logging and tell the renderer, so its "logging on" caption and
+        // the next Start/Stop toggle don't lie. Clearing logWrite also lets a
+        // later startLog open a fresh file instead of returning false forever.
+        session.logging = false
+        try {
+          ws.end()
+        } catch {
+          /* already closed */
+        }
+        if (session.logWrite === ws) {
+          session.logWrite = undefined
+          if (!this.sender.isDestroyed()) {
+            this.sender.send(IPC.sessionLogFailed, { sessionId })
+          }
         }
       })
       return true

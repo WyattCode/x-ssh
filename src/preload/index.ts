@@ -171,6 +171,13 @@ const api = {
     startLog: (sessionId: string): Promise<{ ok: boolean; canceled?: boolean; path?: string }> =>
       ipcRenderer.invoke(IPC.sessionLogStart, sessionId),
     stopLog: (sessionId: string): void => ipcRenderer.send(IPC.sessionLogStop, sessionId),
+    /** Fires when a live log stream fails mid-write (disk full, dir removed);
+     *  main has already stopped logging — the renderer should clear its state. */
+    onLogFailed: (cb: (payload: { sessionId: string }) => void): (() => void) => {
+      const listener = (_e: unknown, payload: { sessionId: string }): void => cb(payload)
+      ipcRenderer.on(IPC.sessionLogFailed, listener)
+      return () => ipcRenderer.removeListener(IPC.sessionLogFailed, listener)
+    },
     onData: (cb: (payload: SshData) => void): (() => void) => {
       const listener = (_e: unknown, payload: SshData): void => cb(payload)
       ipcRenderer.on(IPC.sshData, listener)

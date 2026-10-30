@@ -36,6 +36,8 @@ export const IPC = {
   // Per-session output log-to-file (invoke/handle)
   sessionLogStart: 'sessionLog:start',
   sessionLogStop: 'sessionLog:stop',
+  /** main → renderer: the log stream failed mid-write and logging stopped. */
+  sessionLogFailed: 'sessionLog:failed',
 
   // Known-hosts management (invoke/handle)
   knownHostsList: 'knownHosts:list',

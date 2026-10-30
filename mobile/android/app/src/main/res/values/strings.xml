@@ -209,6 +209,7 @@
     <string name="hosts_save_failed">Couldn\'t save hosts. Your changes were not written to disk.</string>
     <string name="sidebar_persist_failed">Couldn\'t save sidebar preference.</string>
     <string name="hosts_save_failed">Couldn\'t save hosts. Please try again.</string>
+    <string name="hosts_secret_seal_failed">Couldn\'t save the new password/key securely — the previous one is still on disk. Please try again.</string>
     <string name="main_sc_close_session">Disconnect current session</string>
     <string name="main_sc_edit_host">Edit host</string>
     <string name="main_sc_ime">Terminal: switch input method / direct English</string>
