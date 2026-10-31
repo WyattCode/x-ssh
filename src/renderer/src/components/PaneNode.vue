@@ -4,6 +4,7 @@ import { computed, ref, defineAsyncComponent } from 'vue'
 import { useSessions } from '../stores/sessions'
 import { useI18n } from '../lib/i18n'
 import { childSizes } from '../lib/paneLayout'
+import { connectActions, type ConnectAction } from '../lib/connectActions'
 import type { LayoutNode } from '../lib/paneLayout'
 import type { Tab } from '../stores/sessions'
 import Icon from './Icon.vue'
@@ -47,24 +48,41 @@ const oldFingerprints = computed(() => {
   if (pn?.errorCode !== 'host_key_changed') return [] as string[]
   const host = pn.hostKeyHost ?? pn.params.host
   const port = pn.hostKeyPort ?? (pn.params.port || 22)
-  const entry = store.knownHosts.find((k) => k.host === host && k.port === port)
-  if (!entry) return []
-  const fps = entry.fingerprints?.length ? entry.fingerprints : [entry.fingerprint]
-  return fps.filter(Boolean)
   // Same `|| 22` normalize as hostKeyKnown: a legacy / imported entry with a
   // falsy port must still match, or the "on record" row vanishes on a
   // host_key_changed card and the user only sees the new key.
-  return (
-    store.knownHosts.find(
-      (k) => k.host === host && (k.port || 22) === (port || 22)
-    )?.fingerprint ?? ''
+  const entry = store.knownHosts.find(
+    (k) => k.host === host && (k.port || 22) === (port || 22)
   )
+  if (!entry) return []
+  const fps = entry.fingerprints?.length ? entry.fingerprints : [entry.fingerprint]
+  return fps.filter(Boolean)
 })
 const hostKeyRejected = computed(
   () =>
     pane.value?.errorCode === 'host_key_unknown' ||
     pane.value?.errorCode === 'host_key_changed'
 )
+
+/** What this failure tells the user to go fix, offered beside the reconnect
+ *  button. A broken hop points at the jump host's own profile when we know it. */
+const paneActions = computed(() => {
+  const pn = pane.value
+  if (!pn) return [] as { action: ConnectAction; targetId?: string }[]
+  const ctx = { hostId: pn.params.hostId, jumpHostId: pn.params.jumpHostId }
+  return connectActions(pn.errorCode, ctx).map((action) => ({
+    action,
+    targetId: action.kind === 'fix-jump' ? ctx.jumpHostId ?? ctx.hostId : ctx.hostId
+  }))
+})
+
+function onPaneAction(item: { action: ConnectAction; targetId?: string }): void {
+  if (item.action.kind === 'security-settings') {
+    store.toggleSettings(true, 'security')
+    return
+  }
+  if (item.targetId) store.requestHostEditor(item.targetId)
+}
 
 function onDividerDown(e: PointerEvent, i: number): void {
   const el = splitEl.value
@@ -162,6 +180,14 @@ const splitEl = ref<HTMLElement>()
                 ? (pane.errorCode === 'host_key_unknown' ? t('app.trustKey') : t('app.trustReconnect'))
                 : t('app.reconnect')
           }}</span>
+        </button>
+        <button
+          v-for="item in paneActions"
+          :key="item.action.kind"
+          class="idle-action"
+          @click.stop="onPaneAction(item)"
+        >
+          {{ t(item.action.labelKey) }}
         </button>
         <button
           class="idle-close"
@@ -483,6 +509,23 @@ const splitEl = ref<HTMLElement>()
   opacity: 0.55;
   cursor: default;
   pointer-events: none;
+}
+/* The "go fix the cause" button: clearly tappable, but quieter than reconnect —
+   reconnecting blindly is what the user was already doing wrong. */
+.idle-action {
+  margin-top: 14px;
+  padding: 7px 12px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--accent);
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  transition: border-color 0.14s, background 0.14s;
+}
+.idle-action:hover {
+  border-color: var(--accent);
+  background: var(--bg-elev-2);
 }
 .idle-close {
   margin-top: 8px;

@@ -195,6 +195,20 @@ function openEditHost(h: Host): void {
   editorOpen.value = true
 }
 
+// The editor's open state lives here, but a connect-failure card deep inside a
+// pane is the one that knows which host needs fixing — so it leaves a request
+// in the store and we open the profile for it here.
+watch(
+  () => store.hostEditorIntent,
+  (id) => {
+    if (!id) return
+    store.clearHostEditorIntent()
+    const h = store.hosts.find((x) => x.id === id)
+    if (h) openEditHost(h)
+    else toast(t('app.actHostGone'), 'error')
+  }
+)
+
 // Zoom (shortcuts, Ctrl+wheel, the pill's own buttons) goes through one place,
 // which also shows the percentage pill — see composables/zoom.ts.
 const zoom = useZoom()

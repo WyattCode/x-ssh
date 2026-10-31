@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { connectFailureMessage } from './connectFailure'
+import { connectFailureMessage, sessionEventMessage } from './connectFailure'
 
 /** Stands in for i18n: echoes the key and inlines any vars. */
 const t = (key: string, vars?: Record<string, string | number>): string =>
@@ -42,6 +42,8 @@ describe('connectFailureMessage', () => {
       needs_passphrase: 'app.needsPassphrase',
       bad_passphrase: 'app.badPassphrase',
       auth_failed: 'app.authFailed',
+      userVerifyCanceled: 'hello.canceled',
+      userVerifyFailed: 'hello.failed',
       secrets_load_failed: 'app.secretsLoadFail',
       'jump-forward-timeout': 'app.jumpForwardTimeout',
       'jump-connect-failed': 'app.jumpConnectFailed',
@@ -83,5 +85,23 @@ describe('connectFailureMessage', () => {
     expect(connectFailureMessage({ code: 'locked', error: 'raw detail' }, ctx, t)).toBe(
       'app.locked'
     )
+  })
+})
+
+describe('sessionEventMessage', () => {
+  it('localizes the machine codes main emits on a status event', () => {
+    expect(sessionEventMessage('connection-lost', t)).toBe('app.sessionLost')
+    expect(sessionEventMessage('channel-closed', t)).toBe('app.channelClosed')
+    expect(sessionEventMessage('已关闭', t)).toBe('app.channelClosed')
+    expect(sessionEventMessage('host_key_unknown', t)).toBe('app.keyUntrusted')
+    expect(sessionEventMessage('host_key_changed', t)).toBe('app.keyChanged')
+  })
+
+  it('passes any other message through — main already made it friendly', () => {
+    expect(sessionEventMessage('Socket handshake failed', t)).toBe('Socket handshake failed')
+  })
+
+  it('falls back to the generic drop message when there is none', () => {
+    expect(sessionEventMessage(undefined, t)).toBe('app.sessionLost')
   })
 })

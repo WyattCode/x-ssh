@@ -1,48 +1,67 @@
+// i18n-allow-file: 文件里的中文全部出现在"识别旧版中文报错"的匹配条件里（passphraseConnectCode /
+// isAuthConnectError 要能认出已经被翻成中文的旧字符串），没有任何一处是输出给用户的文案。
 /**
- * Maps raw ssh2 / Node network / SFTP error strings (English) to friendly
- * Simplified-Chinese messages. Unknown errors pass through unchanged.
+ * Maps raw ssh2 / Node network / SFTP error strings to stable machine codes
+ * that the renderer translates (see `renderer/src/lib/mainError.ts`).
+ *
+ * It used to return Simplified Chinese prose, which meant an English or
+ * Traditional-Chinese UI showed Chinese for anything the renderer did not
+ * already have its own code for — every unexpected SFTP/fs error, essentially.
+ * Main never draws these strings itself, so returning a code costs nothing and
+ * makes the wording follow the `lang` setting.
+ *
+ * Recognized errors come back as a known code; anything else comes back as
+ * `raw-error:<original>` so the renderer can show the original text (English
+ * from Node/ssh2 is readable, and losing it would be worse than not localizing).
  */
 export function friendlyError(msg: string | undefined): string {
   const raw = msg ?? ''
   // Stable machine codes (kebab-case) are mapped in the renderer; do not rewrite them.
   if (/^[a-z][a-z0-9]*(?:-[a-z0-9]+)+$/.test(raw)) return raw
+  if (raw.startsWith(RAW_ERROR_PREFIX)) return raw
   const m = raw.toLowerCase()
   const has = (s: string): boolean => m.includes(s)
 
   // ---- authentication ----
   if (has('all configured authentication methods failed') || has('authentication methods failed'))
-    return '认证失败:用户名、密码或密钥不正确'
-  if (has('keyboard-interactive')) return '认证失败:服务器要求交互式验证'
+    return 'auth_failed'
+  if (has('keyboard-interactive')) return 'auth-interactive'
   if (has('passphrase') || has('cannot parse privatekey') || has('integrity check') || has('unsupported key'))
-    return '私钥无法解析,或密钥的密码短语不正确'
+    return 'key-unreadable'
 
   // ---- connection / network ----
-  if (has('not allowed at this time'))
-    return '服务器暂时拒绝连接:该地址触发了连接频率限制(PerSourcePenalties),通常几十秒后自动恢复'
-  if (has('timed out while waiting for handshake') || has('handshake'))
-    return '握手超时:服务器无响应,请检查地址、端口或网络'
-  if (has('etimedout') || has('timed out')) return '连接超时:请检查地址、端口或网络'
-  if (has('econnrefused')) return '连接被拒绝:目标端口未开放,或 SSH 服务未运行'
-  if (has('enotfound') || has('getaddrinfo')) return '无法解析主机名,请检查地址是否正确'
-  if (has('ehostunreach')) return '无法访问主机:网络不可达'
-  if (has('enetunreach')) return '网络不可达'
-  if (has('econnreset')) return '连接被服务器重置'
-  if (has('econnaborted')) return '连接已中断'
-  if (has('eacces') || has('eaccess')) return '连接被拒绝:权限不足'
-  if (has('epipe')) return '连接已断开'
+  // Ordered before the generic reset/timeout branches: "Not allowed at this
+  // time" also matches nothing else, but a handshake timeout must not be
+  // reported as a plain connect timeout.
+  if (has('not allowed at this time')) return 'rate-limited'
+  if (has('timed out while waiting for handshake') || has('handshake')) return 'handshake-timeout'
+  if (has('etimedout') || has('timed out')) return 'connect-timeout'
+  if (has('econnrefused')) return 'conn-refused'
+  if (has('enotfound') || has('getaddrinfo')) return 'dns-failed'
+  if (has('ehostunreach')) return 'host-unreachable'
+  if (has('enetunreach')) return 'net-unreachable'
+  if (has('econnreset')) return 'conn-reset'
+  if (has('econnaborted')) return 'conn-aborted'
+  if (has('eacces') || has('eaccess')) return 'access-denied'
+  if (has('epipe')) return 'conn-closed'
 
   // ---- SFTP file operations ----
-  if (has('no such file')) return '文件或目录不存在'
-  if (has('permission denied')) return '权限不足'
-  if (has('not a directory')) return '目标不是目录'
-  if (has('is a directory')) return '目标是一个目录'
-  if (has('already exists')) return '目标已存在'
-  if (has('no space left')) return '服务器磁盘空间不足'
-  if (has('quota')) return '超出磁盘配额'
-  if (m === 'failure' || has('sftp error') || has('sftp failure')) return '操作失败'
+  if (has('no such file')) return 'fs-not-found'
+  if (has('permission denied')) return 'fs-permission'
+  if (has('not a directory')) return 'fs-not-dir'
+  if (has('is a directory')) return 'fs-is-dir'
+  if (has('already exists')) return 'fs-exists'
+  if (has('no space left')) return 'fs-no-space'
+  if (has('quota')) return 'fs-quota'
+  if (m === 'failure' || has('sftp error') || has('sftp failure')) return 'fs-op-failed'
 
-  return raw
+  // Unknown: keep the original text, tagged so the renderer can tell it apart
+  // from a code and show it verbatim (or translate a known Chinese mapping).
+  return raw ? `${RAW_ERROR_PREFIX}${raw}` : 'unknown-error'
 }
+
+/** Marker for "this is not a code, it is the original error text". */
+export const RAW_ERROR_PREFIX = 'raw-error:'
 
 /**
  * Whether a raw connect error is a transient network condition worth retrying

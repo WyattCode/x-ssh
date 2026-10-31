@@ -21,6 +21,8 @@ export function keyErrorMessage(
       return t('host.keyNoPub')
     case 'not-ready':
       return t('host.keyNotReady')
+    case 'labels-corrupt':
+      return t('host.keyLabelsLoadFail')
     default:
       return r.error || t('host.keyOpFail')
   }

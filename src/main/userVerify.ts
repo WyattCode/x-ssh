@@ -295,6 +295,7 @@ export class UserVerify {
         this.markUnlocked()
         return { ok: true }
       case 'canceled':
+        // i18n-allow-next: message 只作主进程侧诊断，界面按 code 出文案（hello.canceled）
         return { ok: false, code: 'userVerifyCanceled', message: '系统验证已取消' }
       case 'unavailable':
         // 验证过程中设备消失/被策略禁用 → fail-open
@@ -302,6 +303,7 @@ export class UserVerify {
       case 'unsupported':
         return { ok: true }
       default:
+        // i18n-allow-next: message 只作主进程侧诊断，界面按 code 出文案（hello.failed）
         return { ok: false, code: 'userVerifyFailed', message: '系统验证失败' }
     }
   }

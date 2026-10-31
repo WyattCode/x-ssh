@@ -8,7 +8,7 @@ const dialogEl = ref<HTMLElement>()
 useFocusTrap(dialogEl, () => store.publishOpen)
 import { useSessions } from '../stores/sessions'
 import { useI18n } from '../lib/i18n'
-import { keyErrorMessage } from '../lib/keyError'
+import { publishErrorText } from '../lib/publishError'
 import type { ManagedKey, Host } from '../../../shared/types'
 import Icon from './Icon.vue'
 
@@ -17,13 +17,7 @@ const { t } = useI18n()
 const { confirm } = useConfirm()
 
 /** Per-host publish/revoke failures arrive as codes; render them in the UI language. */
-function pubErr(err?: string): string {
-  if (err === 'host-missing') return t('keyPub.hostMissing')
-  if (err === 'app-locked') return t('keyPub.appLocked')
-  if (err === 'connect-failed') return t('keyPub.connectFailed')
-  if (err === 'window-not-ready') return t('app.windowNotReady')
-  return err ?? ''
-}
+const pubErr = (err?: string): string => publishErrorText(err, t)
 
 const { toast } = useToast()
 // Mounted for the app's lifetime and shown by its own v-if, so an onMounted
@@ -64,20 +58,11 @@ function toggleHost(h: Host): void {
   else selected.add(h.id)
 }
 
-/** Main returns stable codes for the per-host failures; the wording is ours. */
-function hostOpError(err?: string): string {
-  if (err === 'host-missing') return t('keyPub.hostMissing')
-  if (err === 'app-locked') return t('keyPub.appLocked')
-  if (err === 'connect-failed') return t('keyPub.connectFailed')
-  return err ?? ''
-}
-/** Main reports a failed remote command as `remote-exit:N`; show it in the UI
- *  language instead of the raw machine code. Anything else passes through. */
-function mapError(msg: string | undefined): string {
-  const m = /^remote-exit:(\d+)$/.exec(msg ?? '')
-  if (m) return t('keyPub.remoteExit', { n: Number(m[1]) })
-  return msg ?? ''
-}
+/** The per-host rows and the dialog banner read from one table: which of the two
+ *  asked made no difference to the wording, and keeping them apart let a code be
+ *  translated in one and shown raw in the other. */
+const hostOpError = pubErr
+const mapError = pubErr
 
 async function publish(): Promise<void> {
   if (!keyId.value || !selected.size) return
@@ -91,7 +76,7 @@ async function publish(): Promise<void> {
     const r = await window.api.keys.publish(keyId.value, [...selected])
     if (!r.ok) {
       // Dialog is dismissible, so a banner alone is lost on close — toast too.
-      const msg = mapError(r.error) || t('keyPub.fail')
+      const msg = mapError(r.error || r.code) || t('keyPub.fail')
       err.value = msg
       toast(msg, 'error')
       return
@@ -116,7 +101,7 @@ async function revoke(): Promise<void> {
   try {
     const r = await window.api.keys.revoke(keyId.value, [...selected])
     if (!r.ok) {
-      err.value = mapError(r.error) || t('keyPub.revokeFail')
+      err.value = mapError(r.error || r.code) || t('keyPub.revokeFail')
       return
     }
     revokeResults.value = r.results ?? []

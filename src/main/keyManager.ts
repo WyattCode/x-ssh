@@ -128,7 +128,7 @@ export class KeyManager {
   private async writeLabels(labels: Record<string, string>): Promise<void> {
     await writeFile(this.labelsPath, JSON.stringify(labels), { mode: 0o600 })
     if (this.labelsLoadFailed) {
-      throw new Error('密钥标签文件损坏，已停止写入以免覆盖原有名称')
+      throw new Error('labels-corrupt')
     }
     await writeFile(this.labelsPath, JSON.stringify(labels), { mode: 0o600 }).catch(() => undefined)
     // Do not swallow write failures: generate/import/remove callers already
@@ -172,7 +172,7 @@ export class KeyManager {
   async generate(opts: { name: string; type?: string; passphrase?: string; bits?: number }): Promise<ManagedKey> {
     const dir = await this.ensureDir()
     await this.readLabels()
-    if (this.labelsLoadFailed) throw new Error('密钥标签文件损坏，已停止写入以免覆盖原有名称')
+    if (this.labelsLoadFailed) throw new Error('labels-corrupt')
     const safe = sanitizeKeyName(opts.name)
     const id = `${safe}-${randomUUID().slice(0, 8)}`
     const priv = join(dir, id)
@@ -217,7 +217,7 @@ export class KeyManager {
   async import(srcPath: string): Promise<ManagedKey> {
     const dir = await this.ensureDir()
     await this.readLabels()
-    if (this.labelsLoadFailed) throw new Error('密钥标签文件损坏，已停止写入以免覆盖原有名称')
+    if (this.labelsLoadFailed) throw new Error('labels-corrupt')
     const id = `${sanitizeKeyName(basename(srcPath))}-${randomUUID().slice(0, 8)}`
     const priv = join(dir, id)
     const buf = await readFile(srcPath)
