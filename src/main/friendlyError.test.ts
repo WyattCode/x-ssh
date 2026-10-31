@@ -9,15 +9,66 @@ import {
 
 describe('friendlyError', () => {
   it('names the rate-limit refusal instead of a generic reset', () => {
-    expect(friendlyError('Not allowed at this time')).toContain('连接频率限制')
+    expect(friendlyError('Not allowed at this time')).toBe('rate-limited')
   })
   it('keeps the plain-reset wording when the socket just dies', () => {
-    expect(friendlyError('read ECONNRESET')).toBe('连接被服务器重置')
+    expect(friendlyError('read ECONNRESET')).toBe('conn-reset')
   })
   it('passes through kebab-case machine codes', () => {
     expect(friendlyError('passphrase-empty')).toBe('passphrase-empty')
     expect(friendlyError('app-locked')).toBe('app-locked')
     expect(friendlyError('connection-lost')).toBe('connection-lost')
+  })
+
+  it('never returns Chinese prose', () => {
+    // The point of the change: main must not decide wording, because it does
+    // not know the UI language. Everything is either a code or a tagged raw.
+    const inputs = [
+      'All configured authentication methods failed',
+      'connect ECONNREFUSED 10.0.0.1:22',
+      'getaddrinfo ENOTFOUND nope',
+      'Timed out while waiting for handshake',
+      'No such file',
+      'Permission denied',
+      'ENOSPC: no space left on device',
+      'something nobody has ever seen',
+      ''
+    ]
+    for (const m of inputs) {
+      expect(/[\u3400-\u9fff]/.test(friendlyError(m)), m).toBe(false)
+    }
+  })
+
+  it('tags an unrecognized error so the original text survives', () => {
+    // terse uses a code that matches no table row, so the original text is all
+    // the user can get — keep it rather than replacing it with "操作失败".
+    expect(friendlyError('tar: unrecognized option --xattrs')).toBe(
+      'raw-error:tar: unrecognized option --xattrs'
+    )
+    expect(friendlyError('')).toBe('unknown-error')
+  })
+
+  it('still recognizes the node disk-full error', () => {
+    expect(friendlyError('ENOSPC: no space left on device')).toBe('fs-no-space')
+  })
+
+  it('does not double-tag an error that is already tagged', () => {
+    const once = friendlyError('weird thing happened')
+    expect(friendlyError(once)).toBe(once)
+  })
+
+  it('checks handshake before the generic timeout branch', () => {
+    // "Timed out while waiting for handshake" contains "timed out"; the more
+    // specific wording has to win or the user is told the wrong thing.
+    expect(friendlyError('Timed out while waiting for handshake')).toBe('handshake-timeout')
+    expect(friendlyError('connect ETIMEDOUT')).toBe('connect-timeout')
+  })
+
+  it('maps the file-operation failures distinctly', () => {
+    expect(friendlyError('No such file')).toBe('fs-not-found')
+    expect(friendlyError('Permission denied')).toBe('fs-permission')
+    expect(friendlyError('File already exists')).toBe('fs-exists')
+    expect(friendlyError('Failure')).toBe('fs-op-failed')
   })
 })
 

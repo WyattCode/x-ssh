@@ -28,7 +28,7 @@ const knownHosts = new KnownHosts()
 const settings = new SettingsStore()
 const keyManager = new KeyManager(app.getPath('userData'))
 const masterLock = new MasterLock(settings)
-const userVerify = registerUserVerifyIpc({ settings })
+const userVerify = registerUserVerifyIpc({ settings, lang: uiLang })
 const activeEdits = new Set<string>()
 /** Per-path stop callbacks for in-flight external edits (clear debounce + unwatch + rm). */
 const editCleanups = new Map<string, () => void>()
@@ -87,6 +87,11 @@ function systemLocales(): string[] {
   }
   return [...preferred, app.getLocale()].filter(Boolean)
 }
+/** The interface language actually in use, resolved from the `lang` setting. */
+async function uiLang(): Promise<UiLang> {
+  return resolveLang(await settings.get<LangPref>('lang'), systemLocales())
+}
+/* i18n-allow-start: 托盘与原生对话框由 OS 绘制，不经渲染层，所以主进程自带一份三语表 */
 const TRAY_LABELS: Record<UiLang, { show: string; hide: string; palette: string; quit: string }> = {
   zh: { show: '显示 X-SSH', hide: '隐藏', palette: '打开命令栏', quit: '退出' },
   'zh-TW': { show: '顯示 X-SSH', hide: '隱藏', palette: '開啟命令面板', quit: '結束' },
@@ -177,6 +182,7 @@ const NL: Record<string, Record<UiLang, string>> = {
   filterArchive: { zh: '归档文件', 'zh-TW': '封存檔', en: 'Archives' },
   filterExecutable: { zh: '程序', 'zh-TW': '程式', en: 'Programs' }
 }
+/* i18n-allow-end */
 /** Localized dialog string for the current UI language (English fallback). */
 async function dl(key: string): Promise<string> {
   const lang = resolveLang(await settings.get<LangPref>('lang'), systemLocales())
@@ -578,7 +584,7 @@ async function withTempHosts(
   fn: (sessionId: string, host: Host) => Promise<void>
 ): Promise<{ host: string; ok: boolean; error?: string }[]> {
   const results: { host: string; ok: boolean; error?: string }[] = []
-  for (const hostId of hostIds) {
+  for (const [index, hostId] of hostIds.entries()) {
     const h = (await store.list()).find((x) => x.id === hostId)
     const hostLabel = h ? `${h.username}@${h.host}${h.port && h.port !== 22 ? `:${h.port}` : ''}` : hostId
     if (!h) {
@@ -613,7 +619,7 @@ async function withTempHosts(
           results.push({
             host: hostLabel,
             ok: false,
-            error: '跳板机已被删除,请在主机编辑页重新选择跳板机或改为直接连接。'
+            error: 'jump-missing'
           })
           continue
         }
@@ -634,7 +640,7 @@ async function withTempHosts(
           results.push({
             host: hostLabel,
             ok: false,
-            error: `跳板机 ${jh.host} 需要密码,但没有已保存的密码。请在「主机」编辑页为 ${jh.label} 设置密码后重试,或更换认证方式。`
+            error: 'jump-needs-password'
           })
           continue
         }
@@ -642,16 +648,22 @@ async function withTempHosts(
           results.push({
             host: hostLabel,
             ok: false,
-            error: `跳板机 ${jh.host} 未选择私钥文件。请在「主机」编辑页为 ${jh.label} 导入私钥后重试。`
+            error: 'jump-needs-key'
           })
           continue
         }
         params.jump = jump
       }
       {
-        const gate = await gateKeyConnect(userVerify, params)
+        // Batch path: tell the user which of N hosts this prompt is for, so a
+        // run of identical Hello dialogs doesn't look like a stuck loop.
+        const gate = await gateKeyConnect(userVerify, params, {
+          lang: uiLang,
+          nth: index + 1,
+          total: hostIds.length
+        })
         if (!gate.proceed) {
-          results.push({ host: hostLabel, ok: false, error: gate.result.error ?? '系统验证失败' })
+          results.push({ host: hostLabel, ok: false, error: gate.result.code ?? 'userVerifyFailed' })
           continue
         }
       }
@@ -1504,7 +1516,7 @@ function registerIpc(): void {
     // is locked, don't auto-fill a saved secret — return a clear 'locked' error
     // so the renderer surfaces the unlock prompt instead of failing obscurely.
     if (store.isLocked && !params.password && !params.passphrase) {
-      return { ok: false, code: 'locked', error: '应用已锁定，请先解锁' }
+      return { ok: false, code: 'locked', error: 'locked' }
     }
     if (params.hostId && params.auth === 'password' && !params.password) {
       // Corrupt secrets.bin: don't dial with an empty password (looks like auth_failed).
@@ -1512,7 +1524,7 @@ function registerIpc(): void {
         return {
           ok: false,
           code: 'secrets_load_failed',
-          error: '已保存的密码无法读取(密钥库不可用或 secrets.bin 来自另一台设备)。请重新输入密码,或从备份恢复。'
+          error: 'secrets_load_failed'
         }
       }
       params.password = await store.getPassword(params.hostId)
@@ -1522,7 +1534,7 @@ function registerIpc(): void {
         return {
           ok: false,
           code: 'secrets_load_failed',
-          error: '已保存的密钥口令无法读取(密钥库不可用或 secrets.bin 来自另一台设备)。请重新输入口令,或从备份恢复。'
+          error: 'secrets_load_failed'
         }
       }
       params.passphrase = await store.getPassphrase(params.hostId)
@@ -1552,7 +1564,7 @@ function registerIpc(): void {
             return {
               ok: false,
               code: 'jump_missing',
-              error: '跳板机已被删除,请在主机编辑页重新选择跳板机或改为直接连接。'
+              error: 'jump_missing'
             }
           }
           const jump: JumpConfig = {
@@ -1572,17 +1584,17 @@ function registerIpc(): void {
             return {
               ok: false,
               code: 'jump_needs_password',
-              error: `跳板机 ${jh.host} 需要密码,但没有已保存的密码。请在「主机」编辑页为 ${jh.label} 设置密码后重试,或更换认证方式。`
+              error: 'jump_needs_password'
             }
           }
-          // A key jump host with no key file would throw late ("未选择私钥文件")
-          // after the target's handshake already started; refuse it up front
-          // with the same actionable wording Android uses.
+          // A key jump host with no key file would throw late, after the target's
+          // handshake already started; refuse it up front with the same
+          // classification Android uses.
           if (jh.auth === 'key' && !jh.keyPath) {
             return {
               ok: false,
               code: 'jump_needs_key',
-              error: `跳板机 ${jh.host} 未选择私钥文件。请在「主机」编辑页为 ${jh.label} 导入私钥后重试。`
+              error: 'jump_needs_key'
             }
           }
         }
@@ -1596,19 +1608,19 @@ function registerIpc(): void {
       return {
         ok: false,
         code: 'needs_key',
-        error: '未选择私钥文件。请在「主机」编辑页导入或选择私钥后重试。'
+        error: 'needs_key'
       }
     }
     if (params.auth === 'password' && !params.password) {
       return {
         ok: false,
         code: 'needs_password',
-        error: '需要密码,但没有已保存的密码。请在连接时输入密码,或在「主机」编辑页保存密码后重试。'
+        error: 'needs_password'
       }
     }
     if (params.multiplex === undefined) params.multiplex = (await settings.get<boolean>('connectionMultiplex')) === true
     {
-      const gate = await gateKeyConnect(userVerify, params)
+      const gate = await gateKeyConnect(userVerify, params, { lang: uiLang })
       if (!gate.proceed) return gate.result
       if (gate.warned) {
         void pushConnLog({
@@ -1854,7 +1866,6 @@ function registerIpc(): void {
     async (_e, target: string) => {
       try {
         if (!target || !isAbsolute(target)) return { ok: false, error: 'path-invalid' }
-        if (!target || !isAbsolute(target)) return { ok: false, error: '路径不合法' }
         // showItemInFolder does not throw for a missing path — it just opens the
         // parent (or does nothing useful). Fail closed so the drawer toast fires.
         await access(target)
@@ -2462,7 +2473,7 @@ function registerIpc(): void {
    *  anything else keeps the friendly message. */
   function keyFail(e: unknown): { ok: false; code?: KeyErrorCode; error?: string } {
     const msg = (e as Error)?.message ?? ''
-    if (msg === 'invalid-key' || msg === 'bad-id') return { ok: false, code: msg }
+    if (msg === 'invalid-key' || msg === 'bad-id' || msg === 'labels-corrupt') return { ok: false, code: msg }
     return { ok: false, error: friendlyError(msg) }
   }
   ipcMain.handle(IPC.keysList, () => keyManager.list())
@@ -2501,7 +2512,6 @@ function registerIpc(): void {
     try {
       const text = await keyManager.publicKey(id)
       if (!text) return { ok: false, code: 'no-pubkey' }
-      if (!text) return { ok: false, error: 'no-public-key' }
       return { ok: true, text }
     } catch (e) {
       return keyFail(e)
@@ -2519,10 +2529,6 @@ function registerIpc(): void {
     }
     if (!pub) return { ok: false, code: 'no-pubkey' }
     if (!sshManager) return { ok: false, code: 'not-ready' }
-    if (!pub) return { ok: false, error: 'no-public-key' }
-    if (!sshManager) return { ok: false, error: '窗口未就绪' }
-    if (!pub) return { ok: false, error: '该密钥没有可用的公钥' }
-    if (!sshManager) return { ok: false, error: 'window-not-ready' }
     const results = await withTempHosts(hostIds, async (sid) => {
       const cmd = `umask 077; mkdir -p ~/.ssh && chmod 700 ~/.ssh\ncat >> ~/.ssh/authorized_keys <<'XSSH'\n${pub}\nXSSH\ntouch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys`
       await requireSshManager().execCommand(sid, cmd)
@@ -2543,10 +2549,6 @@ function registerIpc(): void {
     }
     if (!pub) return { ok: false, code: 'no-pubkey' }
     if (!sshManager) return { ok: false, code: 'not-ready' }
-    if (!pub) return { ok: false, error: 'no-public-key' }
-    if (!sshManager) return { ok: false, error: '窗口未就绪' }
-    if (!pub) return { ok: false, error: '该密钥没有可用的公钥' }
-    if (!sshManager) return { ok: false, error: 'window-not-ready' }
     const keyPart = pub.split(/\s+/).slice(0, 2).join(' ')
     const results = await withTempHosts(hostIds, async (sid) => {
       // if/fi (not a bare &&-chain) so a host without authorized_keys exits 0

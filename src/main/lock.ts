@@ -72,7 +72,7 @@ export class MasterLock {
    *  with their own and walk straight in — the same threat `reset()` guards
    *  against, which is why that one requires the passphrase too. */
   async setPassphrase(passphrase: string): Promise<void> {
-    if (!passphrase) throw new Error('口令不能为空')
+    if (!passphrase) throw new Error('passphrase-empty')
     if (this.enabled && !this.unlocked) throw new Error('app-locked')
     const salt = randomBytes(16).toString('hex')
     this.salt = salt

@@ -14,7 +14,7 @@
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "vue-tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
-    "lint:i18n": "node scripts/lint-i18n.mjs && node scripts/lint-i18n-mobile.mjs",
+    "lint:i18n": "node scripts/lint-i18n.mjs && node scripts/lint-i18n-mobile.mjs && node scripts/lint-i18n-main.mjs",
     "test": "vitest run",
     "package": "electron-vite build && electron-builder --dir",
     "dist": "electron-vite build && electron-builder"

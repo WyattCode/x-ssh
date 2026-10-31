@@ -1,4 +1,5 @@
 import { formatTransferError } from './transferFormat'
+import { mainErrorText } from './mainError'
 
 type Translate = (key: string, vars?: Record<string, string | number>) => string
 
@@ -40,6 +41,12 @@ export function sftpErrorText(
 
     // "files-failed:3" carries its own wording (see transferFormat).
     if (err.startsWith('files-failed:')) return formatTransferError(err, t)
+
+    // Codes from friendlyError (fs-permission, conn-reset, …) and the tagged
+    // raw-error:<text> carry. Before this, an unrecognized fs error reached an
+    // English UI as Chinese prose written by the main process.
+    const mapped = mainErrorText(err, t)
+    if (mapped) return mapped
 
     return err
   }

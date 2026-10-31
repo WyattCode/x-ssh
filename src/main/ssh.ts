@@ -448,8 +448,9 @@ export class SshManager {
             code: passphraseConnectCode(raw, !!jump.passphrase)
           })
         }
-        fail('跳板机主机密钥未获信任,连接已中止', {
-          code: keyUnknown ? 'host_key_unknown' : 'host_key_changed',
+        const jumpKeyCode = keyUnknown ? 'host_key_unknown' : 'host_key_changed'
+        fail(jumpKeyCode, {
+          code: jumpKeyCode,
           key: lastKey,
           keyHost: jump.host,
           keyPort: jump.port || 22
@@ -1216,10 +1217,12 @@ export class SshManager {
 
       client.on('error', (err) => {
         const raw = err.message
+        // Machine codes, not display text: the session error event is shown as-is
+        // by the renderer, which translates these two (see sessionEventMessage).
         const message = keyRejected
           ? keyUnknown
-            ? '主机密钥未获信任,连接已中止;若此服务器是你自己的,可确认其身份后信任'
-            : '主机密钥与首次连接时记录的不一致,连接已中止;这可能是中间人攻击,若你确认服务器已重装或更换,可选择“信任新密钥并重连”'
+            ? 'host_key_unknown'
+            : 'host_key_changed'
           : friendlyError(raw)
         this.emit({ sessionId: id, status: 'error', message })
         this.stopLog(id)
@@ -1800,13 +1803,11 @@ export class SshManager {
       }
     }
 
-    if (this.cancelledJobs.has(jobId)) emit('', 'up', false, SshManager.CANCELLED_TEXT)
-    else if (errors) emit('', 'up', false, `sync-items-failed:${errors}`)
     // Read the cancel flag before the job state is torn down below: the caller
     // (IPC) must be able to answer "cancelled" instead of a blanket ok.
     const cancelled = this.cancelledJobs.has(jobId)
     if (cancelled) emit('', 'up', false, SshManager.CANCELLED_TEXT)
-    else if (errors) emit('', 'up', false, `${errors} 项失败`)
+    else if (errors) emit('', 'up', false, `sync-items-failed:${errors}`)
     else {
       const t = bytesDone || 1
       // A machine token, not display text: the renderer translates it
@@ -2865,7 +2866,7 @@ export class SshManager {
     const pack = await this.execRemote(sessionId, buildPackCommand(parent, tmp, names))
     if (pack.code !== 0) {
       await this.execRemote(sessionId, `rm -f "${tmp}"`).catch(() => {})
-      return { ok: false, error: pack.out.trim() || '打包失败' }
+      return { ok: false, error: pack.out.trim() || 'pack-failed' }
     }
     const name = archiveName || (items.length === 1 ? items[0].name : 'archive') + '.tar.gz'
     const outPath = resolve(localDir, name).replace(/\.tar\.gz$/, '.tar.gz')
