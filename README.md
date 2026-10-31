@@ -5,6 +5,17 @@
 整个产品围绕一个理念:**按下 `Ctrl/Cmd+K`,一切都在这里发生** —— 连接、切换、
 管理主机。没有臃肿的侧边栏,没有层层嵌套的对话框。输入 `user@host` 回车即连。
 
+## 下载
+
+[![Latest release](https://img.shields.io/github/v/release/WyattCode/x-ssh)](https://github.com/WyattCode/x-ssh/releases)
+
+**[下载最新版 X-SSH](https://github.com/WyattCode/x-ssh/releases/latest)** —— Windows 安装包(x64)。
+
+- 安装包**还没有代码签名**,首次运行 Windows 可能弹蓝底提示"Windows 已保护你的
+  电脑":点「更多信息」→「仍要运行」即可。它表示"没人给这个程序背书",不代表检测到了恶意代码。
+- 更新:下载新安装包覆盖安装(自动更新尚未接入)。
+- 主机、已信任指纹与设置都在 `%APPDATA%\X-SSH`;卸载不清除它,重装即恢复。
+
 ## 产品定义
 
 - **零摩擦连接** —— 输入 `user@host`、`host:2222` 或 `user@host:22` 即可连接。

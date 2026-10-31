@@ -11,7 +11,7 @@ export type ForwardMode = 'local' | 'remote' | 'dynamic'
 export type ForwardErrorCode = 'no-session' | 'bad-port' | 'already' | 'in-use'
 
 /** Why a `keys:*` IPC call failed (translated in the renderer, see lib/keyError.ts). */
-export type KeyErrorCode = 'invalid-key' | 'bad-id' | 'no-pubkey' | 'not-ready'
+export type KeyErrorCode = 'invalid-key' | 'bad-id' | 'no-pubkey' | 'not-ready' | 'labels-corrupt'
 
 /**
  * How an upload treats remote files that already exist at the destination.

@@ -18,7 +18,7 @@ import { hasLiveConnectedPane, closeOthersNeedsConfirm } from '../lib/snapshotGu
 import { closeAllNeedsConfirm } from '../lib/tabCloseGuard'
 
 import { formatTransferName } from '../lib/transferFormat'
-import { connectFailureMessage } from '../lib/connectFailure'
+import { connectFailureMessage, sessionEventMessage } from '../lib/connectFailure'
 import {
   buildFlatTree,
   buildGrid,
@@ -318,6 +318,8 @@ interface State {
   historyOpen: boolean
   /** Which settings section is showing. */
   settingsTab: SettingsTab
+  /** A saved host whose editor a connect-failure card asked to open (see lib/connectActions.ts). */
+  hostEditorIntent: string | null
   externalEditor: string | null
   snippets: Snippet[]
   knownHosts: KnownHostEntry[]
@@ -437,6 +439,7 @@ export const useSessions = defineStore('sessions', {
     settingsOpen: false,
     historyOpen: false,
     settingsTab: 'general',
+    hostEditorIntent: null,
     externalEditor: null,
     snippets: [],
     knownHosts: [],
@@ -1394,6 +1397,14 @@ export const useSessions = defineStore('sessions', {
     toggleSftp(open?: boolean): void {
       this.sftpOpen = open ?? !this.sftpOpen
     },
+    /** A connect-failure card asked the user to fix this saved host; App.vue
+     *  opens the editor for it (see lib/connectActions.ts). */
+    requestHostEditor(id: string): void {
+      this.hostEditorIntent = id
+    },
+    clearHostEditorIntent(): void {
+      this.hostEditorIntent = null
+    },
     /** Settings is a sidebar page now; toggling it off goes back to where you were. */
     toggleSettings(open?: boolean, tab?: SettingsTab): void {
       if (tab) this.settingsTab = tab
@@ -2045,7 +2056,7 @@ export const useSessions = defineStore('sessions', {
         // A clean `closed` (e.g. the user typed `exit`) keeps sshSessionId set
         // so the "session closed · reconnect" banner shows; no auto-reconnect.
         pane.status = status
-        if (message) pane.message = message === 'connection-lost' ? t('app.sessionLost') : message
+        if (message) pane.message = sessionEventMessage(message, t)
         return
       }
       // Drop the dead id so the terminal unmounts and the error / reconnect UI
@@ -2056,8 +2067,7 @@ export const useSessions = defineStore('sessions', {
       // A multiplexed bridge that was already closed reports a machine code
       // (older builds sent the Chinese literal); show it in the UI language
       // instead of leaking either into the pane / toast / notification.
-      const lostMsg =
-        message === 'channel-closed' || message === '已关闭' ? t('app.channelClosed') : message
+      const lostMsg = sessionEventMessage(message, t)
       pane.message = lostMsg ?? t('app.sessionLost')
       // When auto-reconnect is on, the "reconnecting…" banner communicates the
       // drop without us flooding a toast per attempt.
