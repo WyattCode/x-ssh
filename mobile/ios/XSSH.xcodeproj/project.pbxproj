@@ -1,0 +1,398 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		04D733AE31069B943C4C8B27 /* XSSHCore.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = F1FE87F7078E3613BAB91B46 /* XSSHCore.xcframework */; };
+		265B7FC008DF6F6A3CF64CE9 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 908C2C163E9BCA7CB86BF5AD /* Localizable.xcstrings */; };
+		4C423AAD5F442F103B6AA367 /* XSSHApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8F34A73B5A93309E875F953 /* XSSHApp.swift */; };
+		701248AC7809523E89810737 /* KeyCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67546D7180CF39865A1FCEA9 /* KeyCapture.swift */; };
+		730F1D8CB36D4752C73EF293 /* TerminalModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7AA13AB1E8539719A7AD181 /* TerminalModel.swift */; };
+		766889B2E5FD72AB857145AF /* HostsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90A700116E14789B6722DE37 /* HostsView.swift */; };
+		BE3CA517D8EA35268B424A55 /* xssh_ffi.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBF96103E5FED6FF22B64431 /* xssh_ffi.swift */; };
+		C367438F25B3CB7622343595 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 7811C2DC0FBD8705949EBC0A /* Assets.xcassets */; };
+		CDA543690DA21D9A89F3745D /* Host.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7368087C0BFDB2DD4A225C02 /* Host.swift */; };
+		DD2F9EA665208D9FB1275812 /* Backend.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BDF8ABACFC555DF2E97187B /* Backend.swift */; };
+		F667657DD704D5826C64D3C9 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A6376447A9D21D6FDD076D3 /* Theme.swift */; };
+		FEDB013B6F7A6011481F21AE /* TerminalScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF0F57A4214E6389AC275F83 /* TerminalScreen.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		3A6376447A9D21D6FDD076D3 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
+		5BDF8ABACFC555DF2E97187B /* Backend.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Backend.swift; sourceTree = "<group>"; };
+		67546D7180CF39865A1FCEA9 /* KeyCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyCapture.swift; sourceTree = "<group>"; };
+		7368087C0BFDB2DD4A225C02 /* Host.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Host.swift; sourceTree = "<group>"; };
+		7811C2DC0FBD8705949EBC0A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		908C2C163E9BCA7CB86BF5AD /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
+		90A700116E14789B6722DE37 /* HostsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostsView.swift; sourceTree = "<group>"; };
+		B2CB2495746BDBF4939BFC12 /* XSSH.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = XSSH.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		EBF96103E5FED6FF22B64431 /* xssh_ffi.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = xssh_ffi.swift; sourceTree = "<group>"; };
+		F1FE87F7078E3613BAB91B46 /* XSSHCore.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = XSSHCore.xcframework; path = Core/XSSHCore.xcframework; sourceTree = "<group>"; };
+		F7AA13AB1E8539719A7AD181 /* TerminalModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalModel.swift; sourceTree = "<group>"; };
+		F8F34A73B5A93309E875F953 /* XSSHApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XSSHApp.swift; sourceTree = "<group>"; };
+		FF0F57A4214E6389AC275F83 /* TerminalScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalScreen.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		CBE099AD2E32CD64153A21BD /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				04D733AE31069B943C4C8B27 /* XSSHCore.xcframework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		1A7DFF15FBF4AB6FDCF130EA /* generated */ = {
+			isa = PBXGroup;
+			children = (
+				EBF96103E5FED6FF22B64431 /* xssh_ffi.swift */,
+			);
+			path = generated;
+			sourceTree = "<group>";
+		};
+		4EC59B92747AF4FD0E3D8D96 = {
+			isa = PBXGroup;
+			children = (
+				E0426A24DA2843FA32A976EF /* Core */,
+				F0D17993CF0599CA7240B200 /* XSSH */,
+				F4533EF1E144B1D32FAD3242 /* Frameworks */,
+				54A7ABC8E179439926E479C7 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		54A7ABC8E179439926E479C7 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				B2CB2495746BDBF4939BFC12 /* XSSH.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		E0426A24DA2843FA32A976EF /* Core */ = {
+			isa = PBXGroup;
+			children = (
+				1A7DFF15FBF4AB6FDCF130EA /* generated */,
+			);
+			path = Core;
+			sourceTree = "<group>";
+		};
+		F0D17993CF0599CA7240B200 /* XSSH */ = {
+			isa = PBXGroup;
+			children = (
+				7811C2DC0FBD8705949EBC0A /* Assets.xcassets */,
+				5BDF8ABACFC555DF2E97187B /* Backend.swift */,
+				7368087C0BFDB2DD4A225C02 /* Host.swift */,
+				90A700116E14789B6722DE37 /* HostsView.swift */,
+				67546D7180CF39865A1FCEA9 /* KeyCapture.swift */,
+				908C2C163E9BCA7CB86BF5AD /* Localizable.xcstrings */,
+				F7AA13AB1E8539719A7AD181 /* TerminalModel.swift */,
+				FF0F57A4214E6389AC275F83 /* TerminalScreen.swift */,
+				3A6376447A9D21D6FDD076D3 /* Theme.swift */,
+				F8F34A73B5A93309E875F953 /* XSSHApp.swift */,
+			);
+			path = XSSH;
+			sourceTree = "<group>";
+		};
+		F4533EF1E144B1D32FAD3242 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				F1FE87F7078E3613BAB91B46 /* XSSHCore.xcframework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		9134B14E0F7175E4E03A49B7 /* XSSH */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A679AFF1BAFD89474ECACFD6 /* Build configuration list for PBXNativeTarget "XSSH" */;
+			buildPhases = (
+				FF152BD52CD59306D53FEE44 /* Sources */,
+				19F95DA57AB8D6B5F5F1C832 /* Resources */,
+				CBE099AD2E32CD64153A21BD /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = XSSH;
+			packageProductDependencies = (
+			);
+			productName = XSSH;
+			productReference = B2CB2495746BDBF4939BFC12 /* XSSH.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		91F384CD13913AA3AD5949B3 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+				};
+			};
+			buildConfigurationList = 8BB22C7D38DBC9CDAE874A90 /* Build configuration list for PBXProject "XSSH" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+				"zh-Hans",
+				"zh-Hant",
+			);
+			mainGroup = 4EC59B92747AF4FD0E3D8D96;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 54A7ABC8E179439926E479C7 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				9134B14E0F7175E4E03A49B7 /* XSSH */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		19F95DA57AB8D6B5F5F1C832 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C367438F25B3CB7622343595 /* Assets.xcassets in Resources */,
+				265B7FC008DF6F6A3CF64CE9 /* Localizable.xcstrings in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		FF152BD52CD59306D53FEE44 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				DD2F9EA665208D9FB1275812 /* Backend.swift in Sources */,
+				CDA543690DA21D9A89F3745D /* Host.swift in Sources */,
+				766889B2E5FD72AB857145AF /* HostsView.swift in Sources */,
+				701248AC7809523E89810737 /* KeyCapture.swift in Sources */,
+				730F1D8CB36D4752C73EF293 /* TerminalModel.swift in Sources */,
+				FEDB013B6F7A6011481F21AE /* TerminalScreen.swift in Sources */,
+				F667657DD704D5826C64D3C9 /* Theme.swift in Sources */,
+				4C423AAD5F442F103B6AA367 /* XSSHApp.swift in Sources */,
+				BE3CA517D8EA35268B424A55 /* xssh_ffi.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		AA95AFBC3D2AA0B875BFEA5D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		CD21ABE5310AC5470F3B0F88 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"\"Core\"",
+				);
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "X-SSH";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "X-SSH connects to servers on your local network.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = dev.xssh.ios;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		D84463DEBFA039765B109FFE /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"\"Core\"",
+				);
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "X-SSH";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "X-SSH connects to servers on your local network.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = dev.xssh.ios;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		DA757761E9271AD865D396ED /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		8BB22C7D38DBC9CDAE874A90 /* Build configuration list for PBXProject "XSSH" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				DA757761E9271AD865D396ED /* Debug */,
+				AA95AFBC3D2AA0B875BFEA5D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		A679AFF1BAFD89474ECACFD6 /* Build configuration list for PBXNativeTarget "XSSH" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CD21ABE5310AC5470F3B0F88 /* Debug */,
+				D84463DEBFA039765B109FFE /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 91F384CD13913AA3AD5949B3 /* Project object */;
+}
