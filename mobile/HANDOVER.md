@@ -227,7 +227,7 @@ adb push id_xssh_dev /sdcard/Download/id_xssh_dev   # 然后在表单里「导�
 | 本地 SSH 靶机 | 系统自带 OpenSSH,配置 `%LOCALAPPDATA%\Temp\opencode\xssh-sshd\`(**127.0.0.1:2222**,私钥 `id_xssh_dev`,第十四次会话重建) |
 | MuMu 模拟器 | `D:\Apps\MuMuPlayer`(MuMuManager 6.7.0;实例 0 = Android 15/API 35,伪装 vivo V2362A,1440×2560@360dpi,adb `127.0.0.1:16384`) |
 | 用户服务器 | `192.168.1.100`(DGX-Node-0,用户 user;**密码不写进仓库**;只点界面不敲命令) |
-| 网络 | PC 与手机同一局域网 `192.168.10.x`(手机曾为 `.150`) |
+| 网络 | PC 与手机同一局域网 `192.168.1.x`(手机曾为 `.150`) |
 | MSVC | VS 2022 Build Tools + C++ 工作负载(**cargo-ndk / 桌面版 xssh-ffi 编译要 `link.exe`**,没有就 `linker link.exe not found`) |
 
 第七次会话换了一台 PC(`LAPTOP-GU5Q5VRL`),上表的工具全部按原路径重装(platform-tools 37.0.1、cmdline-tools、
@@ -2550,7 +2550,7 @@ adb shell input swipe 2134 113 2134 113 80   # 80ms 的零长度 swipe
 ## 7. 设备现状(2026-10-15 补记在最前;下面 09-28 那段是旧的)
 
 **2026-10-15 补记**:**18 Fold**(无线调试,序列号形如 `adb-SERIAL0000000002-…_adb-tls-connect._tcp`,
-`192.168.10.x:端口` 的地址会变,先 `adb devices -l`)装的是 `a3e6d78` 的 debug 包(`installDebug` 覆盖,数据没动)。
+`192.168.1.x:端口` 的地址会变,先 `adb devices -l`)装的是 `a3e6d78` 的 debug 包(`installDebug` 覆盖,数据没动)。
 **用户的主机数据状态没核对**(10-10 事故后用户需自己重新置顶;之后的备份 / 还原情况以对话为准,别信下面 09-28 的 md5)。
 **PC**:`D:\Apps\X-SSH` = 桌面 0.4.1;测试靶机状态未动。**Pad / 17 Ultra**:本会话没碰,仍按下面旧记录(17 Ultra 还是很旧的版本)。
 
