@@ -5,6 +5,9 @@
 
 ## [Unreleased]
 
+### Fixed(构建)
+- **macOS 安装包一直是默认图标**。`build.mac.icon` 指向 `build/icon.icon` —— 那是 Icon Composer 的源目录,不是图标文件。electron-builder 只接受 `.icns` 或边长 ≥512 的 `.png`,指向目录时会**静默退回 Electron 默认图标**,构建日志里没有任何警告,所以之前几版都没人发现。已改为 `build/icon.png`。
+
 ## [0.6.0] - 2026-10-31
 
 这一版把「看起来能跑」的东西真正修到能跑：修好了被批量合并弄坏、一直没人发现的构建，

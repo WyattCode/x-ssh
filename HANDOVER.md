@@ -1,3 +1,63 @@
+# 会话记录:M3.183(2026-11-01,公开化收尾 + 0.6.0 发版 + macOS 图标)
+
+⚠️ **读下面大量历史切片前先看一眼这两条**,否则容易被误导:
+- 2026-10-30 那批 M3.83–M3.180 是**每轮一个未合并 PR 的切片记录**,大量提到 `fix/review-polish-m31xx` 分支和 PR #12–#89。**这些分支和 PR 后来已整体合入 `main`**,历史正文没改,看到"请勿合并"是当时的语境。
+- 2026-10-31 之后的记录才是当前状态的直接写照。
+
+## 一、仓库公开化(为解锁 GitHub Actions 免费额度)
+
+**背景**:CI 长期示红但没人在意。查下去发现历史 373 次运行里 288 次失败,**后期连续 225 次失败,每次只跑 4–5 秒且步骤为空** —— 不是代码问题,是私有仓库的 Actions 免费额度耗尽,runner 根本没启动。改成 public 后额度解除,首次真实运行立刻暴露出 4 个 clippy 错误(新版 clippy 变严:`manual_contains`、`let_unit_value`,在 `forward.rs:120`、`ssh.rs:164/791/814`),一并修掉。
+
+公开前做了**全历史**敏感信息清理:
+
+| 维度 | 清理内容 |
+|---|---|
+| 文件内容 | 公网 IP + 端口、两个内网地址、用户名、两个设备序列号、DGX 主机名 |
+| 提交消息正文 | **agent 自己脱敏那次的提交消息里又写了真实 IP** |
+| 作者/提交者邮箱 | 15 个提交带真实 Gmail |
+| 引用列表 | `refs/pull/*` 117 个(只读,API 删不掉) |
+
+最终处理方式:`git filter-repo` 重写 490 个提交与 7 个 tag,`--replace-text` + `--message-callback` + `--email-callback` 三管齐下;`refs/pull/*` 无解(关 PR ≠ 删 ref,`deletePullRequest` mutation 不存在)→ **由用户手动删库重建**,agent 重推全部引用、恢复分支保护、重建 Release。
+
+**复核方法论修正**(前几轮只查"文件内容 + 引用列表",漏了三个维度,以后一律四查):
+`git log --format=%B`(提交消息正文)、`git log --format='%an <%ae>'`(作者身份)、`git ls-remote origin | cut -d/ -f2 | sort -u`(**所有**引用类型)、再加文件内容。
+
+## 二、测试夹具私钥(公开化的必要前置)
+
+`mobile/core/xssh-core/src/ssh.rs` 里有一把 ed25519 测试私钥。它**从未部署过**,但公开仓库里留一把真私钥是坏示范。已替换为**「从生成起就公开」的夹具**(明文注释 `x-ssh test fixture, public by design`,口令仍是 `pw123`),指纹断言改为 `SHA256:E815YwKGOeKXgokX2FAp5JjteGK0Q1f8XfHWACoS63Y`。`.gitignore` 同步补上 `.env*` / `*.pem` / `*.key` / `*.p12` / `*.jks` / `id_rsa*` / `credentials.json` / `service-account*.json` / `*.kdbx`(保留 `!.env.example`)。
+
+## 三、0.6.0 发版
+
+- `package.json` 0.5.0 → **0.6.0**;`CHANGELOG.md` 的 `[Unreleased]` 封为 `[0.6.0] - 2026-10-31`。
+- 强推 tag 后**必须**先 `DELETE /releases/{id}` 删旧 Release,再重推 tag 才会触发 workflow。
+- Release:Windows `X-SSH.Setup.0.6.0.exe`(78.2MB)+ macOS dmg/zip。
+- 分支保护:strict + 必须通过 `test-build` + 禁强推 + 禁删除。**强推前要先 DELETE protection,推完立刻 PUT 恢复**。
+
+## 四、macOS 图标(已由 Mac 侧修复,`1af641c`)
+
+`package.json` 的 `build.mac.icon` 原指向 `build/icon.icon` —— 那是 Icon Composer 的**源目录**,不是图标文件。electron-builder 只认 `.icns` 或 ≥512px 的 `.png`,指向目录时**静默退回默认图标**,构建日志里没有任何警告。已改为 `build/icon.png`。
+
+**以后改 mac 图标只认两种**:`.icns`,或边长 ≥512 的 `.png`。改完验:解包 dmg / zip 里的 `Contents/Resources/icon.icns` 存在且体积正常(本次 654KB、11 档尺寸)。
+
+## 五、当前状态(以 `git log` 为准)
+
+| 项目 | 结果 |
+|---|---|
+| HEAD | `1af641c`,本地/远程一致 |
+| 远程 | `https://github.com/WyattCode/x-ssh`(public) |
+| 分支 | 本地/远程各 4 个 + `merge-mac` |
+| tag | 8 个(`v0.6.0` 最新) |
+| CI | test-build / rust-core / release 三作业全绿 |
+| 测试 | 桌面 **504** / 49 文件全绿;Rust 核心 `cargo test` 全绿 |
+| 敏感信息 | 文件内容 / 提交消息 / 邮箱 / 引用 —— 全为 0 |
+| 备份 | `x-ssh-pre-recreate.bundle`、`x-ssh-before-msgfix.bundle`(各 16M,保留未删) |
+
+**下次要动历史前先读这段**:`git filter-repo` 会删掉 origin remote,需 `git remote add` 恢复;tag 要在 main 构建完成之后单独推,否则不触发 workflow;推 tag 前先删同名 Release。
+
+---
+
+# 历史切片记录(以下为 2026-10-30 各轮"复核打磨",相关分支与 PR 均已合入 main)
+
 # 会话记录:连续改进 M3.83(2026-10-30,复核打磨:OSC52 空白 base64 + 主锁 Enter/busy + 离线点透明度)
 
 功能清单已够,本轮按站立规则做开源复核打磨(不合并)。未动 PR #17 / #16 / #15 / #14 / #13 / #12 与更早的 #4–#11。
