@@ -8,16 +8,26 @@
 
 /* Begin PBXBuildFile section */
 		04D733AE31069B943C4C8B27 /* XSSHCore.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = F1FE87F7078E3613BAB91B46 /* XSSHCore.xcframework */; };
+		265B7FC008DF6F6A3CF64CE9 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 908C2C163E9BCA7CB86BF5AD /* Localizable.xcstrings */; };
 		4C423AAD5F442F103B6AA367 /* XSSHApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8F34A73B5A93309E875F953 /* XSSHApp.swift */; };
+		701248AC7809523E89810737 /* KeyCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67546D7180CF39865A1FCEA9 /* KeyCapture.swift */; };
 		730F1D8CB36D4752C73EF293 /* TerminalModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7AA13AB1E8539719A7AD181 /* TerminalModel.swift */; };
 		766889B2E5FD72AB857145AF /* HostsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90A700116E14789B6722DE37 /* HostsView.swift */; };
 		BE3CA517D8EA35268B424A55 /* xssh_ffi.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBF96103E5FED6FF22B64431 /* xssh_ffi.swift */; };
+		C367438F25B3CB7622343595 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 7811C2DC0FBD8705949EBC0A /* Assets.xcassets */; };
 		CDA543690DA21D9A89F3745D /* Host.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7368087C0BFDB2DD4A225C02 /* Host.swift */; };
+		DD2F9EA665208D9FB1275812 /* Backend.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BDF8ABACFC555DF2E97187B /* Backend.swift */; };
+		F667657DD704D5826C64D3C9 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A6376447A9D21D6FDD076D3 /* Theme.swift */; };
 		FEDB013B6F7A6011481F21AE /* TerminalScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF0F57A4214E6389AC275F83 /* TerminalScreen.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		3A6376447A9D21D6FDD076D3 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
+		5BDF8ABACFC555DF2E97187B /* Backend.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Backend.swift; sourceTree = "<group>"; };
+		67546D7180CF39865A1FCEA9 /* KeyCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyCapture.swift; sourceTree = "<group>"; };
 		7368087C0BFDB2DD4A225C02 /* Host.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Host.swift; sourceTree = "<group>"; };
+		7811C2DC0FBD8705949EBC0A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		908C2C163E9BCA7CB86BF5AD /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
 		90A700116E14789B6722DE37 /* HostsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostsView.swift; sourceTree = "<group>"; };
 		B2CB2495746BDBF4939BFC12 /* XSSH.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = XSSH.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		EBF96103E5FED6FF22B64431 /* xssh_ffi.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = xssh_ffi.swift; sourceTree = "<group>"; };
@@ -76,10 +86,15 @@
 		F0D17993CF0599CA7240B200 /* XSSH */ = {
 			isa = PBXGroup;
 			children = (
+				7811C2DC0FBD8705949EBC0A /* Assets.xcassets */,
+				5BDF8ABACFC555DF2E97187B /* Backend.swift */,
 				7368087C0BFDB2DD4A225C02 /* Host.swift */,
 				90A700116E14789B6722DE37 /* HostsView.swift */,
+				67546D7180CF39865A1FCEA9 /* KeyCapture.swift */,
+				908C2C163E9BCA7CB86BF5AD /* Localizable.xcstrings */,
 				F7AA13AB1E8539719A7AD181 /* TerminalModel.swift */,
 				FF0F57A4214E6389AC275F83 /* TerminalScreen.swift */,
+				3A6376447A9D21D6FDD076D3 /* Theme.swift */,
 				F8F34A73B5A93309E875F953 /* XSSHApp.swift */,
 			);
 			path = XSSH;
@@ -101,6 +116,7 @@
 			buildConfigurationList = A679AFF1BAFD89474ECACFD6 /* Build configuration list for PBXNativeTarget "XSSH" */;
 			buildPhases = (
 				FF152BD52CD59306D53FEE44 /* Sources */,
+				19F95DA57AB8D6B5F5F1C832 /* Resources */,
 				CBE099AD2E32CD64153A21BD /* Frameworks */,
 			);
 			buildRules = (
@@ -131,6 +147,8 @@
 			knownRegions = (
 				Base,
 				en,
+				"zh-Hans",
+				"zh-Hant",
 			);
 			mainGroup = 4EC59B92747AF4FD0E3D8D96;
 			minimizedProjectReferenceProxies = 1;
@@ -144,15 +162,30 @@
 		};
 /* End PBXProject section */
 
+/* Begin PBXResourcesBuildPhase section */
+		19F95DA57AB8D6B5F5F1C832 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C367438F25B3CB7622343595 /* Assets.xcassets in Resources */,
+				265B7FC008DF6F6A3CF64CE9 /* Localizable.xcstrings in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		FF152BD52CD59306D53FEE44 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				DD2F9EA665208D9FB1275812 /* Backend.swift in Sources */,
 				CDA543690DA21D9A89F3745D /* Host.swift in Sources */,
 				766889B2E5FD72AB857145AF /* HostsView.swift in Sources */,
+				701248AC7809523E89810737 /* KeyCapture.swift in Sources */,
 				730F1D8CB36D4752C73EF293 /* TerminalModel.swift in Sources */,
 				FEDB013B6F7A6011481F21AE /* TerminalScreen.swift in Sources */,
+				F667657DD704D5826C64D3C9 /* Theme.swift in Sources */,
 				4C423AAD5F442F103B6AA367 /* XSSHApp.swift in Sources */,
 				BE3CA517D8EA35268B424A55 /* xssh_ffi.swift in Sources */,
 			);

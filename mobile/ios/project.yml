@@ -4,6 +4,8 @@ options:
   deploymentTarget:
     iOS: "27.0"
   createIntermediateGroups: true
+  developmentLanguage: en
+  knownRegions: [en, zh-Hans, zh-Hant]
 settings:
   base:
     SWIFT_VERSION: "5.0"
@@ -25,6 +27,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: dev.xssh.ios
         TARGETED_DEVICE_FAMILY: "1"
         GENERATE_INFOPLIST_FILE: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         INFOPLIST_KEY_CFBundleDisplayName: X-SSH
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
