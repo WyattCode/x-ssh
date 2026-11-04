@@ -25,7 +25,6 @@ struct TerminalScreen: View {
     /// 回到主机列表,会话保留(和「断开」不同)。
     let onBack: () -> Void
     let onClose: () -> Void
-    @Environment(\.horizontalSizeClass) private var sizeClass
 
     @State private var pinchBase: Double?
     @State private var dragLast: CGFloat = 0
@@ -46,10 +45,6 @@ struct TerminalScreen: View {
                 let size = area.size
                 ZStack(alignment: .topLeading) {
                     canvas(m)
-                    KeyCapture(model: model, ctrlArmed: model.ctrlArmed,
-                               wantsKeyboard: model.wantsKeyboard && !model.showsPrompt)
-                        .frame(width: 1, height: 1)
-                        .allowsHitTesting(false)
                 }
                 .frame(width: size.width, height: size.height, alignment: .topLeading)
                 #if DEBUG
@@ -84,14 +79,18 @@ struct TerminalScreen: View {
                 .padding(.leading, usable.map { $0.minX - container.minX } ?? 0)
                 .padding(.top, usable.map { $0.minY - container.minY } ?? 0)
         }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if model.wantsKeyboard, model.state == .connected { TerminalKeyRow(model: model) }
+        }
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { container = $0 }
         .navigationTitle(model.title.isEmpty ? model.host.displayName : model.title)
         .navigationBarTitleDisplayMode(.inline)
         // 标题由左上角的 logo + 主机名自己画,去掉系统标题,否则主机名出现两遍。
         .toolbar(removing: .title)
         .toolbarColorScheme(.dark, for: .navigationBar, .bottomBar)
-        // 外屏(紧凑宽度)系统返回键在竖条最上面,紧贴状态区;改成底部工具栏里的「主机」按钮。内屏侧栏常驻,不需要。
-        .navigationBarBackButtonHidden(sizeClass == .compact)
+        // 系统返回键在外屏竖条最上面,紧贴状态区;改成底部工具栏里的「主机」按钮。
+        // 工具栏结构不随尺寸类变:姿态切换时(折叠 / 展开)内容变了,系统会丢掉竖条。
+        .navigationBarBackButtonHidden(true)
         .toolbar {
             // 会话页左上角:应用 logo + 主机名。自定义视图(不是单纯的图标或标题)不会被系统竖排进竖条,留在顶部左边。
             ToolbarItem(placement: .topBarLeading) {
@@ -104,12 +103,10 @@ struct TerminalScreen: View {
             }
             // 去掉系统给工具栏项套的玻璃圆泡,否则 logo + 主机名被裁在一个小圆里。
             .sharedBackgroundVisibility(.hidden)
-            if sizeClass == .compact {
-                ToolbarItem(placement: .bottomBar) {
-                    Button("Hosts", systemImage: "chevron.backward", action: onBack)
-                }
-                .visibilityPriority(.high)
+            ToolbarItem(placement: .bottomBar) {
+                Button("Hosts", systemImage: "sidebar.leading", action: onBack)
             }
+            .visibilityPriority(.high)
             // 系统工具栏:iPhone Duo 外屏上带图标的按钮自动竖排到右侧,放不下的从下往上收进溢出菜单。
             // 键盘开关是终端里最常用的,最后才收;断开最不常用,最先收。每颗都带标题,溢出菜单里才看得懂。
             ToolbarItem(placement: .bottomBar) {

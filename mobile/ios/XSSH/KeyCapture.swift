@@ -1,7 +1,7 @@
 import SwiftUI
 import UIKit
 
-/// 隐形的第一响应者:接软键盘文字、实体键盘的组合键,并在键盘上方挂一排终端专用键。
+/// 隐形的第一响应者:接软键盘文字和实体键盘的组合键。终端专用键行是 `TerminalKeyRow`(SwiftUI,放在终端自己那一栏里)。
 /// 用 UITextField 而不是裸 UIKeyInput:拼音等输入法靠它的「标记文本」组字,
 /// 只有组字结束(没有 markedTextRange)才把定稿的文字发给服务器 —— 裸 UIKeyInput 会把拼音字母整个吞掉。
 struct KeyCapture: UIViewRepresentable {
@@ -17,7 +17,6 @@ struct KeyCapture: UIViewRepresentable {
     }
 
     func updateUIView(_ field: CaptureField, context: Context) {
-        field.accessory.setCtrl(armed: ctrlArmed)
         // 等视图进了窗口再要焦点;键盘开关由 `wantsKeyboard` 决定。
         DispatchQueue.main.async {
             field.syncing = true
@@ -45,13 +44,11 @@ struct KeyCapture: UIViewRepresentable {
 
     final class CaptureField: UITextField {
         weak var model: TerminalModel?
-        let accessory: KeyAccessory
         /// 程序自己开关键盘时置位:这种焦点变化不该改写用户的「要不要键盘」偏好。
         var syncing = false
 
         init(model: TerminalModel) {
             self.model = model
-            self.accessory = KeyAccessory(model: model)
             super.init(frame: .zero)
             autocorrectionType = .no
             autocapitalizationType = .none
@@ -66,8 +63,6 @@ struct KeyCapture: UIViewRepresentable {
         }
 
         @available(*, unavailable) required init?(coder: NSCoder) { fatalError() }
-
-        override var inputAccessoryView: UIView? { get { accessory } set {} }
 
         // 键盘被系统收起 / 我们收起时,同步回模型,按钮图标和点击唤起才对得上。
         override func becomeFirstResponder() -> Bool {
@@ -152,106 +147,76 @@ struct KeyCapture: UIViewRepresentable {
     }
 }
 
-/// 键盘上方那一排终端键。附件栏随键盘走、不会被系统挪到竖条里(Apple 的 iPhone Duo 指南里写明),
-/// 所以 Esc / Tab / Ctrl / 方向键放这里,系统工具栏只放次要动作。
-final class KeyAccessory: UIInputView {
-    private weak var model: TerminalModel?
-    private let haptic = UIImpactFeedbackGenerator(style: .light)
+/// 终端专用键行:Esc / Tab / Ctrl / 方向键 / 常用符号 / 粘贴,最右固定一颗「收起键盘」。
+/// 不再用系统的键盘附件栏:它铺满整个窗口宽度,内屏上会盖住左边的主机列表、半折时还横跨折痕。
+/// 现在它在终端那一栏的底部(`safeAreaInset`),软键盘弹起时跟着键盘上沿走,实体键盘时贴栏底。
+/// 点击区域 ≥44×44pt,看得见的键帽 40×40,按键之间留 2pt。
+struct TerminalKeyRow: View {
+    let model: TerminalModel
+    @State private var haptic = UIImpactFeedbackGenerator(style: .light)
 
-    init(model: TerminalModel) {
-        self.model = model
-        super.init(frame: CGRect(x: 0, y: 0, width: 0, height: 56), inputViewStyle: .keyboard)
-        allowsSelfSizing = true
-        translatesAutoresizingMaskIntoConstraints = false
-
-        let stack = UIStackView()
-        stack.axis = .horizontal
-        stack.spacing = 6
-        stack.alignment = .center
-        stack.translatesAutoresizingMaskIntoConstraints = false
-
-        func key(_ title: String? = nil, symbol: String? = nil, label: String, action: @escaping @MainActor () -> Void) -> UIButton {
-            var config = UIButton.Configuration.gray()
-            config.title = title
-            if let symbol { config.image = UIImage(systemName: symbol) }
-            config.cornerStyle = .medium
-            config.contentInsets = NSDirectionalEdgeInsets(top: 12, leading: 12, bottom: 12, trailing: 12)
-            let b = UIButton(configuration: config, primaryAction: UIAction { [weak self] _ in
-                self?.haptic.impactOccurred()
-                MainActor.assumeIsolated { action() }
-            })
-            b.accessibilityLabel = label
-            b.widthAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
-            b.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
-            return b
+    var body: some View {
+        HStack(spacing: 0) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 2) {
+                    text("Esc") { model.press(.esc) }
+                    text("Tab") { model.press(.tab) }
+                    ctrl
+                    symbol("arrow.up", "Up") { model.press(.up) }
+                    symbol("arrow.down", "Down") { model.press(.down) }
+                    symbol("arrow.left", "Left") { model.press(.left) }
+                    symbol("arrow.right", "Right") { model.press(.right) }
+                    text("|") { model.send("|") }
+                    text("~") { model.send("~") }
+                    text("/") { model.send("/") }
+                    text("-") { model.send("-") }
+                    symbol("doc.on.clipboard", "Paste") { model.paste() }
+                }
+                .padding(.horizontal, 4)
+            }
+            Divider().frame(height: 24).padding(.horizontal, 2)
+            symbol("keyboard.chevron.compact.down", "Hide Keyboard") { model.wantsKeyboard = false }
+                .padding(.trailing, 4)
         }
-
-        let m = model
-        let buttons: [UIButton] = [
-            key("Esc", label: "Esc") { m.press(.esc) },
-            key("Tab", label: "Tab") { m.press(.tab) },
-            key("Ctrl", label: String(localized: "Control")) { m.ctrlArmed.toggle() },
-            key(symbol: "arrow.up", label: String(localized: "Up")) { m.press(.up) },
-            key(symbol: "arrow.down", label: String(localized: "Down")) { m.press(.down) },
-            key(symbol: "arrow.left", label: String(localized: "Left")) { m.press(.left) },
-            key(symbol: "arrow.right", label: String(localized: "Right")) { m.press(.right) },
-            key("|", label: "|") { m.send("|") },
-            key("~", label: "~") { m.send("~") },
-            key("/", label: "/") { m.send("/") },
-            key("-", label: "-") { m.send("-") },
-            key(symbol: "doc.on.clipboard", label: String(localized: "Paste")) { m.paste() },
-        ]
-        for (i, b) in buttons.enumerated() {
-            if i == 2 { ctrl = b }
-            stack.addArrangedSubview(b)
-        }
-
-        // 收起键盘固定在最右、不随键行滚动:外屏键盘弹着时系统工具栏里的键盘开关可能被收进溢出菜单,
-        // 键盘附件栏跟着键盘走(Apple 的 iPhone Duo 指引),所以这颗放这里一定够得着。
-        var hideConfig = UIButton.Configuration.gray()
-        hideConfig.image = UIImage(systemName: "keyboard.chevron.compact.down")
-        hideConfig.cornerStyle = .medium
-        let hide = UIButton(configuration: hideConfig, primaryAction: UIAction { [weak self] _ in
-            self?.haptic.impactOccurred()
-            MainActor.assumeIsolated { m.wantsKeyboard = false }
-        })
-        hide.accessibilityLabel = String(localized: "Hide Keyboard")
-        hide.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(hide)
-
-        let scroll = UIScrollView()
-        scroll.showsHorizontalScrollIndicator = false
-        scroll.translatesAutoresizingMaskIntoConstraints = false
-        scroll.addSubview(stack)
-        addSubview(scroll)
-        NSLayoutConstraint.activate([
-            hide.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-            hide.centerYAnchor.constraint(equalTo: centerYAnchor),
-            hide.widthAnchor.constraint(equalToConstant: 52),
-            hide.heightAnchor.constraint(equalToConstant: 44),
-            scroll.leadingAnchor.constraint(equalTo: leadingAnchor),
-            scroll.trailingAnchor.constraint(equalTo: hide.leadingAnchor, constant: -4),
-            scroll.topAnchor.constraint(equalTo: topAnchor),
-            scroll.bottomAnchor.constraint(equalTo: bottomAnchor),
-            stack.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor, constant: 8),
-            stack.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor, constant: -8),
-            stack.centerYAnchor.constraint(equalTo: scroll.frameLayoutGuide.centerYAnchor),
-            heightAnchor.constraint(equalToConstant: 56),
-        ])
+        .frame(height: 52)
+        // 底色只铺在终端这一栏的安全区里,不铺到右边的系统竖条下面。
+        .background(.bar, ignoresSafeAreaEdges: [])
+        .environment(\.colorScheme, .dark)
     }
 
-    @available(*, unavailable) required init?(coder: NSCoder) { fatalError() }
+    private var ctrl: some View {
+        Button { haptic.impactOccurred(); model.ctrlArmed.toggle() } label: {
+            Text("Ctrl")
+        }
+        .buttonStyle(KeyCapStyle(highlighted: model.ctrlArmed))
+        .accessibilityLabel(Text("Control"))
+        .accessibilityValue(model.ctrlArmed ? Text("On") : Text(verbatim: ""))
+    }
 
-    private var ctrl: UIButton?
+    private func text(_ title: String, _ action: @escaping () -> Void) -> some View {
+        Button { haptic.impactOccurred(); action() } label: { Text(verbatim: title) }
+            .buttonStyle(KeyCapStyle())
+            .accessibilityLabel(Text(verbatim: title))
+    }
 
-    /// Ctrl 待用时整颗按钮实心高亮,看得出下一个键会变成控制字符。
-    func setCtrl(armed: Bool) {
-        guard let ctrl else { return }
-        var config = armed ? UIButton.Configuration.filled() : UIButton.Configuration.gray()
-        config.title = "Ctrl"
-        config.cornerStyle = .medium
-        config.contentInsets = NSDirectionalEdgeInsets(top: 12, leading: 12, bottom: 12, trailing: 12)
-        ctrl.configuration = config
-        ctrl.accessibilityValue = armed ? String(localized: "On") : nil
+    private func symbol(_ name: String, _ label: LocalizedStringKey, _ action: @escaping () -> Void) -> some View {
+        Button { haptic.impactOccurred(); action() } label: { Image(systemName: name) }
+            .buttonStyle(KeyCapStyle())
+            .accessibilityLabel(Text(label))
+    }
+}
+
+private struct KeyCapStyle: ButtonStyle {
+    var highlighted = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.body)
+            .foregroundStyle(.white)
+            .frame(minWidth: 40, minHeight: 40)
+            .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(highlighted ? Color.accentColor : Color(white: configuration.isPressed ? 0.4 : 0.24)))
+            .padding(2)                 // 点击区域 44×44
+            .contentShape(Rectangle())
     }
 }
