@@ -1698,19 +1698,11 @@ function registerIpc(): void {
       try {
         await knownHosts.load()
         await knownHosts.set(host, p, fingerprint.toLowerCase())
-      } catch {
-        // Persisting failed: keep the rejection so the user can retry.
-        return { ok: false }
-      }
-      // Written: now consume the rejection so it can't be trusted twice.
-      mgr.takeRejectedKey(host, p, fingerprint)
-      if (!sshManager?.takeRejectedKey(host, p, fingerprint)) return { ok: false, code: 'rejected' }
-      try {
-        await knownHosts.load()
-        await knownHosts.set(host, p, fingerprint.toLowerCase())
       } catch (e) {
         // A corrupt known_hosts.json is refused rather than overwritten, so the
         // user's other trusted fingerprints survive; tell the renderer which.
+        // A plain write failure keeps the rejection alive so the click can be
+        // retried — but say so with a code, not a bare { ok: false }.
         const corrupt = e instanceof KnownHostsCorruptError || knownHosts.status().loadFailed
         return {
           ok: false as const,
@@ -1718,6 +1710,14 @@ function registerIpc(): void {
           error: friendlyError((e as Error).message)
         }
       }
+      // Written: now consume the rejection so it can't be trusted twice.
+      //
+      // This block used to be duplicated straight after — the second
+      // takeRejectedKey() could never succeed (the first call deleted the
+      // entry), so every trust returned { ok: false } and the renderer showed
+      // "无法保存主机密钥" while the key had in fact been saved. The user
+      // re-clicked, each click stacking another toast.
+      mgr.takeRejectedKey(host, p, fingerprint)
       void pushConnLog({ at: Date.now(), event: 'connect', host, port: p, username: '', detail: 'trust-host-key' }).catch(() => undefined)
       return { ok: true as const }
     }
