@@ -80,7 +80,7 @@ struct TerminalScreen: View {
                 .padding(.top, usable.map { $0.minY - container.minY } ?? 0)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            if model.wantsKeyboard, model.state == .connected { TerminalKeyRow(model: model) }
+            if model.showsKeys, model.state == .connected { TerminalKeyPanel(model: model) }
         }
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { container = $0 }
         .navigationTitle(model.title.isEmpty ? model.host.displayName : model.title)
@@ -103,24 +103,28 @@ struct TerminalScreen: View {
             }
             // 去掉系统给工具栏项套的玻璃圆泡,否则 logo + 主机名被裁在一个小圆里。
             .sharedBackgroundVisibility(.hidden)
+            // 返回主机列表是导航,键盘弹着、竖条放不下时让位:进溢出菜单。这时最需要的是键盘 / 快捷键两颗开关。
             ToolbarItem(placement: .bottomBar) {
-                Button("Hosts", systemImage: "sidebar.leading", action: onBack)
+                Button("Hosts", systemImage: "chevron.left", action: onBack)
             }
-            .visibilityPriority(.high)
             // 系统工具栏:iPhone Duo 外屏上带图标的按钮自动竖排到右侧,放不下的从下往上收进溢出菜单。
             // 键盘开关是终端里最常用的,最后才收;断开最不常用,最先收。每颗都带标题,溢出菜单里才看得懂。
+            // 快捷键面板和系统键盘是两颗独立的按钮,各自亮着(蓝)表示开着 —— 同安卓的 ⌘ / ⌨。
             ToolbarItem(placement: .bottomBar) {
-                Button(model.wantsKeyboard ? "Hide Keyboard" : "Keyboard",
-                       systemImage: model.wantsKeyboard ? "keyboard.chevron.compact.down" : "keyboard") {
-                    model.wantsKeyboard.toggle()
-                }
+                Button("Shortcuts", systemImage: "command") { withAnimation(.smooth(duration: 0.25)) { model.showsKeys.toggle() } }
+                    .tint(model.showsKeys ? Color.accentColor : nil)
             }
             .visibilityPriority(.high)
             ToolbarItem(placement: .bottomBar) {
-                Button("Paste", systemImage: "doc.on.clipboard") { model.paste() }
+                Button("Keyboard", systemImage: "keyboard") { model.wantsKeyboard.toggle() }
+                    .tint(model.wantsKeyboard ? Color.accentColor : nil)
+            }
+            .visibilityPriority(.high)
+            ToolbarItem(placement: .bottomBar) {
+                Button("Paste", systemImage: "clipboard") { model.paste() }
             }
             ToolbarItem(placement: .bottomBar) {
-                Button("Disconnect", systemImage: "xmark.circle", role: .destructive, action: onClose)
+                Button("Disconnect", systemImage: "xmark", role: .destructive, action: onClose)
             }
             .visibilityPriority(.low)
         }
@@ -224,6 +228,7 @@ struct TerminalScreen: View {
         switch model.state {
         case .idle, .connecting:
             card {
+                BrandMark(size: 56)
                 ProgressView().tint(.white)
                 Text("Connecting…").font(.headline)
                 Button("Cancel", role: .cancel, action: onClose).buttonStyle(.bordered)
@@ -268,7 +273,7 @@ struct TerminalScreen: View {
             VStack {
                 Spacer()
                 HStack(spacing: 12) {
-                    Image(systemName: "bolt.horizontal.circle")
+                    Image(systemName: "bolt.slash")
                     if let status, status != 0 { Text("Session ended (exit \(Int(status)))") } else { Text("Session ended") }
                     Spacer(minLength: 8)
                     Button("Reconnect") { model.connect() }.buttonStyle(.borderedProminent).controlSize(.large)
