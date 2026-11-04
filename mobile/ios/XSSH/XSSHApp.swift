@@ -31,7 +31,7 @@ struct RootView: View {
             HostsView(activeID: active.flatMap { $0.isEnded ? nil : $0.host.id }, onConnect: open)
         } detail: {
             if let active {
-                TerminalScreen(model: active, onClose: close)
+                TerminalScreen(model: active, onBack: { compactColumn = .sidebar }, onClose: close)
                     .id(active.id)
             } else {
                 ContentUnavailableView("No session", systemImage: "terminal",

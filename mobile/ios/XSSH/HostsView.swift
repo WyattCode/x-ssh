@@ -67,6 +67,15 @@ struct HostsView: View {
                 Button("Add Host", systemImage: "plus") { startAdding() }
             }
         }
+        #if DEBUG
+        // `-autoNewHost` / `-autoEditHost <名字>`:启动后直接弹出编辑页,命令行起的模拟器里核对弹层布局用。
+        .task {
+            try? await Task.sleep(for: .seconds(1))
+            if DebugLaunch.flag("-autoNewHost") { startAdding() }
+            else if let name = DebugLaunch.value("-autoEditHost"),
+                    let host = store.hosts.first(where: { $0.displayName == name }) { startEditing(host) }
+        }
+        #endif
         .sheet(item: $editing) { host in
             HostEditor(host: host, password: isNew ? "" : store.password(for: host)) { saved, password in
                 store.save(saved, password: password)
@@ -161,6 +170,9 @@ struct HostEditor: View {
                         .onSubmit { focus = nil }
                 }
             }
+            // 外屏上弹层默认也把 × ✓ 竖排进竖条最上面,紧贴状态区;弹层保持横向工具栏(HIG 给弹层的做法),
+            // 按钮回到弹层自己的顶角,竖条顶端不放任何可点的东西。
+            .modifier(HorizontalBarsOnly())
             .navigationTitle(host.displayName.isEmpty ? String(localized: "New Host") : host.displayName)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -199,5 +211,16 @@ struct HostEditor: View {
         var h = host
         h.port = port ?? 0
         if onSave(h, password) { dismiss() } else { saveFailed = true }
+    }
+}
+
+/// 弹层不进竖条:`toolbarVerticalBehavior` 是 iOS 27.1 才有的,低版本没有竖条这回事,原样返回。
+private struct HorizontalBarsOnly: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 27.1, *) {
+            content.toolbarVerticalBehavior(.disabled)
+        } else {
+            content
+        }
     }
 }

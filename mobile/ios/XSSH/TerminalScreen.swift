@@ -22,7 +22,10 @@ struct TerminalScreen: View {
     @AppStorage("terminalFontSize") private var fontSize = 13.0
 
     let model: TerminalModel
+    /// 回到主机列表,会话保留(和「断开」不同)。
+    let onBack: () -> Void
     let onClose: () -> Void
+    @Environment(\.horizontalSizeClass) private var sizeClass
 
     @State private var pinchBase: Double?
     @State private var dragLast: CGFloat = 0
@@ -85,7 +88,15 @@ struct TerminalScreen: View {
         .navigationTitle(model.title.isEmpty ? model.host.displayName : model.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbarColorScheme(.dark, for: .navigationBar, .bottomBar)
+        // 外屏(紧凑宽度)系统返回键在竖条最上面,紧贴状态区;改成底部工具栏里的「主机」按钮。内屏侧栏常驻,不需要。
+        .navigationBarBackButtonHidden(sizeClass == .compact)
         .toolbar {
+            if sizeClass == .compact {
+                ToolbarItem(placement: .bottomBar) {
+                    Button("Hosts", systemImage: "chevron.backward", action: onBack)
+                }
+                .visibilityPriority(.high)
+            }
             // 系统工具栏:iPhone Duo 外屏上带图标的按钮自动竖排到右侧,放不下的从下往上收进溢出菜单。
             // 键盘开关是终端里最常用的,最后才收;断开最不常用,最先收。每颗都带标题,溢出菜单里才看得懂。
             ToolbarItem(placement: .bottomBar) {
