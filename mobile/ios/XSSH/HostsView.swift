@@ -3,6 +3,8 @@ import SwiftUI
 struct HostsView: View {
     @Environment(HostStore.self) private var store
     let activeID: UUID?
+    /// 详情那一侧的「新建主机」按钮通过它让这里弹出编辑页。
+    @Binding var addRequested: Bool
     let onConnect: (Host) -> Void
 
     @State private var editing: Host?
@@ -76,6 +78,9 @@ struct HostsView: View {
                     let host = store.hosts.first(where: { $0.displayName == name }) { startEditing(host) }
         }
         #endif
+        .onChange(of: addRequested) { _, requested in
+            if requested { addRequested = false; startAdding() }
+        }
         .sheet(item: $editing) { host in
             HostEditor(host: host, password: isNew ? "" : store.password(for: host)) { saved, password in
                 store.save(saved, password: password)
@@ -117,6 +122,7 @@ struct HostEditor: View {
     private enum Field { case name, address, port, user, password }
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var host: Host
     @State private var portText: String
     @State private var password: String
@@ -170,17 +176,25 @@ struct HostEditor: View {
                         .onSubmit { focus = nil }
                 }
             }
-            // 外屏上弹层默认也把 × ✓ 竖排进竖条最上面,紧贴状态区;弹层保持横向工具栏(HIG 给弹层的做法),
-            // 按钮回到弹层自己的顶角,竖条顶端不放任何可点的东西。
-            .modifier(HorizontalBarsOnly())
             .navigationTitle(host.displayName.isEmpty ? String(localized: "New Host") : host.displayName)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel", systemImage: "xmark") { dismiss() }
-                }
-                ToolbarItem(placement: .topBarPinnedTrailing) {
-                    Button("Save", systemImage: "checkmark", action: save).disabled(!canSave)
+                // 外屏(紧凑宽度)上弹层的按钮竖排进竖条:放底部工具栏,也就是右下角,和主机页一致;
+                // 竖条最上面一格紧挨状态区,按钮放那儿会碰到状态图标。内屏弹层居中,用标准的顶部按钮。
+                if sizeClass == .compact {
+                    ToolbarItem(placement: .bottomBar) {
+                        Button("Cancel", systemImage: "xmark") { dismiss() }
+                    }
+                    ToolbarItem(placement: .bottomBar) {
+                        Button("Save", systemImage: "checkmark", action: save).disabled(!canSave)
+                    }
+                } else {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel", systemImage: "xmark") { dismiss() }
+                    }
+                    ToolbarItem(placement: .topBarPinnedTrailing) {
+                        Button("Save", systemImage: "checkmark", action: save).disabled(!canSave)
+                    }
                 }
                 // 数字键盘没有回车键,得给个收起的地方。
                 ToolbarItemGroup(placement: .keyboard) {
@@ -211,16 +225,5 @@ struct HostEditor: View {
         var h = host
         h.port = port ?? 0
         if onSave(h, password) { dismiss() } else { saveFailed = true }
-    }
-}
-
-/// 弹层不进竖条:`toolbarVerticalBehavior` 是 iOS 27.1 才有的,低版本没有竖条这回事,原样返回。
-private struct HorizontalBarsOnly: ViewModifier {
-    func body(content: Content) -> some View {
-        if #available(iOS 27.1, *) {
-            content.toolbarVerticalBehavior(.disabled)
-        } else {
-            content
-        }
     }
 }

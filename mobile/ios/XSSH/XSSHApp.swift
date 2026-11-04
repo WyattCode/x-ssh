@@ -22,21 +22,32 @@ struct XSSHApp: App {
 struct RootView: View {
     @Environment(HostStore.self) private var hosts
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var active: TerminalModel?
+    @State private var addHostRequested = false
     @State private var columns: NavigationSplitViewVisibility = .automatic
     @State private var compactColumn: NavigationSplitViewColumn = .sidebar
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columns, preferredCompactColumn: $compactColumn) {
-            HostsView(activeID: active.flatMap { $0.isEnded ? nil : $0.host.id }, onConnect: open)
+            HostsView(activeID: active.flatMap { $0.isEnded ? nil : $0.host.id }, addRequested: $addHostRequested, onConnect: open)
         } detail: {
             if let active {
                 TerminalScreen(model: active, onBack: { compactColumn = .sidebar }, onClose: close)
                     .id(active.id)
             } else {
-                ContentUnavailableView("No session", systemImage: "terminal",
-                                       description: Text("Pick a host to connect."))
+                EmptySessionView()
+                    // 没会话时右侧竖条也要有按钮:内屏上主机列表在左边的侧栏里,详情这一侧的竖条放「新建主机」。
+                    .toolbar {
+                        ToolbarItem(placement: .bottomBar) {
+                            Button("Add Host", systemImage: "plus") { addHostRequested = true }
+                        }
+                    }
             }
+        }
+        // 内屏(宽 × 高都是常规尺寸)是 iPad 布局的自然延伸:主机列表常驻在左边,不默认收起。
+        .onChange(of: sizeClass, initial: true) { _, now in
+            columns = now == .regular ? .all : .automatic
         }
         .onChange(of: scenePhase) { _, phase in active?.setForeground(phase == .active) }
         #if DEBUG
