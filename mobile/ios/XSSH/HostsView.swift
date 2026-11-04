@@ -182,6 +182,8 @@ struct HostEditor: View {
                 // 外屏(紧凑宽度)上弹层的按钮竖排进竖条:放底部工具栏,也就是右下角,和主机页一致;
                 // 竖条最上面一格紧挨状态区,按钮放那儿会碰到状态图标。内屏弹层居中,用标准的顶部按钮。
                 if sizeClass == .compact {
+                    // 竖条里弹性空白是零尺寸;弹层是横向底栏时(内屏居中弹层)把这组按钮推到右下角。
+                    ToolbarSpacer(.flexible, placement: .bottomBar)
                     ToolbarItem(placement: .bottomBar) {
                         Button("Cancel", systemImage: "xmark") { dismiss() }
                     }

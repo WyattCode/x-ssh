@@ -71,9 +71,19 @@ struct KeyCapture: UIViewRepresentable {
             return ok
         }
 
+        /// 键盘显示与否只由用户的按钮(`wantsKeyboard`)决定。系统因为换屏 / 姿态切换 / 导航容器重建把焦点收走时,
+        /// 不能当成用户要收键盘;用户还想要键盘的话,稍后把焦点拿回来。
         override func resignFirstResponder() -> Bool {
             let ok = super.resignFirstResponder()
-            if ok, !syncing { MainActor.assumeIsolated { if model?.wantsKeyboard == true { model?.wantsKeyboard = false } } }
+            if ok, !syncing, model?.wantsKeyboard == true {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+                    guard let self, self.window != nil, !self.isFirstResponder else { return }
+                    guard MainActor.assumeIsolated({ self.model?.wantsKeyboard == true }) else { return }
+                    self.syncing = true
+                    _ = self.becomeFirstResponder()
+                    self.syncing = false
+                }
+            }
             return ok
         }
 
