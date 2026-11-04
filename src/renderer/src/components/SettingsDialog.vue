@@ -203,6 +203,7 @@ watch(
     if (show) {
       void loadConnLog()
       void loadHelloStatus()
+      void loadSecretsStatus()
     }
   }
 )
@@ -979,6 +980,32 @@ async function backupNow(): Promise<void> {
 // ---- App master-lock ----
 const lockNewPass = ref('')
 const lockBusy = ref(false)
+
+// ---- Secrets vault ----
+// An unreadable vault makes save() refuse to write passwords (overwriting it
+// would destroy data that may still be recoverable on the originating machine),
+// so this is the only path back to being able to save a password again.
+const secretsBad = ref(false)
+const vaultBusy = ref(false)
+async function loadSecretsStatus(): Promise<void> {
+  try {
+    secretsBad.value = (await window.api.hosts.secretsStatus()) === 'bad'
+  } catch {
+    secretsBad.value = false
+  }
+}
+async function resetVault(): Promise<void> {
+  if (vaultBusy.value) return
+  const ok = await confirm(t('vault.resetConfirm'), { danger: true, confirmText: t('vault.reset') })
+  if (!ok) return
+  vaultBusy.value = true
+  try {
+    const done = await store.resetSecrets()
+    if (done) secretsBad.value = false
+  } finally {
+    vaultBusy.value = false
+  }
+}
 const helloSupported = ref(false)
 const helloEnabled = ref(false)
 const helloAvailable = ref<'available' | 'unavailable' | 'unsupported'>('unsupported')
@@ -1562,6 +1589,22 @@ function onLockPassEnter(e: KeyboardEvent): void {
 
           <!-- ================= 安全 ================= -->
           <template v-else-if="store.settingsTab === 'security'">
+            <!-- Only shown when the vault is actually unreadable. Saving a
+                 password fails on purpose in that state, so the user needs a
+                 way out that is not "delete the app's data folder". -->
+            <section v-if="secretsBad" class="group">
+              <h3>{{ t('vault.title') }}</h3>
+              <div class="card">
+                <p class="g-desc">{{ t('app.secretsLoadFail') }}</p>
+                <div class="row actions-row">
+                  <span class="spacer" />
+                  <button class="btn sm btn-danger" :disabled="vaultBusy" @click="resetVault">
+                    {{ t('vault.reset') }}
+                  </button>
+                </div>
+              </div>
+            </section>
+
             <section class="group">
               <h3>{{ t('lock.title') }}</h3>
               <p class="g-desc">{{ t('lock.desc') }}</p>

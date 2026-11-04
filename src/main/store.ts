@@ -1,6 +1,6 @@
 import { app, safeStorage } from 'electron'
 import { join } from 'node:path'
-import { mkdir } from 'node:fs/promises'
+import { mkdir, copyFile } from 'node:fs/promises'
 import { parseJson, readDurable, writeDurable } from './durableFile'
 import type { Host, HostOs } from '../shared/types'
 
@@ -65,15 +65,25 @@ export class HostStore {
       this.hostsLoadFailed = false
     }
     if (!safeStorage.isEncryptionAvailable()) return
-    // If a prior load couldn't decrypt secrets.bin (e.g. it was copied from
-    // another machine — DPAPI is per-machine), don't clobber it with an EMPTY
-    // object. But once the user actually saves a secret, persist it and clear
-    // the flag: the old undecryptable data is unrecoverable here anyway, so we
-    // must not stay permanently unable to save new passwords.
-    if (this.secretsLoadFailed && Object.keys(this.secrets).length === 0) return
+    // An existing vault this launch could not decrypt must never be replaced.
+    //
+    // The guard used to be `secrets.length === 0`, i.e. "don't clobber it with
+    // an EMPTY object". Typing a single new password made the object non-empty
+    // and the guard fell away: the unreadable file was overwritten with one
+    // entry, silently discarding every password it still held. Emptiness was
+    // the wrong question — the vault is unreadable either way, so whether this
+    // write is safe cannot depend on how many entries we happen to hold.
+    //
+    // Refusing is the only honest option: the data on disk is recoverable (the
+    // file is left untouched, and .corrupt records the failed read), while an
+    // overwrite is not. save() turns this into a visible error so the user
+    // learns the password was not stored instead of finding out at connect
+    // time.
+    if (this.secretsLoadFailed) {
+      throw new Error('secrets-unreadable: refusing to overwrite an unreadable vault')
+    }
     const enc = safeStorage.encryptString(JSON.stringify(this.secrets))
     await writeDurable(this.secretsFile, enc)
-    this.secretsLoadFailed = false
   }
 
   private ppKey(id: string): string {
@@ -129,6 +139,14 @@ export class HostStore {
     if (idx >= 0) this.hosts[idx] = clean
     else this.hosts.push(clean)
 
+    // Remember the pre-edit vault so a failed write can be rolled back. Without
+    // this, a save that threw left the *in-memory* vault holding only what this
+    // call touched, and the next successful save wrote that reduced set to disk
+    // — one failed edit could quietly drop every other saved password.
+    const secretsBefore = { ...this.secrets }
+    const unreadableBefore = this.secretsLoadFailed
+    const wroteSecret = password !== undefined || passphrase !== undefined
+
     if (password !== undefined) {
       if (password) this.secrets[host.id] = password
       else delete this.secrets[host.id]
@@ -137,8 +155,63 @@ export class HostStore {
       if (passphrase) this.secrets[this.ppKey(host.id)] = passphrase
       else delete this.secrets[this.ppKey(host.id)]
     }
-    await this.persist()
+    try {
+      // persist() writes hosts.json first, then the vault — so a vault failure
+      // still leaves the host edit saved, which is the right split: losing the
+      // profile because a password could not be stored would be worse.
+      await this.persist()
+    } catch (e) {
+      // Put the vault back so a later save can't persist the half-applied set.
+      this.secrets = secretsBefore
+      this.secretsLoadFailed = unreadableBefore
+      // The renderer tells "host kept, password not stored" apart by the
+      // `secrets-` prefix; anything else is a genuine save failure.
+      throw e
+    }
+    // A typed secret must actually be in the vault, not just in memory. This
+    // covers the case persist() skips silently: no OS encryption at all.
+    if (wroteSecret && password) {
+      if (!safeStorage.isEncryptionAvailable()) {
+        throw new Error('secrets-unavailable: no OS encryption, password not stored')
+      }
+      if (this.secrets[host.id] !== password) {
+        throw new Error('secrets-not-persisted: password did not reach the vault')
+      }
+    }
     return this.list()
+  }
+
+  /** Whether the OS can encrypt the secrets vault on this machine. */
+  isEncryptionAvailable(): boolean {
+    return safeStorage.isEncryptionAvailable()
+  }
+
+  /** Whether this launch failed to read an existing vault (so writes are risky). */
+  get secretsUnreadable(): boolean {
+    return this.secretsLoadFailed
+  }
+
+  /**
+   * Discards an unreadable vault so saving passwords works again.
+   *
+   * `persist()` refuses to overwrite a vault it could not decrypt (that is what
+   * kept the old passwords recoverable instead of silently erasing them), but
+   * refusing forever would leave the app unable to store any password. This is
+   * the explicit way out: the caller has told the user what is being given up,
+   * and the old file is kept beside the new one rather than deleted.
+   */
+  async resetSecrets(): Promise<void> {
+    await this.ensureLoaded()
+    if (!this.secretsLoadFailed) return
+    // Keep the unreadable original: it may still be decryptable on the machine
+    // it came from, so this stays a "start over here", not a destruction.
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+    await copyFile(this.secretsFile, `${this.secretsFile}.unreadable-${stamp}`).catch(
+      () => undefined
+    )
+    this.secrets = {}
+    this.secretsLoadFailed = false
+    await this.persist()
   }
 
   async delete(id: string): Promise<Host[]> {

@@ -3,6 +3,7 @@ export const IPC = {
   // Host store (invoke/handle)
   hostsList: 'hosts:list',
   hostsSecretsStatus: 'hosts:secretsStatus',
+  hostsResetSecrets: 'hosts:resetSecrets',
   hostsSave: 'hosts:save',
   hostsDelete: 'hosts:delete',
   hostsProbe: 'hosts:probe',
