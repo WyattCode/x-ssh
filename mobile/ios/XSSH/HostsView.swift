@@ -58,8 +58,12 @@ struct HostsView: View {
         .searchable(text: $query, prompt: Text("Search hosts"))
         .navigationTitle("Hosts")
         // 按钮全走系统工具栏:iPhone Duo 外屏上它们会自动竖到右侧。
+        // 放底部工具栏:竖条里顶部那一段紧挨着状态区(灵动岛 / 信号 / 电量),「+」贴上去会和状态图标碰在一起,
+        // 按下放大时还会压到它;HIG 里底部工具栏的按钮留在竖条下方,拇指也够得着。
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
+            // 搜索也显式放底部,和「+」由系统分开排位;只放「+」时搜索按钮会被它占掉。
+            DefaultToolbarItem(kind: .search, placement: .bottomBar)
+            ToolbarItem(placement: .bottomBar) {
                 Button("Add Host", systemImage: "plus") { startAdding() }
             }
         }
