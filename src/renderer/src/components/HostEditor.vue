@@ -493,10 +493,17 @@ async function save(): Promise<void> {
   saving.value = true
   try {
     store.hosts = await window.api.hosts.save(host, pw, pp)
-  } catch {
+  } catch (e) {
     // Main rejects when the hosts file cannot be written (disk full, unreadable
-    // file). Without this the panel just sat there with nothing said.
-    toast(t('ed.saveFail'), 'error')
+    // file) — and now also when a typed password could not be written to the
+    // secrets vault. Those need different words: "保存失败" made the user retype
+    // a password that had in fact been stored, while the real problem was the
+    // vault (no OS encryption / unreadable secrets.bin).
+    const msg = (e as Error)?.message ?? ''
+    toast(
+      msg.includes('secrets-') ? t('ed.saveFailSecret') : t('ed.saveFail'),
+      'error'
+    )
     return
   } finally {
     saving.value = false
