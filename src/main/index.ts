@@ -22,6 +22,7 @@ import { friendlyError } from './friendlyError'
 import { KeyManager } from './keyManager'
 import { MasterLock } from './lock'
 import { registerUserVerifyIpc, gateKeyConnect, userVerifyBlocksQuiet } from './userVerifyIpc'
+import { capHistory } from './sessionHistory'
 
 const store = new HostStore()
 const knownHosts = new KnownHosts()
@@ -1197,6 +1198,14 @@ function createWindow(saved?: SavedBounds, prefs: UiPrefs = {}): void {
 
   win.on('closed', () => {
     // Persist session output so history search still finds it after a restart.
+    //
+    // Bounded by BYTES, not by entry count. A scrollback buffer for a busy
+    // session is ~330 KB of ANSI-laden text (measured on real data: 142 saved
+    // entries filled 30 MB, median entry 327 KB). The old `slice(-300)` cap
+    // allowed ~100 MB, and settings.json is rewritten in full — twice, plus a
+    // temp file — on EVERY settings write. At that size a single edit to a
+    // 4.9 KB hosts.json could fail on a Windows rename, which surfaced as
+    // "保存失败" in the host editor even though the host itself saved.
     const live = sshManager?.historyList() ?? []
     if (live.length) {
       void settings
@@ -1206,7 +1215,7 @@ function createWindow(saved?: SavedBounds, prefs: UiPrefs = {}): void {
             ...(existing ?? []),
             ...live.map((s) => ({ label: s.label, text: s.text }))
           ]
-          void settings.set('sessionHistory', merged.slice(-300)).catch(() => undefined)
+          void settings.set('sessionHistory', capHistory(merged)).catch(() => undefined)
         })
     }
     for (const stop of [...editCleanups.values()]) stop()
@@ -1229,6 +1238,19 @@ function registerIpc(): void {
       store.save(host, password, passphrase)
   )
   ipcMain.handle(IPC.hostsDelete, (_e, id: string) => store.delete(id))
+  ipcMain.handle(IPC.hostsResetSecrets, async () => {
+    // Explicit recovery from an undecryptable vault. persist() refuses to
+    // overwrite one (that would destroy passwords still recoverable on the
+    // machine it came from), so without this the app could never store a
+    // password again. The old file is kept beside the new one, not deleted.
+    try {
+      await store.resetSecrets()
+      return { ok: true }
+    } catch (e) {
+      console.error('resetSecrets failed:', (e as Error).message)
+      return { ok: false }
+    }
+  })
   ipcMain.handle(IPC.hostsImportSshConfig, () => importSshConfig())
   ipcMain.handle(IPC.hostsExportJson, async () => {
     const res = await dialog.showSaveDialog({
@@ -2651,6 +2673,25 @@ app.whenReady().then(async () => {
     Menu.setApplicationMenu(null)
   }
   registerIpc()
+  // Shrink a settings.json that grew under the old count-only history cap.
+  // Existing installs carry up to ~100 MB of session buffers; settings.json is
+  // rewritten whole on every settings write, and at that size the rename step
+  // starts failing on Windows — which surfaced as unrelated saves reporting
+  // failure. Best-effort: a pruned history must never block startup.
+  void (async () => {
+    try {
+      const existing = await settings.get<{ label: string; text: string }[]>('sessionHistory')
+      if (!Array.isArray(existing) || existing.length === 0) return
+      const capped = capHistory(existing)
+      const size = (xs: { text?: string }[]): number =>
+        xs.reduce((n, e) => n + (e.text?.length ?? 0), 0)
+      // Same count does not mean same size — entries may have been trimmed.
+      if (capped.length === existing.length && size(capped) >= size(existing)) return
+      await settings.set('sessionHistory', capped)
+    } catch {
+      /* ignore */
+    }
+  })()
   // Register as the handler for x-ssh:// URLs so a link/`start x-ssh:…` can
   // launch the app straight into a connection. Kept best-effort: registration
   // needs a packaged exe path and may fail harmlessly in dev.

@@ -608,10 +608,28 @@ export const useSessions = defineStore('sessions', {
         const s = await window.api.hosts.secretsStatus()
         if (s === 'bad' && !secretsLoadFailToasted) {
           secretsLoadFailToasted = true
+          // Say what this means for the user, not just that something is wrong:
+          // saving a password now fails on purpose (overwriting the unreadable
+          // vault would destroy passwords that may still be recoverable on the
+          // machine it came from), so the message has to name the way out.
           toast(t('app.secretsLoadFail'), 'error')
         }
       } catch (e) {
         console.error('hosts: secretsStatus failed', e)
+      }
+    },
+
+    /** Discards an unreadable vault after the user has explicitly agreed. */
+    async resetSecrets(): Promise<boolean> {
+      try {
+        await window.api.hosts.resetSecrets()
+        secretsLoadFailToasted = false
+        toast(t('app.secretsResetOk'), 'success')
+        return true
+      } catch (e) {
+        console.error('hosts: resetSecrets failed', e)
+        toast(t('app.secretsResetFail'), 'error')
+        return false
       }
     },
 
