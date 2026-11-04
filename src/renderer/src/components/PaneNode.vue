@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { formatFingerprint } from '../../../shared/hostKey'
 import { computed, ref, defineAsyncComponent } from 'vue'
-import { useSessions } from '../stores/sessions'
+import { useSessions, isTrustingPane } from '../stores/sessions'
 import { useI18n } from '../lib/i18n'
 import { childSizes } from '../lib/paneLayout'
 import { connectActions, type ConnectAction } from '../lib/connectActions'
@@ -63,6 +63,8 @@ const hostKeyRejected = computed(
     pane.value?.errorCode === 'host_key_unknown' ||
     pane.value?.errorCode === 'host_key_changed'
 )
+/** The trust write is in flight: keep the button disabled and say so. */
+const trusting = computed(() => isTrustingPane(pane.value?.id ?? ''))
 
 /** What this failure tells the user to go fix, offered beside the reconnect
  *  button. A broken hop points at the jump host's own profile when we know it. */
@@ -169,16 +171,18 @@ const splitEl = ref<HTMLElement>()
         </div>
         <button
           class="idle-connect"
-          :disabled="!!pane.reconnectAttempt"
+          :disabled="!!pane.reconnectAttempt || trusting"
           @click.stop="hostKeyRejected ? store.trustAndReconnect(pane.id) : store.reconnect(pane.id)"
         >
           <Icon name="refresh" :size="15" />
           <span>{{
-            pane.reconnectAttempt
-              ? t('app.reconnecting', { attempt: pane.reconnectAttempt })
-              : hostKeyRejected
-                ? (pane.errorCode === 'host_key_unknown' ? t('app.trustKey') : t('app.trustReconnect'))
-                : t('app.reconnect')
+            trusting
+              ? t('app.trusting')
+              : pane.reconnectAttempt
+                ? t('app.reconnecting', { attempt: pane.reconnectAttempt })
+                : hostKeyRejected
+                  ? (pane.errorCode === 'host_key_unknown' ? t('app.trustKey') : t('app.trustReconnect'))
+                  : t('app.reconnect')
           }}</span>
         </button>
         <button

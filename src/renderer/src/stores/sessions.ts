@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { toRaw } from 'vue'
+import { reactive, toRaw } from 'vue'
 import { useI18n } from '../lib/i18n'
 import { useToast } from '../composables/toast'
 import { useConfirm } from '../composables/confirm'
@@ -131,7 +131,16 @@ const inFlight = new Set<string>()
 // call consumes the rejection, the second gets `{ ok: false }` and still
 // reconnects while the first write is in flight. Android's HostKeyGate has
 // ignored re-entry since M3.105; this is the desktop equivalent.
-const trustingPanes = new Set<string>()
+// Multi-click guard. Wrapped in `reactive` so the card can disable its button
+// while the write is in flight — a plain Set left the button looking ready, so
+// a user whose first click appeared to do nothing (it was writing) kept
+// clicking, and each click stacked another error toast.
+const trustingPanes = reactive(new Set<string>())
+
+/** Whether this pane's "trust key" write is currently in flight. */
+export function isTrustingPane(paneId: string): boolean {
+  return trustingPanes.has(paneId)
+}
 
 // Sessions the store has deliberately closed (a reconnect replacing a dead
 // session, a tab being torn down). Main still emits their final error/closed
