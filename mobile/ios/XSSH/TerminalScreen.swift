@@ -18,6 +18,7 @@ struct TermMetrics: Equatable {
 struct TerminalScreen: View {
     @Environment(HostStore.self) private var store
     @Environment(\.displayScale) private var displayScale
+    @Environment(FoldState.self) private var fold
     @AppStorage("terminalFontSize") private var fontSize = 13.0
 
     let model: TerminalModel
@@ -26,6 +27,7 @@ struct TerminalScreen: View {
     @State private var pinchBase: Double?
     @State private var dragLast: CGFloat = 0
     @State private var confirmReplace = false
+    @State private var container: CGRect = .zero
 
     private var metrics: TermMetrics { TermMetrics(fontSize: fontSize) }
 
@@ -35,6 +37,10 @@ struct TerminalScreen: View {
             Color(rgb: TermTheme.background).ignoresSafeArea()
             // 画布和输入框一直在 —— 连接前就量得到尺寸,PTY 一开始就是对的大小;状态卡片盖在上面。
             GeometryReader { geo in
+                // 避开接缝和遮挡区:笔记本姿态只用接缝上半,书本姿态只用一侧,遮挡区从最省的那条边削掉。
+                let full = geo.frame(in: .global)
+                let area = fold.usableRect(in: full)
+                let size = area.size
                 ZStack(alignment: .topLeading) {
                     canvas(m)
                     KeyCapture(model: model, ctrlArmed: model.ctrlArmed,
@@ -42,12 +48,17 @@ struct TerminalScreen: View {
                         .frame(width: 1, height: 1)
                         .allowsHitTesting(false)
                 }
-                .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
+                .frame(width: size.width, height: size.height, alignment: .topLeading)
+                #if DEBUG
+                .border(FoldState.simulatedAxis == nil && !FoldState.simulatesOcclusion ? .clear : .green.opacity(0.6))
+                #endif
+                .padding(.leading, area.minX - full.minX)
+                .padding(.top, area.minY - full.minY)
                 .contentShape(Rectangle())
                 .onTapGesture { model.wantsKeyboard = true }
                 .gesture(scrollGesture(m))
                 .gesture(pinchGesture)
-                .onChange(of: geo.size, initial: true) { _, size in
+                .onChange(of: size, initial: true) { _, size in
                     model.measured(
                         cols: Int(size.width / m.width), rows: Int(size.height / m.height),
                         cellPixels: (UInt32(m.width * displayScale), UInt32(m.height * displayScale)))
@@ -55,7 +66,7 @@ struct TerminalScreen: View {
                 .onChange(of: fontSize) { _, _ in
                     let m = metrics
                     model.measured(
-                        cols: Int(geo.size.width / m.width), rows: Int(geo.size.height / m.height),
+                        cols: Int(size.width / m.width), rows: Int(size.height / m.height),
                         cellPixels: (UInt32(m.width * displayScale), UInt32(m.height * displayScale)))
                 }
             }
@@ -63,22 +74,40 @@ struct TerminalScreen: View {
             .accessibilityElement()
             .accessibilityLabel(Text("Terminal"))
             .accessibilityValue(UIAccessibility.isVoiceOverRunning ? model.screenText : "")
+            // 状态卡片和画布用同一块可用区域:不跨接缝、不压遮挡区。
             overlay
+                .frame(width: usable?.width, height: usable?.height)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .padding(.leading, usable.map { $0.minX - container.minX } ?? 0)
+                .padding(.top, usable.map { $0.minY - container.minY } ?? 0)
         }
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { container = $0 }
         .navigationTitle(model.title.isEmpty ? model.host.displayName : model.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbarColorScheme(.dark, for: .navigationBar, .bottomBar)
         .toolbar {
-            // 系统工具栏:iPhone Duo 外屏上带图标的按钮自动竖排到右侧,放不下的进溢出菜单。
-            ToolbarItemGroup(placement: .bottomBar) {
+            // 系统工具栏:iPhone Duo 外屏上带图标的按钮自动竖排到右侧,放不下的从下往上收进溢出菜单。
+            // 键盘开关是终端里最常用的,最后才收;断开最不常用,最先收。每颗都带标题,溢出菜单里才看得懂。
+            ToolbarItem(placement: .bottomBar) {
                 Button(model.wantsKeyboard ? "Hide Keyboard" : "Keyboard",
                        systemImage: model.wantsKeyboard ? "keyboard.chevron.compact.down" : "keyboard") {
                     model.wantsKeyboard.toggle()
                 }
+            }
+            .visibilityPriority(.high)
+            ToolbarItem(placement: .bottomBar) {
                 Button("Paste", systemImage: "doc.on.clipboard") { model.paste() }
+            }
+            ToolbarItem(placement: .bottomBar) {
                 Button("Disconnect", systemImage: "xmark.circle", role: .destructive, action: onClose)
             }
+            .visibilityPriority(.low)
         }
+    }
+
+    /// 整个页面扣掉接缝和遮挡区之后的可用矩形;还没量到页面尺寸时不限制。
+    private var usable: CGRect? {
+        container.isEmpty ? nil : fold.usableRect(in: container)
     }
 
     // MARK: 画布
@@ -221,7 +250,7 @@ struct TerminalScreen: View {
                     Image(systemName: "bolt.horizontal.circle")
                     if let status, status != 0 { Text("Session ended (exit \(Int(status)))") } else { Text("Session ended") }
                     Spacer(minLength: 8)
-                    Button("Reconnect") { model.connect() }.buttonStyle(.borderedProminent)
+                    Button("Reconnect") { model.connect() }.buttonStyle(.borderedProminent).controlSize(.large)
                 }
                 .padding(12)
                 .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
@@ -242,6 +271,7 @@ struct TerminalScreen: View {
             body
             ScrollView { body }.scrollBounceBehavior(.basedOnSize)
         }
+            .controlSize(.large)
             .padding(20)
             .frame(maxWidth: 420)
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 28))

@@ -116,6 +116,9 @@ final class TerminalModel: Identifiable {
         case .success:
             state = .connected
             rows = []
+            #if DEBUG
+            runLaunchCommand()
+            #endif
             // 连接期间尺寸又变了(键盘落定):补发一次。
             if let m = measured, connectedSize?.cols != m.cols || connectedSize?.rows != m.rows {
                 connectedSize = m
@@ -125,6 +128,18 @@ final class TerminalModel: Identifiable {
             state = Self.state(for: error, known: knownKey)
         }
     }
+
+    #if DEBUG
+    /// `-autoKeyboard` 弹出软键盘;`-autoRun "<命令>"` 连上后自动敲这条命令(分号分隔多条)。
+    private func runLaunchCommand() {
+        if DebugLaunch.flag("-autoKeyboard") { wantsKeyboard = true }
+        guard let command = DebugLaunch.value("-autoRun") else { return }
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(1.5))
+            self?.send(command + "\r")
+        }
+    }
+    #endif
 
     private static func state(for error: Error, known: String?) -> State {
         guard let e = error as? FfiError else { return .failed(error.localizedDescription) }

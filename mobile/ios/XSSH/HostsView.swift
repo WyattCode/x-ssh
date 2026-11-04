@@ -49,7 +49,7 @@ struct HostsView: View {
                 } description: {
                     Text("Add a host to get started.")
                 } actions: {
-                    Button("Add Host") { startAdding() }.buttonStyle(.borderedProminent)
+                    Button("Add Host") { startAdding() }.buttonStyle(.borderedProminent).controlSize(.large)
                 }
             } else if shown.isEmpty {
                 ContentUnavailableView.search(text: query)

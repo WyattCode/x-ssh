@@ -83,15 +83,16 @@ final class HostStore {
     }
 
     #if DEBUG
-    /// 模拟器里没法顺手敲表单:`-seedHost name:address:port:user:password` 直接塞一台主机(只在 Debug 构建里有)。
+    /// 模拟器里没法顺手敲表单:`-seedHost name:address:port:user:password` 直接塞一台主机,可重复(只在 Debug 构建里有)。
     private func seedFromLaunchArguments() {
         let args = ProcessInfo.processInfo.arguments
-        guard let i = args.firstIndex(of: "-seedHost"), i + 1 < args.count else { return }
-        let f = args[i + 1].split(separator: ":", omittingEmptySubsequences: false).map(String.init)
-        guard f.count == 5, let port = Int(f[2]) else { return }
-        let host = Host(name: f[0], address: f[1], port: port, username: f[3])
-        hosts.removeAll { $0.address == host.address && $0.port == host.port }
-        _ = save(host, password: f[4])
+        for (i, arg) in args.enumerated() where arg == "-seedHost" && i + 1 < args.count {
+            let f = args[i + 1].split(separator: ":", omittingEmptySubsequences: false).map(String.init)
+            guard f.count == 5, let port = Int(f[2]) else { continue }
+            let host = Host(name: f[0], address: f[1], port: port, username: f[3])
+            hosts.removeAll { $0.address == host.address && $0.port == host.port }
+            _ = save(host, password: f[4])
+        }
     }
     #endif
 
