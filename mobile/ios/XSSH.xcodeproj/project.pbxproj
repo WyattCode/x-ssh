@@ -25,6 +25,7 @@
 
 /* Begin PBXFileReference section */
 		167F9953B597EB1D7BA057E4 /* FoldState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoldState.swift; sourceTree = "<group>"; };
+		1B28A299AC2BED65E98F5049 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		3A6376447A9D21D6FDD076D3 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		5BDF8ABACFC555DF2E97187B /* Backend.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Backend.swift; sourceTree = "<group>"; };
 		66C7531350EB43494A36FEC7 /* BrandMark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrandMark.swift; sourceTree = "<group>"; };
@@ -96,6 +97,7 @@
 				167F9953B597EB1D7BA057E4 /* FoldState.swift */,
 				7368087C0BFDB2DD4A225C02 /* Host.swift */,
 				90A700116E14789B6722DE37 /* HostsView.swift */,
+				1B28A299AC2BED65E98F5049 /* Info.plist */,
 				67546D7180CF39865A1FCEA9 /* KeyCapture.swift */,
 				908C2C163E9BCA7CB86BF5AD /* Localizable.xcstrings */,
 				F7AA13AB1E8539719A7AD181 /* TerminalModel.swift */,
@@ -271,11 +273,11 @@
 					"\"Core\"",
 				);
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = XSSH/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "X-SSH";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "X-SSH connects to servers on your local network.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
-				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -297,11 +299,11 @@
 					"\"Core\"",
 				);
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = XSSH/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "X-SSH";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "X-SSH connects to servers on your local network.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
-				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

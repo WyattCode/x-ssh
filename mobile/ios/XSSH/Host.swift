@@ -1,21 +1,35 @@
 import Foundation
 import Security
 
+/// 登录方式。老文件里没有这个字段 → 按密码处理。
+enum AuthKind: String, Codable, Hashable, CaseIterable {
+    case password, key
+}
+
+/// 一台主机的登录凭据。密码 / 私钥 / 私钥口令都只进钥匙串,不落在 hosts.json 里。
+struct Credentials: Equatable {
+    var password = ""
+    var privateKey = ""
+    var passphrase = ""
+}
+
 struct Host: Identifiable, Codable, Hashable {
     var id = UUID()
     var name = ""
     var address = ""
     var port = 22
     var username = ""
+    var authKind: AuthKind = .password
     var lastUsed: Date?
 
     init(id: UUID = UUID(), name: String = "", address: String = "", port: Int = 22,
-         username: String = "", lastUsed: Date? = nil) {
+         username: String = "", authKind: AuthKind = .password, lastUsed: Date? = nil) {
         self.id = id
         self.name = name
         self.address = address
         self.port = port
         self.username = username
+        self.authKind = authKind
         self.lastUsed = lastUsed
     }
 
@@ -27,6 +41,7 @@ struct Host: Identifiable, Codable, Hashable {
         address = (try? c.decode(String.self, forKey: .address)) ?? ""
         port = (try? c.decode(Int.self, forKey: .port)) ?? 22
         username = (try? c.decode(String.self, forKey: .username)) ?? ""
+        authKind = (try? c.decode(AuthKind.self, forKey: .authKind)) ?? .password
         lastUsed = try? c.decode(Date.self, forKey: .lastUsed)
     }
 
@@ -91,18 +106,35 @@ final class HostStore {
             guard f.count == 5, let port = Int(f[2]) else { continue }
             let host = Host(name: f[0], address: f[1], port: port, username: f[3])
             hosts.removeAll { $0.address == host.address && $0.port == host.port }
-            _ = save(host, password: f[4])
+            _ = save(host, credentials: Credentials(password: f[4]))
+        }
+        // `-seedHostKey name:address:port:user:/path/to/private_key`:用文件里的私钥(无口令)建一台密钥登录的主机。
+        for (i, arg) in args.enumerated() where arg == "-seedHostKey" && i + 1 < args.count {
+            let f = args[i + 1].split(separator: ":", maxSplits: 4, omittingEmptySubsequences: false).map(String.init)
+            guard f.count == 5, let port = Int(f[2]), let pem = try? String(contentsOfFile: f[4], encoding: .utf8) else { continue }
+            let host = Host(name: f[0], address: f[1], port: port, username: f[3], authKind: .key)
+            hosts.removeAll { $0.address == host.address && $0.port == host.port }
+            _ = save(host, credentials: Credentials(privateKey: pem))
         }
     }
     #endif
 
-    /// 先写钥匙串再写列表:密码存不进去就整个失败,不留一台「没有密码」的主机。
+    /// 先写钥匙串再写列表:凭据存不进去就整个失败,不留一台「没有凭据」的主机。
+    /// 换了登录方式,另一种方式的凭据一并清掉(不在钥匙串里留旧密码 / 旧私钥)。
     @discardableResult
-    func save(_ host: Host, password: String?) -> Bool {
+    func save(_ host: Host, credentials: Credentials) -> Bool {
         let host = host.normalized()
-        if let password {
-            if password.isEmpty { Keychain.remove(host.id.uuidString) }
-            else if !Keychain.set(password, for: host.id.uuidString) { return false }
+        let id = host.id.uuidString
+        switch host.authKind {
+        case .password:
+            if credentials.password.isEmpty { Keychain.remove(id) }
+            else if !Keychain.set(credentials.password, for: id) { return false }
+            Keychain.remove(Self.keyAccount(id)); Keychain.remove(Self.passphraseAccount(id))
+        case .key:
+            guard !credentials.privateKey.isEmpty, Keychain.set(credentials.privateKey, for: Self.keyAccount(id)) else { return false }
+            if credentials.passphrase.isEmpty { Keychain.remove(Self.passphraseAccount(id)) }
+            else if !Keychain.set(credentials.passphrase, for: Self.passphraseAccount(id)) { return false }
+            Keychain.remove(id)
         }
         var next = hosts
         if let i = next.firstIndex(where: { $0.id == host.id }) { next[i] = host } else { next.append(host) }
@@ -115,7 +147,8 @@ final class HostStore {
         let next = hosts.filter { $0.id != host.id }
         guard persist("hosts.json", next) else { return }
         hosts = next
-        Keychain.remove(host.id.uuidString)
+        let id = host.id.uuidString
+        Keychain.remove(id); Keychain.remove(Self.keyAccount(id)); Keychain.remove(Self.passphraseAccount(id))
     }
 
     func touch(_ host: Host) {
@@ -125,7 +158,15 @@ final class HostStore {
         if persist("hosts.json", next) { hosts = next }
     }
 
-    func password(for host: Host) -> String { Keychain.get(host.id.uuidString) ?? "" }
+    private static func keyAccount(_ id: String) -> String { "\(id).key" }
+    private static func passphraseAccount(_ id: String) -> String { "\(id).keypass" }
+
+    func credentials(for host: Host) -> Credentials {
+        let id = host.id.uuidString
+        return Credentials(password: Keychain.get(id) ?? "",
+                           privateKey: Keychain.get(Self.keyAccount(id)) ?? "",
+                           passphrase: Keychain.get(Self.passphraseAccount(id)) ?? "")
+    }
 
     private static func knownKeyName(_ host: Host) -> String { "\(host.address.lowercased()):\(host.port)" }
 

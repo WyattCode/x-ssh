@@ -28,12 +28,33 @@ struct EmptySessionView: View {
             }
             .multilineTextAlignment(.center)
             if let showHosts {
-                Button("Hosts", systemImage: "sidebar.leading", action: showHosts)
+                Button("Hosts", systemImage: "list.bullet", action: showHosts)
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .ignoresSafeArea(.container, edges: .trailing)
+    }
+}
+
+/// 开屏页:先是和系统启动画面一模一样的 logo(同大小同位置,所以交接时看不出换了一层),
+/// 稍停一下,再淡出、同时轻轻放大,露出下面已经加载好的主程序。
+struct SplashView: View {
+    @State private var settled = false
+
+    static let logoSize: CGFloat = 120
+
+    var body: some View {
+        ZStack {
+            Color.black
+            BrandMark(size: Self.logoSize)
+                .scaleEffect(settled ? 1.04 : 1)
+                .animation(.easeOut(duration: 1.2), value: settled)
+        }
+        // 整块屏幕居中:外屏右侧竖条占着安全区,不忽略的话 logo 会被挤向左,和系统启动画面(居中在整屏)对不上。
+        .ignoresSafeArea()
+        .onAppear { settled = true }
+        .accessibilityHidden(true)
     }
 }

@@ -4,13 +4,29 @@ import SwiftUI
 struct XSSHApp: App {
     @State private var hosts = HostStore()
     @State private var fold = FoldState()
+    @State private var splash = true
 
     var body: some Scene {
         WindowGroup {
-            RootView()
-                .environment(hosts)
-                .environment(fold)
-                .background { FoldTracker(state: fold).ignoresSafeArea() }
+            ZStack {
+                RootView()
+                    .environment(hosts)
+                    .environment(fold)
+                    .background { FoldTracker(state: fold).ignoresSafeArea() }
+                // 开屏:主程序在下面已经加载,这一层停一下就淡出,主程序慢慢露出来。
+                if splash {
+                    SplashView()
+                        .transition(.opacity)
+                        .zIndex(1)
+                }
+            }
+            .task {
+                #if DEBUG
+                if DebugLaunch.flag("-noSplash") { splash = false; return }
+                #endif
+                try? await Task.sleep(for: .milliseconds(1100))
+                withAnimation(.easeInOut(duration: 0.6)) { splash = false }
+            }
         }
     }
 }
@@ -30,11 +46,20 @@ struct RootView: View {
     @State private var compactColumn: NavigationSplitViewColumn = .sidebar
 
     var body: some View {
-        GeometryReader { geo in
-            split
-                .onChange(of: layoutKey(geo.size), initial: true) { _, _ in containerSize = geo.size; updateColumns(geo.size) }
-                .onChange(of: active?.id) { _, _ in updateColumns(geo.size) }
-        }
+        split
+            // 容器尺寸只用来判断横 / 竖,必须不受软键盘影响:搜索 / 输入时键盘把可用高度压矮,
+            // 竖屏会被误判成横屏,侧栏跟着来回跳(搜索时的过渡不顺就是这个)。所以量一块忽略键盘的背景。
+            .background {
+                GeometryReader { geo in
+                    Color.clear
+                        .onChange(of: layoutKey(geo.size), initial: true) { _, _ in
+                            containerSize = geo.size
+                            updateColumns(geo.size)
+                        }
+                        .onChange(of: active?.id) { _, _ in updateColumns(geo.size) }
+                }
+                .ignoresSafeArea(.keyboard)
+            }
     }
 
     /// 横向(宽 > 高)才有地方让主机列表和终端并排;竖向时列表是浮在详情上面的,会盖住居中的内容,
@@ -108,7 +133,7 @@ struct RootView: View {
         }
         active?.disconnect()
         hosts.touch(host)
-        active = TerminalModel(host: host, password: hosts.password(for: host), knownKey: hosts.knownKey(host))
+        active = TerminalModel(host: host, credentials: hosts.credentials(for: host), knownKey: hosts.knownKey(host))
         compactColumn = .detail
     }
 

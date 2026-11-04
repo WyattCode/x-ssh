@@ -24,7 +24,7 @@ final class TerminalModel: Identifiable {
 
     let id = UUID()
     let host: Host
-    private let password: String
+    private let credentials: Credentials
     private(set) var knownKey: String?
 
     private(set) var state: State = .idle
@@ -32,7 +32,11 @@ final class TerminalModel: Identifiable {
     private(set) var cursor = CursorState(col: 0, row: 0, visible: true)
     private(set) var title = ""
     var ctrlArmed = false
+    /// Alt 待用:下一次发出去的内容前面加 ESC(终端里 Alt+键 就是这么编码的)。
+    var altArmed = false
     var wantsKeyboard = true
+    /// 快捷键面板(Esc / Tab / Ctrl / 方向键…)。和系统键盘各自独立开关,默认收起 —— 同安卓。
+    var showsKeys = false
 
     private let backend = Backend()
     private var measured: (cols: Int, rows: Int)?
@@ -41,9 +45,9 @@ final class TerminalModel: Identifiable {
     private var resizeTask: Task<Void, Never>?
     private var connectedSize: (cols: Int, rows: Int)?
 
-    init(host: Host, password: String, knownKey: String?) {
+    init(host: Host, credentials: Credentials, knownKey: String?) {
         self.host = host
-        self.password = password
+        self.credentials = credentials
         self.knownKey = knownKey
         backend.onOutput = { [weak self] output in
             Task { @MainActor [weak self] in self?.apply(output) }
@@ -104,9 +108,17 @@ final class TerminalModel: Identifiable {
         state = .connecting
         let config = HostConfig(
             host: host.address, port: UInt16(clamping: host.port), username: host.username,
-            auth: .password(password: password), knownKey: knownKey, jump: nil)
+            auth: authMethod, knownKey: knownKey, jump: nil)
         backend.connect(config, cols: UInt32(size.0), rows: UInt32(size.1), cellPixels: cell) { [weak self] result in
             Task { @MainActor [weak self] in self?.connectFinished(result) }
+        }
+    }
+
+    private var authMethod: AuthMethod {
+        switch host.authKind {
+        case .password: .password(password: credentials.password)
+        case .key: .keyData(pem: credentials.privateKey,
+                            passphrase: credentials.passphrase.isEmpty ? nil : credentials.passphrase)
         }
     }
 
@@ -133,6 +145,7 @@ final class TerminalModel: Identifiable {
     /// `-autoKeyboard` 弹出软键盘;`-autoRun "<命令>"` 连上后自动敲这条命令(分号分隔多条)。
     private func runLaunchCommand() {
         if DebugLaunch.flag("-autoKeyboard") { wantsKeyboard = true }
+        if DebugLaunch.flag("-autoKeys") { showsKeys = true }
         guard let command = DebugLaunch.value("-autoRun") else { return }
         Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(1.5))
@@ -146,7 +159,9 @@ final class TerminalModel: Identifiable {
         switch e {
         case .HostKeyUnknown(let fp), .JumpHostKeyUnknown(let fp): return .needsTrust(fingerprint: fp)
         case .HostKeyChanged(let fp), .JumpHostKeyChanged(let fp): return .keyChanged(new: fp, old: known)
-        default: return .failed(e.localizedDescription)
+        case .KeyEncrypted:
+            return .failed(String(localized: "The private key needs a passphrase, or the one saved is wrong. Edit the host to fix it."))
+        default: return .failed(e.userMessage)
         }
     }
 
@@ -199,7 +214,14 @@ final class TerminalModel: Identifiable {
             ctrlArmed = false
             bytes = Self.control(first) ?? bytes
         }
-        backend.send(Data(bytes))
+        emit(bytes)
+    }
+
+    /// 所有按键输入的出口:待用的 Alt 在这里加 ESC 前缀并收掉。
+    private func emit(_ bytes: [UInt8]) {
+        var out = bytes
+        if altArmed { out.insert(0x1B, at: 0); altArmed = false }
+        backend.send(Data(out))
     }
 
     /// Ctrl+字母 / 符号 → 控制字符;不适用就返回 nil(原样发)。
@@ -213,7 +235,7 @@ final class TerminalModel: Identifiable {
 
     func sendRaw(_ bytes: [UInt8]) {
         ctrlArmed = false
-        backend.send(Data(bytes))
+        emit(bytes)
     }
 
     func press(_ key: Key) {
@@ -246,7 +268,7 @@ final class TerminalModel: Identifiable {
         }
         // Ctrl 只对可打印字符有意义:按过方向键等就取消待用状态。
         ctrlArmed = false
-        backend.send(Data(seq.utf8))
+        emit(Array(seq.utf8))
     }
 
     /// 粘贴:换行统一成回车;程序开了括号粘贴就包起来,多行文本不会被当成逐行输入执行。
@@ -259,6 +281,7 @@ final class TerminalModel: Identifiable {
             text = "\u{1B}[200~" + text + "\u{1B}[201~"
         }
         ctrlArmed = false
+        altArmed = false
         backend.send(Data(text.utf8))
     }
 
@@ -273,6 +296,16 @@ final class TerminalModel: Identifiable {
             backend.send(Data(String(repeating: seq, count: min(abs(lines), 10)).utf8))
         } else {
             backend.scroll(lines: Int32(lines))
+        }
+    }
+}
+
+extension FfiError {
+    /// 核心给的就是人话(`ssh: Connection refused (os error 61)`),别让界面显示枚举的类型名。
+    var userMessage: String {
+        switch self {
+        case .Message(let m), .HostKeyUnknown(let m), .HostKeyChanged(let m), .JumpHostKeyUnknown(let m),
+             .JumpHostKeyChanged(let m), .KeyEncrypted(let m), .Cancelled(let m): m
         }
     }
 }
