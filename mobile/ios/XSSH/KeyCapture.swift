@@ -59,6 +59,8 @@ struct KeyCapture: UIViewRepresentable {
             smartQuotesType = .no
             smartDashesType = .no
             smartInsertDeleteType = .no
+            // 终端整个 App 是深色的,键盘和键行也固定深色;否则系统浅色时键盘是白的,键行的深色按钮几乎看不见。
+            keyboardAppearance = .dark
             isAccessibilityElement = false
             alpha = 0.01
         }

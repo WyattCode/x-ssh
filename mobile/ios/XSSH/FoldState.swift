@@ -91,8 +91,11 @@ struct FoldTracker: UIViewRepresentable {
 
     @MainActor
     final class TrackerView: UIView {
-        private let state: FoldState
+        fileprivate let state: FoldState
         private var hinge: FoldState.Hinge = .unknown
+        #if DEBUG
+        fileprivate var lastDiagnostics = ""
+        #endif
 
         init(state: FoldState) {
             self.state = state
@@ -143,18 +146,47 @@ struct FoldTracker: UIViewRepresentable {
             #endif
             state.apply(hinge: hinge, seam: seam, occlusions: occlusions,
                         windowHeight: window?.bounds.height ?? 0)
+            #if DEBUG
+            logDiagnostics()
+            #endif
         }
     }
 }
 
 #if DEBUG
+extension FoldTracker.TrackerView {
+    /// 真机上没法截图,把系统实际报的铰链 / 保留区域 / 窗口尺寸打到控制台,事后对照。
+    fileprivate func logDiagnostics() {
+        var lines = ["FOLDDIAG hinge=\(state.hinge) window=\(window?.bounds.debugDescription ?? "nil") safe=\(safeAreaInsets)"]
+        if let scene = window?.windowScene {
+            lines.append("  scene=\(scene.coordinateSpace.bounds) orient=\(scene.interfaceOrientation.rawValue) h=\(scene.traitCollection.horizontalSizeClass.rawValue) v=\(scene.traitCollection.verticalSizeClass.rawValue)")
+        }
+        if #available(iOS 27.1, *) {
+            for (name, kind) in [("division", UIView.ReservedRegion.Kind.division), ("occlusion", .occlusion)] {
+                let all = reservedRegions(kind: kind, options: [.includeInactive])
+                if all.isEmpty { lines.append("  \(name): none") }
+                for r in all {
+                    lines.append("  \(name) active=\(r.isActive) frame=\(convert(r.frame, to: nil)) margins=\(r.margins)")
+                }
+            }
+        }
+        lines.append("  seam=\(state.seam.map { "\($0.frame)" } ?? "nil") usedOcclusions=\(state.occlusions.count)")
+        let text = lines.joined(separator: "\n")
+        if text != lastDiagnostics { lastDiagnostics = text; NSLog("%@", text) }
+    }
+}
+
 /// 调试用:把接缝带画出来,看避让有没有对准。
 struct SeamOutline: View {
     @Environment(FoldState.self) private var fold
 
+    /// 只在模拟假数据时才画:真机上状态栏那一条本身就是一块 active 的遮挡区,画出来只会是一块碍眼的蓝块。
+    private let simulating = FoldState.simulatedAxis != nil || FoldState.simulatesOcclusion
+
     var body: some View {
         GeometryReader { geo in
             let origin = geo.frame(in: .global).origin
+            if simulating {
             if let seam = fold.seam {
                 Rectangle()
                     .fill(.red.opacity(0.25))
@@ -166,6 +198,7 @@ struct SeamOutline: View {
                     .fill(.blue.opacity(0.4))
                     .frame(width: hole.width, height: hole.height)
                     .position(x: hole.midX - origin.x, y: hole.midY - origin.y)
+            }
             }
         }
         .allowsHitTesting(false)
