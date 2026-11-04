@@ -160,7 +160,7 @@ final class KeyAccessory: UIInputView {
 
     init(model: TerminalModel) {
         self.model = model
-        super.init(frame: CGRect(x: 0, y: 0, width: 0, height: 48), inputViewStyle: .keyboard)
+        super.init(frame: CGRect(x: 0, y: 0, width: 0, height: 56), inputViewStyle: .keyboard)
         allowsSelfSizing = true
         translatesAutoresizingMaskIntoConstraints = false
 
@@ -175,13 +175,14 @@ final class KeyAccessory: UIInputView {
             config.title = title
             if let symbol { config.image = UIImage(systemName: symbol) }
             config.cornerStyle = .medium
-            config.contentInsets = NSDirectionalEdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12)
+            config.contentInsets = NSDirectionalEdgeInsets(top: 12, leading: 12, bottom: 12, trailing: 12)
             let b = UIButton(configuration: config, primaryAction: UIAction { [weak self] _ in
                 self?.haptic.impactOccurred()
                 MainActor.assumeIsolated { action() }
             })
             b.accessibilityLabel = label
-            b.widthAnchor.constraint(greaterThanOrEqualToConstant: 40).isActive = true
+            b.widthAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
+            b.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
             return b
         }
 
@@ -205,20 +206,37 @@ final class KeyAccessory: UIInputView {
             stack.addArrangedSubview(b)
         }
 
+        // 收起键盘固定在最右、不随键行滚动:外屏键盘弹着时系统工具栏里的键盘开关可能被收进溢出菜单,
+        // 键盘附件栏跟着键盘走(Apple 的 iPhone Duo 指引),所以这颗放这里一定够得着。
+        var hideConfig = UIButton.Configuration.gray()
+        hideConfig.image = UIImage(systemName: "keyboard.chevron.compact.down")
+        hideConfig.cornerStyle = .medium
+        let hide = UIButton(configuration: hideConfig, primaryAction: UIAction { [weak self] _ in
+            self?.haptic.impactOccurred()
+            MainActor.assumeIsolated { m.wantsKeyboard = false }
+        })
+        hide.accessibilityLabel = String(localized: "Hide Keyboard")
+        hide.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(hide)
+
         let scroll = UIScrollView()
         scroll.showsHorizontalScrollIndicator = false
         scroll.translatesAutoresizingMaskIntoConstraints = false
         scroll.addSubview(stack)
         addSubview(scroll)
         NSLayoutConstraint.activate([
+            hide.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            hide.centerYAnchor.constraint(equalTo: centerYAnchor),
+            hide.widthAnchor.constraint(equalToConstant: 52),
+            hide.heightAnchor.constraint(equalToConstant: 44),
             scroll.leadingAnchor.constraint(equalTo: leadingAnchor),
-            scroll.trailingAnchor.constraint(equalTo: trailingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: hide.leadingAnchor, constant: -4),
             scroll.topAnchor.constraint(equalTo: topAnchor),
             scroll.bottomAnchor.constraint(equalTo: bottomAnchor),
             stack.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor, constant: 8),
             stack.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor, constant: -8),
             stack.centerYAnchor.constraint(equalTo: scroll.frameLayoutGuide.centerYAnchor),
-            heightAnchor.constraint(equalToConstant: 48),
+            heightAnchor.constraint(equalToConstant: 56),
         ])
     }
 
@@ -232,7 +250,7 @@ final class KeyAccessory: UIInputView {
         var config = armed ? UIButton.Configuration.filled() : UIButton.Configuration.gray()
         config.title = "Ctrl"
         config.cornerStyle = .medium
-        config.contentInsets = NSDirectionalEdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12)
+        config.contentInsets = NSDirectionalEdgeInsets(top: 12, leading: 12, bottom: 12, trailing: 12)
         ctrl.configuration = config
         ctrl.accessibilityValue = armed ? String(localized: "On") : nil
     }

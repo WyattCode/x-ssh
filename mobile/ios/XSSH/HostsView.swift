@@ -2,7 +2,6 @@ import SwiftUI
 
 struct HostsView: View {
     @Environment(HostStore.self) private var store
-    @Environment(FoldState.self) private var fold
     let activeID: UUID?
     let onConnect: (Host) -> Void
 
@@ -50,19 +49,11 @@ struct HostsView: View {
                 } description: {
                     Text("Add a host to get started.")
                 } actions: {
-                    Button("Add Host") { startAdding() }.buttonStyle(.borderedProminent)
+                    Button("Add Host") { startAdding() }.buttonStyle(.borderedProminent).controlSize(.large)
                 }
             } else if shown.isEmpty {
                 ContentUnavailableView.search(text: query)
             }
-        }
-        // 接缝横着(笔记本姿态):列表只在接缝上半滚动,行不会压在折线上;下半留给搜索框和键盘。
-        .safeAreaPadding(.bottom, fold.heightBelowSeam)
-        .mask {
-            VStack(spacing: 0) {
-                Rectangle()
-                Color.clear.frame(height: fold.heightBelowSeam)
-            }.ignoresSafeArea()
         }
         .searchable(text: $query, prompt: Text("Search hosts"))
         .navigationTitle("Hosts")

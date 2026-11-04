@@ -86,15 +86,22 @@ struct TerminalScreen: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbarColorScheme(.dark, for: .navigationBar, .bottomBar)
         .toolbar {
-            // 系统工具栏:iPhone Duo 外屏上带图标的按钮自动竖排到右侧,放不下的进溢出菜单。
-            ToolbarItemGroup(placement: .bottomBar) {
+            // 系统工具栏:iPhone Duo 外屏上带图标的按钮自动竖排到右侧,放不下的从下往上收进溢出菜单。
+            // 键盘开关是终端里最常用的,最后才收;断开最不常用,最先收。每颗都带标题,溢出菜单里才看得懂。
+            ToolbarItem(placement: .bottomBar) {
                 Button(model.wantsKeyboard ? "Hide Keyboard" : "Keyboard",
                        systemImage: model.wantsKeyboard ? "keyboard.chevron.compact.down" : "keyboard") {
                     model.wantsKeyboard.toggle()
                 }
+            }
+            .visibilityPriority(.high)
+            ToolbarItem(placement: .bottomBar) {
                 Button("Paste", systemImage: "doc.on.clipboard") { model.paste() }
+            }
+            ToolbarItem(placement: .bottomBar) {
                 Button("Disconnect", systemImage: "xmark.circle", role: .destructive, action: onClose)
             }
+            .visibilityPriority(.low)
         }
     }
 
@@ -243,7 +250,7 @@ struct TerminalScreen: View {
                     Image(systemName: "bolt.horizontal.circle")
                     if let status, status != 0 { Text("Session ended (exit \(Int(status)))") } else { Text("Session ended") }
                     Spacer(minLength: 8)
-                    Button("Reconnect") { model.connect() }.buttonStyle(.borderedProminent)
+                    Button("Reconnect") { model.connect() }.buttonStyle(.borderedProminent).controlSize(.large)
                 }
                 .padding(12)
                 .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
@@ -264,6 +271,7 @@ struct TerminalScreen: View {
             body
             ScrollView { body }.scrollBounceBehavior(.basedOnSize)
         }
+            .controlSize(.large)
             .padding(20)
             .frame(maxWidth: 420)
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 28))
