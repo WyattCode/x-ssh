@@ -56,7 +56,8 @@ App 已能**直连局域网**(`192.168.1.100`,早期 MIUI 联网拦截的问题�
   **原地换文字、不重建界面**。桌面版同时补上了繁体和「跟随系统」。
 
 **功能覆盖(2026-11-01 校准)**:Android 已有端口转发(M3.70)、快照(M3.71)、SFTP 全套(含拖出与传输排队,M3.73)、配色方案(M3.74)、多指纹信任(M3.75),后几项标注过"真机待验",需在真机上复核一遍。
-**iOS(iPhone Duo)** 已是**能跑的壳层**,在 `mobile/ios/`:`tools/build-ios-core.sh` 把 Rust 核心编成 xcframework + 生成 Swift 绑定,`xcodegen generate` 出工程,SwiftUI 界面(主机列表 / 终端 / 主机密钥确认 / 键盘上方终端键行)。**已在 iPhone Duo 模拟器里对本机测试 sshd 验过**:连接、密码登录、屏幕渲染、软键盘与拼音、Ctrl 组合、键盘开关、PTY 初始尺寸、resize 防抖、会话在返回 / 旋转后保留、会话结束重连、主机密钥变更替换、主机文件损坏恢复。**没验**:真折叠(内屏分栏 / 半折叠避让 / `reservedRegions` / `onHingeChange` 都还没接)、真机、私钥登录、跳板机、SFTP、选择复制、自动重连 + tmux 续接。Rust 的 `write` / `resize` / `disconnect` 是 `block_on`,界面层一律只在 `Backend` 的串行队列里调,别挪回主线程。
+**iOS(iPhone Duo)** 已是**能跑的壳层**,在 `mobile/ios/`:`tools/build-ios-core.sh` 把 Rust 核心编成 xcframework + 生成 Swift 绑定,`xcodegen generate` 出工程,SwiftUI 界面(主机列表 / 终端 / 主机密钥确认 / 键盘上方终端键行)。**已在 iPhone Duo 模拟器里对本机测试 sshd 验过**:连接、密码登录、屏幕渲染、软键盘与拼音、Ctrl 组合、键盘开关、PTY 初始尺寸、resize 防抖、会话在返回 / 旋转后保留、会话结束重连、主机密钥变更替换、主机文件损坏恢复。**折叠适配(M3.184,`FoldState.swift`)**:`UIHingeInteraction` 读铰链,`reservedRegions(kind: .division / .occlusion)` 读接缝和遮挡区(iOS 27.1+,窗口坐标,只取 active 的)。接缝横着(笔记本姿态)时终端画布只用接缝上半、状态卡片和空状态居中在上半,键盘 / 键行 / 底栏落在下半;接缝竖着(书本姿态)时强制两栏同时可见,主机列表正好停在接缝左边缘,终端从接缝右边缘开始。完全展开时没有接缝,布局和普通 iPhone 一样。**遮挡区**(occlusion,真机读到的约 58×37pt)用 `usableRect(in:)` 避开:终端画布和状态卡片共用同一块可用矩形,遮挡区从离它最近、损失面积最小的那条边削掉(通常是削掉顶部几行)。**主机列表**在笔记本姿态下只在接缝上半滚动(底部整段遮掉),搜索框和键盘留在下半。**模拟器没法把铰链掰到半开**,所以接缝和遮挡区只用 DEBUG 启动参数 `-simulateSeam horizontal|vertical`、`-simulateOcclusion` 造假数据验证(分别画红带 / 蓝块和终端画布的绿框);`-seedHost` 现在可重复,方便造出一长串主机。真实半开的行为只对着头文件约定写,**没在真机上验过**。注意:模拟器要用 `CODE_SIGN_IDENTITY=-`(ad-hoc 签名)构建,`CODE_SIGNING_ALLOWED=NO` 的包没有钥匙串权限,`-seedHost` 存密码会静默失败。
+**没验**:真折叠(铰链真实半开时系统实际报的接缝 / 遮挡区)、真机、私钥登录、跳板机、SFTP、选择复制、自动重连 + tmux 续接。Rust 的 `write` / `resize` / `disconnect` 是 `block_on`,界面层一律只在 `Backend` 的串行队列里调,别挪回主线程。
 **Android 仍缺**:多标签。**iOS 仍缺**:端口转发、多标签、快照、SFTP(Android 的 SFTP 已做:上传/下载/重命名/删除,上传先写临时文件再改名,取消不动目标)。
 
 ## 1. 下一步(建议顺序)
@@ -2863,9 +2864,11 @@ M3.51 已有「用生物识别解锁」开关,连私钥密文(`lockedKeyData` / 
 
 ## 四、桌面端 macOS 图标(踩过的坑,三端都适用)
 
-`package.json` 的 `build.mac.icon` 曾经指向 `build/icon.icon`(Icon Composer 的**源目录**)。electron-builder 只认 `.icns` 或边长 ≥512 的 `.png`,指向目录时**静默退回默认图标**,日志里一个字都不说。已改 `build/icon.png`(commit `1af641c`)。
+`package.json` 的 `build.mac.icon` 现在是 `build/icon.icon`(Icon Composer 的 Liquid Glass 源目录,PR #6)。electron-builder 在 macOS 上用 Xcode 的 `actool` 把它编成 `Resources/Assets.car`(亮 / 暗 / 着色三套)并写入 `CFBundleIconName`,同时生成 `icon.icns` 兜底。**只能在装了 Xcode 的 Mac 上打 mac 包。**
 
-**改图标只认两种格式**,改完一定要解包 dmg/zip 验 `Contents/Resources/icon.icns` 真实存在且体积正常(本次 654KB / 11 档尺寸)。
+踩过的坑:Xcode 27 的 `actool` 不认 `icon.json` 里的 `"color-space-for-untagged-svg-colors": "srgb"`,整个图标目录编译失败(报 "Failed to create a catalog from the Icon Studio document"),曾经只能退回 `build/icon.png`(commit `1af641c`)。删掉这个键(未标注的 SVG 默认就是 sRGB)即可,值改成 `display-p3` 也能过,`extended-srgb` 不行。
+
+改图标后一定要解包 dmg / zip 验 `Contents/Resources/Assets.car`(1.7MB 左右)和 `icon.icns`(57KB 左右)都在,`Info.plist` 的 `CFBundleIconName` 是 `Icon`。
 
 ## 五、测试现状
 
