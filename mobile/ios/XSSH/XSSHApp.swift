@@ -51,10 +51,31 @@ struct RootView: View {
         .onChange(of: fold.verticalSeam != nil, initial: true) { _, onSeam in
             columns = onSeam ? .all : .automatic
         }
+        // 选了主机之后系统会把侧栏收起来,接缝左边那半屏就空了:收起一次就重新展开,并去掉收起按钮。
+        .onChange(of: columns) { _, now in
+            if fold.verticalSeam != nil, now != .all { columns = .all }
+        }
+        .toolbar(removing: fold.verticalSeam != nil ? .sidebarToggle : nil)
         #if DEBUG
         .overlay { SeamOutline() }
+        .task { await autoOpenFromLaunchArguments() }
+        .onChange(of: active?.state) { _, state in
+            // `-autoTrust`:首次连接的主机密钥确认也自动点掉,模拟器里不用手点。
+            if case .needsTrust(let fingerprint) = state, DebugLaunch.flag("-autoTrust") {
+                active?.trust(fingerprint: fingerprint, store: hosts)
+            }
+        }
         #endif
     }
+
+    #if DEBUG
+    /// `-autoOpen <主机名>`:启动后自动打开那台主机,命令行起的模拟器没法点屏幕时用。
+    private func autoOpenFromLaunchArguments() async {
+        guard let name = DebugLaunch.value("-autoOpen") else { return }
+        try? await Task.sleep(for: .seconds(1))
+        if let host = hosts.hosts.first(where: { $0.displayName == name }) { open(host) }
+    }
+    #endif
 
     /// 书本姿态(接缝竖着):主机列表正好占满接缝左边那一半。其余情况交给系统自己定宽。
     private var sidebarWidth: (min: CGFloat, ideal: CGFloat, max: CGFloat) {
@@ -80,3 +101,15 @@ struct RootView: View {
         compactColumn = .sidebar
     }
 }
+
+#if DEBUG
+/// 调试用启动参数的读取;只在 Debug 构建里存在。
+enum DebugLaunch {
+    static func flag(_ name: String) -> Bool { ProcessInfo.processInfo.arguments.contains(name) }
+    static func value(_ name: String) -> String? {
+        let args = ProcessInfo.processInfo.arguments
+        guard let i = args.firstIndex(of: name), i + 1 < args.count else { return nil }
+        return args[i + 1]
+    }
+}
+#endif
