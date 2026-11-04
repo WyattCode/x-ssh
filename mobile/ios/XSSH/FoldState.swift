@@ -30,6 +30,37 @@ final class FoldState {
     /// 接缝下面那一截(含接缝本身)的高度,用来给详情页的底部让位。
     var heightBelowSeam: CGFloat { horizontalSeam.map { max(0, windowHeight - $0.minY) } ?? 0 }
 
+    /// 在 `rect`(窗口坐标)里扣掉接缝和遮挡区之后,终端这类「整块排版」的内容能用的最大矩形。
+    /// 接缝横着只取上半;接缝竖着穿过 rect 时取宽的那一边;遮挡区从离它最近、损失面积最小的那条边削掉。
+    func usableRect(in rect: CGRect) -> CGRect {
+        var r = rect
+        if let seam = horizontalSeam, seam.minY > r.minY, seam.minY < r.maxY {
+            r.size.height = seam.minY - r.minY
+        }
+        if let seam = verticalSeam, seam.minX > r.minX, seam.maxX < r.maxX {
+            let left = CGRect(x: r.minX, y: r.minY, width: seam.minX - r.minX, height: r.height)
+            let right = CGRect(x: seam.maxX, y: r.minY, width: r.maxX - seam.maxX, height: r.height)
+            r = left.width >= right.width ? left : right
+        }
+        for hole in occlusions where r.intersects(hole) {
+            // 四种削法各自损失的面积,取最小的。
+            let cuts: [(area: CGFloat, rect: CGRect)] = [
+                ((hole.maxY - r.minY) * r.width,
+                 CGRect(x: r.minX, y: hole.maxY, width: r.width, height: r.maxY - hole.maxY)),
+                ((r.maxY - hole.minY) * r.width,
+                 CGRect(x: r.minX, y: r.minY, width: r.width, height: hole.minY - r.minY)),
+                ((hole.maxX - r.minX) * r.height,
+                 CGRect(x: hole.maxX, y: r.minY, width: r.maxX - hole.maxX, height: r.height)),
+                ((r.maxX - hole.minX) * r.height,
+                 CGRect(x: r.minX, y: r.minY, width: hole.minX - r.minX, height: r.height)),
+            ]
+            if let best = cuts.filter({ $0.rect.width > 0 && $0.rect.height > 0 }).min(by: { $0.area < $1.area }) {
+                r = best.rect
+            }
+        }
+        return r
+    }
+
     func apply(hinge: Hinge, seam: Seam?, occlusions: [CGRect], windowHeight: CGFloat) {
         if self.windowHeight != windowHeight { self.windowHeight = windowHeight }
         if self.hinge != hinge { self.hinge = hinge }
@@ -38,6 +69,8 @@ final class FoldState {
     }
 
     #if DEBUG
+    static let simulatesOcclusion = ProcessInfo.processInfo.arguments.contains("-simulateOcclusion")
+
     /// 模拟器没法把铰链掰到半开:`-simulateSeam horizontal|vertical` 在窗口正中造一条 40pt 的接缝。
     static let simulatedAxis: String? = {
         let args = ProcessInfo.processInfo.arguments
@@ -102,6 +135,11 @@ struct FoldTracker: UIViewRepresentable {
                     ? CGRect(x: b.midX - 20, y: 0, width: 40, height: b.height)
                     : CGRect(x: 0, y: b.midY - 20, width: b.width, height: 40))
             }
+            if FoldState.simulatesOcclusion, let window {
+                // 真机上读到的那块遮挡区大约 58×37pt,这里放在窗口上部偏右、肯定压到终端画布的位置。
+                let b = window.bounds
+                occlusions = [CGRect(x: b.maxX * 0.62, y: 200, width: 58, height: 37)]
+            }
             #endif
             state.apply(hinge: hinge, seam: seam, occlusions: occlusions,
                         windowHeight: window?.bounds.height ?? 0)
@@ -116,12 +154,18 @@ struct SeamOutline: View {
 
     var body: some View {
         GeometryReader { geo in
+            let origin = geo.frame(in: .global).origin
             if let seam = fold.seam {
-                let origin = geo.frame(in: .global).origin
                 Rectangle()
                     .fill(.red.opacity(0.25))
                     .frame(width: seam.frame.width, height: seam.frame.height)
                     .position(x: seam.frame.midX - origin.x, y: seam.frame.midY - origin.y)
+            }
+            ForEach(Array(fold.occlusions.enumerated()), id: \.offset) { _, hole in
+                Rectangle()
+                    .fill(.blue.opacity(0.4))
+                    .frame(width: hole.width, height: hole.height)
+                    .position(x: hole.midX - origin.x, y: hole.midY - origin.y)
             }
         }
         .allowsHitTesting(false)

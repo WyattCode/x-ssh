@@ -37,9 +37,10 @@ struct TerminalScreen: View {
             Color(rgb: TermTheme.background).ignoresSafeArea()
             // 画布和输入框一直在 —— 连接前就量得到尺寸,PTY 一开始就是对的大小;状态卡片盖在上面。
             GeometryReader { geo in
-                // 笔记本姿态(接缝横着):终端只用接缝上面那一半,下半留给键盘和键行。
-                let size = CGSize(width: geo.size.width,
-                                  height: usableHeight(geo.size.height, top: geo.frame(in: .global).minY))
+                // 避开接缝和遮挡区:笔记本姿态只用接缝上半,书本姿态只用一侧,遮挡区从最省的那条边削掉。
+                let full = geo.frame(in: .global)
+                let area = fold.usableRect(in: full)
+                let size = area.size
                 ZStack(alignment: .topLeading) {
                     canvas(m)
                     KeyCapture(model: model, ctrlArmed: model.ctrlArmed,
@@ -49,8 +50,10 @@ struct TerminalScreen: View {
                 }
                 .frame(width: size.width, height: size.height, alignment: .topLeading)
                 #if DEBUG
-                .border(FoldState.simulatedAxis == nil ? .clear : .green.opacity(0.6))
+                .border(FoldState.simulatedAxis == nil && !FoldState.simulatesOcclusion ? .clear : .green.opacity(0.6))
                 #endif
+                .padding(.leading, area.minX - full.minX)
+                .padding(.top, area.minY - full.minY)
                 .contentShape(Rectangle())
                 .onTapGesture { model.wantsKeyboard = true }
                 .gesture(scrollGesture(m))
@@ -71,10 +74,12 @@ struct TerminalScreen: View {
             .accessibilityElement()
             .accessibilityLabel(Text("Terminal"))
             .accessibilityValue(UIAccessibility.isVoiceOverRunning ? model.screenText : "")
-            // 状态卡片居中在接缝上面那一半,别跨在折线上。
+            // 状态卡片和画布用同一块可用区域:不跨接缝、不压遮挡区。
             overlay
-                .frame(maxWidth: .infinity, maxHeight: overlayCap ?? .infinity)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .frame(width: usable?.width, height: usable?.height)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .padding(.leading, usable.map { $0.minX - container.minX } ?? 0)
+                .padding(.top, usable.map { $0.minY - container.minY } ?? 0)
         }
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { container = $0 }
         .navigationTitle(model.title.isEmpty ? model.host.displayName : model.title)
@@ -93,15 +98,9 @@ struct TerminalScreen: View {
         }
     }
 
-    private var overlayCap: CGFloat? {
-        guard let seam = fold.horizontalSeam, seam.minY > container.minY else { return nil }
-        return seam.minY - container.minY
-    }
-
-    /// 接缝横着且贴在画布里时,画布只到接缝上沿;`top` 是画布顶边的窗口坐标。
-    private func usableHeight(_ height: CGFloat, top: CGFloat) -> CGFloat {
-        guard let seam = fold.horizontalSeam, seam.minY > top else { return height }
-        return min(height, seam.minY - top)
+    /// 整个页面扣掉接缝和遮挡区之后的可用矩形;还没量到页面尺寸时不限制。
+    private var usable: CGRect? {
+        container.isEmpty ? nil : fold.usableRect(in: container)
     }
 
     // MARK: 画布
