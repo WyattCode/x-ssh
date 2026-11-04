@@ -23,6 +23,7 @@ import { KeyManager } from './keyManager'
 import { MasterLock } from './lock'
 import { registerUserVerifyIpc, gateKeyConnect, userVerifyBlocksQuiet } from './userVerifyIpc'
 import { capHistory } from './sessionHistory'
+import { displayIdForBounds, pickWindowPlacement } from './windowPlacement'
 
 const store = new HostStore()
 const knownHosts = new KnownHosts()
@@ -363,6 +364,13 @@ interface SavedBounds {
   width: number
   height: number
   maximized?: boolean
+  /** Top-left of the restored (non-maximised) window, in screen coordinates. */
+  x?: number
+  y?: number
+  /** Display the window was last on — lets us reopen on the same monitor even
+   *  if the saved coordinates no longer land there (resolution change, monitor
+   *  reordered, unplugged and plugged back in). */
+  displayId?: number
 }
 
 /** True for plain web URLs — the only thing we hand to the OS to open. */
@@ -1072,12 +1080,22 @@ async function readUiPrefs(): Promise<UiPrefs> {
 }
 
 function createWindow(saved?: SavedBounds, prefs: UiPrefs = {}): void {
-  // Restore the last size (never the position — the window always opens
-  // centered), on whichever display the pointer is on, so a second monitor
-  // gets the window rather than always the primary one.
-  const { x: dx, y: dy, width: sw, height: sh } = screen.getDisplayNearestPoint(
-    screen.getCursorScreenPoint()
-  ).workArea
+  // Where the window opens.
+  //
+  // It used to be "whichever display the mouse pointer is on", centred there,
+  // with the position never saved. That reads as a feature (a second monitor
+  // gets the window) but in practice the window jumped to a secondary display
+  // whenever the pointer happened to rest there — with no way to tell the app
+  // which screen it belongs on, because the position was never remembered.
+  //
+  // Now: reopen where the window was last closed, on the display it was on.
+  // The pointer only decides for a first run, when there is nothing saved yet.
+  const target = pickWindowPlacement(saved, {
+    displays: screen.getAllDisplays().map((d) => ({ id: d.id, workArea: d.workArea })),
+    primaryId: screen.getPrimaryDisplay().id,
+    cursor: screen.getCursorScreenPoint()
+  })
+  const { x: dx, y: dy, width: sw, height: sh } = target.workArea
   // A saved size is only used when it is large enough to be usable; below that
   // it is as if there were none. Narrowed here so the rest of the function can
   // use `restore` directly instead of asserting the same thing three times.
@@ -1090,14 +1108,19 @@ function createWindow(saved?: SavedBounds, prefs: UiPrefs = {}): void {
   // reqW/reqH: what we asked the OS for, kept for persistBounds() below.
   const reqW = Math.min(restore ? restore.width : Math.min(1440, Math.round(sw * 0.66)), sw)
   const reqH = Math.min(restore ? restore.height : Math.min(920, Math.round(sh * 0.8)), sh)
+  // reqX/reqY: the top-left we asked for, kept for persistBounds() so the
+  // fractional-scale rounding above can be recognised on x/y too.
+  const reqX = target.x ?? dx + Math.round((sw - reqW) / 2)
+  const reqY = target.y ?? dy + Math.round((sh - reqH) / 2)
   const win = new BrowserWindow({
     width: reqW,
     height: reqH,
-    // Centred by hand rather than with `center: true`, which would ignore this
-    // and use the primary display. workArea x/y matter: a secondary monitor's
-    // origin is offset (and can be negative when it sits left of the primary).
-    x: dx + Math.round((sw - reqW) / 2),
-    y: dy + Math.round((sh - reqH) / 2),
+    // On a first run, centre by hand rather than with `center: true`, which
+    // would ignore the display we chose and use the primary one. When a
+    // position was saved it is used verbatim — already validated against the
+    // live display layout by pickWindowPlacement.
+    x: reqX,
+    y: reqY,
     minWidth: 680,
     minHeight: 440,
     show: false,
@@ -1129,15 +1152,31 @@ function createWindow(saved?: SavedBounds, prefs: UiPrefs = {}): void {
     // 退出时会等设置写完(见 will-quit)才真正结束进程 —— 这段时间里窗口已经销毁,
     // 迟到的缩放防抖回调再读 bounds 会抛「Object has been destroyed」,主进程弹错误框。
     if (win.isDestroyed()) return
+    // getNormalBounds() ignores the maximised state, which is exactly what we
+    // want for both size and position: restoring a maximised window must reuse
+    // the size it had before, not the full work area.
     const b = win.getNormalBounds()
     // On a fractional-scale display the OS hands back a slightly larger rect
     // than we asked for (measured +3w/+2h at 175%). Storing that verbatim grew
     // the window a few px on every single launch, so treat a difference within
     // rounding noise as "unchanged" and keep our own figure; a real resize is
-    // always larger than that and passes through.
-    const width = Math.abs(b.width - reqW) <= 8 ? reqW : b.width
-    const height = Math.abs(b.height - reqH) <= 8 ? reqH : b.height
-    void settings.set('windowBounds', { width, height, maximized: win.isMaximized() }).catch(() => undefined)
+    // always larger than that and passes through. Same reasoning for x/y, where
+    // the OS may shave a pixel off a work-area edge.
+    const near = (actual: number, asked: number): number =>
+      Math.abs(actual - asked) <= 8 ? asked : actual
+    const width = near(b.width, reqW)
+    const height = near(b.height, reqH)
+    const displays = screen.getAllDisplays().map((d) => ({ id: d.id, workArea: d.workArea }))
+    void settings
+      .set('windowBounds', {
+        width,
+        height,
+        maximized: win.isMaximized(),
+        x: near(b.x, reqX),
+        y: near(b.y, reqY),
+        displayId: displayIdForBounds(displays, screen.getPrimaryDisplay().id, b)
+      })
+      .catch(() => undefined)
   }
   const schedulePersist = (): void => {
     if (saveTimer) clearTimeout(saveTimer)
