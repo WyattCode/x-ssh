@@ -3,6 +3,8 @@ import SwiftUI
 struct HostsView: View {
     @Environment(HostStore.self) private var store
     let activeID: UUID?
+    /// 详情那一侧的「新建主机」按钮通过它让这里弹出编辑页。
+    @Binding var addRequested: Bool
     let onConnect: (Host) -> Void
 
     @State private var editing: Host?
@@ -58,10 +60,26 @@ struct HostsView: View {
         .searchable(text: $query, prompt: Text("Search hosts"))
         .navigationTitle("Hosts")
         // 按钮全走系统工具栏:iPhone Duo 外屏上它们会自动竖到右侧。
+        // 放底部工具栏:竖条里顶部那一段紧挨着状态区(灵动岛 / 信号 / 电量),「+」贴上去会和状态图标碰在一起,
+        // 按下放大时还会压到它;HIG 里底部工具栏的按钮留在竖条下方,拇指也够得着。
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
+            // 搜索也显式放底部,和「+」由系统分开排位;只放「+」时搜索按钮会被它占掉。
+            DefaultToolbarItem(kind: .search, placement: .bottomBar)
+            ToolbarItem(placement: .bottomBar) {
                 Button("Add Host", systemImage: "plus") { startAdding() }
             }
+        }
+        #if DEBUG
+        // `-autoNewHost` / `-autoEditHost <名字>`:启动后直接弹出编辑页,命令行起的模拟器里核对弹层布局用。
+        .task {
+            try? await Task.sleep(for: .seconds(1))
+            if DebugLaunch.flag("-autoNewHost") { startAdding() }
+            else if let name = DebugLaunch.value("-autoEditHost"),
+                    let host = store.hosts.first(where: { $0.displayName == name }) { startEditing(host) }
+        }
+        #endif
+        .onChange(of: addRequested) { _, requested in
+            if requested { addRequested = false; startAdding() }
         }
         .sheet(item: $editing) { host in
             HostEditor(host: host, password: isNew ? "" : store.password(for: host)) { saved, password in
@@ -104,6 +122,7 @@ struct HostEditor: View {
     private enum Field { case name, address, port, user, password }
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var host: Host
     @State private var portText: String
     @State private var password: String
@@ -160,11 +179,24 @@ struct HostEditor: View {
             .navigationTitle(host.displayName.isEmpty ? String(localized: "New Host") : host.displayName)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel", systemImage: "xmark") { dismiss() }
-                }
-                ToolbarItem(placement: .topBarPinnedTrailing) {
-                    Button("Save", systemImage: "checkmark", action: save).disabled(!canSave)
+                // 外屏(紧凑宽度)上弹层的按钮竖排进竖条:放底部工具栏,也就是右下角,和主机页一致;
+                // 竖条最上面一格紧挨状态区,按钮放那儿会碰到状态图标。内屏弹层居中,用标准的顶部按钮。
+                if sizeClass == .compact {
+                    // 竖条里弹性空白是零尺寸;弹层是横向底栏时(内屏居中弹层)把这组按钮推到右下角。
+                    ToolbarSpacer(.flexible, placement: .bottomBar)
+                    ToolbarItem(placement: .bottomBar) {
+                        Button("Cancel", systemImage: "xmark") { dismiss() }
+                    }
+                    ToolbarItem(placement: .bottomBar) {
+                        Button("Save", systemImage: "checkmark", action: save).disabled(!canSave)
+                    }
+                } else {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel", systemImage: "xmark") { dismiss() }
+                    }
+                    ToolbarItem(placement: .topBarPinnedTrailing) {
+                        Button("Save", systemImage: "checkmark", action: save).disabled(!canSave)
+                    }
                 }
                 // 数字键盘没有回车键,得给个收起的地方。
                 ToolbarItemGroup(placement: .keyboard) {
