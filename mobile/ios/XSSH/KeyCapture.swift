@@ -206,14 +206,31 @@ final class KeyAccessory: UIInputView {
             stack.addArrangedSubview(b)
         }
 
+        // 收起键盘固定在最右、不随键行滚动:外屏键盘弹着时系统工具栏里的键盘开关可能被收进溢出菜单,
+        // 键盘附件栏跟着键盘走(Apple 的 iPhone Duo 指引),所以这颗放这里一定够得着。
+        var hideConfig = UIButton.Configuration.gray()
+        hideConfig.image = UIImage(systemName: "keyboard.chevron.compact.down")
+        hideConfig.cornerStyle = .medium
+        let hide = UIButton(configuration: hideConfig, primaryAction: UIAction { [weak self] _ in
+            self?.haptic.impactOccurred()
+            MainActor.assumeIsolated { m.wantsKeyboard = false }
+        })
+        hide.accessibilityLabel = String(localized: "Hide Keyboard")
+        hide.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(hide)
+
         let scroll = UIScrollView()
         scroll.showsHorizontalScrollIndicator = false
         scroll.translatesAutoresizingMaskIntoConstraints = false
         scroll.addSubview(stack)
         addSubview(scroll)
         NSLayoutConstraint.activate([
+            hide.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            hide.centerYAnchor.constraint(equalTo: centerYAnchor),
+            hide.widthAnchor.constraint(equalToConstant: 52),
+            hide.heightAnchor.constraint(equalToConstant: 44),
             scroll.leadingAnchor.constraint(equalTo: leadingAnchor),
-            scroll.trailingAnchor.constraint(equalTo: trailingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: hide.leadingAnchor, constant: -4),
             scroll.topAnchor.constraint(equalTo: topAnchor),
             scroll.bottomAnchor.constraint(equalTo: bottomAnchor),
             stack.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor, constant: 8),
