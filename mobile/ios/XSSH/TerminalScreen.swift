@@ -22,6 +22,8 @@ struct TerminalScreen: View {
     @AppStorage("terminalFontSize") private var fontSize = 13.0
 
     let model: TerminalModel
+    /// 回到主机列表,会话保留(和「断开」不同)。
+    let onBack: () -> Void
     let onClose: () -> Void
 
     @State private var pinchBase: Double?
@@ -43,10 +45,6 @@ struct TerminalScreen: View {
                 let size = area.size
                 ZStack(alignment: .topLeading) {
                     canvas(m)
-                    KeyCapture(model: model, ctrlArmed: model.ctrlArmed,
-                               wantsKeyboard: model.wantsKeyboard && !model.showsPrompt)
-                        .frame(width: 1, height: 1)
-                        .allowsHitTesting(false)
                 }
                 .frame(width: size.width, height: size.height, alignment: .topLeading)
                 #if DEBUG
@@ -81,25 +79,52 @@ struct TerminalScreen: View {
                 .padding(.leading, usable.map { $0.minX - container.minX } ?? 0)
                 .padding(.top, usable.map { $0.minY - container.minY } ?? 0)
         }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if model.showsKeys, model.state == .connected { TerminalKeyPanel(model: model) }
+        }
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { container = $0 }
         .navigationTitle(model.title.isEmpty ? model.host.displayName : model.title)
         .navigationBarTitleDisplayMode(.inline)
+        // 标题由左上角的 logo + 主机名自己画,去掉系统标题,否则主机名出现两遍。
+        .toolbar(removing: .title)
         .toolbarColorScheme(.dark, for: .navigationBar, .bottomBar)
+        // 系统返回键在外屏竖条最上面,紧贴状态区;改成底部工具栏里的「主机」按钮。
+        // 工具栏结构不随尺寸类变:姿态切换时(折叠 / 展开)内容变了,系统会丢掉竖条。
+        .navigationBarBackButtonHidden(true)
         .toolbar {
+            // 会话页左上角:应用 logo + 主机名。自定义视图(不是单纯的图标或标题)不会被系统竖排进竖条,留在顶部左边。
+            ToolbarItem(placement: .topBarLeading) {
+                HStack(spacing: 8) {
+                    BrandMark(size: 26)
+                    Text(verbatim: model.title.isEmpty ? model.host.displayName : model.title)
+                        .font(.headline).lineLimit(1)
+                }
+                .fixedSize()
+            }
+            // 去掉系统给工具栏项套的玻璃圆泡,否则 logo + 主机名被裁在一个小圆里。
+            .sharedBackgroundVisibility(.hidden)
+            // 返回主机列表是导航,键盘弹着、竖条放不下时让位:进溢出菜单。这时最需要的是键盘 / 快捷键两颗开关。
+            ToolbarItem(placement: .bottomBar) {
+                Button("Hosts", systemImage: "chevron.left", action: onBack)
+            }
             // 系统工具栏:iPhone Duo 外屏上带图标的按钮自动竖排到右侧,放不下的从下往上收进溢出菜单。
             // 键盘开关是终端里最常用的,最后才收;断开最不常用,最先收。每颗都带标题,溢出菜单里才看得懂。
+            // 快捷键面板和系统键盘是两颗独立的按钮,各自亮着(蓝)表示开着 —— 同安卓的 ⌘ / ⌨。
             ToolbarItem(placement: .bottomBar) {
-                Button(model.wantsKeyboard ? "Hide Keyboard" : "Keyboard",
-                       systemImage: model.wantsKeyboard ? "keyboard.chevron.compact.down" : "keyboard") {
-                    model.wantsKeyboard.toggle()
-                }
+                Button("Shortcuts", systemImage: "command") { withAnimation(.smooth(duration: 0.25)) { model.showsKeys.toggle() } }
+                    .tint(model.showsKeys ? Color.accentColor : nil)
             }
             .visibilityPriority(.high)
             ToolbarItem(placement: .bottomBar) {
-                Button("Paste", systemImage: "doc.on.clipboard") { model.paste() }
+                Button("Keyboard", systemImage: "keyboard") { model.wantsKeyboard.toggle() }
+                    .tint(model.wantsKeyboard ? Color.accentColor : nil)
+            }
+            .visibilityPriority(.high)
+            ToolbarItem(placement: .bottomBar) {
+                Button("Paste", systemImage: "clipboard") { model.paste() }
             }
             ToolbarItem(placement: .bottomBar) {
-                Button("Disconnect", systemImage: "xmark.circle", role: .destructive, action: onClose)
+                Button("Disconnect", systemImage: "xmark", role: .destructive, action: onClose)
             }
             .visibilityPriority(.low)
         }
@@ -203,6 +228,7 @@ struct TerminalScreen: View {
         switch model.state {
         case .idle, .connecting:
             card {
+                BrandMark(size: 56)
                 ProgressView().tint(.white)
                 Text("Connecting…").font(.headline)
                 Button("Cancel", role: .cancel, action: onClose).buttonStyle(.bordered)
@@ -247,7 +273,7 @@ struct TerminalScreen: View {
             VStack {
                 Spacer()
                 HStack(spacing: 12) {
-                    Image(systemName: "bolt.horizontal.circle")
+                    Image(systemName: "bolt.slash")
                     if let status, status != 0 { Text("Session ended (exit \(Int(status)))") } else { Text("Session ended") }
                     Spacer(minLength: 8)
                     Button("Reconnect") { model.connect() }.buttonStyle(.borderedProminent).controlSize(.large)

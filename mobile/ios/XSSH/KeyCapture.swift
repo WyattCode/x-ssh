@@ -1,7 +1,7 @@
 import SwiftUI
 import UIKit
 
-/// 隐形的第一响应者:接软键盘文字、实体键盘的组合键,并在键盘上方挂一排终端专用键。
+/// 隐形的第一响应者:接软键盘文字和实体键盘的组合键。终端专用键行是 `TerminalKeyRow`(SwiftUI,放在终端自己那一栏里)。
 /// 用 UITextField 而不是裸 UIKeyInput:拼音等输入法靠它的「标记文本」组字,
 /// 只有组字结束(没有 markedTextRange)才把定稿的文字发给服务器 —— 裸 UIKeyInput 会把拼音字母整个吞掉。
 struct KeyCapture: UIViewRepresentable {
@@ -17,7 +17,6 @@ struct KeyCapture: UIViewRepresentable {
     }
 
     func updateUIView(_ field: CaptureField, context: Context) {
-        field.accessory.setCtrl(armed: ctrlArmed)
         // 等视图进了窗口再要焦点;键盘开关由 `wantsKeyboard` 决定。
         DispatchQueue.main.async {
             field.syncing = true
@@ -30,9 +29,31 @@ struct KeyCapture: UIViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     final class Coordinator: NSObject, UITextFieldDelegate {
+        private var settle: DispatchWorkItem?
+
         @objc func changed(_ field: UITextField) {
             guard let field = field as? CaptureField, field.markedTextRange == nil,
                   let text = field.text, !text.isEmpty else { return }
+            switch InputGate.decide(text: text, dictating: field.isDictating) {
+            case .sendNow:
+                settle?.cancel()
+                flush(field)
+            case .settle(let delay):
+                // 听写 / 一次进来一整段:系统还在往这个输入框里写结果(后面的识别会改写前面的),
+                // 这时清空输入框会把整个听写会话弄断,只剩第一个字。等一段时间没有新变化再整段发出去。
+                settle?.cancel()
+                let item = DispatchWorkItem { [weak self, weak field] in
+                    guard let self, let field else { return }
+                    if field.isDictating || field.markedTextRange != nil { self.changed(field); return }
+                    self.flush(field)
+                }
+                settle = item
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
+            }
+        }
+
+        private func flush(_ field: CaptureField) {
+            guard let text = field.text, !text.isEmpty else { return }
             field.text = ""
             MainActor.assumeIsolated { field.model?.send(text) }
         }
@@ -45,13 +66,11 @@ struct KeyCapture: UIViewRepresentable {
 
     final class CaptureField: UITextField {
         weak var model: TerminalModel?
-        let accessory: KeyAccessory
         /// 程序自己开关键盘时置位:这种焦点变化不该改写用户的「要不要键盘」偏好。
         var syncing = false
 
         init(model: TerminalModel) {
             self.model = model
-            self.accessory = KeyAccessory(model: model)
             super.init(frame: .zero)
             autocorrectionType = .no
             autocapitalizationType = .none
@@ -67,7 +86,8 @@ struct KeyCapture: UIViewRepresentable {
 
         @available(*, unavailable) required init?(coder: NSCoder) { fatalError() }
 
-        override var inputAccessoryView: UIView? { get { accessory } set {} }
+        /// 系统听写(键盘上的麦克风)进行中。听写模式的输入语言是 "dictation"。
+        var isDictating: Bool { textInputMode?.primaryLanguage == "dictation" }
 
         // 键盘被系统收起 / 我们收起时,同步回模型,按钮图标和点击唤起才对得上。
         override func becomeFirstResponder() -> Bool {
@@ -76,9 +96,19 @@ struct KeyCapture: UIViewRepresentable {
             return ok
         }
 
+        /// 键盘显示与否只由用户的按钮(`wantsKeyboard`)决定。系统因为换屏 / 姿态切换 / 导航容器重建把焦点收走时,
+        /// 不能当成用户要收键盘;用户还想要键盘的话,稍后把焦点拿回来。
         override func resignFirstResponder() -> Bool {
             let ok = super.resignFirstResponder()
-            if ok, !syncing { MainActor.assumeIsolated { if model?.wantsKeyboard == true { model?.wantsKeyboard = false } } }
+            if ok, !syncing, model?.wantsKeyboard == true {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+                    guard let self, self.window != nil, !self.isFirstResponder else { return }
+                    guard MainActor.assumeIsolated({ self.model?.wantsKeyboard == true }) else { return }
+                    self.syncing = true
+                    _ = self.becomeFirstResponder()
+                    self.syncing = false
+                }
+            }
             return ok
         }
 
@@ -152,106 +182,181 @@ struct KeyCapture: UIViewRepresentable {
     }
 }
 
-/// 键盘上方那一排终端键。附件栏随键盘走、不会被系统挪到竖条里(Apple 的 iPhone Duo 指南里写明),
-/// 所以 Esc / Tab / Ctrl / 方向键放这里,系统工具栏只放次要动作。
-final class KeyAccessory: UIInputView {
-    private weak var model: TerminalModel?
-    private let haptic = UIImpactFeedbackGenerator(style: .light)
+/// 快捷键面板,照安卓:浮起的圆角面板,默认收起,和系统键盘各自独立开关。
+/// 窄(外屏)两行五列,`⋯` 翻到第二页;宽(内屏)两行九列全部露出。
+///
+///     窄:  Esc  Tab  ^C   ↑   ⏎          第二页:  Alt  ^D  ^Z   ⌫  ^L
+///          Ctrl  ⋯   ←   ↓   →                    Ctrl  ⋯   |   /   -
+///     宽:  Esc  Tab  ^C  ^D  ^Z  ^L   ⌫   ↑   ⏎
+///          Ctrl Alt   |   /   -   ~   ←   ↓   →
+///
+/// 键帽一律是胶囊(和右侧竖条的玻璃胶囊同一种形状),要么这样要么无边框,不用「方块加小圆角」。
+struct TerminalKeyPanel: View {
+    let model: TerminalModel
+    @State private var more = false
 
-    init(model: TerminalModel) {
-        self.model = model
-        super.init(frame: CGRect(x: 0, y: 0, width: 0, height: 56), inputViewStyle: .keyboard)
-        allowsSelfSizing = true
-        translatesAutoresizingMaskIntoConstraints = false
+    private let gap: CGFloat = 6
 
-        let stack = UIStackView()
-        stack.axis = .horizontal
-        stack.spacing = 6
-        stack.alignment = .center
-        stack.translatesAutoresizingMaskIntoConstraints = false
-
-        func key(_ title: String? = nil, symbol: String? = nil, label: String, action: @escaping @MainActor () -> Void) -> UIButton {
-            var config = UIButton.Configuration.gray()
-            config.title = title
-            if let symbol { config.image = UIImage(systemName: symbol) }
-            config.cornerStyle = .medium
-            config.contentInsets = NSDirectionalEdgeInsets(top: 12, leading: 12, bottom: 12, trailing: 12)
-            let b = UIButton(configuration: config, primaryAction: UIAction { [weak self] _ in
-                self?.haptic.impactOccurred()
-                MainActor.assumeIsolated { action() }
-            })
-            b.accessibilityLabel = label
-            b.widthAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
-            b.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
-            return b
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            frame { wide }
+            frame { compact }
         }
-
-        let m = model
-        let buttons: [UIButton] = [
-            key("Esc", label: "Esc") { m.press(.esc) },
-            key("Tab", label: "Tab") { m.press(.tab) },
-            key("Ctrl", label: String(localized: "Control")) { m.ctrlArmed.toggle() },
-            key(symbol: "arrow.up", label: String(localized: "Up")) { m.press(.up) },
-            key(symbol: "arrow.down", label: String(localized: "Down")) { m.press(.down) },
-            key(symbol: "arrow.left", label: String(localized: "Left")) { m.press(.left) },
-            key(symbol: "arrow.right", label: String(localized: "Right")) { m.press(.right) },
-            key("|", label: "|") { m.send("|") },
-            key("~", label: "~") { m.send("~") },
-            key("/", label: "/") { m.send("/") },
-            key("-", label: "-") { m.send("-") },
-            key(symbol: "doc.on.clipboard", label: String(localized: "Paste")) { m.paste() },
-        ]
-        for (i, b) in buttons.enumerated() {
-            if i == 2 { ctrl = b }
-            stack.addArrangedSubview(b)
-        }
-
-        // 收起键盘固定在最右、不随键行滚动:外屏键盘弹着时系统工具栏里的键盘开关可能被收进溢出菜单,
-        // 键盘附件栏跟着键盘走(Apple 的 iPhone Duo 指引),所以这颗放这里一定够得着。
-        var hideConfig = UIButton.Configuration.gray()
-        hideConfig.image = UIImage(systemName: "keyboard.chevron.compact.down")
-        hideConfig.cornerStyle = .medium
-        let hide = UIButton(configuration: hideConfig, primaryAction: UIAction { [weak self] _ in
-            self?.haptic.impactOccurred()
-            MainActor.assumeIsolated { m.wantsKeyboard = false }
-        })
-        hide.accessibilityLabel = String(localized: "Hide Keyboard")
-        hide.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(hide)
-
-        let scroll = UIScrollView()
-        scroll.showsHorizontalScrollIndicator = false
-        scroll.translatesAutoresizingMaskIntoConstraints = false
-        scroll.addSubview(stack)
-        addSubview(scroll)
-        NSLayoutConstraint.activate([
-            hide.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-            hide.centerYAnchor.constraint(equalTo: centerYAnchor),
-            hide.widthAnchor.constraint(equalToConstant: 52),
-            hide.heightAnchor.constraint(equalToConstant: 44),
-            scroll.leadingAnchor.constraint(equalTo: leadingAnchor),
-            scroll.trailingAnchor.constraint(equalTo: hide.leadingAnchor, constant: -4),
-            scroll.topAnchor.constraint(equalTo: topAnchor),
-            scroll.bottomAnchor.constraint(equalTo: bottomAnchor),
-            stack.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor, constant: 8),
-            stack.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor, constant: -8),
-            stack.centerYAnchor.constraint(equalTo: scroll.frameLayoutGuide.centerYAnchor),
-            heightAnchor.constraint(equalToConstant: 56),
-        ])
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 12).padding(.bottom, 10)
+        .environment(\.colorScheme, .dark)
     }
 
-    @available(*, unavailable) required init?(coder: NSCoder) { fatalError() }
+    private func frame<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        VStack(spacing: gap, content: content)
+            .padding(8)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 30, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 30, style: .continuous).strokeBorder(.white.opacity(0.10), lineWidth: 0.5))
+    }
 
-    private var ctrl: UIButton?
+    private func row<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        HStack(spacing: gap, content: content)
+    }
 
-    /// Ctrl 待用时整颗按钮实心高亮,看得出下一个键会变成控制字符。
-    func setCtrl(armed: Bool) {
-        guard let ctrl else { return }
-        var config = armed ? UIButton.Configuration.filled() : UIButton.Configuration.gray()
-        config.title = "Ctrl"
-        config.cornerStyle = .medium
-        config.contentInsets = NSDirectionalEdgeInsets(top: 12, leading: 12, bottom: 12, trailing: 12)
-        ctrl.configuration = config
-        ctrl.accessibilityValue = armed ? String(localized: "On") : nil
+    private var compact: some View {
+        Group {
+            row {
+                if more {
+                    key("Alt", active: model.altArmed) { model.altArmed.toggle() }
+                    key("^D") { model.sendRaw([4]) }
+                    key("^Z") { model.sendRaw([26]) }
+                    key(symbol: "delete.left", label: "Delete", repeats: true) { model.sendRaw([0x7F]) }
+                } else {
+                    key("Esc") { model.press(.esc) }
+                    key("Tab") { model.press(.tab) }
+                    key("^C") { model.sendRaw([3]) }
+                    key(symbol: "arrow.up", label: "Up", repeats: true) { model.press(.up) }
+                }
+                key(symbol: "return", label: "Return", emphasis: true) { model.sendRaw([13]) }
+            }
+            row {
+                key("Ctrl", active: model.ctrlArmed) { model.ctrlArmed.toggle() }
+                key("⋯", active: more) { more.toggle() }
+                if more {
+                    key("^L") { model.sendRaw([12]) }
+                    key("|") { model.send("|") }
+                    key("/") { model.send("/") }
+                } else {
+                    key(symbol: "arrow.left", label: "Left", repeats: true) { model.press(.left) }
+                    key(symbol: "arrow.down", label: "Down", repeats: true) { model.press(.down) }
+                    key(symbol: "arrow.right", label: "Right", repeats: true) { model.press(.right) }
+                }
+            }
+        }
+    }
+
+    private var wide: some View {
+        Group {
+            row {
+                key("Esc") { model.press(.esc) }
+                key("Tab") { model.press(.tab) }
+                key("^C") { model.sendRaw([3]) }
+                key("^D") { model.sendRaw([4]) }
+                key("^Z") { model.sendRaw([26]) }
+                key("^L") { model.sendRaw([12]) }
+                key(symbol: "delete.left", label: "Delete", repeats: true) { model.sendRaw([0x7F]) }
+                key(symbol: "arrow.up", label: "Up", repeats: true) { model.press(.up) }
+                key(symbol: "return", label: "Return", emphasis: true) { model.sendRaw([13]) }
+            }
+            row {
+                key("Ctrl", active: model.ctrlArmed) { model.ctrlArmed.toggle() }
+                key("Alt", active: model.altArmed) { model.altArmed.toggle() }
+                key("|") { model.send("|") }
+                key("/") { model.send("/") }
+                key("-") { model.send("-") }
+                key("~") { model.send("~") }
+                key(symbol: "arrow.left", label: "Left", repeats: true) { model.press(.left) }
+                key(symbol: "arrow.down", label: "Down", repeats: true) { model.press(.down) }
+                key(symbol: "arrow.right", label: "Right", repeats: true) { model.press(.right) }
+            }
+        }
+    }
+
+    private func key(_ title: String, active: Bool = false, action: @escaping () -> Void) -> some View {
+        KeyCap(face: .text(title), label: Text(verbatim: title), active: active, emphasis: false, repeats: false, action: action)
+    }
+
+    private func key(symbol: String, label: LocalizedStringKey, emphasis: Bool = false, repeats: Bool = false,
+                     action: @escaping () -> Void) -> some View {
+        KeyCap(face: .symbol(symbol), label: Text(label), active: false, emphasis: emphasis, repeats: repeats, action: action)
+    }
+}
+
+/// 一颗键:按下立刻触发;能连发的(方向键 / 退格)按住 0.4 秒后每 0.08 秒重复。
+private struct KeyCap: View {
+    enum Face { case text(String), symbol(String) }
+
+    let face: Face
+    let label: Text
+    let active: Bool
+    let emphasis: Bool
+    let repeats: Bool
+    let action: () -> Void
+
+    @State private var pressed = false
+    @State private var repeating: Task<Void, Never>?
+    private static let haptic = UIImpactFeedbackGenerator(style: .light)
+
+    var body: some View {
+        content
+            .font(.body)
+            .foregroundStyle(.white)
+            .frame(width: 52, height: 44)
+            .background(Capsule().fill(fill))
+            .contentShape(Capsule())
+            .gesture(DragGesture(minimumDistance: 0)
+                .onChanged { _ in
+                    guard !pressed else { return }
+                    pressed = true
+                    fire()
+                    if repeats {
+                        repeating = Task { @MainActor in
+                            try? await Task.sleep(for: .milliseconds(400))
+                            while !Task.isCancelled { fire(); try? await Task.sleep(for: .milliseconds(80)) }
+                        }
+                    }
+                }
+                .onEnded { _ in pressed = false; repeating?.cancel(); repeating = nil })
+            .accessibilityElement()
+            .accessibilityLabel(label)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityValue(active ? Text("On") : Text(verbatim: ""))
+            .accessibilityAction { action() }
+    }
+
+    @ViewBuilder private var content: some View {
+        switch face {
+        case .text(let t): Text(verbatim: t)
+        case .symbol(let name): Image(systemName: name)
+        }
+    }
+
+    private var fill: Color {
+        if emphasis || active { return Color.accentColor.opacity(pressed ? 0.8 : 1) }
+        return Color.white.opacity(pressed ? 0.30 : 0.14)
+    }
+
+    private func fire() {
+        Self.haptic.impactOccurred()
+        action()
+    }
+}
+
+/// 输入框里冒出新文字时,是立刻发给服务器,还是先等一等。纯逻辑,方便单独验证。
+enum InputGate {
+    enum Decision: Equatable { case sendNow, settle(TimeInterval) }
+
+    /// - 听写中:一律等(识别还在改写前面的结果)。
+    /// - 一次进来不止一个字:可能是听写的整段结果,等一小会儿让后续改写落定,再整段发。
+    /// - 单个字符:是敲键盘,立刻发,不能让打字有延迟。
+    static func decide(text: String, dictating: Bool) -> Decision {
+        if dictating { return .settle(0.7) }
+        if text.count > 1 { return .settle(0.3) }
+        return .sendNow
     }
 }
