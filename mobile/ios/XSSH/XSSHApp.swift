@@ -105,6 +105,8 @@ struct RootView: View {
     @State private var active: TerminalModel?
     @State private var addHostRequested = false
     @State private var searching = false
+    /// 拖把手 / 收起时侧栏内容跟手滑出去的位移(0 = 原位,-侧栏宽度 = 完全滑出)。
+    @State private var slide: CGFloat = 0
     @State private var containerSize: CGSize = .zero
     @State private var columns: NavigationSplitViewVisibility = .automatic
     @State private var compactColumn: NavigationSplitViewColumn = .sidebar
@@ -114,8 +116,8 @@ struct RootView: View {
     @State private var handleShown = true
     @State private var handleToken = 0
     @State private var pokeClock = PokeClock()
-    /// 最近一次连接主机的时刻:连接之后一小段时间里,系统自己把列表收起来(换详情时导航容器会这么干)要拦回去。
-    @State private var lastOpenAt = Date.distantPast
+    /// 刚点了一台主机去连:连上之后把会话抽屉收起来(只对这一次连接生效)。
+    @State private var collapseAfterConnect = false
 
     /// 半折(铰链半开)时侧栏(主机列表)和内容(会话)各占整个宽度的一半;其余时候用记住的宽度。
     private var halfFolded: Bool { sizeClass == .regular && fold.hinge == .partiallyOpen && containerSize.width > 0 }
@@ -152,6 +154,21 @@ struct RootView: View {
         }
     }
 
+    /// 收起列表:侧栏内容先顺着手势方向滑出屏幕(0.22 秒),滑出去之后再无动画地把列只改成「收起」,
+    /// 用户看到的是一整条连贯的「抽屉滑走」,不是淡出再突然变样。
+    private func slideAwayThenCollapse() {
+        widthTween?.cancel()
+        withAnimation(.easeIn(duration: 0.22)) { slide = -CGFloat(shownSidebarWidth) }
+        widthTween = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(235))
+            if Task.isCancelled { return }
+            var t = Transaction(animation: nil)
+            t.disablesAnimations = true
+            withTransaction(t) { columns = .detailOnly; slide = 0 }
+            widthTween = nil
+        }
+    }
+
     /// 展开 / 收起列表的过渡:整块内容快速淡出 → 换状态 → 淡入。系统工具栏(右边竖条里的搜索 / 新建按钮随列表出现 / 消失)
     /// 没有自己的过渡,按钮会生硬地一下跳掉;整块淡一下,按钮的切换就藏在过渡里了。
     private func setColumnsAnimated(_ new: NavigationSplitViewVisibility) {
@@ -166,20 +183,6 @@ struct RootView: View {
             withAnimation(.easeOut(duration: 0.28)) { dip = false }
             widthTween = nil
         }
-    }
-
-    /// 交给导航容器的列可见性绑定。我们自己改 `columns` 都是直接赋值(不走这里),所以走到这里的 setter 都是系统发起的:
-    /// 用户点了系统的侧栏按钮(在窗口顶部、刚刚有触摸),或系统自己决定要收(比如换详情时顺手收起)。
-    /// 横着拿 / 半折时,后一种一律拒绝 —— 连接主机之后列表(会话抽屉)自己收起来就是这么来的。
-    private var columnsFromSystem: Binding<NavigationSplitViewVisibility> {
-        Binding(get: { columns }, set: { new in
-            if new == .detailOnly, sizeClass == .regular, halfFolded || containerSize.width > containerSize.height {
-                let recent = Date().timeIntervalSince(pokeClock.lastTouchAt) < 0.8
-                let onToggle = pokeClock.lastTouch.y >= 0 && pokeClock.lastTouch.y < 130
-                guard recent, onToggle else { return }
-            }
-            columns = new
-        })
     }
 
     /// 列表(侧栏)现在是展开的。两栏的 NavigationSplitView 里系统会把 `.all` 改写成 `.doubleColumn`(用户点系统按钮展开后尤其会),
@@ -234,6 +237,18 @@ struct RootView: View {
                 // 连侧边的状态竖条那块安全区也算进来:整块屏幕的宽度(半折时侧栏取它的一半)。
                 .ignoresSafeArea()
             }
+        // 连上主机之后,会话抽屉(左边的主机列表)自动收起,会话占满整屏(你要的):
+        // 点一台主机 → 转圈 → 连上(绿点亮一下)→ 抽屉顺着滑走。连不上(出错 / 取消)就不收,留着列表让你重选。
+        // 半折时列表和会话各占一半是设计,不收;外屏(单栏)本来就是翻页,不用管。
+        .onChange(of: active?.state) { _, state in
+            guard state == .connected, collapseAfterConnect else { return }
+            collapseAfterConnect = false
+            guard sizeClass == .regular, listVisible, !halfFolded else { return }
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(700))   // 让绿点先亮一会儿,再滑走
+                if listVisible, !halfFolded, active?.state == .connected { slideAwayThenCollapse() }
+            }
+        }
     }
 
     /// 内屏横向(宽 > 高)有地方让主机列表和终端并排;竖向时系统让列表浮在详情上面、盖住它一半,
@@ -252,10 +267,10 @@ struct RootView: View {
     }
 
     private var split: some View {
-        NavigationSplitView(columnVisibility: columnsFromSystem, preferredCompactColumn: $compactColumn) {
+        NavigationSplitView(columnVisibility: $columns, preferredCompactColumn: $compactColumn) {
             HostsView(splitLayout: sizeClass == .regular, activeID: active.flatMap { $0.isEnded ? nil : $0.host.id },
                       activeConnecting: activeConnecting, addRequested: $addHostRequested, searching: $searching, onConnect: open,
-                      onCollapse: { setColumnsAnimated(.detailOnly) })
+                      onCollapse: { slideAwayThenCollapse() }, slideOffset: slide)
                 .navigationSplitViewColumnWidth(min: shownSidebarWidth, ideal: shownSidebarWidth, max: shownSidebarWidth)
         } detail: {
             if let active {
@@ -294,18 +309,11 @@ struct RootView: View {
             }
         }
         .onChange(of: scenePhase) { _, phase in active?.setForeground(phase == .active) }
-        // 连上主机之后列表(会话抽屉)不能自己收起来:横着拿 / 半折时它本来就该常驻。用户自己收(把手、空白处左滑、系统按钮)
-        // 不会发生在刚连接的这 1.5 秒里;这段时间里变成「收起」的,是系统换详情时顺手收的,拦回去。
-        .onChange(of: columns) { _, new in
-            guard new == .detailOnly, sizeClass == .regular, Date().timeIntervalSince(lastOpenAt) < 1.5,
-                  halfFolded || containerSize.width > containerSize.height else { return }
-            columns = .all
-        }
         .overlay(alignment: .leading) {
             if sizeClass == .regular, listVisible, !halfFolded {
-                SidebarHandle(visible: handleShown, onTouch: pokeHandle,
-                              onCollapse: { setColumnsAnimated(.detailOnly) })
-                    .offset(x: shownSidebarWidth + SidebarHandle.gap - SidebarHandle.hitWidth / 2)
+                SidebarHandle(visible: handleShown, width: CGFloat(shownSidebarWidth), slide: $slide, onTouch: pokeHandle,
+                              onCollapse: { slideAwayThenCollapse() })
+                    .offset(x: shownSidebarWidth + SidebarHandle.gap - SidebarHandle.hitWidth / 2 + slide)
                     // 软键盘弹出时竖向居中的位置不能跟着挪(中间线不动)。
                     .ignoresSafeArea(.keyboard)
             }
@@ -377,12 +385,13 @@ struct RootView: View {
             return
         }
         active?.disconnect()
-        lastOpenAt = Date()
+        collapseAfterConnect = true
         active = TerminalModel(host: host, credentials: hosts.credentials(for: host), knownKey: hosts.knownKey(host))
         compactColumn = .detail
     }
 
     private func close() {
+        collapseAfterConnect = false
         active?.disconnect()
         active = nil
         compactColumn = .sidebar
@@ -469,22 +478,25 @@ struct TouchSpy: UIViewRepresentable {
     }
 }
 
-/// 侧栏和会话之间的分界线把手。侧栏宽度是固定的,不能拖到别的位置:用户一碰它往旁边滑,就把整个列表收起来
-/// (收起后屏幕左边缘有小把手,点一下或往右拖就拉回来)。默认显示,两秒没人用就慢慢淡出;
-/// 点它所在的位置、滑它、或在会话区域里碰 / 滑,都会让它重新出现。
+/// 侧栏和会话之间的分界线把手。侧栏宽度是固定的,只有「展开」和「收起」两个位置:
+/// 往左拖时侧栏内容跟着手指滑出去(`slide`),松手时过了三成(或甩得够快)就接着滑走并收起,
+/// 没过就带一点回弹滑回原位。默认显示,两秒没人用就慢慢淡出;点它所在的位置、碰会话区域会让它重新出现。
 struct SidebarHandle: View {
-    /// 固定 334pt(系统默认 320pt;先加宽 10% 到 352pt,再减 5%)。
+    /// 系统默认 320pt,再宽 10%,再减 5%。
     static let width = 334.4
     static let hitWidth: CGFloat = 20
     /// 胶囊在分界线右边 7pt(参考图里胶囊和侧栏边缘之间有一条缝)。
     static let gap: CGFloat = 7
-    /// 滑过这么远就算「滑动」,收起列表。
-    static let swipeDistance: CGFloat = 12
 
     let visible: Bool
+    /// 侧栏现在的宽度(滑出的最大距离)。
+    let width: CGFloat
+    @Binding var slide: CGFloat
     let onTouch: () -> Void
+    /// 松手时决定收起:调用方负责接着把侧栏滑走并真正收起。
     let onCollapse: () -> Void
-    @State private var collapsed = false
+    @State private var dragging = false
+    @State private var crossedThreshold = false
 
     var body: some View {
         // 触摸区域用一块几乎透明但不是「全透明」的矩形撑出来:淡出后胶囊的透明度是 0,系统对「看不见的」视图不一定派发触摸。
@@ -492,23 +504,39 @@ struct SidebarHandle: View {
             .frame(width: Self.hitWidth, height: 160)
             .overlay {
                 Capsule()
-                    .fill(Color.white.opacity(0.4))
-                    .frame(width: 4, height: 40.3)
-                    .opacity(visible ? 1 : 0)
+                    .fill(Color.white.opacity(dragging ? 0.7 : 0.4))
+                    .frame(width: dragging ? 5 : 4, height: dragging ? 48 : 40.3)
+                    .opacity(visible || dragging ? 1 : 0)
                     .animation(.easeOut(duration: visible ? 0.15 : 0.7), value: visible)
+                    .animation(.spring(duration: 0.25), value: dragging)
                     .allowsHitTesting(false)   // 胶囊本身不接触摸:一切交给下面那块触摸区域
             }
             .contentShape(Rectangle())
             .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .global)
                 .onChanged { v in
                     onTouch()
-                    if abs(v.translation.width) > Self.swipeDistance, !collapsed {
-                        collapsed = true
-                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                        onCollapse()
+                    dragging = true
+                    // 只跟着往左的位移;往右拖有一点点阻力感(1/6)但不能把侧栏拉宽。
+                    let dx = v.translation.width
+                    slide = dx < 0 ? max(dx, -width) : min(dx / 6, 10)
+                    let crossed = slide < -width * 0.3
+                    if crossed != crossedThreshold {
+                        crossedThreshold = crossed
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()   // 过了「松手就收起」的线,轻震一下
                     }
                 }
-                .onEnded { _ in collapsed = false; onTouch() })
+                .onEnded { v in
+                    dragging = false
+                    let collapse = slide < -width * 0.3 || v.predictedEndTranslation.width < -width * 0.7
+                    crossedThreshold = false
+                    onTouch()
+                    if collapse {
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        onCollapse()
+                    } else {
+                        withAnimation(.spring(duration: 0.4, bounce: 0.3)) { slide = 0 }
+                    }
+                })
             // 读屏:一个「收起侧栏」的操作。
             .accessibilityElement()
             .accessibilityLabel(Text("Sidebar"))

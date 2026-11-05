@@ -32,6 +32,11 @@ final class TerminalModel: Identifiable {
     private(set) var rows: [ScreenRow] = []
     private(set) var cursor = CursorState(col: 0, row: 0, visible: true)
     private(set) var title = ""
+    /// 滚动位置(离底部多少行 / 回滚历史共多少行)、是否备用屏、视口里的选区:画滚动条和选区高亮用。
+    private(set) var scrollOffset = 0
+    private(set) var historyLen = 0
+    private(set) var onAltScreen = false
+    private(set) var selection: ViewSelection?
     var ctrlArmed = false
     /// Alt 待用:下一次发出去的内容前面加 ESC(终端里 Alt+键 就是这么编码的)。
     var altArmed = false
@@ -218,9 +223,13 @@ final class TerminalModel: Identifiable {
 
     private func apply(_ output: Backend.Output) {
         switch output {
-        case .frame(let rows, let cursor):
+        case .frame(let rows, let cursor, let view):
             self.rows = rows
             self.cursor = cursor
+            scrollOffset = Int(view.scrollOffset)
+            historyLen = Int(view.history)
+            onAltScreen = view.altScreen
+            selection = view.selection
             backend.ackFrame()
         case .title(let t): title = t
         case .closed(let status): if state == .connected { state = .closed(exitStatus: status) }
@@ -314,6 +323,41 @@ final class TerminalModel: Identifiable {
         ctrlArmed = false
         altArmed = false
         backend.send(Data(text.utf8))
+    }
+
+    // MARK: 选择 / 复制
+
+    /// 长按开始选择(视口坐标;默认选一个词),拖动时扩展。
+    func selectStart(row: Int, col: Int, rightHalf: Bool, kind: SelectKind = .word) {
+        backend.perform { $0.selectStart(row: UInt32(row), col: UInt32(col), rightHalf: rightHalf, kind: kind) }
+    }
+
+    func selectUpdate(row: Int, col: Int, rightHalf: Bool) {
+        backend.perform { $0.selectUpdate(row: UInt32(row), col: UInt32(col), rightHalf: rightHalf) }
+    }
+
+    func selectClear() {
+        guard selection != nil else { return }
+        backend.perform { $0.selectClear() }
+    }
+
+    /// 选中的文字(没选为 nil)。
+    var selectedText: String? { backend.currentTerm.selectionText() }
+
+    /// 把选中的文字放进系统剪贴板;返回有没有复制到东西。
+    @discardableResult
+    func copySelection() -> Bool {
+        guard let text = selectedText, !text.isEmpty else { return false }
+        UIPasteboard.general.string = text
+        return true
+    }
+
+    /// 拖滚动条:直接滚到离底部 `offset` 行的位置(0 = 贴底)。
+    func scrollTo(offset: Int) {
+        let target = max(0, min(offset, historyLen))
+        let delta = target - scrollOffset
+        guard delta != 0 else { return }
+        backend.scroll(lines: Int32(delta))
     }
 
     /// 拖动滚动:普通屏滚回滚历史;备用屏(vim / less)开了 alternateScroll 就发方向键。

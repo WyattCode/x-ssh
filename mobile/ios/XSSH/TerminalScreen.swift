@@ -39,6 +39,13 @@ struct TerminalScreen: View {
     @State private var dragLast: CGFloat = 0
     @State private var confirmReplace = false
     @State private var container: CGRect = .zero
+    /// 长按选择:正在选(手指还按着)、编辑菜单的锚点(终端画布坐标;nil = 不显示)、滚动条什么时候淡出。
+    @State private var selecting = false
+    @State private var menuAnchor: CGPoint?
+    @State private var pressTask: Task<Void, Never>?
+    @State private var pressStart: CGPoint?
+    @State private var barVisible = false
+    @State private var barDragging = false
 
     private var metrics: TermMetrics { TermMetrics(fontSize: fontSize) }
 
@@ -54,15 +61,20 @@ struct TerminalScreen: View {
                 let size = area.size
                 ZStack(alignment: .topLeading) {
                     canvas(m)
+                    scrollBar(size: size, m: m)
+                    editMenu(size: size, m: m)
                 }
                 .frame(width: size.width, height: size.height, alignment: .topLeading)
+                // 长按选择文字(再拖动扩展),松手弹出「复制 / 粘贴」。放在高优先级:长按成功之后的拖动归它,不当成滚动。
+                .contentShape(Rectangle())
+                .simultaneousGesture(selectionGesture(m))
                 #if DEBUG
                 .border(FoldState.simulatedAxis == nil && !FoldState.simulatesOcclusion ? .clear : .green.opacity(0.6))
                 #endif
                 .padding(.leading, area.minX - full.minX)
                 .padding(.top, area.minY - full.minY)
                 .contentShape(Rectangle())
-                .onTapGesture { model.wantsKeyboard = true }
+                .onTapGesture { model.wantsKeyboard = true; model.selectClear(); menuAnchor = nil }
                 .gesture(scrollGesture(m))
                 .gesture(pinchGesture)
                 .onChange(of: size, initial: true) { _, size in
@@ -204,10 +216,22 @@ struct TerminalScreen: View {
 
     private func canvas(_ m: TermMetrics) -> some View {
         TimelineView(.periodic(from: .now, by: 0.53)) { timeline in
-            Canvas { ctx, _ in
+            Canvas { ctx, canvasSize in
                 for (y, row) in model.rows.enumerated() {
                     for run in row.runs {
                         draw(run, in: &ctx, x: CGFloat(run.col) * m.width, y: CGFloat(y) * m.height, m: m)
+                    }
+                }
+                // 选区高亮(闭区间:起止行 / 列都包含,中间的行整行)。
+                if let sel = model.selection {
+                    let cols = max(1, Int(canvasSize.width / m.width))
+                    for row in Int(sel.startRow)...Int(sel.endRow) {
+                        let from = row == Int(sel.startRow) ? Int(sel.startCol) : 0
+                        let to = row == Int(sel.endRow) ? Int(sel.endCol) : cols - 1
+                        guard to >= from else { continue }
+                        ctx.fill(Path(CGRect(x: CGFloat(from) * m.width, y: CGFloat(row) * m.height,
+                                             width: CGFloat(to - from + 1) * m.width, height: m.height)),
+                                 with: .color(Color.accentColor.opacity(0.4)))
                     }
                 }
                 let c = model.cursor
@@ -268,6 +292,7 @@ struct TerminalScreen: View {
     private func scrollGesture(_ m: TermMetrics) -> some Gesture {
         DragGesture(minimumDistance: 8)
             .onChanged { value in
+                guard !selecting else { return }
                 let steps = Int((value.translation.height - dragLast) / m.height)
                 if steps != 0 {
                     model.scroll(lines: steps)
@@ -275,6 +300,125 @@ struct TerminalScreen: View {
                 }
             }
             .onEnded { _ in dragLast = 0 }
+    }
+
+    /// 长按(0.4 秒)开始选择(默认选中一个词),手指不抬继续拖就扩展选区;松手后在手指附近弹出「复制 / 粘贴」。
+    private func selectionGesture(_ m: TermMetrics) -> some Gesture {
+        func cell(_ p: CGPoint) -> (row: Int, col: Int, right: Bool) {
+            (max(0, Int(p.y / m.height)), max(0, Int(p.x / m.width)),
+             p.x.truncatingRemainder(dividingBy: m.width) > m.width / 2)
+        }
+        // 自己计时的长按:手指按下 0.4 秒内没有明显移动(<10pt)就开始选择。不用 LongPressGesture.sequenced:
+        // 手指按住不动时它拿不到位置;这样用一个拖动手势全程跟着手指,按住不动也有位置。
+        return DragGesture(minimumDistance: 0, coordinateSpace: .local)
+            .onChanged { v in
+                let p = v.location
+                if selecting {
+                    let c = cell(p)
+                    model.selectUpdate(row: c.row, col: c.col, rightHalf: c.right)
+                    return
+                }
+                if pressStart == nil {
+                    pressStart = v.startLocation
+                    pressTask = Task { @MainActor in
+                        try? await Task.sleep(for: .milliseconds(400))
+                        guard !Task.isCancelled, let start = pressStart else { return }
+                        selecting = true
+                        menuAnchor = nil
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        let c = cell(start)
+                        model.selectStart(row: c.row, col: c.col, rightHalf: c.right)
+                    }
+                }
+                if hypot(p.x - v.startLocation.x, p.y - v.startLocation.y) > 10 { pressTask?.cancel() }
+            }
+            .onEnded { v in
+                pressTask?.cancel()
+                pressStart = nil
+                if selecting {
+                    selecting = false
+                    menuAnchor = v.location     // 弹出的位置:最后手指落点
+                }
+            }
+    }
+
+    /// 滚动条:回滚历史有内容、不在备用屏时才有;滚动时出现,停下 1.2 秒后淡出;按住右边 28pt 宽的触摸条拖动可以直接定位。
+    @ViewBuilder private func scrollBar(size: CGSize, m: TermMetrics) -> some View {
+        let history = CGFloat(model.historyLen)
+        if history > 0, !model.onAltScreen {
+            let rows = max(1, CGFloat(Int(size.height / m.height)))
+            let thumbH = max(36, size.height * rows / (rows + history))
+            let travel = max(1, size.height - thumbH)
+            // 离底部 offset 行 → 滑块位置:offset 0 在最下面,offset == history 在最上面。
+            let thumbY = travel * (1 - CGFloat(model.scrollOffset) / history)
+            ZStack(alignment: .topTrailing) {
+                Color.black.opacity(0.001)
+                    .frame(width: 28, height: size.height)
+                    .contentShape(Rectangle())
+                    .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .local)
+                        .onChanged { v in
+                            barDragging = true
+                            // 手指在轨道里的位置 → 离底部多少行(上 = 历史最早)。
+                            let f = min(1, max(0, (v.location.y - thumbH / 2) / travel))
+                            model.scrollTo(offset: Int(((1 - f) * history).rounded()))
+                        }
+                        .onEnded { _ in barDragging = false })
+                Capsule()
+                    .fill(Color.white.opacity(barDragging ? 0.8 : 0.5))
+                    .frame(width: barDragging ? 6 : 4, height: thumbH)
+                    .padding(.trailing, 4)
+                    .offset(y: thumbY)
+                    .opacity(barVisible || barDragging ? 1 : 0)
+                    .animation(.easeOut(duration: barVisible ? 0.12 : 0.5), value: barVisible)
+                    .animation(.spring(duration: 0.2), value: barDragging)
+                    .allowsHitTesting(false)
+            }
+            .frame(width: size.width, height: size.height, alignment: .topTrailing)
+            .task(id: model.scrollOffset) {
+                barVisible = true
+                try? await Task.sleep(for: .milliseconds(1200))
+                if !Task.isCancelled { barVisible = false }
+            }
+        }
+    }
+
+    /// 长按之后的编辑菜单:复制(有选中的文字时)、粘贴。玻璃胶囊,出现在手指附近;点别处 / 滚动 / 操作之后消失。
+    @ViewBuilder private func editMenu(size: CGSize, m: TermMetrics) -> some View {
+        if let anchor = menuAnchor, !selecting {
+            let hasText = !(model.selectedText ?? "").isEmpty
+            HStack(spacing: 2) {
+                if hasText {
+                    menuButton("Copy", "doc.on.doc") {
+                        model.copySelection()
+                        model.selectClear()
+                        menuAnchor = nil
+                    }
+                }
+                menuButton("Paste", "clipboard") {
+                    model.paste()
+                    model.selectClear()
+                    menuAnchor = nil
+                }
+            }
+            .padding(4)
+            .glassEffect(.regular.interactive(), in: Capsule())
+            .environment(\.colorScheme, .dark)
+            .fixedSize()
+            // 在手指上方 56pt 处;贴着边就往里收。
+            .position(x: min(max(anchor.x, 80), max(80, size.width - 80)), y: max(30, anchor.y - 56))
+            .transition(.scale(scale: 0.85).combined(with: .opacity))
+        }
+    }
+
+    private func menuButton(_ title: LocalizedStringKey, _ icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: icon)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 14).frame(height: 38)
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
     }
 
     private var pinchGesture: some Gesture {

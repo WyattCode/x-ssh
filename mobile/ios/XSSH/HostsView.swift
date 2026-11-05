@@ -17,6 +17,8 @@ struct HostsView: View {
     let onConnect: (Host) -> Void
     /// 在列表的空白处(不在任何一台主机卡片上、也不在标题区)用力往左一甩 = 收起列表。
     var onCollapse: (() -> Void)?
+    /// 收起时侧栏内容滑出去的位移(见 `SidebarHandle`)。
+    var slideOffset: CGFloat = 0
 
     @State private var editing: Host?
     @State private var isNew = false
@@ -180,6 +182,9 @@ struct HostsView: View {
             Text("“\(host.displayName)” and its saved password will be removed.")
         }
         }
+        // 收起时整个侧栏内容顺着手势滑出去并渐隐(标题栏的 logo 和系统按钮是导航栏的,留到收起那一刻一起消失)。
+        .offset(x: slideOffset)
+        .opacity(1 - min(1, abs(slideOffset) / 300) * 0.5)
     }
 
     private func row(_ host: Host) -> some View {
