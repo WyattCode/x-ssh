@@ -114,6 +114,8 @@ struct RootView: View {
     @State private var handleShown = true
     @State private var handleToken = 0
     @State private var pokeClock = PokeClock()
+    /// 最近一次连接主机的时刻:连接之后一小段时间里,系统自己把列表收起来(换详情时导航容器会这么干)要拦回去。
+    @State private var lastOpenAt = Date.distantPast
 
     /// 半折(铰链半开)时侧栏(主机列表)和内容(会话)各占整个宽度的一半;其余时候用记住的宽度。
     private var halfFolded: Bool { sizeClass == .regular && fold.hinge == .partiallyOpen && containerSize.width > 0 }
@@ -156,7 +158,8 @@ struct RootView: View {
 
     /// 内屏(两栏)里右边竖条放「搜索 / 新建主机」;外屏(单栏)由主机列表自己的竖条放。
     private var hostActions: HostActions? {
-        sizeClass == .regular ? HostActions(searching: $searching, add: { addHostRequested = true }) : nil
+        // 列表(左栏)收起着的时候不需要「搜索 / 新建主机」:这两个按钮是管主机列表的,列表不在就不出现。
+        sizeClass == .regular && listVisible ? HostActions(searching: $searching, add: { addHostRequested = true }) : nil
     }
 
     /// 正在连着的会话还没连上(连接中 / 等确认主机密钥)。
@@ -261,6 +264,13 @@ struct RootView: View {
             }
         }
         .onChange(of: scenePhase) { _, phase in active?.setForeground(phase == .active) }
+        // 连上主机之后列表(会话抽屉)不能自己收起来:横着拿 / 半折时它本来就该常驻。用户自己收(把手、空白处左滑、系统按钮)
+        // 不会发生在刚连接的这 1.5 秒里;这段时间里变成「收起」的,是系统换详情时顺手收的,拦回去。
+        .onChange(of: columns) { _, new in
+            guard new == .detailOnly, sizeClass == .regular, Date().timeIntervalSince(lastOpenAt) < 1.5,
+                  halfFolded || containerSize.width > containerSize.height else { return }
+            columns = .all
+        }
         .overlay(alignment: .leading) {
             if sizeClass == .regular, listVisible, !halfFolded {
                 SidebarHandle(visible: handleShown, onTouch: pokeHandle,
@@ -334,6 +344,7 @@ struct RootView: View {
             return
         }
         active?.disconnect()
+        lastOpenAt = Date()
         active = TerminalModel(host: host, credentials: hosts.credentials(for: host), knownKey: hosts.knownKey(host))
         compactColumn = .detail
     }

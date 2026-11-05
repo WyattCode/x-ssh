@@ -27,6 +27,8 @@ struct HostsView: View {
     @State private var cardX: CGFloat?
     @State private var cardWidth: CGFloat?
     @State private var listWidth: CGFloat = 320
+    /// 量卡片位置是针对哪个列表宽度量的:滚动时行的位置会有瞬时抖动,只在列表宽度变了之后重新量,搜索框才不会跟着变形。
+    @State private var measuredForWidth: CGFloat = 0
     /// 每张主机卡片的底边(整个列表视图坐标系里);所有卡片底边的最大值下面才是「空白处」。
     /// 按主机分别记:删掉最后一台之后,新的最后一台没有布局变化、不会重新量,单记「最后一张」会留着过期的值。
     @State private var rowBottoms: [UUID: CGFloat] = [:]
@@ -61,7 +63,9 @@ struct HostsView: View {
                 // 读屏:正在连着的那台报「已选中」(视觉上是更亮 + 描边 + 绿点)。
                 .accessibilityAddTraits(host.id == activeID ? .isSelected : [])
                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .named("hostsRoot")) } action: {
-                    if $0.width > 0 { cardX = $0.minX; cardWidth = $0.width }
+                    if $0.width > 0, cardX == nil || abs(measuredForWidth - listWidth) > 0.5 {
+                        cardX = $0.minX; cardWidth = $0.width; measuredForWidth = listWidth
+                    }
                     rowBottoms[host.id] = $0.maxY
                 }
                 .swipeActions {
@@ -106,14 +110,17 @@ struct HostsView: View {
         }
         .animation(.smooth(duration: 0.25), value: searching)
         .coordinateSpace(name: "hostsRoot")
+        // 列表本身要能上下滑、有滚动条(主机多了要翻)。
+        .scrollIndicators(.visible)
         // 只有从空白处(最后一张卡片下面)开始的向左滑才收起列表:滑主机卡片本身(删除 / 编辑)、标题区、会话内容都不算。
-        // 不要求速度:慢慢往左滑一段(够长、基本是横着的)就收。
-        .simultaneousGesture(DragGesture(minimumDistance: 24, coordinateSpace: .named("hostsRoot")).onEnded { v in
-            guard splitLayout, let onCollapse else { return }
-            guard v.startLocation.y > lastRowBottom + 8 else { return }
-            guard v.translation.width < -60, abs(v.translation.height) < abs(v.translation.width) * 0.6 else { return }
-            onCollapse()
-        })        // 把排版变化告诉开屏:稳定之后开屏才淡出,过渡中间不会再有重排。
+        // 用 UIKit 的横向拖动识别器,不用 SwiftUI 的 DragGesture:DragGesture 挂在列表上会和列表的上下滑动抢手势,滑不动。
+        .background {
+            HorizontalSwipeSpy { start in
+                guard splitLayout, let onCollapse else { return }
+                guard start.y > lastRowBottom + 8 else { return }
+                onCollapse()
+            }
+        }        // 把排版变化告诉开屏:稳定之后开屏才淡出,过渡中间不会再有重排。
         .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.trailing } action: { gate.touch(trailingInset: $0) }
         .onGeometryChange(for: CGSize.self) { $0.size } action: { listWidth = $0.width; gate.touch(trailingInset: 0) }
         .navigationTitle("Hosts")
@@ -208,8 +215,9 @@ struct HostsView: View {
         // 两栏时每台主机是一张独立的圆角卡,卡片四周有留白(见 `rowBackground`),文字的内边距要把留白算进去。
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
-        // 点击区域只算卡片本身:卡片四周的留白(见 `rowBackground`)不能点,点到缝里会连上旁边那台。
+        // 点击区域只算卡片本身:卡片四周的留白不能点,点到缝里会连上旁边那台。
         .contentShape(Rectangle())
+        .modifier(HostCardGlass(enabled: splitLayout, selected: host.id == activeID))
         .padding(.horizontal, cardInset)
         .padding(.vertical, splitLayout ? Self.cardGap / 2 : 0)
     }
@@ -223,13 +231,8 @@ struct HostsView: View {
     /// 卡与卡之间露出侧栏底色,连着的那台卡片更亮并描边。
     @ViewBuilder private func rowBackground(_ host: Host) -> some View {
         if splitLayout {
-            let on = host.id == activeID
-            let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
-            shape.fill(on ? Color.appSidebarSelected : Color.appSidebarCard)
-                .overlay { shape.strokeBorder(Color.primary.opacity(on ? 0.2 : 0), lineWidth: 1) }
-                .animation(.easeOut(duration: 0.2), value: on)
-                .padding(.horizontal, cardInset)
-                .padding(.vertical, Self.cardGap / 2)
+            // 两栏时卡片自己用系统的液态玻璃画(见 `HostCardGlass`),行背景留空。
+            Color.clear
         } else {
             Color.appCard
         }
@@ -562,5 +565,88 @@ private struct AuthKindPicker: View {
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(on ? [.isButton, .isSelected] : .isButton)
+    }
+}
+
+
+/// 内屏侧栏里的主机卡:系统的液态玻璃(`.glassEffect(.interactive())`),按住 / 按下时和系统 App 的侧栏一样会放大、有光泽流动;
+/// 正在连着的那台玻璃上加一层偏亮的着色。窄屏(单栏)不用,保持一整张圆角卡里分行。
+private struct HostCardGlass: ViewModifier {
+    let enabled: Bool
+    let selected: Bool
+
+    func body(content: Content) -> some View {
+        if enabled {
+            let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
+            content.glassEffect(selected ? .regular.tint(.white.opacity(0.18)).interactive() : .regular.interactive(), in: shape)
+        } else {
+            content
+        }
+    }
+}
+
+
+/// 只听不管的「向左横滑」识别器:一开始就明显是横着的(横向位移远大于纵向)才开始,所以不会和列表的上下滑动抢手势;
+/// 起手点换算成所在视图自己的坐标回报。滑过 60pt 才算。
+struct HorizontalSwipeSpy: UIViewRepresentable {
+    let onSwipeLeft: (CGPoint) -> Void
+
+    func makeUIView(context: Context) -> UIView { Anchor(onSwipeLeft: onSwipeLeft) }
+    func updateUIView(_ view: UIView, context: Context) { (view as? Anchor)?.onSwipeLeft = onSwipeLeft }
+
+    private final class Anchor: UIView {
+        var onSwipeLeft: (CGPoint) -> Void
+        private var recognizer: UIPanGestureRecognizer?
+        private var start: CGPoint?
+
+        init(onSwipeLeft: @escaping (CGPoint) -> Void) {
+            self.onSwipeLeft = onSwipeLeft
+            super.init(frame: .zero)
+            isUserInteractionEnabled = false
+        }
+        required init?(coder: NSCoder) { fatalError("not used") }
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            if let recognizer { recognizer.view?.removeGestureRecognizer(recognizer) }
+            recognizer = nil
+            guard let window else { return }
+            let g = HorizontalPan(target: self, action: #selector(pan(_:)))
+            g.cancelsTouchesInView = false
+            window.addGestureRecognizer(g)
+            recognizer = g
+        }
+
+        @objc private func pan(_ g: UIPanGestureRecognizer) {
+            switch g.state {
+            case .began:
+                // 起手点:手指按下的位置 = 现在的位置减去已经移动的量。
+                guard let window = g.view else { return }
+                let now = g.location(in: window)
+                let moved = g.translation(in: window)
+                start = convert(CGPoint(x: now.x - moved.x, y: now.y - moved.y), from: window)
+            case .ended:
+                let t = g.translation(in: g.view)
+                defer { start = nil }
+                guard let start, bounds.contains(start), t.x < -60 else { return }
+                onSwipeLeft(start)
+            default: break
+            }
+        }
+    }
+
+    /// 一开始就明显是横着的才开始;纵向为主就让给列表去滚。
+    private final class HorizontalPan: UIPanGestureRecognizer, UIGestureRecognizerDelegate {
+        override init(target: Any?, action: Selector?) {
+            super.init(target: target, action: action)
+            delegate = self
+            maximumNumberOfTouches = 1
+        }
+        func gestureRecognizerShouldBegin(_ g: UIGestureRecognizer) -> Bool {
+            guard let pan = g as? UIPanGestureRecognizer else { return false }
+            let v = pan.velocity(in: pan.view)
+            return abs(v.x) > abs(v.y) * 1.5
+        }
+        func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
     }
 }
