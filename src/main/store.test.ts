@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, writeFile, rm, readdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Host } from '../shared/types'
@@ -49,12 +49,36 @@ describe('HostStore durability', () => {
     expect(await readFile(hostsFile(), 'utf8')).toBe('[{"id": "a", "na')
   })
 
-  it('saving a real host after an unreadable load does write (and keeps a .corrupt copy)', async () => {
+  it('saving a real host after an unreadable load is refused, not written', async () => {
+    // This used to overwrite the unreadable file and keep it as .corrupt. But
+    // "the user created a host" does not mean "the old host list is unwanted":
+    // more often the file is repairable, and replacing it loses every host in
+    // one click. Emptiness/count was the wrong signal — the file is unreadable
+    // whether or not memory holds rows. Reset is the explicit way out.
     await writeFile(hostsFile(), '[{"id": "a", "na', 'utf8')
     const store = new HostStore()
+    await expect(store.save(host('c', 'gamma'))).rejects.toThrow(/hosts-unreadable/)
+    expect(await readFile(hostsFile(), 'utf8')).toBe('[{"id": "a", "na')
+  })
+
+  it('resetHosts starts over and keeps the unreadable file', async () => {
+    await writeFile(hostsFile(), '[{"id": "a", "na', 'utf8')
+    const store = new HostStore()
+    await store.resetHosts()
+    // Saving works again afterwards.
     await store.save(host('c', 'gamma'))
     const saved = JSON.parse(await readFile(hostsFile(), 'utf8')) as Host[]
     expect(saved.map((h) => h.id)).toEqual(['c'])
-    expect(await readFile(`${hostsFile()}.corrupt`, 'utf8')).toBe('[{"id": "a", "na')
+    // The original bytes are still on disk under a distinct name.
+    const dirFiles = await readdir(dir)
+    expect(dirFiles.some((f) => f.startsWith('hosts.json.unreadable-'))).toBe(true)
+  })
+
+  it('touch does not fail a connection when the host list is unreadable', async () => {
+    // touch() runs right after a successful connect; lastUsedAt only orders the
+    // recent list, so it must never turn a connect into an error.
+    await writeFile(hostsFile(), '[{"id": "a", "na', 'utf8')
+    const store = new HostStore()
+    await expect(store.touch('a')).resolves.toBeUndefined()
   })
 })

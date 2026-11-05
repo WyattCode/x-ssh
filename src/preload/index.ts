@@ -52,6 +52,10 @@ const api = {
       ipcRenderer.invoke(IPC.hostsSecretsStatus),
     /** Discard an unreadable vault so passwords can be saved again. */
     resetSecrets: (): Promise<{ ok: boolean }> => ipcRenderer.invoke(IPC.hostsResetSecrets),
+    /** 'bad' = hosts.json existed but could not be read this launch. */
+    status: (): Promise<'ok' | 'bad'> => ipcRenderer.invoke(IPC.hostsStatus),
+    /** Discard an unreadable hosts.json so hosts can be saved again. */
+    reset: (): Promise<{ ok: boolean }> => ipcRenderer.invoke(IPC.hostsReset),
     /** Online / offline for the given saved hosts (all when omitted). */
     probe: (ids?: string[]): Promise<Record<string, Reachability>> => ipcRenderer.invoke(IPC.hostsProbe, ids),
     onChanged: (cb: () => void): (() => void) => {

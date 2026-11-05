@@ -4,6 +4,8 @@ export const IPC = {
   hostsList: 'hosts:list',
   hostsSecretsStatus: 'hosts:secretsStatus',
   hostsResetSecrets: 'hosts:resetSecrets',
+  hostsStatus: 'hosts:status',
+  hostsReset: 'hosts:reset',
   hostsSave: 'hosts:save',
   hostsDelete: 'hosts:delete',
   hostsProbe: 'hosts:probe',

@@ -303,6 +303,9 @@ let savedSidebarWidth = bootWidth > 0 ? clampSidebarWidth(bootWidth) : SIDEBAR_D
 
 interface State {
   hosts: Host[]
+  /** hosts.json existed but could not be read: saving is refused until the
+   *  user explicitly starts over (Settings -> Security). */
+  hostsBad: boolean
   tabs: Tab[]
   activeId: string | null
   /** Sidebar page. Terminals stay mounted (hidden) on every other page. */
@@ -432,6 +435,7 @@ interface State {
 export const useSessions = defineStore('sessions', {
   state: (): State => ({
     hosts: [],
+  hostsBad: false,
     tabs: [],
     activeId: null,
     page: 'hosts',
@@ -592,6 +596,7 @@ export const useSessions = defineStore('sessions', {
       try {
         this.hosts = await window.api.hosts.list()
         hostsLoadFailToasted = false
+        this.hostsBad = false
       } catch (e) {
         // Keep the previous list: [] reads as "no hosts" on the Connect page.
         // Do not rethrow — App.vue boot Promise.all must keep loading settings.
@@ -599,6 +604,10 @@ export const useSessions = defineStore('sessions', {
           hostsLoadFailToasted = true
           toast(t('hosts.loadFail'), 'error')
         }
+        // list() rejects only when the file could not be read (and .bak too).
+        // Saving is refused from here on, so the settings page needs to offer
+        // the way out rather than letting every save fail silently.
+        this.hostsBad = true
         console.error('hosts: load failed', e)
       }
     },
@@ -629,6 +638,32 @@ export const useSessions = defineStore('sessions', {
       } catch (e) {
         console.error('hosts: resetSecrets failed', e)
         toast(t('app.secretsResetFail'), 'error')
+        return false
+      }
+    },
+
+    /** Whether hosts.json could be read. 'bad' means saving is refused until
+     *  the user chooses to start over (see resetHosts). */
+    async loadHostsStatus(): Promise<void> {
+      try {
+        this.hostsBad = (await window.api.hosts.status()) === 'bad'
+      } catch {
+        this.hostsBad = false
+      }
+    },
+
+    /** Discards an unreadable hosts.json after the user has explicitly agreed. */
+    async resetHosts(): Promise<boolean> {
+      try {
+        await window.api.hosts.reset()
+        this.hostsBad = false
+        hostsLoadFailToasted = false
+        toast(t('app.hostsResetOk'), 'success')
+        await this.loadHosts()
+        return true
+      } catch (e) {
+        console.error('hosts: reset failed', e)
+        toast(t('app.hostsResetFail'), 'error')
         return false
       }
     },

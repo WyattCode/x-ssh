@@ -5,7 +5,7 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import type { ManagedKey } from '../shared/types'
 import { isPrivateKey, sanitizeKeyName, shouldSkipKeyFile } from '../shared/fsUtils'
-import { parseJson, readDurable } from './durableFile'
+import { parseJson, readDurable, writeDurable } from './durableFile'
 
 const execFileAsync = promisify(execFile)
 
@@ -126,15 +126,29 @@ export class KeyManager {
   }
 
   private async writeLabels(labels: Record<string, string>): Promise<void> {
-    await writeFile(this.labelsPath, JSON.stringify(labels), { mode: 0o600 })
+    // A sidecar this launch could not parse must not be replaced blindly.
+    //
+    // The resolve path deliberately keeps the flag when the file is corrupt
+    // (readLabels returns {} and leaves names intact on disk rather than
+    // rewriting them away), so writing here would discard every existing
+    // friendly name in exchange for the one key just handled.
     if (this.labelsLoadFailed) {
       throw new Error('labels-corrupt')
     }
-    await writeFile(this.labelsPath, JSON.stringify(labels), { mode: 0o600 }).catch(() => undefined)
-    // Do not swallow write failures: generate/import/remove callers already
-    // surface errors via keyGenFail / keyImportFail / delete toast. Silent
-    // catch left friendly names missing after a cold start.
-    await writeFile(this.labelsPath, JSON.stringify(labels), { mode: 0o600 })
+    // One write, and it must be allowed to fail.
+    //
+    // This used to write three times in a row: once, then again inside
+    // `.catch(() => undefined)` (so a real failure was swallowed and the call
+    // reported success), then once more. Three truncating writes of the same
+    // content — a crash between any two leaves a half-written file, which is
+    // what readLabels' corrupt path then has to recover from. Callers surface
+    // the error themselves (keyGenFail / keyImportFail / delete toast).
+    //
+    // writeDurable, not writeFile: readDurable above already falls back to
+    // `<file>.bak`, but a plain writeFile never produced one, so that recovery
+    // path could never actually fire. A crash mid-write lost every friendly
+    // name with nothing to fall back to.
+    await writeDurable(this.labelsPath, JSON.stringify(labels), 0o600)
   }
 
   /** Whether the labels sidecar failed to parse this session (friendly names at risk). */
@@ -256,7 +270,6 @@ export class KeyManager {
     await this.ensureDir()
     // Stable marker: main turns this into KeyErrorCode 'bad-id'.
     if (basename(id) !== id) throw new Error('bad-id')
-    if (basename(id) !== id) throw new Error('illegal-key-id')
     const priv = join(this.keysDir, id)
     try {
       return (await readFile(`${priv}.pub`, 'utf8')).trim()
@@ -272,7 +285,6 @@ export class KeyManager {
     // Only ever operate inside the key dir: refuse path traversal in the id,
     // since it arrives over IPC from the renderer.
     if (basename(id) !== id) throw new Error('bad-id')
-    if (basename(id) !== id) throw new Error('illegal-key-id')
     const priv = join(this.keysDir, id)
     await rm(priv, { force: true })
     await rm(`${priv}.pub`, { force: true })

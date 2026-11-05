@@ -60,10 +60,21 @@ export class HostStore {
   }
 
   private async persist(): Promise<void> {
-    if (!(this.hostsLoadFailed && this.hosts.length === 0)) {
-      await writeDurable(this.hostsFile, JSON.stringify(this.hosts, null, 2))
-      this.hostsLoadFailed = false
+    // A hosts.json this launch could not read must not be replaced.
+    //
+    // The guard used to be `hostsLoadFailed && hosts.length === 0` — the same
+    // "is it empty?" mistake the secrets vault had. Adding a host makes the
+    // array non-empty, the guard falls away, and the unreadable file is
+    // overwritten with the one host the user just typed: every other saved
+    // host is lost. Whether the write is safe cannot depend on how many rows
+    // we happen to hold — the file on disk is unreadable either way.
+    //
+    // `.corrupt` already holds the failed read (see readDurable), so refusing
+    // keeps the data recoverable; overwriting does not.
+    if (this.hostsLoadFailed) {
+      throw new Error('hosts-unreadable: refusing to overwrite an unreadable host list')
     }
+    await writeDurable(this.hostsFile, JSON.stringify(this.hosts, null, 2))
     if (!safeStorage.isEncryptionAvailable()) return
     // An existing vault this launch could not decrypt must never be replaced.
     //
@@ -107,6 +118,14 @@ export class HostStore {
     await this.ensureLoaded()
     if (!safeStorage.isEncryptionAvailable()) return 'missing'
     return this.secretsLoadFailed ? 'bad' : 'ok'
+  }
+
+  /** Whether hosts.json could be read this launch. 'bad' means the file (and
+   *  its .bak) exist but neither parsed — the user's host list is still on
+   *  disk, but nothing may overwrite it until they choose to start over. */
+  async hostsStatus(): Promise<'ok' | 'bad'> {
+    await this.ensureLoaded()
+    return this.hostsLoadFailed ? 'bad' : 'ok'
   }
 
   async list(): Promise<Host[]> {
@@ -170,12 +189,20 @@ export class HostStore {
     }
     // A typed secret must actually be in the vault, not just in memory. This
     // covers the case persist() skips silently: no OS encryption at all.
-    if (wroteSecret && password) {
+    //
+    // Both secrets are checked, not just the password: a key-only host saves a
+    // passphrase with no password, and verifying only `password` meant that
+    // path could report success with nothing written.
+    if (wroteSecret) {
       if (!safeStorage.isEncryptionAvailable()) {
-        throw new Error('secrets-unavailable: no OS encryption, password not stored')
+        throw new Error('secrets-unavailable: no OS encryption, secret not stored')
       }
-      if (this.secrets[host.id] !== password) {
-        throw new Error('secrets-not-persisted: password did not reach the vault')
+      const ppk = this.ppKey(host.id)
+      const lost =
+        (password !== undefined && password !== '' && this.secrets[host.id] !== password) ||
+        (passphrase !== undefined && passphrase !== '' && this.secrets[ppk] !== passphrase)
+      if (lost) {
+        throw new Error('secrets-not-persisted: secret did not reach the vault')
       }
     }
     return this.list()
@@ -214,12 +241,50 @@ export class HostStore {
     await this.persist()
   }
 
+  /**
+   * Discards an unreadable hosts.json so hosts can be saved again.
+   *
+   * `persist()` refuses to overwrite a host list it could not read (that keeps
+   * the file recoverable instead of replacing it with whatever is in memory),
+   * but refusing forever would leave the app unable to save any host. Like
+   * [resetSecrets], the unreadable file is renamed aside rather than deleted.
+   */
+  async resetHosts(): Promise<void> {
+    await this.ensureLoaded()
+    if (!this.hostsLoadFailed) return
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+    await copyFile(this.hostsFile, `${this.hostsFile}.unreadable-${stamp}`).catch(() => undefined)
+    this.hosts = []
+    this.hostsLoadFailed = false
+    await this.persist()
+  }
+
   async delete(id: string): Promise<Host[]> {
     await this.ensureLoaded()
+    // Roll back on a failed write. Without this, the host stays deleted in
+    // memory while still on disk: the renderer asked, got an error and kept
+    // showing the host, but the next unrelated save persists the reduced list
+    // and the host disappears without anyone asking again.
+    const hostsBefore = this.hosts
+    const hadPassword = this.secrets[id]
+    const hadPassphrase = this.secrets[this.ppKey(id)]
     this.hosts = this.hosts.filter((h) => h.id !== id)
     delete this.secrets[id]
     delete this.secrets[this.ppKey(id)]
-    await this.persist()
+    try {
+      await this.persist()
+    } catch (e) {
+      this.hosts = hostsBefore
+      if (hadPassword !== undefined) this.secrets[id] = hadPassword
+      if (hadPassphrase !== undefined) this.secrets[this.ppKey(id)] = hadPassphrase
+      // Normalise to the same code list() uses: to the caller it is one
+      // problem ("the host list could not be read"), whether they tried to
+      // read, delete or save.
+      if ((e as Error).message.startsWith('hosts-unreadable')) {
+        throw new Error('hosts-load-failed: hosts.json could not be read')
+      }
+      throw e
+    }
     return this.list()
   }
 
@@ -248,12 +313,22 @@ export class HostStore {
     return true
   }
 
+  /** Bumps a host to the top of the "recent" list after a successful connect. */
   async touch(id: string): Promise<void> {
     await this.ensureLoaded()
     const host = this.hosts.find((h) => h.id === id)
-    if (host) {
-      host.lastUsedAt = Date.now()
+    if (!host) return
+    host.lastUsedAt = Date.now()
+    try {
       await this.persist()
+    } catch (e) {
+      // `lastUsedAt` only orders the "recent" list. A failed write must not
+      // fail the connection that just succeeded — and with persist() now
+      // refusing to overwrite an unreadable host list, this would otherwise
+      // throw on every successful connect for as long as the file stays bad.
+      // Put the stamp back so the in-memory list matches the disk.
+      host.lastUsedAt = undefined
+      console.error('store: touch failed:', (e as Error).message)
     }
   }
 
