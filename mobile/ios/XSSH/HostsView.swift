@@ -10,6 +10,8 @@ struct HostsView: View {
     let activeID: UUID?
     /// 正在连着的那台还在「连接中 / 等确认密钥」:行尾显示转圈而不是绿点。
     var activeConnecting = false
+    /// 连着的那台是几点连上的(行里显示已连接时长)。
+    var connectedSince: Date?
     /// 详情那一侧的「新建主机」按钮通过它让这里弹出编辑页。
     @Binding var addRequested: Bool
     /// 搜索框开着没有。内屏里搜索 / 新建按钮放在右边会话那一侧的竖条里,状态由外层持有。
@@ -47,7 +49,7 @@ struct HostsView: View {
 
     private var titleRow: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text("Hosts").font(.system(size: 28, weight: .regular)).tracking(-0.4)
+            Text(verbatim: "$ hosts").font(.system(size: 26, weight: .semibold, design: .monospaced)).tracking(-0.4)
             Text("\(store.hosts.count)").font(.footnote).foregroundStyle(Color.white.opacity(0.45))
         }
         .padding(.horizontal, 16 + cardInset).padding(.top, splitLayout ? 2 : 6).padding(.bottom, 8)
@@ -206,7 +208,7 @@ struct HostsView: View {
         // 不是系统从列表单元格里取的形状(最上 / 最下一行变成胶囊、中间行是方的)。
         // 以前用 `Menu`:内屏的侧栏里菜单一弹出,整栏内容就被盖黑,看起来像「把会话收起来了」。
         Button { onConnect(host) } label: { row(host, featured: featured) }
-            .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: splitLayout ? 20 : 32, style: .continuous))
+            .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 12, style: .continuous))
             .contextMenu {
                 Button("Connect", systemImage: "play") { onConnect(host) }
                 Button("Edit", systemImage: "pencil") { startEditing(host) }
@@ -233,83 +235,67 @@ struct HostsView: View {
     }
 
     private func row(_ host: Host, featured: Bool) -> some View {
-        Group {
-            if !splitLayout { capsuleRow(host, featured: featured) }   // 外屏:玻璃胶囊
-            else if featured { featuredCard(host) } else { plainRow(host) }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
-        .padding(.horizontal, cardInset)
+        sshRow(host, featured: featured, last: host.id == shown.last?.id)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .padding(.horizontal, cardInset)
     }
 
-    /// 外屏(窄屏单栏)的一行:一个液态玻璃胶囊,颜色点 + 名字(一行,长了截断);连着的那台玻璃带绿色,右侧写状态(转圈 → 绿点)。
-    private func capsuleRow(_ host: Host, featured: Bool) -> some View {
-        HStack(spacing: 14) {
-            ZStack {
-                if featured && activeConnecting {
-                    ProgressView().controlSize(.mini).tint(.white)
-                        .transition(.opacity.animation(.easeOut(duration: 0.18)))
-                } else {
-                    Circle().fill(featured ? Color.green : HostColor.pip(for: host.displayName)).frame(width: 10, height: 10)
-                        .transition(.asymmetric(insertion: .opacity.animation(.easeIn(duration: 0.2).delay(0.2)),
-                                                removal: .opacity.animation(.easeOut(duration: 0.1))))
-                }
-            }
-            .frame(width: 14, height: 14)
-            Text(verbatim: host.displayName).font(.system(size: 18)).lineLimit(1).truncationMode(.tail)
-            Spacer(minLength: 8)
-            if featured {
-                Text(activeConnecting ? "Connecting…" : "Connected")
-                    .font(.caption.weight(.medium)).lineLimit(1)
-                    .foregroundStyle(activeConnecting ? Color.white.opacity(0.7) : Color.green.opacity(0.95))
-            }
-        }
-        .animation(.easeOut(duration: 0.2), value: activeConnecting)
-        .padding(.horizontal, 24).frame(height: 64)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .glassEffect(featured ? .regular.tint(.green.opacity(0.22)).interactive() : .regular.interactive(), in: Capsule())
-        .contentShape(Capsule())
-        .padding(.bottom, 12)
-    }
-
-    /// 连着的那台:列表里唯一的一张大卡(液态玻璃),上面是状态,下面是名字和地址。
-    private func featuredCard(_ host: Host) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 7) {
-                // 转圈完全消失之后绿点才出现,两个不能叠在一起。
+    /// 每台一行,就是一条要敲的命令:`❯ ssh 名字`(等宽字体,`ssh` 淡、名字亮),行尾一个这台的颜色点,行与行之间一条虚线。
+    /// 连着的那台:`❯` 变绿、名字后面一个闪烁的光标,下面多一行绿色的「✓ 已连接 · 时长」;连接中是「连接中…」,颜色点的位置转圈。
+    /// 名字必须一行(太长截断)。不显示 IP / 端口。
+    private func sshRow(_ host: Host, featured: Bool, last: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Text(verbatim: "❯")
+                    .foregroundStyle(featured ? Color.green : Color.white.opacity(0.28))
+                (Text(verbatim: "ssh ").foregroundStyle(Color.white.opacity(0.4))
+                    + Text(verbatim: host.displayName).foregroundStyle(Color.white.opacity(0.93)))
+                    .lineLimit(1).truncationMode(.tail)
+                if featured && !activeConnecting { BlinkingCursor() }
+                Spacer(minLength: 6)
                 ZStack {
-                    if activeConnecting {
+                    if featured && activeConnecting {
                         ProgressView().controlSize(.mini).tint(.white)
                             .transition(.opacity.animation(.easeOut(duration: 0.18)))
                     } else {
-                        Circle().fill(Color.green).frame(width: 8, height: 8)
-                            .transition(.asymmetric(insertion: .opacity.animation(.easeIn(duration: 0.2).delay(0.2)),
-                                                    removal: .opacity.animation(.easeOut(duration: 0.1))))
+                        Circle().fill(HostColor.pip(for: host.displayName)).frame(width: 9, height: 9)
                     }
                 }
                 .frame(width: 14, height: 14)
-                Text(activeConnecting ? "Connecting…" : "Connected")
-                    .font(.footnote.weight(.medium))
-                    .foregroundStyle(activeConnecting ? Color.white.opacity(0.7) : Color.green.opacity(0.95))
             }
-            Text(verbatim: host.displayName).font(.title3.weight(.semibold)).lineLimit(1).truncationMode(.tail).padding(.top, 2)
+            .font(.system(size: 19, design: .monospaced))
+            if featured {
+                statusLine
+                    .transition(.opacity.animation(.easeOut(duration: 0.2)))
+            }
         }
         .animation(.easeOut(duration: 0.2), value: activeConnecting)
-        .padding(.horizontal, 16).padding(.vertical, 20)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .modifier(HostCardGlass(enabled: true, selected: true))
-        .padding(.horizontal, splitLayout ? 0 : 0).padding(.bottom, 8)
+        .padding(.horizontal, 10).padding(.vertical, 21)
+        .overlay(alignment: .bottom) {
+            if !last { DashedLine().stroke(Color.white.opacity(0.1), style: StrokeStyle(lineWidth: 1, dash: [3, 3])).frame(height: 1) }
+        }
     }
 
-    /// 其余每台:一行,颜色点 + 名字 + 地址(淡),不带卡片,退到背景里。
-    private func plainRow(_ host: Host) -> some View {
-        HStack(spacing: 11) {
-            Circle().fill(HostColor.pip(for: host.displayName)).frame(width: 8, height: 8)
-            // 名字必须一行(长了截断)。列表里不显示 IP / 端口:名字认得清就够了,地址在编辑页里看。
-            Text(verbatim: host.displayName).font(.body).lineLimit(1).truncationMode(.tail)
-            Spacer(minLength: 0)
+    @ViewBuilder private var statusLine: some View {
+        if activeConnecting {
+            Text("Connecting…").foregroundStyle(Color.white.opacity(0.6))
+                .font(.system(size: 12, design: .monospaced))
+        } else {
+            HStack(spacing: 0) {
+                Text(verbatim: "✓ ")
+                Text("Connected")
+                if let connectedSince {
+                    Text(verbatim: " · ")
+                    Text(connectedSince, style: .timer).monospacedDigit()
+                }
+            }
+            .foregroundStyle(Color.green.opacity(0.95))
+            .font(.system(size: 12, design: .monospaced))
+            .lineLimit(1)
+            // 和上面那行名字的起点对齐(❯ 的宽度 + 间距)。
+            .padding(.leading, 28)
         }
-        .padding(.horizontal, 16).padding(.vertical, 22)   // 行高:48 → 58 → 再高 10% ≈ 64pt
     }
 
     static let cardGap: CGFloat = 6
@@ -667,30 +653,21 @@ private struct AuthKindPicker: View {
 }
 
 
-/// 内屏侧栏里的主机卡。**突出选中的、弱化没选的 / 没连的**:
-/// - 选中(正在连着的):系统液态玻璃 + 偏亮着色,文字全亮,按住有系统那种放大和光泽;
-/// - 没选中:不用玻璃,一层淡淡的底色,文字稍微压一点 —— 退后但清楚可读,不跟选中的抢眼。
-/// 窄屏(单栏)不用,保持一整张圆角卡里分行。
-private struct HostCardGlass: ViewModifier {
-    let enabled: Bool
-    let selected: Bool
+private struct DashedLine: Shape {
+    func path(in rect: CGRect) -> Path {
+        var p = Path(); p.move(to: CGPoint(x: 0, y: rect.midY)); p.addLine(to: CGPoint(x: rect.maxX, y: rect.midY)); return p
+    }
+}
 
-    func body(content: Content) -> some View {
-        if enabled {
-            let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
-            if selected {
-                content
-                    .glassEffect(.regular.tint(.white.opacity(0.16)).interactive(), in: shape)
-            } else {
-                // 退后但不暗淡:文字 85%、底色比侧栏底亮一档,清楚可读;选中的靠玻璃 + 着色 + 全亮突出。
-                content
-                    .opacity(0.85)
-                    .background(Color.white.opacity(0.09), in: shape)
-                    .contentShape(shape)
-            }
-        } else {
-            content
-        }
+/// 连着的那台名字后面的光标:一个绿色的块,慢慢明暗闪烁。
+private struct BlinkingCursor: View {
+    @State private var on = true
+    var body: some View {
+        RoundedRectangle(cornerRadius: 1).fill(Color.green).frame(width: 8, height: 15)
+            .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 2 }
+            .opacity(on ? 1 : 0.15)
+            .onAppear { withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) { on = false } }
+            .accessibilityHidden(true)
     }
 }
 

@@ -298,7 +298,7 @@ struct RootView: View {
 
     private var hostsView: some View {
         HostsView(splitLayout: sizeClass == .regular, activeID: active.flatMap { $0.isEnded ? nil : $0.host.id },
-                  activeConnecting: activeConnecting, addRequested: $addHostRequested, searching: $searching, onConnect: open,
+                  activeConnecting: activeConnecting, connectedSince: active?.connectedAt, addRequested: $addHostRequested, searching: $searching, onConnect: open,
                   onCollapse: { setDrawer(false) }, slideOffset: 0)
     }
 

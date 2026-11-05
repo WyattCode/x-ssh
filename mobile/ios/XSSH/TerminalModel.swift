@@ -28,7 +28,11 @@ final class TerminalModel: Identifiable {
     private let credentials: Credentials
     private(set) var knownKey: String?
 
-    private(set) var state: State = .idle
+    private(set) var state: State = .idle {
+        didSet { if state == .connected, oldValue != .connected { connectedAt = Date() } }
+    }
+    /// 这次会话连上的时刻(主机列表里连着的那一行显示已连接时长)。
+    private(set) var connectedAt: Date?
     private(set) var rows: [ScreenRow] = []
     private(set) var cursor = CursorState(col: 0, row: 0, visible: true)
     private(set) var title = ""
