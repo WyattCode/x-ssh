@@ -356,16 +356,21 @@ struct TerminalScreen: View {
                         }
                         .onEnded { _ in barDragging = false })
                 // 轨道:有历史可翻就一直淡淡地在(让人知道能滚);滚动 / 按住时变亮变粗。
+                // 不滚动的时候滚动条彻底消失(轨道和滑块都不画);滚动 / 手指按在右边缘时才出现,停下 1.2 秒后淡出。
+                let shown = barVisible || barDragging
                 Capsule()
                     .fill(Color.white.opacity(0.07))
                     .frame(width: 3, height: size.height - 12)
                     .padding(.trailing, 4.5).padding(.top, 6)
+                    .opacity(shown ? 1 : 0)
+                    .animation(.easeOut(duration: shown ? 0.12 : 0.5), value: shown)
                 Capsule()
-                    .fill(Color.white.opacity(barDragging ? 0.85 : (barVisible ? 0.6 : 0.28)))
-                    .frame(width: barDragging ? 6 : (barVisible ? 4 : 3), height: thumbH)
-                    .padding(.trailing, barDragging ? 4 : (barVisible ? 4 : 4.5))
+                    .fill(Color.white.opacity(barDragging ? 0.85 : 0.6))
+                    .frame(width: barDragging ? 6 : 4, height: thumbH)
+                    .padding(.trailing, 4)
                     .offset(y: thumbY)
-                    .animation(.easeOut(duration: barVisible ? 0.12 : 0.5), value: barVisible)
+                    .opacity(shown ? 1 : 0)
+                    .animation(.easeOut(duration: shown ? 0.12 : 0.5), value: shown)
                     .animation(.spring(duration: 0.2), value: barDragging)
                     .allowsHitTesting(false)
             }
