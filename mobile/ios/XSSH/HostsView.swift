@@ -206,7 +206,7 @@ struct HostsView: View {
         // 不是系统从列表单元格里取的形状(最上 / 最下一行变成胶囊、中间行是方的)。
         // 以前用 `Menu`:内屏的侧栏里菜单一弹出,整栏内容就被盖黑,看起来像「把会话收起来了」。
         Button { onConnect(host) } label: { row(host, featured: featured) }
-            .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: splitLayout ? 20 : 12, style: .continuous))
+            .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: splitLayout ? 20 : 32, style: .continuous))
             .contextMenu {
                 Button("Connect", systemImage: "play") { onConnect(host) }
                 Button("Edit", systemImage: "pencil") { startEditing(host) }
@@ -234,11 +234,42 @@ struct HostsView: View {
 
     private func row(_ host: Host, featured: Bool) -> some View {
         Group {
-            if featured { featuredCard(host) } else { plainRow(host) }
+            if !splitLayout { capsuleRow(host, featured: featured) }   // 外屏:玻璃胶囊
+            else if featured { featuredCard(host) } else { plainRow(host) }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
         .padding(.horizontal, cardInset)
+    }
+
+    /// 外屏(窄屏单栏)的一行:一个液态玻璃胶囊,颜色点 + 名字(一行,长了截断);连着的那台玻璃带绿色,右侧写状态(转圈 → 绿点)。
+    private func capsuleRow(_ host: Host, featured: Bool) -> some View {
+        HStack(spacing: 14) {
+            ZStack {
+                if featured && activeConnecting {
+                    ProgressView().controlSize(.mini).tint(.white)
+                        .transition(.opacity.animation(.easeOut(duration: 0.18)))
+                } else {
+                    Circle().fill(featured ? Color.green : HostColor.pip(for: host.displayName)).frame(width: 10, height: 10)
+                        .transition(.asymmetric(insertion: .opacity.animation(.easeIn(duration: 0.2).delay(0.2)),
+                                                removal: .opacity.animation(.easeOut(duration: 0.1))))
+                }
+            }
+            .frame(width: 14, height: 14)
+            Text(verbatim: host.displayName).font(.system(size: 18)).lineLimit(1).truncationMode(.tail)
+            Spacer(minLength: 8)
+            if featured {
+                Text(activeConnecting ? "Connecting…" : "Connected")
+                    .font(.caption.weight(.medium)).lineLimit(1)
+                    .foregroundStyle(activeConnecting ? Color.white.opacity(0.7) : Color.green.opacity(0.95))
+            }
+        }
+        .animation(.easeOut(duration: 0.2), value: activeConnecting)
+        .padding(.horizontal, 24).frame(height: 64)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassEffect(featured ? .regular.tint(.green.opacity(0.22)).interactive() : .regular.interactive(), in: Capsule())
+        .contentShape(Capsule())
+        .padding(.bottom, 12)
     }
 
     /// 连着的那台:列表里唯一的一张大卡(液态玻璃),上面是状态,下面是名字和地址。
