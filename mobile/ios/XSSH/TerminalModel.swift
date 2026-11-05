@@ -375,14 +375,45 @@ final class TerminalModel: Identifiable {
         userActive = true
         let term = backend.currentTerm
         let modes = term.inputModes()
-        if modes.altScreen {
-            guard modes.alternateScroll else { return }
-            let seq = (modes.appCursor ? "\u{1B}O" : "\u{1B}[") + (lines > 0 ? "A" : "B")
-            backend.send(Data(String(repeating: seq, count: min(abs(lines), 10)).utf8))
-        } else {
+        guard modes.altScreen else {
+            // 普通屏(命令行):滚回滚历史。
             backend.scroll(lines: Int32(lines))
+            return
+        }
+        // 备用屏(vim / less / htop / Codex 这类全屏程序)没有回滚历史,拖动要翻译成程序听得懂的输入,按优先级:
+        // ① 程序开了鼠标上报 → 发鼠标滚轮(现代 TUI 的聊天 / 长输出区都是靠这个滚);
+        // ② 开了 alternateScroll(DECSET 1007)→ 发方向键;
+        // ③ 都没开 → 发翻页键(半屏一次),让 less / 大多数 TUI 至少能翻。
+        let count = min(abs(lines), 10)
+        if modes.mouseReport {
+            let (cols, rows) = measured ?? (80, 24)
+            let col = max(1, cols / 2), row = max(1, rows / 2)
+            // 手指往下拖(lines > 0)= 看更早的内容 = 滚轮向上(按钮 64);向下是 65。
+            let button = lines > 0 ? 64 : 65
+            let event: String
+            if modes.sgrMouse {
+                event = "\u{1B}[<\(button);\(col);\(row)M"
+            } else {
+                let b = Character(UnicodeScalar(UInt8(32 + button)))
+                let c = Character(UnicodeScalar(UInt8(min(255, 32 + col))))
+                let r = Character(UnicodeScalar(UInt8(min(255, 32 + row))))
+                event = "\u{1B}[M\(b)\(c)\(r)"
+            }
+            backend.send(Data(String(repeating: event, count: count).utf8))
+        } else if modes.alternateScroll {
+            let seq = (modes.appCursor ? "\u{1B}O" : "\u{1B}[") + (lines > 0 ? "A" : "B")
+            backend.send(Data(String(repeating: seq, count: count).utf8))
+        } else {
+            altScrollRemainder += lines
+            let page = max(3, (measured?.rows ?? 24) / 2)
+            while abs(altScrollRemainder) >= page {
+                backend.send(Data((altScrollRemainder > 0 ? "\u{1B}[5~" : "\u{1B}[6~").utf8))
+                altScrollRemainder += altScrollRemainder > 0 ? -page : page
+            }
         }
     }
+    /// 备用屏里没有鼠标 / alternateScroll 时,拖动累计的行数(攒够半屏发一次翻页键)。
+    private var altScrollRemainder = 0
 }
 
 extension FfiError {
