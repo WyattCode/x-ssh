@@ -37,6 +37,8 @@ final class TerminalModel: Identifiable {
     private(set) var historyLen = 0
     private(set) var onAltScreen = false
     private(set) var selection: ViewSelection?
+    /// 用户已经开始用这个终端(敲了字 / 按了键 / 粘贴 / 滚动):界面据此把顶部的侧栏开关和会话名称收起来,不挡着内容。
+    private(set) var userActive = false
     var ctrlArmed = false
     /// Alt 待用:下一次发出去的内容前面加 ESC(终端里 Alt+键 就是这么编码的)。
     var altArmed = false
@@ -179,6 +181,8 @@ final class TerminalModel: Identifiable {
 
     #if DEBUG
     /// `-autoKeyboard` 弹出软键盘;`-autoRun "<命令>"` 连上后自动敲这条命令(分号分隔多条)。
+    private func resetUserActive() { userActive = false }
+
     private func runLaunchCommand() {
         if DebugLaunch.flag("-autoKeyboard") { wantsKeyboard = true }
         if DebugLaunch.flag("-autoKeys") { showsKeys = true }
@@ -186,6 +190,7 @@ final class TerminalModel: Identifiable {
         Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(1.5))
             self?.send(command + "\r")
+            self?.resetUserActive()
         }
     }
     #endif
@@ -249,6 +254,7 @@ final class TerminalModel: Identifiable {
     // MARK: 输入
 
     func send(_ text: String) {
+        userActive = true
         var bytes = Array(text.utf8)
         if ctrlArmed, text.unicodeScalars.count == 1, let first = text.unicodeScalars.first {
             ctrlArmed = false
@@ -274,11 +280,13 @@ final class TerminalModel: Identifiable {
     }
 
     func sendRaw(_ bytes: [UInt8]) {
+        userActive = true
         ctrlArmed = false
         emit(bytes)
     }
 
     func press(_ key: Key) {
+        userActive = true
         let app = backend.currentTerm.inputModes().appCursor
         let csi = "\u{1B}["
         let ss3 = "\u{1B}O"
@@ -313,6 +321,7 @@ final class TerminalModel: Identifiable {
 
     /// 粘贴:换行统一成回车;程序开了括号粘贴就包起来,多行文本不会被当成逐行输入执行。
     func paste() {
+        userActive = true
         guard var text = UIPasteboard.general.string, !text.isEmpty else { return }
         text = text.replacingOccurrences(of: "\r\n", with: "\r").replacingOccurrences(of: "\n", with: "\r")
         if backend.currentTerm.inputModes().bracketedPaste {
@@ -363,6 +372,7 @@ final class TerminalModel: Identifiable {
     /// 拖动滚动:普通屏滚回滚历史;备用屏(vim / less)开了 alternateScroll 就发方向键。
     func scroll(lines: Int) {
         guard lines != 0 else { return }
+        userActive = true
         let term = backend.currentTerm
         let modes = term.inputModes()
         if modes.altScreen {

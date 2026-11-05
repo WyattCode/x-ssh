@@ -38,6 +38,7 @@ struct TerminalScreen: View {
     @State private var menuAnchor: CGPoint?
     @State private var pressTask: Task<Void, Never>?
     @State private var pressStart: CGPoint?
+    @State private var scrolling = false
     @State private var barVisible = false
     @State private var barDragging = false
 
@@ -65,7 +66,6 @@ struct TerminalScreen: View {
                 .frame(width: size.width, height: size.height, alignment: .topLeading)
                 // 长按选择文字(再拖动扩展),松手弹出「复制 / 粘贴」。放在高优先级:长按成功之后的拖动归它,不当成滚动。
                 .contentShape(Rectangle())
-                .simultaneousGesture(selectionGesture(m))
                 #if DEBUG
                 .border(FoldState.simulatedAxis == nil && !FoldState.simulatesOcclusion ? .clear : .green.opacity(0.6))
                 #endif
@@ -73,7 +73,7 @@ struct TerminalScreen: View {
                 .padding(.top, area.minY - full.minY)
                 .contentShape(Rectangle())
                 .onTapGesture { model.wantsKeyboard = true; model.selectClear(); menuAnchor = nil }
-                .gesture(scrollGesture(m))
+                .gesture(terminalDrag(m))
                 .gesture(pinchGesture)
                 .onChange(of: size, initial: true) { _, size in
                     model.measured(
@@ -278,28 +278,14 @@ struct TerminalScreen: View {
 
     // MARK: 手势
 
-    /// 竖向拖动 = 滚动回滚历史;一格一行。
-    private func scrollGesture(_ m: TermMetrics) -> some Gesture {
-        DragGesture(minimumDistance: 8)
-            .onChanged { value in
-                guard !selecting else { return }
-                let steps = Int((value.translation.height - dragLast) / m.height)
-                if steps != 0 {
-                    model.scroll(lines: steps)
-                    dragLast += CGFloat(steps) * m.height
-                }
-            }
-            .onEnded { _ in dragLast = 0 }
-    }
-
-    /// 长按(0.4 秒)开始选择(默认选中一个词),手指不抬继续拖就扩展选区;松手后在手指附近弹出「复制 / 粘贴」。
-    private func selectionGesture(_ m: TermMetrics) -> some Gesture {
+    /// 终端上的单指手势,一个拖动手势管两件事(分开挂两个手势会互相抢,滚动就失灵了):
+    /// - 按下后 0.4 秒内没有明显移动(<10pt)= 长按 → 开始选择(默认选一个词),手指不抬继续拖就扩展选区,松手弹出「复制 / 粘贴」;
+    /// - 0.4 秒内手指动了 → 竖向拖动 = 滚动回滚历史,一格一行。
+    private func terminalDrag(_ m: TermMetrics) -> some Gesture {
         func cell(_ p: CGPoint) -> (row: Int, col: Int, right: Bool) {
             (max(0, Int(p.y / m.height)), max(0, Int(p.x / m.width)),
              p.x.truncatingRemainder(dividingBy: m.width) > m.width / 2)
         }
-        // 自己计时的长按:手指按下 0.4 秒内没有明显移动(<10pt)就开始选择。不用 LongPressGesture.sequenced:
-        // 手指按住不动时它拿不到位置;这样用一个拖动手势全程跟着手指,按住不动也有位置。
         return DragGesture(minimumDistance: 0, coordinateSpace: .local)
             .onChanged { v in
                 let p = v.location
@@ -310,9 +296,10 @@ struct TerminalScreen: View {
                 }
                 if pressStart == nil {
                     pressStart = v.startLocation
+                    scrolling = false
                     pressTask = Task { @MainActor in
                         try? await Task.sleep(for: .milliseconds(400))
-                        guard !Task.isCancelled, let start = pressStart else { return }
+                        guard !Task.isCancelled, !scrolling, let start = pressStart else { return }
                         selecting = true
                         menuAnchor = nil
                         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
@@ -320,11 +307,24 @@ struct TerminalScreen: View {
                         model.selectStart(row: c.row, col: c.col, rightHalf: c.right)
                     }
                 }
-                if hypot(p.x - v.startLocation.x, p.y - v.startLocation.y) > 10 { pressTask?.cancel() }
+                if !scrolling, hypot(p.x - v.startLocation.x, p.y - v.startLocation.y) > 10 {
+                    scrolling = true
+                    pressTask?.cancel()
+                    menuAnchor = nil
+                }
+                if scrolling {
+                    let steps = Int((v.translation.height - dragLast) / m.height)
+                    if steps != 0 {
+                        model.scroll(lines: steps)
+                        dragLast += CGFloat(steps) * m.height
+                    }
+                }
             }
             .onEnded { v in
                 pressTask?.cancel()
                 pressStart = nil
+                scrolling = false
+                dragLast = 0
                 if selecting {
                     selecting = false
                     menuAnchor = v.location     // 弹出的位置:最后手指落点

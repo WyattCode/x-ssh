@@ -350,10 +350,12 @@ struct RootView: View {
                 SidebarHandle(visible: handleShown, width: w, slide: $slide, onTouch: pokeHandle,
                               onCollapse: { setDrawer(false) })
                     .offset(x: w + SidebarHandle.gap - SidebarHandle.hitWidth / 2 + slide)
+                    .frame(maxHeight: .infinity)   // 上下居中(ZStack 是顶对齐的)
                     // 软键盘弹出时竖向居中的位置不能跟着挪(中间线不动)。
                     .ignoresSafeArea(.keyboard)
             } else if !drawerOpen {
                 EdgeRevealHandle(visible: handleShown) { setDrawer(true) }
+                    .frame(maxHeight: .infinity)   // 上下居中
                     .ignoresSafeArea(.keyboard)
             }
 
@@ -366,7 +368,11 @@ struct RootView: View {
 
     /// 左上角一行:侧栏开关(跟着抽屉左右滑)+ 会话标题。
     private func headerRow(width w: CGFloat) -> some View {
-        ZStack(alignment: .topLeading) {
+        // 用户开始用这台终端(敲字 / 按键 / 粘贴 / 滚动)之后,顶部的会话名称和(抽屉收起时的)侧栏开关收起来,不挡内容;
+        // 抽屉展开时侧栏开关是侧栏标题栏的一部分,一直在。
+        let typing = active?.userActive == true
+        let showToggle = drawerOpen || !typing
+        return ZStack(alignment: .topLeading) {
             Button { setDrawer(!drawerOpen) } label: {
                 Image(systemName: "sidebar.leading")
                     .font(.system(size: 18, weight: .medium))
@@ -378,9 +384,12 @@ struct RootView: View {
             .glassEffect(.regular.interactive(), in: Circle())
             .environment(\.colorScheme, .dark)
             .offset(x: drawerOpen ? w - 16 - 48 + slide : 16, y: 24)
+            .opacity(showToggle ? 1 : 0)
+            .allowsHitTesting(showToggle)
+            .animation(.easeOut(duration: 0.25), value: showToggle)
             .accessibilityLabel(Text("Hosts"))
 
-            if let active {
+            if let active, !typing {
                 Text(verbatim: active.title.isEmpty ? active.host.displayName : active.title)
                     .font(.headline).lineLimit(1)
                     .foregroundStyle(.white)
