@@ -35,7 +35,19 @@ final class TerminalModel: Identifiable {
     /// 滚动位置(离底部多少行 / 回滚历史共多少行)、是否备用屏、视口里的选区:画滚动条和选区高亮用。
     private(set) var scrollOffset = 0
     private(set) var historyLen = 0
-    private(set) var onAltScreen = false
+    private(set) var onAltScreen = false {
+        didSet { if onAltScreen != oldValue { resetAltScroll() } }
+    }
+    /// 全屏程序(备用屏)里没有回滚历史,程序一共多长我们不知道。滚动条用「估算」:记下用户拖动累计走了多少行(`altPos`,往回拖为正、往前为负)
+    /// 以及这次走到过的最远两端(`altMin` / `altMax`);总长 = 两端之差 + 一屏,滑块位置 = 当前在两端之间的哪里。
+    /// 起点在底部的程序(聊天类)往回拖,滑块往上走;起点在顶部的程序(less)往前拖,滑块往下走 —— 都对。
+    private var altPos = 0
+    private var altMin = 0
+    private var altMax = 0
+    private func resetAltScroll() { altPos = 0; altMin = 0; altMax = 0; altScrollRemainder = 0 }
+    /// 滚动条用的「历史长度 / 离底部多少行」:普通屏是真实的,备用屏是上面的估算。
+    var barHistory: Int { onAltScreen ? altMax - altMin : historyLen }
+    var barOffset: Int { onAltScreen ? altPos - altMin : scrollOffset }
     private(set) var selection: ViewSelection?
     /// 用户已经开始用这个终端(敲了字 / 按了键 / 粘贴 / 滚动):界面据此把顶部的侧栏开关和会话名称收起来,不挡着内容。
     private(set) var userActive = false
@@ -255,6 +267,7 @@ final class TerminalModel: Identifiable {
 
     func send(_ text: String) {
         userActive = true
+        resetAltScroll()
         var bytes = Array(text.utf8)
         if ctrlArmed, text.unicodeScalars.count == 1, let first = text.unicodeScalars.first {
             ctrlArmed = false
@@ -281,12 +294,14 @@ final class TerminalModel: Identifiable {
 
     func sendRaw(_ bytes: [UInt8]) {
         userActive = true
+        resetAltScroll()
         ctrlArmed = false
         emit(bytes)
     }
 
     func press(_ key: Key) {
         userActive = true
+        resetAltScroll()
         let app = backend.currentTerm.inputModes().appCursor
         let csi = "\u{1B}["
         let ss3 = "\u{1B}O"
@@ -363,14 +378,14 @@ final class TerminalModel: Identifiable {
 
     /// 拖滚动条:直接滚到离底部 `offset` 行的位置(0 = 贴底)。
     func scrollTo(offset: Int) {
-        let target = max(0, min(offset, historyLen))
-        let delta = target - scrollOffset
+        let target = max(0, min(offset, barHistory))
+        let delta = target - barOffset
         guard delta != 0 else { return }
-        backend.scroll(lines: Int32(delta))
+        if onAltScreen { scroll(lines: delta, maxEvents: 40) } else { backend.scroll(lines: Int32(delta)) }
     }
 
     /// 拖动滚动:普通屏滚回滚历史;备用屏(vim / less)开了 alternateScroll 就发方向键。
-    func scroll(lines: Int) {
+    func scroll(lines: Int, maxEvents: Int = 10) {
         guard lines != 0 else { return }
         userActive = true
         let term = backend.currentTerm
@@ -384,7 +399,10 @@ final class TerminalModel: Identifiable {
         // ① 程序开了鼠标上报 → 发鼠标滚轮(现代 TUI 的聊天 / 长输出区都是靠这个滚);
         // ② 开了 alternateScroll(DECSET 1007)→ 发方向键;
         // ③ 都没开 → 发翻页键(半屏一次),让 less / 大多数 TUI 至少能翻。
-        let count = min(abs(lines), 10)
+        let count = min(abs(lines), maxEvents)
+        altPos += lines
+        altMin = min(altMin, altPos)
+        altMax = max(altMax, altPos)
         if modes.mouseReport {
             let (cols, rows) = measured ?? (80, 24)
             let col = max(1, cols / 2), row = max(1, rows / 2)

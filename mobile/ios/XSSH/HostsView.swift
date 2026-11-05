@@ -239,9 +239,9 @@ struct HostsView: View {
     }
 
     static let cardGap: CGFloat = 8
-    /// 两栏时卡片宽 = 侧栏宽的 94%,左右各留 3%(参考图里卡片和分界线之间就是这么一条窄缝)。
+    /// 两栏时卡片宽 = 侧栏宽的 92%,左右各留 4%(参考图里卡片和分界线之间就是这么一条窄缝)。
     /// 按侧栏实际宽度算,拖动改宽后比例不变。列表自带的左右边距已去掉(见 `SplitListMargins`)。
-    private var cardInset: CGFloat { splitLayout ? listWidth * 0.03 : 0 }
+    private var cardInset: CGFloat { splitLayout ? listWidth * 0.04 : 0 }
 
     /// 一屏窄的时候是一整张圆角卡里分行(行间有细线);两栏时(内屏)是一台一张独立的圆角卡,
     /// 卡与卡之间露出侧栏底色,连着的那台卡片更亮并描边。

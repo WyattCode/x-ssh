@@ -336,13 +336,13 @@ struct TerminalScreen: View {
 
     /// 滚动条:回滚历史有内容、不在备用屏时才有;滚动时出现,停下 1.2 秒后淡出;按住右边 28pt 宽的触摸条拖动可以直接定位。
     @ViewBuilder private func scrollBar(size: CGSize, m: TermMetrics) -> some View {
-        let history = CGFloat(model.historyLen)
-        if history > 0, !model.onAltScreen {
+        let history = CGFloat(model.barHistory)
+        if history > 0 {
             let rows = max(1, CGFloat(Int(size.height / m.height)))
             let thumbH = max(36, size.height * rows / (rows + history))
             let travel = max(1, size.height - thumbH)
             // 离底部 offset 行 → 滑块位置:offset 0 在最下面,offset == history 在最上面。
-            let thumbY = travel * (1 - CGFloat(model.scrollOffset) / history)
+            let thumbY = travel * (1 - CGFloat(model.barOffset) / history)
             ZStack(alignment: .topTrailing) {
                 Color.black.opacity(0.001)
                     .frame(width: 28, height: size.height)
@@ -370,7 +370,7 @@ struct TerminalScreen: View {
                     .allowsHitTesting(false)
             }
             .frame(width: size.width, height: size.height, alignment: .topTrailing)
-            .task(id: model.scrollOffset) {
+            .task(id: model.barOffset) {
                 barVisible = true
                 try? await Task.sleep(for: .milliseconds(1200))
                 if !Task.isCancelled { barVisible = false }
