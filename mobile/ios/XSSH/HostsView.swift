@@ -578,7 +578,7 @@ private struct AuthKindPicker: View {
 
 /// 内屏侧栏里的主机卡。**突出选中的、弱化没选的 / 没连的**:
 /// - 选中(正在连着的):系统液态玻璃 + 偏亮着色,文字全亮,按住有系统那种放大和光泽;
-/// - 没选中:不用玻璃,只有一层几乎看不见的底色,文字压暗 —— 退到背景里,不跟选中的抢眼。
+/// - 没选中:不用玻璃,一层淡淡的底色,文字稍微压一点 —— 退后但清楚可读,不跟选中的抢眼。
 /// 窄屏(单栏)不用,保持一整张圆角卡里分行。
 private struct HostCardGlass: ViewModifier {
     let enabled: Bool
@@ -591,9 +591,10 @@ private struct HostCardGlass: ViewModifier {
                 content
                     .glassEffect(.regular.tint(.white.opacity(0.16)).interactive(), in: shape)
             } else {
+                // 退后但不暗淡:文字 85%、底色比侧栏底亮一档,清楚可读;选中的靠玻璃 + 着色 + 全亮突出。
                 content
-                    .opacity(0.5)
-                    .background(Color.white.opacity(0.035), in: shape)
+                    .opacity(0.85)
+                    .background(Color.white.opacity(0.07), in: shape)
                     .contentShape(shape)
             }
         } else {

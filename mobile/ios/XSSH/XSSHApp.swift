@@ -120,8 +120,6 @@ struct RootView: View {
     @State private var handleShown = true
     @State private var handleToken = 0
     @State private var pokeClock = PokeClock()
-    /// 刚点了一台主机去连:连上之后把会话抽屉收起来(只对这一次连接生效)。
-    @State private var collapseAfterConnect = false
 
     /// 半折(铰链半开)时侧栏(主机列表)和内容(会话)各占整个宽度的一半;其余时候用记住的宽度。
     private var halfFolded: Bool { sizeClass == .regular && fold.hinge == .partiallyOpen && containerSize.width > 0 }
@@ -165,7 +163,7 @@ struct RootView: View {
     /// ① 整屏先快速淡出(侧栏内容也跟着消失,不会露出灰底);
     /// ② 全透明的那一刻改列 —— 会话瞬间变宽,同时给它一个等宽的位移,让它从原来的位置出发;
     /// ③ 一边淡入一边用弹簧滑到最左、占满整屏。
-    private func slideAwayThenCollapse() {
+    private func slideAwayThenCollapse(swapping swap: (() -> Void)? = nil) {
         widthTween?.cancel()
         let w = CGFloat(shownSidebarWidth)
         widthTween = Task { @MainActor in
@@ -174,14 +172,14 @@ struct RootView: View {
             if Task.isCancelled { return }
             var t = Transaction(animation: nil)
             t.disablesAnimations = true
-            withTransaction(t) { columns = .detailOnly; slide = 0; detailShift = w }
-            withAnimation(.smooth(duration: Self.settleDuration)) { dip = false; detailShift = 0 }
+            withTransaction(t) { swap?(); columns = .detailOnly; slide = 0; detailShift = w }
+            withAnimation(.spring(duration: Self.settleDuration, bounce: 0.08)) { dip = false; detailShift = 0 }
             widthTween = nil
         }
     }
 
     /// 展开列表(从左边缘拉出来 / 点小把手):反过来 —— 淡出、改列(会话变窄)、会话从原位置带反向位移淡入并滑到右边,侧栏跟着淡入。
-    private func expandListSmoothly() {
+    private func expandListSmoothly(swapping swap: (() -> Void)? = nil) {
         widthTween?.cancel()
         let w = CGFloat(shownSidebarWidth)
         widthTween = Task { @MainActor in
@@ -190,14 +188,14 @@ struct RootView: View {
             if Task.isCancelled { return }
             var t = Transaction(animation: nil)
             t.disablesAnimations = true
-            withTransaction(t) { columns = .all; slide = 0; detailShift = -w }
-            withAnimation(.smooth(duration: Self.settleDuration)) { dip = false; detailShift = 0 }
+            withTransaction(t) { swap?(); columns = .all; slide = 0; detailShift = -w }
+            withAnimation(.spring(duration: Self.settleDuration, bounce: 0.08)) { dip = false; detailShift = 0 }
             widthTween = nil
         }
     }
 
-    static let slideOutDuration = 0.18
-    static let settleDuration = 0.45
+    static let slideOutDuration = 0.10
+    static let settleDuration = 0.36
 
     /// 列表(侧栏)现在是展开的。两栏的 NavigationSplitView 里系统会把 `.all` 改写成 `.doubleColumn`(用户点系统按钮展开后尤其会),
     /// 只认 `.all` 的话,把手、收起手势都会在系统改写之后失效。
@@ -251,18 +249,6 @@ struct RootView: View {
                 // 连侧边的状态竖条那块安全区也算进来:整块屏幕的宽度(半折时侧栏取它的一半)。
                 .ignoresSafeArea()
             }
-        // 连上主机之后,会话抽屉(左边的主机列表)自动收起,会话占满整屏(你要的):
-        // 点一台主机 → 转圈 → 连上(绿点亮一下)→ 抽屉顺着滑走。连不上(出错 / 取消)就不收,留着列表让你重选。
-        // 半折时列表和会话各占一半是设计,不收;外屏(单栏)本来就是翻页,不用管。
-        .onChange(of: active?.state) { _, state in
-            guard state == .connected, collapseAfterConnect else { return }
-            collapseAfterConnect = false
-            guard sizeClass == .regular, listVisible, !halfFolded else { return }
-            Task { @MainActor in
-                try? await Task.sleep(for: .milliseconds(700))   // 让绿点先亮一会儿,再滑走
-                if listVisible, !halfFolded, active?.state == .connected { slideAwayThenCollapse() }
-            }
-        }
     }
 
     /// 内屏横向(宽 > 高)有地方让主机列表和终端并排;竖向时系统让列表浮在详情上面、盖住它一半,
@@ -288,7 +274,10 @@ struct RootView: View {
                 .navigationSplitViewColumnWidth(min: shownSidebarWidth, ideal: shownSidebarWidth, max: shownSidebarWidth)
         } detail: {
             if let active {
-                TerminalScreen(model: active, onBack: { compactColumn = .sidebar; columns = .all }, onClose: close,
+                TerminalScreen(model: active, onBack: {
+                    compactColumn = .sidebar
+                    if sizeClass == .regular, !listVisible { expandListSmoothly() } else { columns = .all }
+                }, onClose: close,
                                hostActions: hostActions)
                     .id(active.id)
                     .offset(x: detailShift)
@@ -402,24 +391,28 @@ struct RootView: View {
     }
     #endif
 
+    /// 点一台主机:**立刻**收起会话抽屉(左边的主机列表),会话页顺着滑进来(横屏 / 展开时);半折是并排设计,外屏是翻页,都不收。
+    /// 顺序:抽屉淡出 → 会话换成这台并带着反向位移 → 淡入滑到位 —— 快(约 0.5 秒),一气呵成。
     private func open(_ host: Host) {
+        let collapse = sizeClass == .regular && listVisible && !halfFolded
         // 点的就是正在跑的那台:直接回到它,别断了重连。
         if let current = active, current.host.id == host.id, !current.isEnded {
             compactColumn = .detail
-            updateColumns(containerSize)
+            if collapse { slideAwayThenCollapse() } else { updateColumns(containerSize) }
             return
         }
         active?.disconnect()
-        collapseAfterConnect = true
-        active = TerminalModel(host: host, credentials: hosts.credentials(for: host), knownKey: hosts.knownKey(host))
+        let model = TerminalModel(host: host, credentials: hosts.credentials(for: host), knownKey: hosts.knownKey(host))
         compactColumn = .detail
+        if collapse { slideAwayThenCollapse(swapping: { active = model }) } else { active = model }
     }
 
     private func close() {
-        collapseAfterConnect = false
         active?.disconnect()
-        active = nil
         compactColumn = .sidebar
+        // 断开 / 取消之后回到主机列表:横屏 / 展开时抽屉是收起的,要滑出来让人重新选。
+        if sizeClass == .regular, !listVisible, !halfFolded { expandListSmoothly(swapping: { active = nil }) }
+        else { active = nil }
     }
 }
 
