@@ -93,9 +93,11 @@ struct LaunchContainer<Content: View>: View {
     }
 }
 
-/// 侧栏 = 主机列表,详情 = 终端。窄的时候(外屏)系统自动折成单栈,内屏摊开成两栏,
-/// 不按设备类型分支 —— Apple 对 iPhone Duo 的要求就是靠尺寸类自适应;半开时导航容器自己避让折痕,
-/// 这里不再手工摆栏宽。只有终端画布这种整块排版的内容才自己避开接缝(见 `FoldState.usableRect`)。
+/// 侧栏 = 主机列表,详情 = 终端。
+/// - 外屏(窄,紧凑宽度):系统的 `NavigationSplitView` 折成单栈翻页,按钮放系统工具栏(Duo 外屏上自动竖到右侧)。
+/// - 内屏(宽,常规宽度):**自己排两栏**(`regularLayout`)—— 系统的导航容器改列可见性是一步到位、没有过渡,
+///   系统工具栏里按钮的增减也没有过渡;自己排才能让「抽屉滑出 / 收起、会话跟着滑、右边的玻璃竖条里按钮缩放着出现 / 消失」
+///   全部走同一条弹簧曲线。
 /// 会话由这里持有:视图被折叠 / 旋转重建时连接不受影响,只有「断开」或换主机才会收掉。
 struct RootView: View {
     @Environment(HostStore.self) private var hosts
@@ -105,15 +107,17 @@ struct RootView: View {
     @State private var active: TerminalModel?
     @State private var addHostRequested = false
     @State private var searching = false
-    /// 右边竖条里的「搜索 / 新建」是否在:列表展开立刻出现;列表收起要等收起动画走完才撤(系统工具栏没有自己的过渡,动画中途撤会让竖条生硬地跳一下)。
-    @State private var hostActionsShown = true
-    /// 拖把手 / 收起时侧栏内容跟手滑出去的位移(0 = 原位,-侧栏宽度 = 完全滑出)。
+    /// 拖把手时侧栏内容跟手滑出去的位移(0 = 原位,-侧栏宽度 = 完全滑出)。
     @State private var slide: CGFloat = 0
-    /// 会话(详情)的临时水平位移:列变化的瞬间给一个反向位移让它视觉上不动,再平滑归零(见 `slideAwayThenCollapse`)。
-    @State private var detailShift: CGFloat = 0
     @State private var containerSize: CGSize = .zero
+    // 外屏(紧凑)用:
     @State private var columns: NavigationSplitViewVisibility = .automatic
     @State private var compactColumn: NavigationSplitViewColumn = .sidebar
+    // 内屏(常规)用:
+    /// 抽屉(主机列表)展开了没有。会话在抽屉右边,抽屉收起时占满整屏。
+    @State private var drawerOpen = true
+    /// 会话左边让出多宽(跟着抽屉的弹簧一起变)。
+    @State private var detailInset: CGFloat = SidebarHandle.width
     /// 两栏时侧栏的宽度:固定 334pt,不让用户自己拖到别的位置 ——
     /// 只有「展开(这个宽度)」和「收起」两种状态。
     private let sidebarWidth = SidebarHandle.width
@@ -121,7 +125,7 @@ struct RootView: View {
     @State private var handleToken = 0
     @State private var pokeClock = PokeClock()
 
-    /// 半折(铰链半开)时侧栏(主机列表)和内容(会话)各占整个宽度的一半;其余时候用记住的宽度。
+    /// 半折(铰链半开)时侧栏(主机列表)和内容(会话)各占整个宽度的一半;其余时候用固定宽度。
     private var halfFolded: Bool { sizeClass == .regular && fold.hinge == .partiallyOpen && containerSize.width > 0 }
     /// 最多占窗口的 60%(竖屏、小窗口里 334pt 会把会话挤没)。
     private var effectiveSidebarWidth: Double {
@@ -129,23 +133,20 @@ struct RootView: View {
         guard containerSize.width > 0 else { return sidebarWidth }
         return min(sidebarWidth, Double(containerSize.width) * 0.6)
     }
-    /// 实际给导航容器的侧栏宽度:半折 ↔ 展开 / 合上切换时带动画滑过去,拖把手时跟手(不带动画)。
+    /// 实际的侧栏宽度:半折 ↔ 展开 / 合上切换时整体淡出 → 换宽度 → 淡入;拖把手时不变。
     @State private var shownSidebarWidth: Double = SidebarHandle.width
     @State private var widthTween: Task<Void, Never>?
     @State private var dip = false
-    /// 半折 ↔ 展开 / 合上切换时的过渡。系统的导航容器不给「栏宽变化」做动画(直接跳),逐帧改栏宽又会把详情栏弄丢
-    /// (折一次再折平,会话区就空白了),所以用「淡出 → 换宽度 → 淡入」:整块内容先快速淡下去,宽度在看不见的时候一次到位,再淡回来。
-    /// 拖把手时 `animated` 为 false,直接跟手。
     private func syncSidebarWidth(animated: Bool) {
         if animated {
             widthTween?.cancel()
             widthTween = Task { @MainActor in
                 withAnimation(.easeIn(duration: 0.18)) { dip = true }
-                // `try?` 会吞掉取消:被新一次切换取消的旧任务必须在每次等待后自己退出,
-                // 否则它会抢先把 `dip` 放回去、把 `widthTween` 清掉,新的过渡就被打断(闪一下)。
+                // `try?` 会吞掉取消:被新一次切换取消的旧任务必须在每次等待后自己退出。
                 try? await Task.sleep(for: .milliseconds(190))
                 if Task.isCancelled { return }
                 shownSidebarWidth = effectiveSidebarWidth
+                detailInset = drawerOpen ? CGFloat(shownSidebarWidth) : 0
                 try? await Task.sleep(for: .milliseconds(60))
                 if Task.isCancelled { return }
                 withAnimation(.easeOut(duration: 0.35)) { dip = false }
@@ -153,58 +154,31 @@ struct RootView: View {
             }
         } else if widthTween == nil, abs(shownSidebarWidth - effectiveSidebarWidth) > 0.5 {
             shownSidebarWidth = effectiveSidebarWidth
+            detailInset = drawerOpen ? CGFloat(shownSidebarWidth) : 0
         }
     }
 
-    /// 收起列表:侧栏内容先顺着手势方向滑出屏幕(0.22 秒),滑出去之后再无动画地把列只改成「收起」,
-    /// 用户看到的是一整条连贯的「抽屉滑走」,不是淡出再突然变样。
-    /// 收起列表,丝滑版。系统的导航容器改列可见性是「一步到位」的(不带动画,实测),侧栏内容滑走之后还会露出一块系统灰底,
-    /// 所以整个界面「淡出 → 改列 → 会话带着反向位移淡入并滑到位」:
-    /// ① 整屏先快速淡出(侧栏内容也跟着消失,不会露出灰底);
-    /// ② 全透明的那一刻改列 —— 会话瞬间变宽,同时给它一个等宽的位移,让它从原来的位置出发;
-    /// ③ 一边淡入一边用弹簧滑到最左、占满整屏。
-    private func slideAwayThenCollapse(swapping swap: (() -> Void)? = nil) {
+    /// 抽屉展开 / 收起 —— 整个界面最重要的一条过渡。几件事走同一条弹簧曲线,同时发生:
+    /// ① 侧栏滑入 / 滑出;② 会话左边让出的宽度跟着变(会话顺滑地变宽 / 变窄;终端的 PTY 尺寸有 150 毫秒防抖,
+    /// 动画走完才重排一次,不会逐帧折腾服务器);③ 右边玻璃竖条里的按钮缩放着增减(见 `rightBar`)。
+    /// 可选 `swap`:在同一条动画里把会话换成另一台(淡入淡出)。
+    private func setDrawer(_ open: Bool, swapping swap: (() -> Void)? = nil) {
+        guard open != drawerOpen || swap != nil else { return }
         widthTween?.cancel()
-        let w = CGFloat(shownSidebarWidth)
-        widthTween = Task { @MainActor in
-            withAnimation(.easeIn(duration: Self.slideOutDuration)) { dip = true }
-            try? await Task.sleep(for: .milliseconds(Int(Self.slideOutDuration * 1000) + 15))
-            if Task.isCancelled { return }
-            var t = Transaction(animation: nil)
-            t.disablesAnimations = true
-            withTransaction(t) { swap?(); columns = .detailOnly; slide = 0; detailShift = w }
-            withAnimation(.spring(duration: Self.settleDuration, bounce: 0.08)) { dip = false; detailShift = 0 }
-            widthTween = nil
+        withAnimation(Self.drawerSpring) {
+            drawerOpen = open
+            detailInset = open ? CGFloat(shownSidebarWidth) : 0
+            slide = 0
+            swap?()
         }
+        if open { pokeHandle() }
     }
 
-    /// 展开列表(从左边缘拉出来 / 点小把手):反过来 —— 淡出、改列(会话变窄)、会话从原位置带反向位移淡入并滑到右边,侧栏跟着淡入。
-    private func expandListSmoothly(swapping swap: (() -> Void)? = nil) {
-        widthTween?.cancel()
-        let w = CGFloat(shownSidebarWidth)
-        widthTween = Task { @MainActor in
-            withAnimation(.easeIn(duration: Self.slideOutDuration)) { dip = true }
-            try? await Task.sleep(for: .milliseconds(Int(Self.slideOutDuration * 1000) + 15))
-            if Task.isCancelled { return }
-            var t = Transaction(animation: nil)
-            t.disablesAnimations = true
-            withTransaction(t) { swap?(); columns = .all; slide = 0; detailShift = -w }
-            withAnimation(.spring(duration: Self.settleDuration, bounce: 0.08)) { dip = false; detailShift = 0 }
-            widthTween = nil
-        }
-    }
+    static let drawerSpring = Animation.spring(duration: 0.46, bounce: 0.12)
 
-    static let slideOutDuration = 0.10
-    static let settleDuration = 0.36
-
-    /// 列表(侧栏)现在是展开的。两栏的 NavigationSplitView 里系统会把 `.all` 改写成 `.doubleColumn`(用户点系统按钮展开后尤其会),
-    /// 只认 `.all` 的话,把手、收起手势都会在系统改写之后失效。
-    private var listVisible: Bool { columns == .all || columns == .doubleColumn }
-
-    /// 内屏(两栏)里右边竖条放「搜索 / 新建主机」;外屏(单栏)由主机列表自己的竖条放。
-    private var hostActions: HostActions? {
-        // 列表(左栏)收起着的时候不需要「搜索 / 新建主机」:这两个按钮是管主机列表的,列表不在就不出现。
-        sizeClass == .regular && hostActionsShown ? HostActions(searching: $searching, add: { addHostRequested = true }) : nil
+    /// 抽屉(侧栏)现在是展开的。外屏用系统导航容器的列状态。
+    private var listVisible: Bool {
+        sizeClass == .regular ? drawerOpen : (columns == .all || columns == .doubleColumn)
     }
 
     /// 正在连着的会话还没连上(连接中 / 等确认主机密钥)。
@@ -218,10 +192,8 @@ struct RootView: View {
     /// App 启动的时刻。启动后头 3.5 秒里的把手不淡出(开屏盖着,不然用户还没看到它就没了)。
     private static let launchTime = Date()
 
-    /// 把手(列表展开时是分界线上的竖条,收起时是左边缘的小条)的显示逻辑,只有一条规则:
-    /// **有「该让用户看到它」的事情发生就显示,两秒后没人再动就淡出。** 这些事情是:
-    /// ① 列表展开 / 收起了(启动、折叠屏展开、半折、转屏、点系统按钮、从边缘拉出来);
-    /// ② 姿态 / 窗口尺寸变了;③ 手指碰了会话区域(列表展开时)或屏幕(列表收起时);④ 碰 / 滑把手本身。
+    /// 把手(抽屉展开时是分界线上的竖条,收起时是左边缘的小条)的显示逻辑,只有一条规则:
+    /// **有「该让用户看到它」的事情发生就显示,两秒后没人再动就淡出。**
     private func pokeHandle() {
         pokeClock.last = Date()
         if !handleShown { handleShown = true }
@@ -229,81 +201,47 @@ struct RootView: View {
     }
 
     var body: some View {
-        split
+        content
             .opacity(dip ? 0 : 1)
-            .allowsHitTesting(!dip)   // 过渡的 0.5 秒里内容是看不见的,别让手指点到看不见的东西
+            .allowsHitTesting(!dip)   // 过渡里内容是看不见的,别让手指点到看不见的东西
             // 容器尺寸只用来判断横 / 竖,必须不受软键盘影响:搜索 / 输入时键盘把可用高度压矮,
-            // 竖屏会被误判成横屏,侧栏跟着来回跳(搜索时的过渡不顺就是这个)。所以量一块忽略键盘的背景。
+            // 竖屏会被误判成横屏,侧栏跟着来回跳。所以量一块忽略键盘的背景。
             .background {
                 GeometryReader { geo in
                     Color.clear
                         .onChange(of: layoutKey(geo.size), initial: true) { _, _ in
                             containerSize = geo.size
-                            updateColumns(geo.size)
+                            updateLayout(geo.size)
                             pokeHandle()
                         }
                         // 宽高比没变但宽度变了(半折的一半宽度要跟着走)也要更新。
                         .onChange(of: geo.size) { _, size in containerSize = size }
-                        .onChange(of: active?.id) { _, _ in updateColumns(geo.size) }
                 }
                 // 连侧边的状态竖条那块安全区也算进来:整块屏幕的宽度(半折时侧栏取它的一半)。
                 .ignoresSafeArea()
             }
     }
 
-    /// 内屏横向(宽 > 高)有地方让主机列表和终端并排;竖向时系统让列表浮在详情上面、盖住它一半,
-    /// 所以竖向(不算半折)先收起列表(左上角的系统按钮、空会话里的「主机」按钮、从左边缘右滑都能拉出来)。
-    /// 按容器宽高比判断,不看设备朝向。
+    /// 内屏横向(宽 > 高)有地方让主机列表和会话并排,抽屉默认展开;竖向抽屉默认收起,会话占满整屏(左上角的按钮 / 左边缘的小把手能拉出来)。
+    /// 半折一律并排(不看宽高比:折的过程里宽高比会来回变)。按容器宽高比判断,不看设备朝向。
     private func layoutKey(_ size: CGSize) -> String { "\(sizeClass == .compact)-\(size.width > size.height)" }
 
-    private func updateColumns(_ size: CGSize) {
-        if sizeClass == .compact { columns = .automatic }
-        // 内屏:横着拿、或者半折(铰链半开)时并排;完全展开又竖着拿时列表收起来,会话占满整屏。
-        // 系统的导航容器在竖屏里并排放不下去,会让列表「浮」在会话上面,盖住会话(终端文字、底部按钮)的一半,
-        // 所以竖屏不硬并排。半折时一律并排(不看宽高比):折的过程中宽高比会来回变,
-        // 按比例判断会让侧栏一会收一会开,空会话的 logo 就一会在整屏中间、一会在右边。
-        else if halfFolded || size.width > size.height { columns = .all }
-        else { columns = .detailOnly }
+    private func updateLayout(_ size: CGSize) {
+        if sizeClass == .compact { columns = .automatic; return }
+        let open = halfFolded || size.width > size.height
+        if open != drawerOpen { setDrawer(open) }
+        else { detailInset = open ? CGFloat(shownSidebarWidth) : 0 }
     }
 
-    private var split: some View {
-        NavigationSplitView(columnVisibility: $columns, preferredCompactColumn: $compactColumn) {
-            HostsView(splitLayout: sizeClass == .regular, activeID: active.flatMap { $0.isEnded ? nil : $0.host.id },
-                      activeConnecting: activeConnecting, addRequested: $addHostRequested, searching: $searching, onConnect: open,
-                      onCollapse: { slideAwayThenCollapse() }, slideOffset: slide)
-                .navigationSplitViewColumnWidth(min: shownSidebarWidth, ideal: shownSidebarWidth, max: shownSidebarWidth)
-        } detail: {
-            if let active {
-                TerminalScreen(model: active, onBack: {
-                    compactColumn = .sidebar
-                    if sizeClass == .regular, !listVisible { expandListSmoothly() } else { columns = .all }
-                }, onClose: close,
-                               hostActions: hostActions)
-                    .id(active.id)
-                    .offset(x: detailShift)
-            } else {
-                EmptySessionView(showHosts: listVisible ? nil : { expandListSmoothly() })
-                    .offset(x: detailShift)
-                    // 没会话时右侧竖条放「搜索 / 新建主机」(内屏只放这一份,左栏里不再有)。
-                    .toolbar {
-                        if let hostActions {
-                            ToolbarItem(placement: .bottomBar) {
-                                Button(searching ? "Close Search" : "Search", systemImage: searching ? "xmark" : "magnifyingglass") {
-                                    hostActions.searching.wrappedValue.toggle()
-                                }
-                            }
-                            ToolbarItem(placement: .bottomBar) {
-                                Button("Add Host", systemImage: "plus", action: hostActions.add)
-                            }
-                        }
-                    }
-            }
+    // MARK: 版面
+
+    @ViewBuilder private var content: some View {
+        Group {
+            if sizeClass == .regular { regularLayout } else { compactSplit }
         }
-        // 内屏(宽 × 高都是常规尺寸)是 iPad 布局的自然延伸:主机列表常驻在左边,不默认收起。
-        // 紧凑 ↔ 常规(合上 ↔ 展开 / 半折)切换时,系统不会给已有的导航容器重新装上竖条工具栏,侧栏状态也会错乱。
-        // 按尺寸类重建导航容器;会话和主机数据都在这里(RootView)持有,重建不会断连接。
+        // 紧凑 ↔ 常规(合上 ↔ 展开 / 半折)切换时按尺寸类重建;会话和主机数据都在这里(RootView)持有,重建不会断连接。
         .id(sizeClass == .compact)
-        // 输入框放在被重建的导航容器外面:姿态切换时它不会被拆掉,焦点和「要不要键盘」都保持。
+        // 输入框放在被重建的容器外面:姿态切换时它不会被拆掉,焦点和「要不要键盘」都保持。
         .background {
             if let active {
                 KeyCapture(model: active, ctrlArmed: active.ctrlArmed,
@@ -314,62 +252,38 @@ struct RootView: View {
             }
         }
         .onChange(of: scenePhase) { _, phase in active?.setForeground(phase == .active) }
-        .overlay(alignment: .leading) {
-            if sizeClass == .regular, listVisible, !halfFolded {
-                SidebarHandle(visible: handleShown, width: CGFloat(shownSidebarWidth), slide: $slide, onTouch: pokeHandle,
-                              onCollapse: { slideAwayThenCollapse() })
-                    .offset(x: shownSidebarWidth + SidebarHandle.gap - SidebarHandle.hitWidth / 2 + slide)
-                    // 软键盘弹出时竖向居中的位置不能跟着挪(中间线不动)。
-                    .ignoresSafeArea(.keyboard)
-            }
-        }
-        // 列表被收起时,屏幕左边缘留一个淡淡的小把手:点一下或往右拖就把列表拉出来(不然只有左上角的系统按钮,看不出来能拉)。
-        .overlay(alignment: .leading) {
-            if sizeClass == .regular, columns == .detailOnly {
-                EdgeRevealHandle(visible: handleShown) { expandListSmoothly() }
-                    .ignoresSafeArea(.keyboard)
-            }
-        }
         // 有人在会话区域(分界线右边)碰 / 滑,把手重新显示。UIKit 手势识别器只旁听触摸,不影响终端自己的手势。
         .background {
             TouchSpy { point in
                 let x = point.x
                 pokeClock.lastTouch = point
                 pokeClock.lastTouchAt = Date()
-                // 列表展开时只有碰会话区域(分界线右边)才算;列表收起时碰屏幕任何地方都让左边缘的小把手出来。
+                // 抽屉展开时只有碰会话区域(分界线右边)才算;收起时碰屏幕任何地方都让左边缘的小把手出来。
                 guard sizeClass == .regular, !listVisible || x > sidebarWidth else { return }
                 if !handleShown || Date().timeIntervalSince(pokeClock.last) > 0.5 { pokeHandle() }
             }
             .frame(width: 0, height: 0)
         }
         .onChange(of: halfFolded) { _, _ in
-            updateColumns(containerSize)
+            updateLayout(containerSize)
             syncSidebarWidth(animated: true)
+            pokeHandle()
         }
-        // 启动时直接用固定宽度(开屏盖着,不做淡出淡入,免得开屏淡出时内容正好半透明)。
-        .onAppear { shownSidebarWidth = effectiveSidebarWidth }
+        // 启动时直接用固定宽度(开屏盖着,不做淡出淡入)。
+        .onAppear {
+            shownSidebarWidth = effectiveSidebarWidth
+            detailInset = drawerOpen ? CGFloat(shownSidebarWidth) : 0
+            pokeHandle()
+        }
         .onChange(of: containerSize) { _, _ in syncSidebarWidth(animated: false) }
         .task(id: handleToken) {
             let launchRemaining = 3.5 - Date().timeIntervalSince(Self.launchTime)
             try? await Task.sleep(for: .seconds(max(2.0, launchRemaining)))
             if !Task.isCancelled { handleShown = false }
         }
-        // 列表展开 ↔ 收起、姿态 / 尺寸变化:都让把手出来一下(以前只有碰才出来,折叠屏展开后它是不出现的)。
-        .onChange(of: listVisible) { _, visible in
-            if sizeClass == .regular { pokeHandle() }
-            if visible { hostActionsShown = true }
-            else {
-                Task { @MainActor in
-                    try? await Task.sleep(for: .milliseconds(Int((Self.slideOutDuration + Self.settleDuration) * 1000) + 60))
-                    if !listVisible { hostActionsShown = false }
-                }
-            }
-        }
-        // 从右边竖条点搜索:搜索框在左栏里,列表收起着的话先拉出来。
-        .onChange(of: searching) { _, on in if on, sizeClass == .regular, !listVisible { columns = .all } }
+        // 抽屉展开 ↔ 收起、姿态 / 尺寸变化:都让把手出来一下。
+        .onChange(of: listVisible) { _, _ in if sizeClass == .regular { pokeHandle() } }
         .onChange(of: sizeClass) { _, _ in pokeHandle() }
-        .onChange(of: halfFolded) { _, _ in pokeHandle() }
-        .onAppear { pokeHandle() }
         #if DEBUG
         .overlay { SeamOutline() }
         .task { await autoOpenFromLaunchArguments() }
@@ -382,6 +296,159 @@ struct RootView: View {
         #endif
     }
 
+    private var hostsView: some View {
+        HostsView(splitLayout: sizeClass == .regular, activeID: active.flatMap { $0.isEnded ? nil : $0.host.id },
+                  activeConnecting: activeConnecting, addRequested: $addHostRequested, searching: $searching, onConnect: open,
+                  onCollapse: { setDrawer(false) }, slideOffset: 0)
+    }
+
+    /// 外屏(单栏翻页):系统导航容器。
+    private var compactSplit: some View {
+        NavigationSplitView(columnVisibility: $columns, preferredCompactColumn: $compactColumn) {
+            hostsView
+        } detail: {
+            if let active {
+                TerminalScreen(model: active, onBack: { compactColumn = .sidebar }, onClose: close)
+                    .id(active.id)
+            } else {
+                EmptySessionView(showHosts: nil)
+            }
+        }
+    }
+
+    /// 内屏:自己排的两栏。会话在底层(左边让出 `detailInset`),侧栏盖在上面,按钮竖条和标题行再盖在最上面。
+    private var regularLayout: some View {
+        let w = CGFloat(shownSidebarWidth)
+        return ZStack(alignment: .topLeading) {
+            // 会话
+            ZStack {
+                if let active {
+                    TerminalScreen(model: active, onBack: { setDrawer(true) }, onClose: close, embedded: true)
+                        .id(active.id)
+                        .transition(.opacity)
+                } else {
+                    EmptySessionView(showHosts: nil)
+                        .transition(.opacity)
+                }
+            }
+            .padding(.leading, detailInset)
+
+            // 侧栏(抽屉)
+            hostsView
+                .frame(width: w)
+                .frame(maxHeight: .infinity)
+                .background(Color.appSidebar.ignoresSafeArea())
+                .offset(x: (drawerOpen ? 0 : -w) + slide)
+                .opacity(1 - min(1, abs(slide) / max(w, 1)) * 0.4)
+                .allowsHitTesting(drawerOpen)
+
+            // 左上角:侧栏开关;会话标题
+            headerRow(width: w)
+
+            // 分界线上的把手 / 收起后左边缘的小把手
+            if drawerOpen, !halfFolded {
+                SidebarHandle(visible: handleShown, width: w, slide: $slide, onTouch: pokeHandle,
+                              onCollapse: { setDrawer(false) })
+                    .offset(x: w + SidebarHandle.gap - SidebarHandle.hitWidth / 2 + slide)
+                    // 软键盘弹出时竖向居中的位置不能跟着挪(中间线不动)。
+                    .ignoresSafeArea(.keyboard)
+            } else if !drawerOpen {
+                EdgeRevealHandle(visible: handleShown) { setDrawer(true) }
+                    .ignoresSafeArea(.keyboard)
+            }
+
+            // 右边的玻璃竖条
+            Color.clear
+                .overlay(alignment: .bottomTrailing) { rightBar.padding(.trailing, 25).padding(.bottom, 25) }
+                .ignoresSafeArea(.container)
+        }
+    }
+
+    /// 左上角一行:侧栏开关(跟着抽屉左右滑)+ 会话标题。
+    private func headerRow(width w: CGFloat) -> some View {
+        ZStack(alignment: .topLeading) {
+            Button { setDrawer(!drawerOpen) } label: {
+                Image(systemName: "sidebar.leading")
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundStyle(.white)
+                    .frame(width: 48, height: 48)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .glassEffect(.regular.interactive(), in: Circle())
+            .environment(\.colorScheme, .dark)
+            .offset(x: drawerOpen ? w - 16 - 48 + slide : 16, y: 24)
+            .accessibilityLabel(Text("Hosts"))
+
+            if let active {
+                Text(verbatim: active.title.isEmpty ? active.host.displayName : active.title)
+                    .font(.headline).lineLimit(1)
+                    .foregroundStyle(.white)
+                    .offset(x: drawerOpen ? w + 16 : 76, y: 24 + 14)
+                    .transition(.opacity)
+            }
+        }
+    }
+
+    // MARK: 右边的玻璃竖条
+
+    private struct BarItem: Identifiable {
+        let id: String
+        let icon: String
+        let label: LocalizedStringKey
+        var on = false
+        var role: ButtonRole?
+        let action: () -> Void
+    }
+
+    /// 竖条里现在该有哪些按钮:没会话时只有主机列表的「搜索 / 新建」(抽屉收起时一个都没有);
+    /// 有会话时是会话按钮(抽屉收起时多一颗「回主机列表」),抽屉展开时再接上「搜索 / 新建」。
+    private var barItems: [BarItem] {
+        var items: [BarItem] = []
+        if let active {
+            if !drawerOpen { items.append(BarItem(id: "hosts", icon: "chevron.left", label: "Hosts") { setDrawer(true) }) }
+            items.append(BarItem(id: "keys", icon: "command", label: "Shortcuts", on: active.showsKeys) {
+                withAnimation(.smooth(duration: 0.25)) { active.showsKeys.toggle() }
+            })
+            items.append(BarItem(id: "kbd", icon: "keyboard", label: "Keyboard", on: active.wantsKeyboard) { active.wantsKeyboard.toggle() })
+            items.append(BarItem(id: "paste", icon: "clipboard", label: "Paste") { active.paste() })
+            items.append(BarItem(id: "close", icon: "xmark", label: "Disconnect", role: .destructive) { close() })
+        }
+        if drawerOpen {
+            items.append(BarItem(id: "search", icon: searching ? "xmark" : "magnifyingglass",
+                                 label: searching ? "Close Search" : "Search") { searching.toggle() })
+            items.append(BarItem(id: "add", icon: "plus", label: "Add Host") { addHostRequested = true })
+        }
+        return items
+    }
+
+    @ViewBuilder private var rightBar: some View {
+        let items = barItems
+        if !items.isEmpty {
+            VStack(spacing: 2) {
+                ForEach(items) { item in
+                    Button(role: item.role, action: item.action) {
+                        Image(systemName: item.icon)
+                            .font(.system(size: 18, weight: .medium))
+                            .foregroundStyle(item.on ? Color.accentColor : Color.white)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(Text(item.label))
+                    .transition(.scale(scale: 0.5).combined(with: .opacity))
+                }
+            }
+            .padding(5)
+            // 液态玻璃,整条可交互:按住时整条像系统工具栏那样放大、随手指流动。
+            .glassEffect(.regular.interactive(), in: Capsule())
+            .environment(\.colorScheme, .dark)
+            // 按钮增减(抽屉展开 / 收起、连上 / 断开)用同一条弹簧,缩放着出现 / 消失,竖条随之伸缩。
+            .animation(Self.drawerSpring, value: items.map(\.id))
+            .transition(.scale(scale: 0.6, anchor: .bottomTrailing).combined(with: .opacity))
+        }
+    }
+
     #if DEBUG
     /// `-autoOpen <主机名>`:启动后自动打开那台主机,命令行起的模拟器没法点屏幕时用。
     private func autoOpenFromLaunchArguments() async {
@@ -391,28 +458,37 @@ struct RootView: View {
     }
     #endif
 
-    /// 点一台主机:**立刻**收起会话抽屉(左边的主机列表),会话页顺着滑进来(横屏 / 展开时);半折是并排设计,外屏是翻页,都不收。
-    /// 顺序:抽屉淡出 → 会话换成这台并带着反向位移 → 淡入滑到位 —— 快(约 0.5 秒),一气呵成。
+    /// 点一台主机:内屏横屏 / 展开时**立刻**收起抽屉,会话顺着滑进来(抽屉、会话、按钮竖条一条弹簧);
+    /// 半折是并排设计、竖屏抽屉本来就是收起的,都不用收;外屏是翻页。
     private func open(_ host: Host) {
-        let collapse = sizeClass == .regular && listVisible && !halfFolded
+        let collapse = sizeClass == .regular && drawerOpen && !halfFolded
         // 点的就是正在跑的那台:直接回到它,别断了重连。
         if let current = active, current.host.id == host.id, !current.isEnded {
             compactColumn = .detail
-            if collapse { slideAwayThenCollapse() } else { updateColumns(containerSize) }
+            if collapse { setDrawer(false) }
             return
         }
         active?.disconnect()
         let model = TerminalModel(host: host, credentials: hosts.credentials(for: host), knownKey: hosts.knownKey(host))
         compactColumn = .detail
-        if collapse { slideAwayThenCollapse(swapping: { active = model }) } else { active = model }
+        if sizeClass == .regular {
+            if collapse { setDrawer(false, swapping: { active = model }) }
+            else { withAnimation(.smooth(duration: 0.25)) { active = model } }
+        } else {
+            active = model
+        }
     }
 
     private func close() {
         active?.disconnect()
         compactColumn = .sidebar
         // 断开 / 取消之后回到主机列表:横屏 / 展开时抽屉是收起的,要滑出来让人重新选。
-        if sizeClass == .regular, !listVisible, !halfFolded { expandListSmoothly(swapping: { active = nil }) }
-        else { active = nil }
+        if sizeClass == .regular {
+            if !drawerOpen, !halfFolded { setDrawer(true, swapping: { active = nil }) }
+            else { withAnimation(.smooth(duration: 0.25)) { active = nil } }
+        } else {
+            active = nil
+        }
     }
 }
 

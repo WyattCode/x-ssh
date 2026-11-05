@@ -15,12 +15,6 @@ struct TermMetrics: Equatable {
     }
 }
 
-/// 内屏里放在右边竖条的「搜索 / 新建主机」。
-struct HostActions {
-    var searching: Binding<Bool>
-    var add: () -> Void
-}
-
 struct TerminalScreen: View {
     @Environment(HostStore.self) private var store
     @Environment(\.displayScale) private var displayScale
@@ -32,8 +26,8 @@ struct TerminalScreen: View {
     /// 回到主机列表,会话保留(和「断开」不同)。
     let onBack: () -> Void
     let onClose: () -> Void
-    /// 内屏(两栏)里「搜索 / 新建主机」放在会话这一侧的竖条里(只放一份);nil = 不放(外屏 / 直板机)。
-    var hostActions: HostActions?
+    /// 内屏(自己排的两栏布局)里嵌着用:标题、右边的玻璃竖条、返回手势都由外层 `RootView` 画,这里不挂系统导航栏 / 工具栏。
+    var embedded = false
 
     @State private var pinchBase: Double?
     @State private var dragLast: CGFloat = 0
@@ -50,6 +44,10 @@ struct TerminalScreen: View {
     private var metrics: TermMetrics { TermMetrics(fontSize: fontSize) }
 
     var body: some View {
+        if embedded { core } else { navChrome(core) }
+    }
+
+    @ViewBuilder private var core: some View {
         let m = metrics
         ZStack {
             Color(rgb: TermTheme.background).ignoresSafeArea()
@@ -109,6 +107,11 @@ struct TerminalScreen: View {
             }
         }
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { container = $0 }
+    }
+
+    /// 外屏 / 直板机:用系统导航栏 + 工具栏(Duo 外屏上带图标的按钮自动竖排到右侧)。
+    private func navChrome<V: View>(_ content: V) -> some View {
+        content
         .navigationTitle(model.title.isEmpty ? model.host.displayName : model.title)
         .navigationBarTitleDisplayMode(.inline)
         // 标题由左上角的主机名自己画,去掉系统标题,否则主机名出现两遍。
@@ -151,19 +154,6 @@ struct TerminalScreen: View {
                 }
                 ToolbarItem(placement: .bottomBar) {
                     Button("Disconnect", systemImage: "xmark", role: .destructive, action: onClose)
-                }
-                .visibilityPriority(.low)
-            }
-            if let hostActions {
-                ToolbarItem(placement: .bottomBar) {
-                    Button(hostActions.searching.wrappedValue ? "Close Search" : "Search",
-                           systemImage: hostActions.searching.wrappedValue ? "xmark" : "magnifyingglass") {
-                        hostActions.searching.wrappedValue.toggle()
-                    }
-                }
-                .visibilityPriority(.low)
-                ToolbarItem(placement: .bottomBar) {
-                    Button("Add Host", systemImage: "plus", action: hostActions.add)
                 }
                 .visibilityPriority(.low)
             }

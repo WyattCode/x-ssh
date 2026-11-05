@@ -108,7 +108,16 @@ struct HostsView: View {
         // 自己的搜索框,不用系统的 `.searchable`:系统搜索展开时整个标题区收起 / 重排,列表跟着跳,过渡不连贯。
         // 这里点一下搜索钮,顶部滑出一个搜索框,列表跟着平滑下移,标题和右侧竖条纹丝不动。
         .safeAreaInset(edge: .top, spacing: 0) {
-            if searching { searchField.transition(.move(edge: .top).combined(with: .opacity)) }
+            VStack(spacing: 0) {
+                // 内屏(自己排的两栏)没有系统导航栏,logo 自己画在侧栏顶部(右边留给外层画的「侧栏开关」)。
+                if splitLayout {
+                    BrandLockup(height: 19)
+                        .padding(.leading, 16).padding(.top, 38)
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                        .frame(height: 47, alignment: .top)
+                }
+                if searching { searchField.transition(.move(edge: .top).combined(with: .opacity)) }
+            }
         }
         .animation(.smooth(duration: 0.25), value: searching)
         .coordinateSpace(name: "hostsRoot")
