@@ -89,6 +89,8 @@ struct TerminalScreen: View {
             }
             // 内屏(常规宽度)左边紧挨着侧栏的分界线,文字贴着边太挤:多留一些;外屏窄,保持 4pt。
             .padding(.horizontal, sizeClass == .regular ? 16 : 4)
+            // 内屏自己排版没有导航栏:终端顶上留一点边,字不贴着屏幕上沿。
+            .padding(.top, embedded ? 14 : 0)
             .accessibilityElement()
             .accessibilityLabel(Text("Terminal"))
             .accessibilityValue(UIAccessibility.isVoiceOverRunning ? model.screenText : "")

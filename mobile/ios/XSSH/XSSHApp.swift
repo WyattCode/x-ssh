@@ -368,9 +368,9 @@ struct RootView: View {
 
     /// 左上角一行:侧栏开关(跟着抽屉左右滑)+ 会话标题。
     private func headerRow(width w: CGFloat) -> some View {
-        // 用户开始用这台终端(敲字 / 按键 / 粘贴 / 滚动)之后,顶部的会话名称和(抽屉收起时的)侧栏开关收起来,不挡内容;
-        // 抽屉展开时侧栏开关是侧栏标题栏的一部分,一直在。
-        let typing = active?.userActive == true
+        // 连上之后(或用户开始用这台终端:敲字 / 按键 / 粘贴 / 滚动),顶部的会话名称和(抽屉收起时的)侧栏开关收起来,
+        // 不挡终端内容;连接中 / 出错 / 已结束时还显示着。抽屉展开时侧栏开关是侧栏标题栏的一部分,一直在。
+        let typing = active.map { $0.userActive || $0.state == .connected } ?? false
         let showToggle = drawerOpen || !typing
         return ZStack(alignment: .topLeading) {
             Button { setDrawer(!drawerOpen) } label: {
