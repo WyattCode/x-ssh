@@ -107,7 +107,7 @@ struct RootView: View {
     @State private var containerSize: CGSize = .zero
     @State private var columns: NavigationSplitViewVisibility = .automatic
     @State private var compactColumn: NavigationSplitViewColumn = .sidebar
-    /// 两栏时侧栏的宽度:固定 352pt(系统默认 320pt 再宽 10%),不让用户自己拖到别的位置 ——
+    /// 两栏时侧栏的宽度:固定 334pt,不让用户自己拖到别的位置 ——
     /// 只有「展开(这个宽度)」和「收起」两种状态。
     private let sidebarWidth = SidebarHandle.width
     @State private var handleShown = true
@@ -116,7 +116,7 @@ struct RootView: View {
 
     /// 半折(铰链半开)时侧栏(主机列表)和内容(会话)各占整个宽度的一半;其余时候用记住的宽度。
     private var halfFolded: Bool { sizeClass == .regular && fold.hinge == .partiallyOpen && containerSize.width > 0 }
-    /// 最多占窗口的 60%(竖屏、小窗口里 352pt 会把会话挤没)。
+    /// 最多占窗口的 60%(竖屏、小窗口里 334pt 会把会话挤没)。
     private var effectiveSidebarWidth: Double {
         if halfFolded { return Double(containerSize.width) / 2 }
         guard containerSize.width > 0 else { return sidebarWidth }
@@ -386,8 +386,8 @@ struct TouchSpy: UIViewRepresentable {
 /// (收起后屏幕左边缘有小把手,点一下或往右拖就拉回来)。默认显示,两秒没人用就慢慢淡出;
 /// 点它所在的位置、滑它、或在会话区域里碰 / 滑,都会让它重新出现。
 struct SidebarHandle: View {
-    /// 系统默认 320pt,再宽 10%。
-    static let width = 352.0
+    /// 固定 334pt(系统默认 320pt;先加宽 10% 到 352pt,再减 5%)。
+    static let width = 334.4
     static let hitWidth: CGFloat = 20
     /// 胶囊在分界线右边 7pt(参考图里胶囊和侧栏边缘之间有一条缝)。
     static let gap: CGFloat = 7
