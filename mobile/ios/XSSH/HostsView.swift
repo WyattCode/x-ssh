@@ -45,35 +45,27 @@ struct HostsView: View {
         }
     }
 
-    /// 按地址分组:同一个地址上有 2 台以上主机(例如同一台跳板机不同端口)折成一组,组头写地址;单台的不加组头。
-    /// 组按首次出现的顺序排,组内按添加顺序。
-    private struct HostGroup: Identifiable {
-        let id: String
-        let title: String?
-        let hosts: [Host]
-    }
-    private var groups: [HostGroup] {
-        shown.isEmpty ? [] : [HostGroup(id: "all", title: nil, hosts: shown)]
+    private var titleRow: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text("Hosts").font(.system(size: 28, weight: .regular)).tracking(-0.4)
+            Text("\(store.hosts.count)").font(.footnote).foregroundStyle(Color.white.opacity(0.45))
+        }
+        .padding(.horizontal, 16 + cardInset).padding(.top, splitLayout ? 2 : 6).padding(.bottom, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .listRowBackground(Color.clear).listRowSeparator(.hidden).listRowInsets(EdgeInsets())
+        .accessibilityAddTraits(.isHeader)
     }
 
     var body: some View {
         ScrollViewReader { proxy in
         List {
-            ForEach(groups) { group in
-            Section {
-            ForEach(group.hosts) { host in
-                hostRow(host, grouped: group.title != nil)
+            // 聚光灯版式:标题 + 数量 → 连着的那台一张大卡 → 其余每台一行(颜色点 + 名字 + 地址)。
+            titleRow
+            if let featured = shown.first(where: { $0.id == activeID }) {
+                hostRow(featured, featured: true)
             }
-            } header: {
-                if let title = group.title {
-                    Text(verbatim: title)
-                        .font(.footnote.weight(.semibold).monospaced())
-                        .foregroundStyle(Color.white.opacity(0.55))
-                        .textCase(nil)
-                        .padding(.leading, splitLayout ? cardInset + 4 : 0)
-                }
-            }
-            .modifier(SectionSpacing(split: splitLayout))
+            ForEach(shown.filter { $0.id != activeID }) { host in
+                hostRow(host, featured: false)
             }
         }
         // 连上一台时,让列表滚到那张卡片(它在视野外也能看到自己选中了哪台)。
@@ -210,12 +202,12 @@ struct HostsView: View {
     }
 
     /// 一张主机卡(带点击、长按菜单、左滑操作、卡片背景):单独成函数,List 里的表达式才不会复杂到编译器类型推断超时。
-    private func hostRow(_ host: Host, grouped: Bool) -> some View {
+    private func hostRow(_ host: Host, featured: Bool) -> some View {
         // 点一下 = 连接;长按 = 弹菜单(系统自带触觉反馈)。
         // 用 `.contextMenu` 带自定义 `preview:`:长按浮起来的是下面那张统一的圆角卡(每一行形状都一样),
         // 不是系统从列表单元格里取的形状(最上 / 最下一行变成胶囊、中间行是方的)。
         // 以前用 `Menu`:内屏的侧栏里菜单一弹出,整栏内容就被盖黑,看起来像「把会话收起来了」。
-        Button { onConnect(host) } label: { row(host, grouped: grouped) }
+        Button { onConnect(host) } label: { row(host, featured: featured) }
             .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: splitLayout ? 20 : 12, style: .continuous))
             .contextMenu {
                 Button("Connect", systemImage: "play") { onConnect(host) }
@@ -236,71 +228,69 @@ struct HostsView: View {
             Button("Delete", role: .destructive) { pendingDelete = host }
             Button("Edit") { startEditing(host) }.tint(.blue)
         }
-            .listRowBackground(rowBackground(host))
+            .listRowBackground(Color.clear)
             .listRowInsets(EdgeInsets())
-            .listRowSeparator(splitLayout ? .hidden : .automatic)
-            // 分割线仍然从文字左边缘开始(和以前一样,和内容里的 16pt 内边距对齐)。
-            .alignmentGuide(.listRowSeparatorLeading) { _ in 16 }
+            .listRowSeparator(.hidden)
             .id(host.id)
     }
 
-    private func row(_ host: Host, grouped: Bool) -> some View {
-        HStack(spacing: 12) {
-            MonogramTile(name: host.displayName, lit: host.id == activeID)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(verbatim: host.displayName).font(.headline)
-                // 组头已经写了地址,卡片上只留用户和端口;单台的写完整。
-                Text(verbatim: grouped ? "\(host.username) · \(host.port)" : "\(host.username)@\(host.address):" + String(host.port))
-                    .font(.caption.monospaced()).foregroundStyle(Color.white.opacity(0.62))
-            }
-            Spacer(minLength: 0)
-            if host.id == activeID {
-                // 转圈完全消失之后绿点才出现,两个不能叠在一起:转圈 0.18 秒淡出,绿点等 0.2 秒再淡入。
+    private func row(_ host: Host, featured: Bool) -> some View {
+        Group {
+            if featured { featuredCard(host) } else { plainRow(host) }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        .padding(.horizontal, cardInset)
+    }
+
+    /// 连着的那台:列表里唯一的一张大卡(液态玻璃),上面是状态,下面是名字和地址。
+    private func featuredCard(_ host: Host) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 7) {
+                // 转圈完全消失之后绿点才出现,两个不能叠在一起。
                 ZStack {
                     if activeConnecting {
-                        ProgressView().controlSize(.small)
-                            .accessibilityLabel(Text("Connecting…"))
+                        ProgressView().controlSize(.mini).tint(.white)
                             .transition(.opacity.animation(.easeOut(duration: 0.18)))
                     } else {
-                        Label("Running", systemImage: "circle.fill")
-                            .labelStyle(.iconOnly).foregroundStyle(.green).font(.caption2)
-                            .accessibilityLabel(Text("Running"))
+                        Circle().fill(Color.green).frame(width: 8, height: 8)
                             .transition(.asymmetric(insertion: .opacity.animation(.easeIn(duration: 0.2).delay(0.2)),
                                                     removal: .opacity.animation(.easeOut(duration: 0.1))))
                     }
                 }
-                .frame(width: 20, height: 20)
+                .frame(width: 14, height: 14)
+                Text(activeConnecting ? "Connecting…" : "Connected")
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(activeConnecting ? Color.white.opacity(0.7) : Color.green.opacity(0.95))
             }
+            Text(verbatim: host.displayName).font(.title3.weight(.semibold)).padding(.top, 2)
+            Text(verbatim: "\(host.username)@\(host.address)" + (host.port == 22 ? "" : ":\(host.port)"))
+                .font(.caption.monospaced()).foregroundStyle(Color.white.opacity(0.62))
         }
         .animation(.easeOut(duration: 0.2), value: activeConnecting)
+        .padding(.horizontal, 16).padding(.vertical, 14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        // 内边距放进行内容里(列表行自己的内边距清零,见 `listRowInsets`):系统长按时只把「行内容」浮起,
-        // 内边距在内容外面的话,浮起的就是一块窄了一圈、文字紧贴边缘的长方形,和卡片里的这一行对不上。
-        // 两栏时每台主机是一张独立的圆角卡,卡片四周有留白(见 `rowBackground`),文字的内边距要把留白算进去。
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
-        // 点击区域只算卡片本身:卡片四周的留白不能点,点到缝里会连上旁边那台。
-        .contentShape(Rectangle())
-        .modifier(HostCardGlass(enabled: splitLayout, selected: host.id == activeID))
-        .padding(.horizontal, cardInset)
-        .padding(.vertical, splitLayout ? Self.cardGap / 2 : 0)
+        .modifier(HostCardGlass(enabled: true, selected: true))
+        .padding(.horizontal, splitLayout ? 0 : 0).padding(.bottom, 8)
+    }
+
+    /// 其余每台:一行,颜色点 + 名字 + 地址(淡),不带卡片,退到背景里。
+    private func plainRow(_ host: Host) -> some View {
+        HStack(spacing: 11) {
+            Circle().fill(HostColor.pip(for: host.displayName)).frame(width: 8, height: 8)
+            Text(verbatim: host.displayName).font(.body)
+            Spacer(minLength: 8)
+            Text(verbatim: host.address + (host.port == 22 ? "" : ":\(host.port)"))
+                .font(.caption.monospaced()).foregroundStyle(Color.white.opacity(0.4))
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 16).padding(.vertical, 12)
     }
 
     static let cardGap: CGFloat = 6
     /// 两栏时卡片宽 = 侧栏宽的 92%,左右各留 4%(参考图里卡片和分界线之间就是这么一条窄缝)。
     /// 按侧栏实际宽度算,拖动改宽后比例不变。列表自带的左右边距已去掉(见 `SplitListMargins`)。
     private var cardInset: CGFloat { splitLayout ? listWidth * 0.04 : 0 }
-
-    /// 一屏窄的时候是一整张圆角卡里分行(行间有细线);两栏时(内屏)是一台一张独立的圆角卡,
-    /// 卡与卡之间露出侧栏底色,连着的那台卡片更亮并描边。
-    @ViewBuilder private func rowBackground(_ host: Host) -> some View {
-        if splitLayout {
-            // 两栏时卡片自己用系统的液态玻璃画(见 `HostCardGlass`),行背景留空。
-            Color.clear
-        } else {
-            Color.appCard
-        }
-    }
 
     private var searchField: some View {
         HStack(spacing: 8) {
@@ -745,46 +735,21 @@ struct HorizontalSwipeSpy: UIViewRepresentable {
 }
 
 
-/// 主机卡左边的字标方块:取名字的首字母(两个词取两个词的首字母),底色按名字稳定地挑一种沉稳的渐变 ——
-/// 列表里一眼能认出哪台是哪台,不用逐行读字。
-private struct MonogramTile: View {
-    let name: String
-    /// 正在连着的那台亮一点。
-    let lit: Bool
-
-    private static let palette: [(Color, Color)] = [
-        (Color(red: 0.36, green: 0.52, blue: 0.95), Color(red: 0.24, green: 0.34, blue: 0.78)),   // 蓝
-        (Color(red: 0.30, green: 0.72, blue: 0.62), Color(red: 0.16, green: 0.50, blue: 0.46)),   // 青绿
-        (Color(red: 0.62, green: 0.48, blue: 0.92), Color(red: 0.43, green: 0.30, blue: 0.74)),   // 紫
-        (Color(red: 0.93, green: 0.58, blue: 0.36), Color(red: 0.76, green: 0.38, blue: 0.22)),   // 橙
-        (Color(red: 0.90, green: 0.45, blue: 0.58), Color(red: 0.70, green: 0.28, blue: 0.42)),   // 粉
-        (Color(red: 0.55, green: 0.70, blue: 0.35), Color(red: 0.36, green: 0.52, blue: 0.20)),   // 草绿
+/// 主机行左边那个小圆点的颜色:按名字稳定地(不是 `hashValue`,它每次启动都变)在 6 种沉稳的色相里挑一种,一眼认出哪台是哪台。
+private enum HostColor {
+    private static let palette: [Color] = [
+        Color(red: 0.44, green: 0.55, blue: 1.00),   // 蓝
+        Color(red: 0.31, green: 0.73, blue: 0.64),   // 青绿
+        Color(red: 0.71, green: 0.55, blue: 0.94),   // 紫
+        Color(red: 0.88, green: 0.54, blue: 0.36),   // 橙
+        Color(red: 0.91, green: 0.45, blue: 0.56),   // 粉
+        Color(red: 0.62, green: 0.76, blue: 0.40),   // 草绿
     ]
 
-    private var letters: String {
-        let words = name.split(whereSeparator: { $0 == " " || $0 == "-" || $0 == "_" }).filter { $0.first?.isLetter == true }
-        if words.count >= 2 { return String(words.prefix(2).compactMap { $0.first }).uppercased() }
-        return String(name.prefix(2)).uppercased()
-    }
-
-    private var colors: (Color, Color) {
-        // 稳定的哈希(`hashValue` 每次启动都不同,不能用)。
+    static func pip(for name: String) -> Color {
         var h: UInt64 = 0xcbf29ce484222325                      // FNV-1a
         for b in name.utf8 { h = (h ^ UInt64(b)) &* 0x100000001b3 }
-        h ^= h >> 29; h = h &* 0xbf58476d1ce4e5b9; h ^= h >> 32   // 再混一次,相近的名字颜色也拉得开
-        return Self.palette[Int(h % UInt64(Self.palette.count))]
-    }
-
-    var body: some View {
-        let c = colors
-        Text(verbatim: letters)
-            .font(.system(size: 15, weight: .bold, design: .rounded))
-            .foregroundStyle(.white)
-            .frame(width: 38, height: 38)
-            .background(LinearGradient(colors: [c.0, c.1], startPoint: .topLeading, endPoint: .bottomTrailing),
-                        in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-            .saturation(lit ? 1.0 : 0.55)
-            .brightness(lit ? 0.0 : -0.08)
-            .accessibilityHidden(true)
+        h ^= h >> 29; h = h &* 0xbf58476d1ce4e5b9; h ^= h >> 32
+        return palette[Int(h % UInt64(palette.count))]
     }
 }
