@@ -1277,6 +1277,20 @@ function registerIpc(): void {
       store.save(host, password, passphrase)
   )
   ipcMain.handle(IPC.hostsDelete, (_e, id: string) => store.delete(id))
+  ipcMain.handle(IPC.hostsStatus, () => store.hostsStatus())
+  ipcMain.handle(IPC.hostsReset, async () => {
+    // Explicit recovery from an unreadable hosts.json, mirroring resetSecrets.
+    // persist() refuses to overwrite one (the file is still on disk and may be
+    // repairable by hand), so without this the app could never save a host
+    // again. The old file is renamed aside, not deleted.
+    try {
+      await store.resetHosts()
+      return { ok: true }
+    } catch (e) {
+      console.error('resetHosts failed:', (e as Error).message)
+      return { ok: false }
+    }
+  })
   ipcMain.handle(IPC.hostsResetSecrets, async () => {
     // Explicit recovery from an undecryptable vault. persist() refuses to
     // overwrite one (that would destroy passwords still recoverable on the

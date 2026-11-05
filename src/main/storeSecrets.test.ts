@@ -142,6 +142,15 @@ describe('saving passwords', () => {
     expect(await s.getPassword('a')).toBe('pw-a')
   })
 
+  it('verifies a saved passphrase too, not just the password', async () => {
+    // A key-only host saves a passphrase with no password at all. The check
+    // used to test `password` alone, so this path reported success with
+    // nothing written.
+    encryptAvailable = false
+    const s = new HostStore()
+    await expect(s.save(host('k', 'keyonly'), undefined, 'pp-1')).rejects.toThrow(/secrets-/)
+  })
+
   it('refuses to overwrite an unreadable vault with a single new password', async () => {
     // First run writes a real vault.
     const first = new HostStore()

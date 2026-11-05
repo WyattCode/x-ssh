@@ -1006,6 +1006,20 @@ async function resetVault(): Promise<void> {
     vaultBusy.value = false
   }
 }
+async function resetHostsFile(): Promise<void> {
+  if (vaultBusy.value) return
+  const ok = await confirm(t('vault.hostsResetConfirm'), {
+    danger: true,
+    confirmText: t('vault.hostsReset')
+  })
+  if (!ok) return
+  vaultBusy.value = true
+  try {
+    await store.resetHosts()
+  } finally {
+    vaultBusy.value = false
+  }
+}
 const helloSupported = ref(false)
 const helloEnabled = ref(false)
 const helloAvailable = ref<'available' | 'unavailable' | 'unsupported'>('unsupported')
@@ -1589,6 +1603,21 @@ function onLockPassEnter(e: KeyboardEvent): void {
 
           <!-- ================= 安全 ================= -->
           <template v-else-if="store.settingsTab === 'security'">
+            <!-- Saving is refused while hosts.json is unreadable, so this is the
+                 only way back that does not involve editing the data folder. -->
+            <section v-if="store.hostsBad" class="group">
+              <h3>{{ t('vault.hostsTitle') }}</h3>
+              <div class="card">
+                <p class="g-desc">{{ t('vault.hostsBad') }}</p>
+                <div class="row actions-row">
+                  <span class="spacer" />
+                  <button class="btn sm btn-danger" :disabled="vaultBusy" @click="resetHostsFile">
+                    {{ t('vault.hostsReset') }}
+                  </button>
+                </div>
+              </div>
+            </section>
+
             <!-- Only shown when the vault is actually unreadable. Saving a
                  password fails on purpose in that state, so the user needs a
                  way out that is not "delete the app's data folder". -->
