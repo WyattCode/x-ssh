@@ -127,7 +127,6 @@ struct TerminalScreen: View {
                 ToolbarItem(placement: .bottomBar) {
                     Button("Keyboard", systemImage: "keyboard") { model.wantsKeyboard.toggle() }
                         .tint(model.wantsKeyboard ? Color.accentColor : nil)
-                        .disabled(model.hasHardwareKeyboard)
                 }
                 .visibilityPriority(.high)
                 ToolbarItem(placement: .bottomBar) {
@@ -155,8 +154,6 @@ struct TerminalScreen: View {
             barButton("chevron.left", "Hosts", action: onBack)
             barButton("command", "Shortcuts", on: model.showsKeys) { withAnimation(.smooth(duration: 0.25)) { model.showsKeys.toggle() } }
             barButton("keyboard", "Keyboard", on: model.wantsKeyboard) { model.wantsKeyboard.toggle() }
-                .disabled(model.hasHardwareKeyboard)
-                .opacity(model.hasHardwareKeyboard ? 0.4 : 1)
             barButton("clipboard", "Paste") { model.paste() }
             barButton("xmark", "Disconnect", role: .destructive, action: onClose)
         }
