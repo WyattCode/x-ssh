@@ -43,3 +43,10 @@ extension Color {
     /// 正在连着的那台:卡片再亮一档并描一圈细边。
     static let appSidebarSelected = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(white: 0.26, alpha: 1) : .systemGray5 })
 }
+
+extension Color {
+    /// 内屏里「新建 / 编辑主机」弹层的底:比纯黑亮一档(#1C1C1C),浮在黑色终端上能看出是一张面。
+    static let appSheet = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(white: 0.11, alpha: 1) : .systemGroupedBackground })
+    /// 弹层里的卡片 / 表单行:再亮一档(#2B2B2B),和弹层的底拉开层次。
+    static let appSheetCard = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(white: 0.17, alpha: 1) : .secondarySystemGroupedBackground })
+}

@@ -151,10 +151,11 @@ struct HostsView: View {
             if requested { addRequested = false; startAdding() }
         }
         .sheet(item: $editing) { host in
-            HostEditor(host: host, credentials: isNew ? Credentials() : store.credentials(for: host)) { saved, credentials in
+            HostEditor(host: host, credentials: isNew ? Credentials() : store.credentials(for: host), elevated: splitLayout) { saved, credentials in
                 store.save(saved, credentials: credentials)
             }
-            .presentationBackground(Color.appBackground)
+            // 内屏:弹层是浮在黑色终端上的一张面,要比黑色亮一档、里面的卡片再亮一档,层次才出得来;窄屏沿用纯黑。
+            .presentationBackground(splitLayout ? Color.appSheet : Color.appBackground)
         }
         .alert("Delete Host?", isPresented: Binding(get: { pendingDelete != nil },
                                                      set: { if !$0 { pendingDelete = nil } }),
@@ -281,8 +282,13 @@ struct HostEditor: View {
     @State private var saveFailed = false
     @FocusState private var focus: Field?
     let onSave: (Host, Credentials) -> Bool
+    /// 内屏(两栏)里的弹层:换更亮的底和卡片(见 `Color.appSheet`)。
+    let elevated: Bool
+    private var pageColor: Color { elevated ? .appSheet : .appBackground }
+    private var cardColor: Color { elevated ? .appSheetCard : .appCard }
 
-    init(host: Host, credentials: Credentials, onSave: @escaping (Host, Credentials) -> Bool) {
+    init(host: Host, credentials: Credentials, elevated: Bool = false, onSave: @escaping (Host, Credentials) -> Bool) {
+        self.elevated = elevated
         _host = State(initialValue: host)
         _portText = State(initialValue: String(host.port))
         _credentials = State(initialValue: credentials)
@@ -321,12 +327,14 @@ struct HostEditor: View {
                         .keyboardType(.numbersAndPunctuation)
                         .focused($focus, equals: .port).submitLabel(.done)
                         .onSubmit { applyTarget(); focus = nil }
+                } header: {
+                    Text("Server")
                 } footer: {
                     if !portText.isEmpty, port == nil {
                         Text("Port must be between 1 and 65535.").foregroundStyle(.red)
                     }
                 }
-                .listRowBackground(Color.appCard)
+                .listRowBackground(cardColor)
                 Section {
                     TextField("User", text: $host.username)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
@@ -340,12 +348,14 @@ struct HostEditor: View {
                             .focused($focus, equals: .password).submitLabel(.done)
                             .onSubmit { focus = nil }
                     }
+                } header: {
+                    Text("Sign In")
                 }
-                .listRowBackground(Color.appCard)
+                .listRowBackground(cardColor)
                 if host.authKind == .key { keySection }
             }
             .scrollContentBackground(.hidden)
-            .background(Color.appBackground)
+            .background(pageColor)
             // 上下拖表单就收键盘(各个输入框的回车键也都能收),不再需要键盘上方那颗悬浮的「完成」。
             .scrollDismissesKeyboard(.interactively)
             .navigationTitle(host.displayName.isEmpty ? String(localized: "New Host") : host.displayName)
@@ -429,7 +439,7 @@ struct HostEditor: View {
         } footer: {
             Text("The key is stored in the Keychain on this device. Add the public key to ~/.ssh/authorized_keys on the server.")
         }
-                .listRowBackground(Color.appCard)
+                .listRowBackground(cardColor)
     }
 
     private func refreshKeyInfo() {

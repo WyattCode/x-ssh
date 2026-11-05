@@ -107,23 +107,23 @@ struct RootView: View {
     @State private var containerSize: CGSize = .zero
     @State private var columns: NavigationSplitViewVisibility = .automatic
     @State private var compactColumn: NavigationSplitViewColumn = .sidebar
-    /// 两栏时侧栏的宽度(可拖分界线上的把手调整,记住)。默认 352pt(系统默认 320pt 再宽 10%)。
-    @AppStorage("sidebarWidth") private var sidebarWidth = SidebarHandle.defaultWidth
+    /// 两栏时侧栏的宽度:固定 352pt(系统默认 320pt 再宽 10%),不让用户自己拖到别的位置 ——
+    /// 只有「展开(这个宽度)」和「收起」两种状态。
+    private let sidebarWidth = SidebarHandle.width
     @State private var handleShown = true
     @State private var handleToken = 0
     @State private var pokeClock = PokeClock()
 
     /// 半折(铰链半开)时侧栏(主机列表)和内容(会话)各占整个宽度的一半;其余时候用记住的宽度。
     private var halfFolded: Bool { sizeClass == .regular && fold.hinge == .partiallyOpen && containerSize.width > 0 }
-    /// 记住的宽度最多占窗口的 60%(竖屏、小窗口里 480pt 会把会话挤没)。
+    /// 最多占窗口的 60%(竖屏、小窗口里 352pt 会把会话挤没)。
     private var effectiveSidebarWidth: Double {
         if halfFolded { return Double(containerSize.width) / 2 }
-        let saved = max(sidebarWidth, SidebarHandle.range.lowerBound)
-        guard containerSize.width > 0 else { return saved }
-        return min(saved, Double(containerSize.width) * 0.6)
+        guard containerSize.width > 0 else { return sidebarWidth }
+        return min(sidebarWidth, Double(containerSize.width) * 0.6)
     }
     /// 实际给导航容器的侧栏宽度:半折 ↔ 展开 / 合上切换时带动画滑过去,拖把手时跟手(不带动画)。
-    @State private var shownSidebarWidth: Double = SidebarHandle.defaultWidth
+    @State private var shownSidebarWidth: Double = SidebarHandle.width
     @State private var widthTween: Task<Void, Never>?
     @State private var dip = false
     /// 半折 ↔ 展开 / 合上切换时的过渡。系统的导航容器不给「栏宽变化」做动画(直接跳),逐帧改栏宽又会把详情栏弄丢
@@ -242,7 +242,7 @@ struct RootView: View {
         .onChange(of: scenePhase) { _, phase in active?.setForeground(phase == .active) }
         .overlay(alignment: .leading) {
             if sizeClass == .regular, listVisible, !halfFolded {
-                SidebarHandle(width: $sidebarWidth, visible: handleShown, onTouch: pokeHandle,
+                SidebarHandle(visible: handleShown, onTouch: pokeHandle,
                               onCollapse: { withAnimation(.smooth(duration: 0.3)) { columns = .detailOnly } })
                     .offset(x: shownSidebarWidth + SidebarHandle.gap - SidebarHandle.hitWidth / 2)
                     // 软键盘弹出时竖向居中的位置不能跟着挪(中间线不动)。
@@ -268,9 +268,8 @@ struct RootView: View {
             updateColumns(containerSize)
             syncSidebarWidth(animated: true)
         }
-        // 启动时直接用记住的宽度(开屏盖着,不做淡出淡入,免得开屏淡出时内容正好半透明)。
+        // 启动时直接用固定宽度(开屏盖着,不做淡出淡入,免得开屏淡出时内容正好半透明)。
         .onAppear { shownSidebarWidth = effectiveSidebarWidth }
-        .onChange(of: sidebarWidth) { _, _ in syncSidebarWidth(animated: false) }
         .onChange(of: containerSize) { _, _ in syncSidebarWidth(animated: false) }
         .task(id: handleToken) {
             try? await Task.sleep(for: .seconds(handleToken == 0 ? 3.5 : 2))
@@ -383,27 +382,25 @@ struct TouchSpy: UIViewRepresentable {
     }
 }
 
-/// 侧栏和会话之间的分界线把手:左右拖动调侧栏宽度。默认显示,两秒没人用就慢慢淡出;
-/// 点它所在的位置、拖它、或在会话区域里碰 / 滑,都会让它重新出现。淡出之后触摸区域还在,点一下就回来。
+/// 侧栏和会话之间的分界线把手。侧栏宽度是固定的,不能拖到别的位置:用户一碰它往旁边滑,就把整个列表收起来
+/// (收起后屏幕左边缘有小把手,点一下或往右拖就拉回来)。默认显示,两秒没人用就慢慢淡出;
+/// 点它所在的位置、滑它、或在会话区域里碰 / 滑,都会让它重新出现。
 struct SidebarHandle: View {
-    static let defaultWidth = 352.0   // 系统默认 320pt,再宽 10%
+    /// 系统默认 320pt,再宽 10%。
+    static let width = 352.0
     static let hitWidth: CGFloat = 20
     /// 胶囊在分界线右边 7pt(参考图里胶囊和侧栏边缘之间有一条缝)。
     static let gap: CGFloat = 7
-    static let range = 240.0...480.0
+    /// 滑过这么远就算「滑动」,收起列表。
+    static let swipeDistance: CGFloat = 12
 
-    @Binding var width: Double
     let visible: Bool
     let onTouch: () -> Void
-    /// 一直往左拖过最小宽度再多拖这么远,就把整个列表收起来。
     let onCollapse: () -> Void
-    static let collapseOvershoot = 60.0
-    @State private var base: Double?
     @State private var collapsed = false
 
     var body: some View {
-        // 触摸区域用一块几乎透明但不是「全透明」的矩形撑出来:淡出后胶囊的透明度是 0,
-        // 系统对「看不见的」视图不一定派发触摸,淡出之后就拖不动了(实测)。
+        // 触摸区域用一块几乎透明但不是「全透明」的矩形撑出来:淡出后胶囊的透明度是 0,系统对「看不见的」视图不一定派发触摸。
         Color.black.opacity(0.001)
             .frame(width: Self.hitWidth, height: 160)
             .overlay {
@@ -412,40 +409,23 @@ struct SidebarHandle: View {
                     .frame(width: 4, height: 40.3)
                     .opacity(visible ? 1 : 0)
                     .animation(.easeOut(duration: visible ? 0.15 : 0.7), value: visible)
-                    .allowsHitTesting(false)   // 胶囊本身不接触摸:一切交给下面那块触摸区域(正中间 4pt 以前会被胶囊「吃掉」)
+                    .allowsHitTesting(false)   // 胶囊本身不接触摸:一切交给下面那块触摸区域
             }
             .contentShape(Rectangle())
             .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .global)
                 .onChanged { v in
                     onTouch()
-                    if base == nil { base = width }
-                    if let base, abs(v.translation.width) > 3 {
-                        let raw = base + v.translation.width
-                        if raw < Self.range.lowerBound - Self.collapseOvershoot, !collapsed {
-                            collapsed = true
-                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                            width = base          // 收起之前拖到的宽度不能存下来,否则下次展开列表就是被压窄的
-                            onCollapse()
-                            return
-                        }
-                        if !collapsed { width = min(max(raw, Self.range.lowerBound), Self.range.upperBound) }
+                    if abs(v.translation.width) > Self.swipeDistance, !collapsed {
+                        collapsed = true
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        onCollapse()
                     }
                 }
-                .onEnded { _ in base = nil; collapsed = false; onTouch() })
-            // 读屏:把手是一个可调节的控件,上滑 / 下滑加宽 / 变窄 16pt。
+                .onEnded { _ in collapsed = false; onTouch() })
+            // 读屏:一个「收起侧栏」的操作。
             .accessibilityElement()
-            .accessibilityLabel(Text("Sidebar width"))
-            .accessibilityValue(Text(verbatim: "\(Int(width)) pt"))
-            .accessibilityAdjustableAction { direction in
-                switch direction {
-                case .increment: width = min(width + 16, Self.range.upperBound)
-                case .decrement: width = max(width - 16, Self.range.lowerBound)
-                @unknown default: break
-                }
-                onTouch()
-            }
-            // 双击把手 = 恢复默认宽度。
-            .simultaneousGesture(TapGesture(count: 2).onEnded { withAnimation(.smooth(duration: 0.2)) { width = Self.defaultWidth }; onTouch() })
+            .accessibilityLabel(Text("Sidebar"))
+            .accessibilityAction(named: Text("Collapse sidebar")) { onCollapse() }
     }
 }
 
