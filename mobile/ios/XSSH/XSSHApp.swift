@@ -181,6 +181,11 @@ struct RootView: View {
         sizeClass == .regular ? drawerOpen : (columns == .all || columns == .doubleColumn)
     }
 
+    /// 最近连过的几台(没有会话时的空页面里给快捷入口)。
+    private var recentHosts: [Host] {
+        Array(hosts.hosts.filter { $0.lastUsed != nil }.sorted { ($0.lastUsed ?? .distantPast) > ($1.lastUsed ?? .distantPast) }.prefix(3))
+    }
+
     /// 正在连着的会话还没连上(连接中 / 等确认主机密钥)。
     private var activeConnecting: Bool {
         switch active?.state {
@@ -311,7 +316,7 @@ struct RootView: View {
                 TerminalScreen(model: active, onBack: { compactColumn = .sidebar }, onClose: close)
                     .id(active.id)
             } else {
-                EmptySessionView(showHosts: nil)
+                EmptySessionView(recents: recentHosts, onConnect: open)
             }
         }
     }
@@ -327,7 +332,7 @@ struct RootView: View {
                         .id(active.id)
                         .transition(.opacity)
                 } else {
-                    EmptySessionView(showHosts: nil)
+                    EmptySessionView(recents: recentHosts, onConnect: open)
                         .transition(.opacity)
                 }
             }
@@ -410,8 +415,8 @@ struct RootView: View {
         let action: () -> Void
     }
 
-    /// 竖条里现在该有哪些按钮:没会话时只有主机列表的「搜索 / 新建」(抽屉收起时一个都没有);
-    /// 有会话时是会话按钮(抽屉收起时多一颗「回主机列表」),抽屉展开时再接上「搜索 / 新建」。
+    /// 竖条里现在该有哪些按钮:只有会话按钮(快捷键 / 键盘 / 粘贴 / 断开),抽屉收起时多一颗「回主机列表」;没会话就没有竖条。
+    /// 主机列表自己的「搜索 / 新建」在列表底部(和列表在一起)。
     private var barItems: [BarItem] {
         var items: [BarItem] = []
         if let active {
@@ -422,11 +427,6 @@ struct RootView: View {
             items.append(BarItem(id: "kbd", icon: "keyboard", label: "Keyboard", on: active.wantsKeyboard) { active.wantsKeyboard.toggle() })
             items.append(BarItem(id: "paste", icon: "clipboard", label: "Paste") { active.paste() })
             items.append(BarItem(id: "close", icon: "xmark", label: "Disconnect", role: .destructive) { close() })
-        }
-        if drawerOpen {
-            items.append(BarItem(id: "search", icon: searching ? "xmark" : "magnifyingglass",
-                                 label: searching ? "Close Search" : "Search") { searching.toggle() })
-            items.append(BarItem(id: "add", icon: "plus", label: "Add Host") { addHostRequested = true })
         }
         return items
     }
@@ -478,6 +478,7 @@ struct RootView: View {
             return
         }
         active?.disconnect()
+        hosts.touch(host)
         let model = TerminalModel(host: host, credentials: hosts.credentials(for: host), knownKey: hosts.knownKey(host))
         compactColumn = .detail
         if sizeClass == .regular {

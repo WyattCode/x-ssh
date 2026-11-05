@@ -45,41 +45,53 @@ struct HostsView: View {
         }
     }
 
+    /// 按地址分组:同一个地址上有 2 台以上主机(例如同一台跳板机不同端口)折成一组,组头写地址;单台的不加组头。
+    /// 组按首次出现的顺序排,组内按添加顺序。
+    private struct HostGroup: Identifiable {
+        let id: String
+        let title: String?
+        let hosts: [Host]
+    }
+    private var groups: [HostGroup] {
+        var order: [String] = []
+        var byAddress: [String: [Host]] = [:]
+        for h in shown {
+            let key = h.address.lowercased()
+            if byAddress[key] == nil { order.append(key) }
+            byAddress[key, default: []].append(h)
+        }
+        // 单台的合成一段(不加组头,卡片挨在一起);2 台以上同地址的各自一段,组头写地址。
+        var singles: [Host] = []
+        var multi: [HostGroup] = []
+        for key in order {
+            let hosts: [Host] = byAddress[key] ?? []
+            if hosts.count == 1 { singles.append(hosts[0]) }
+            else if hosts.count > 1 { multi.append(HostGroup(id: key, title: hosts[0].address, hosts: hosts)) }
+        }
+        var result: [HostGroup] = []
+        if !singles.isEmpty { result.append(HostGroup(id: "singles", title: nil, hosts: singles)) }
+        result.append(contentsOf: multi)
+        return result
+    }
+
     var body: some View {
         ScrollViewReader { proxy in
         List {
-            ForEach(shown) { host in
-                // 点一下 = 连接;长按 = 弹菜单(系统自带触觉反馈)。
-                // 用 `.contextMenu` 带自定义 `preview:`:长按浮起来的是下面那张统一的圆角卡(每一行形状都一样),
-                // 不是系统从列表单元格里取的形状(最上 / 最下一行变成胶囊、中间行是方的)。
-                // 以前用 `Menu`:内屏的侧栏里菜单一弹出,整栏内容就被盖黑,看起来像「把会话收起来了」。
-                Button { onConnect(host) } label: { row(host) }
-                    .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: splitLayout ? 20 : 12, style: .continuous))
-                    .contextMenu {
-                        Button("Connect", systemImage: "play") { onConnect(host) }
-                        Button("Edit", systemImage: "pencil") { startEditing(host) }
-                        Button("Delete", systemImage: "trash", role: .destructive) { pendingDelete = host }
-                    }
-                .buttonStyle(.plain)
-                .foregroundStyle(.primary)
-                // 读屏:正在连着的那台报「已选中」(视觉上是更亮 + 描边 + 绿点)。
-                .accessibilityAddTraits(host.id == activeID ? .isSelected : [])
-                .onGeometryChange(for: CGRect.self) { $0.frame(in: .named("hostsRoot")) } action: {
-                    if $0.width > 0, cardX == nil || abs(measuredForWidth - listWidth) > 0.5 {
-                        cardX = $0.minX; cardWidth = $0.width; measuredForWidth = listWidth
-                    }
-                    rowBottoms[host.id] = $0.maxY
+            ForEach(groups) { group in
+            Section {
+            ForEach(group.hosts) { host in
+                hostRow(host, grouped: group.title != nil)
+            }
+            } header: {
+                if let title = group.title {
+                    Text(verbatim: title)
+                        .font(.footnote.weight(.semibold).monospaced())
+                        .foregroundStyle(Color.white.opacity(0.55))
+                        .textCase(nil)
+                        .padding(.leading, splitLayout ? cardInset + 4 : 0)
                 }
-                .swipeActions {
-                    Button("Delete", role: .destructive) { pendingDelete = host }
-                    Button("Edit") { startEditing(host) }.tint(.blue)
-                }
-                    .listRowBackground(rowBackground(host))
-                    .listRowInsets(EdgeInsets())
-                    .listRowSeparator(splitLayout ? .hidden : .automatic)
-                    // 分割线仍然从文字左边缘开始(和以前一样,和内容里的 16pt 内边距对齐)。
-                    .alignmentGuide(.listRowSeparatorLeading) { _ in 16 }
-                    .id(host.id)
+            }
+            .modifier(SectionSpacing(split: splitLayout))
             }
         }
         // 连上一台时,让列表滚到那张卡片(它在视野外也能看到自己选中了哪台)。
@@ -91,6 +103,8 @@ struct HostsView: View {
         .scrollContentBackground(.hidden)
         // 两栏时去掉列表自带的左右边距(约 20pt),卡片才能占满侧栏宽度;窄屏单栏保持系统边距。
         .modifier(SplitListMargins(split: splitLayout))
+        // 底部的玻璃工具条浮在列表上,最后一张卡片要能滚到它上面。
+        .contentMargins(.bottom, splitLayout ? 76 : 0, for: .scrollContent)
         .background((splitLayout ? Color.appSidebar : Color.appBackground).ignoresSafeArea())
         .overlay {
             if store.hosts.isEmpty {
@@ -107,6 +121,19 @@ struct HostsView: View {
         }
         // 自己的搜索框,不用系统的 `.searchable`:系统搜索展开时整个标题区收起 / 重排,列表跟着跳,过渡不连贯。
         // 这里点一下搜索钮,顶部滑出一个搜索框,列表跟着平滑下移,标题和右侧竖条纹丝不动。
+        // 内屏:搜索和新建就在列表底部(和列表在一起,不用够到屏幕另一头);外屏它们在系统竖条里。
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if splitLayout {
+                HStack(spacing: 4) {
+                    toolButton(searching ? "xmark" : "magnifyingglass", searching ? "Close Search" : "Search") { searching.toggle() }
+                    toolButton("plus", "Add Host") { startAdding() }
+                }
+                .padding(4)
+                .glassEffect(.regular.interactive(), in: Capsule())
+                .environment(\.colorScheme, .dark)
+                .padding(.bottom, 12)
+            }
+        }
         .safeAreaInset(edge: .top, spacing: 0) {
             VStack(spacing: 0) {
                 // 内屏(自己排的两栏)没有系统导航栏,logo 自己画在侧栏顶部(右边留给外层画的「侧栏开关」)。
@@ -198,12 +225,48 @@ struct HostsView: View {
         .opacity(1 - min(1, abs(slideOffset) / 300) * 0.5)
     }
 
-    private func row(_ host: Host) -> some View {
+    /// 一张主机卡(带点击、长按菜单、左滑操作、卡片背景):单独成函数,List 里的表达式才不会复杂到编译器类型推断超时。
+    private func hostRow(_ host: Host, grouped: Bool) -> some View {
+        // 点一下 = 连接;长按 = 弹菜单(系统自带触觉反馈)。
+        // 用 `.contextMenu` 带自定义 `preview:`:长按浮起来的是下面那张统一的圆角卡(每一行形状都一样),
+        // 不是系统从列表单元格里取的形状(最上 / 最下一行变成胶囊、中间行是方的)。
+        // 以前用 `Menu`:内屏的侧栏里菜单一弹出,整栏内容就被盖黑,看起来像「把会话收起来了」。
+        Button { onConnect(host) } label: { row(host, grouped: grouped) }
+            .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: splitLayout ? 20 : 12, style: .continuous))
+            .contextMenu {
+                Button("Connect", systemImage: "play") { onConnect(host) }
+                Button("Edit", systemImage: "pencil") { startEditing(host) }
+                Button("Delete", systemImage: "trash", role: .destructive) { pendingDelete = host }
+            }
+        .buttonStyle(.plain)
+        .foregroundStyle(.primary)
+        // 读屏:正在连着的那台报「已选中」(视觉上是更亮 + 描边 + 绿点)。
+        .accessibilityAddTraits(host.id == activeID ? .isSelected : [])
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .named("hostsRoot")) } action: {
+            if $0.width > 0, cardX == nil || abs(measuredForWidth - listWidth) > 0.5 {
+                cardX = $0.minX; cardWidth = $0.width; measuredForWidth = listWidth
+            }
+            rowBottoms[host.id] = $0.maxY
+        }
+        .swipeActions {
+            Button("Delete", role: .destructive) { pendingDelete = host }
+            Button("Edit") { startEditing(host) }.tint(.blue)
+        }
+            .listRowBackground(rowBackground(host))
+            .listRowInsets(EdgeInsets())
+            .listRowSeparator(splitLayout ? .hidden : .automatic)
+            // 分割线仍然从文字左边缘开始(和以前一样,和内容里的 16pt 内边距对齐)。
+            .alignmentGuide(.listRowSeparatorLeading) { _ in 16 }
+            .id(host.id)
+    }
+
+    private func row(_ host: Host, grouped: Bool) -> some View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(verbatim: host.displayName).font(.headline)
-                Text(verbatim: "\(host.username)@\(host.address):" + String(host.port))
-                    .font(.caption.monospaced()).foregroundStyle(.secondary)
+                // 组头已经写了地址,卡片上只留用户和端口;单台的写完整。
+                Text(verbatim: grouped ? "\(host.username) · \(host.port)" : "\(host.username)@\(host.address):" + String(host.port))
+                    .font(.caption.monospaced()).foregroundStyle(Color.white.opacity(0.62))
             }
             Spacer(minLength: 0)
             if host.id == activeID {
@@ -230,7 +293,7 @@ struct HostsView: View {
         // 内边距在内容外面的话,浮起的就是一块窄了一圈、文字紧贴边缘的长方形,和卡片里的这一行对不上。
         // 两栏时每台主机是一张独立的圆角卡,卡片四周有留白(见 `rowBackground`),文字的内边距要把留白算进去。
         .padding(.horizontal, 16)
-        .padding(.vertical, 14)
+        .padding(.vertical, 8)
         // 点击区域只算卡片本身:卡片四周的留白不能点,点到缝里会连上旁边那台。
         .contentShape(Rectangle())
         .modifier(HostCardGlass(enabled: splitLayout, selected: host.id == activeID))
@@ -238,7 +301,7 @@ struct HostsView: View {
         .padding(.vertical, splitLayout ? Self.cardGap / 2 : 0)
     }
 
-    static let cardGap: CGFloat = 8
+    static let cardGap: CGFloat = 6
     /// 两栏时卡片宽 = 侧栏宽的 92%,左右各留 4%(参考图里卡片和分界线之间就是这么一条窄缝)。
     /// 按侧栏实际宽度算,拖动改宽后比例不变。列表自带的左右边距已去掉(见 `SplitListMargins`)。
     private var cardInset: CGFloat { splitLayout ? listWidth * 0.04 : 0 }
@@ -274,8 +337,27 @@ struct HostsView: View {
         .padding(.vertical, 8)
     }
 
+    private func toolButton(_ icon: String, _ label: LocalizedStringKey, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 17, weight: .medium))
+                .foregroundStyle(.white)
+                .frame(width: 52, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(label))
+    }
+
     private func startAdding() { isNew = true; editing = Host() }
     private func startEditing(_ host: Host) { isNew = false; editing = host }
+}
+
+private struct SectionSpacing: ViewModifier {
+    let split: Bool
+    @ViewBuilder func body(content: Content) -> some View {
+        if split { content.listSectionSpacing(.custom(10)) } else { content }
+    }
 }
 
 private struct SplitListMargins: ViewModifier {
@@ -603,7 +685,7 @@ private struct HostCardGlass: ViewModifier {
                 // 退后但不暗淡:文字 85%、底色比侧栏底亮一档,清楚可读;选中的靠玻璃 + 着色 + 全亮突出。
                 content
                     .opacity(0.85)
-                    .background(Color.white.opacity(0.07), in: shape)
+                    .background(Color.white.opacity(0.09), in: shape)
                     .contentShape(shape)
             }
         } else {

@@ -16,21 +16,34 @@ struct BrandMark: View {
 /// 展开后(宽尺寸)没选会话时的详情页:logo + 文案居中。
 /// 内容不带可点击的东西,所以放开右侧竖条那一边的安全区,按整块详情区居中,不偏向左。
 struct EmptySessionView: View {
-    /// 主机列表收起时(竖向)给个按钮把它拉出来;列表已经在屏幕上就不显示。
-    var showHosts: (() -> Void)?
+    /// 最近连过的几台,点一下直接连。
+    var recents: [Host] = []
+    var onConnect: ((Host) -> Void)?
 
     var body: some View {
-        VStack(spacing: 20) {
-            BrandMark(size: 112)
+        VStack(spacing: 18) {
+            BrandMark(size: 72)
             VStack(spacing: 6) {
-                Text("No session").font(.title2.weight(.semibold))
-                Text("Pick a host to connect.").font(.body).foregroundStyle(.secondary)
+                Text("No session").font(.title3.weight(.semibold))
+                Text("Pick a host to connect.").font(.subheadline).foregroundStyle(.secondary)
             }
             .multilineTextAlignment(.center)
-            if let showHosts {
-                Button("Hosts", systemImage: "list.bullet", action: showHosts)
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
+            if !recents.isEmpty, let onConnect {
+                VStack(spacing: 8) {
+                    Text("Recent").font(.caption.weight(.semibold)).foregroundStyle(.secondary).padding(.top, 6)
+                    ForEach(recents) { host in
+                        Button { onConnect(host) } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "clock.arrow.circlepath").font(.footnote).foregroundStyle(.secondary)
+                                Text(verbatim: host.displayName).font(.subheadline.weight(.medium))
+                            }
+                            .padding(.horizontal, 16).frame(height: 40)
+                            .contentShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .glassEffect(.regular.interactive(), in: Capsule())
+                    }
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
