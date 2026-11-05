@@ -3,10 +3,18 @@ import UniformTypeIdentifiers
 
 struct HostsView: View {
     @Environment(HostStore.self) private var store
+    @Environment(LaunchGate.self) private var gate
+    /// 两栏布局(内屏展开):由外层按整个窗口的尺寸类传进来。不能在这里读 `horizontalSizeClass` ——
+    /// 侧栏这一栏自己报的是紧凑,读出来永远是「单栏」,侧栏的背景就变不了色。
+    let splitLayout: Bool
     let activeID: UUID?
+    /// 正在连着的那台还在「连接中 / 等确认密钥」:行尾显示转圈而不是绿点。
+    var activeConnecting = false
     /// 详情那一侧的「新建主机」按钮通过它让这里弹出编辑页。
     @Binding var addRequested: Bool
     let onConnect: (Host) -> Void
+    /// 在列表的空白处(不在任何一台主机卡片上、也不在标题区)用力往左一甩 = 收起列表。
+    var onCollapse: (() -> Void)?
 
     @State private var editing: Host?
     @State private var isNew = false
@@ -14,39 +22,69 @@ struct HostsView: View {
     @State private var query = ""
     @State private var searching = false
     @FocusState private var searchFocused: Bool
+    /// 列表卡片的实际左边缘和宽度(量出来的,不是估的):搜索框按它对齐。
+    @State private var cardX: CGFloat?
+    @State private var cardWidth: CGFloat?
+    @State private var listWidth: CGFloat = 320
+    /// 每张主机卡片的底边(整个列表视图坐标系里);所有卡片底边的最大值下面才是「空白处」。
+    /// 按主机分别记:删掉最后一台之后,新的最后一台没有布局变化、不会重新量,单记「最后一张」会留着过期的值。
+    @State private var rowBottoms: [UUID: CGFloat] = [:]
+    private var lastRowBottom: CGFloat { shown.compactMap { rowBottoms[$0.id] }.max() ?? 0 }
 
-    /// 最近用过的在前,没用过的按名字排。
+    /// 按添加的先后顺序排,点哪台就选中哪台(高亮),列表不会因为连接了某台就把它顶到第一个。
     private var shown: [Host] {
         let q = query.trimmingCharacters(in: .whitespaces)
-        return store.hosts
-            .filter { q.isEmpty || $0.displayName.localizedCaseInsensitiveContains(q)
-                || $0.address.localizedCaseInsensitiveContains(q) || $0.username.localizedCaseInsensitiveContains(q) }
-            .sorted {
-                switch ($0.lastUsed, $1.lastUsed) {
-                case let (a?, b?): a > b
-                case (_?, nil): true
-                case (nil, _?): false
-                default: $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
-                }
-            }
+        return store.hosts.filter {
+            q.isEmpty || $0.displayName.localizedCaseInsensitiveContains(q)
+                || $0.address.localizedCaseInsensitiveContains(q) || $0.username.localizedCaseInsensitiveContains(q)
+        }
     }
 
     var body: some View {
+        ScrollViewReader { proxy in
         List {
             ForEach(shown) { host in
+                // 点一下 = 连接;长按 = 弹菜单(系统自带触觉反馈)。
+                // 用 `.contextMenu` 带自定义 `preview:`:长按浮起来的是下面那张统一的圆角卡(每一行形状都一样),
+                // 不是系统从列表单元格里取的形状(最上 / 最下一行变成胶囊、中间行是方的)。
+                // 以前用 `Menu`:内屏的侧栏里菜单一弹出,整栏内容就被盖黑,看起来像「把会话收起来了」。
                 Button { onConnect(host) } label: { row(host) }
-                    .buttonStyle(.plain)
-                    .swipeActions {
-                        Button("Delete", role: .destructive) { pendingDelete = host }
-                        Button("Edit") { startEditing(host) }.tint(.blue)
-                    }
+                    .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: splitLayout ? 20 : 12, style: .continuous))
                     .contextMenu {
                         Button("Connect", systemImage: "play") { onConnect(host) }
                         Button("Edit", systemImage: "pencil") { startEditing(host) }
                         Button("Delete", systemImage: "trash", role: .destructive) { pendingDelete = host }
                     }
+                .buttonStyle(.plain)
+                .foregroundStyle(.primary)
+                // 读屏:正在连着的那台报「已选中」(视觉上是更亮 + 描边 + 绿点)。
+                .accessibilityAddTraits(host.id == activeID ? .isSelected : [])
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .named("hostsRoot")) } action: {
+                    if $0.width > 0 { cardX = $0.minX; cardWidth = $0.width }
+                    rowBottoms[host.id] = $0.maxY
+                }
+                .swipeActions {
+                    Button("Delete", role: .destructive) { pendingDelete = host }
+                    Button("Edit") { startEditing(host) }.tint(.blue)
+                }
+                    .listRowBackground(rowBackground(host))
+                    .listRowInsets(EdgeInsets())
+                    .listRowSeparator(splitLayout ? .hidden : .automatic)
+                    // 分割线仍然从文字左边缘开始(和以前一样,和内容里的 16pt 内边距对齐)。
+                    .alignmentGuide(.listRowSeparatorLeading) { _ in 16 }
+                    .id(host.id)
             }
         }
+        // 连上一台时,让列表滚到那张卡片(它在视野外也能看到自己选中了哪台)。
+        .onChange(of: activeID) { _, id in
+            guard let id else { return }
+            withAnimation(.smooth(duration: 0.3)) { proxy.scrollTo(id, anchor: .center) }
+        }
+        // 紧凑宽度(主页)背景纯黑;展开成两栏时左边这一栏要和右边的会话(终端纯黑)有颜色区分,用深灰。
+        .scrollContentBackground(.hidden)
+        // 两栏时去掉列表自带的左右边距(约 20pt),卡片才能占满侧栏宽度;窄屏单栏保持系统边距。
+        .modifier(SplitListMargins(split: splitLayout))
+        .background((splitLayout ? Color.appSidebar : Color.appBackground).ignoresSafeArea())
         .overlay {
             if store.hosts.isEmpty {
                 ContentUnavailableView {
@@ -66,9 +104,20 @@ struct HostsView: View {
             if searching { searchField.transition(.move(edge: .top).combined(with: .opacity)) }
         }
         .animation(.smooth(duration: 0.25), value: searching)
+        .coordinateSpace(name: "hostsRoot")
+        // 只有从空白处开始的用力左甩才收起列表:滑主机卡片本身(删除 / 编辑)、标题区、会话内容都不算。
+        .simultaneousGesture(DragGesture(minimumDistance: 40, coordinateSpace: .named("hostsRoot")).onEnded { v in
+            guard splitLayout, onCollapse != nil else { return }
+            guard v.startLocation.y > lastRowBottom + 8 else { return }
+            if v.translation.width < -140, abs(v.translation.height) < 120, v.predictedEndTranslation.width < -400 {
+                onCollapse?()
+            }
+        })        // 把排版变化告诉开屏:稳定之后开屏才淡出,过渡中间不会再有重排。
+        .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.trailing } action: { gate.touch(trailingInset: $0) }
+        .onGeometryChange(for: CGSize.self) { $0.size } action: { listWidth = $0.width; gate.touch(trailingInset: 0) }
         .navigationTitle("Hosts")
         // 固定的小标题:大标题会在搜索展开时收起,整张列表跟着往上跳一截,过渡就不顺了。
-        // 页面左上角是品牌:logo + 名字。(系统标题只留给读屏用,不显示。)
+        // 页面左上角直接放横向 logo(不是图标加文字)。系统标题只留给读屏用,不显示。
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(removing: .title)
         // 按钮全走系统工具栏:iPhone Duo 外屏上它们会自动竖到右侧。
@@ -76,13 +125,7 @@ struct HostsView: View {
         // 按下放大时还会压到它;HIG 里底部工具栏的按钮留在竖条下方,拇指也够得着。
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
-                HStack(spacing: 10) {
-                    BrandMark(size: 34)
-                    Text(verbatim: "X-SSH").font(.title3.weight(.semibold))
-                }
-                .fixedSize()
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel(Text("Hosts"))
+                BrandLockup(height: 19)
             }
             .sharedBackgroundVisibility(.hidden)
             ToolbarItem(placement: .bottomBar) {
@@ -111,6 +154,7 @@ struct HostsView: View {
             HostEditor(host: host, credentials: isNew ? Credentials() : store.credentials(for: host)) { saved, credentials in
                 store.save(saved, credentials: credentials)
             }
+            .presentationBackground(Color.appBackground)
         }
         .alert("Delete Host?", isPresented: Binding(get: { pendingDelete != nil },
                                                      set: { if !$0 { pendingDelete = nil } }),
@@ -119,6 +163,7 @@ struct HostsView: View {
             Button("Delete", role: .destructive) { store.delete(host) }
         } message: { host in
             Text("“\(host.displayName)” and its saved password will be removed.")
+        }
         }
     }
 
@@ -131,13 +176,51 @@ struct HostsView: View {
             }
             Spacer(minLength: 0)
             if host.id == activeID {
-                Label("Running", systemImage: "circle.fill")
-                    .labelStyle(.iconOnly).foregroundStyle(.green).font(.caption2)
-                    .accessibilityLabel(Text("Running"))
+                Group {
+                    if activeConnecting {
+                        ProgressView().controlSize(.small)
+                            .accessibilityLabel(Text("Connecting…"))
+                    } else {
+                        Label("Running", systemImage: "circle.fill")
+                            .labelStyle(.iconOnly).foregroundStyle(.green).font(.caption2)
+                            .accessibilityLabel(Text("Running"))
+                    }
+                }
+                .transition(.opacity)
             }
         }
+        .animation(.easeOut(duration: 0.2), value: activeConnecting)
         .frame(maxWidth: .infinity, alignment: .leading)
+        // 内边距放进行内容里(列表行自己的内边距清零,见 `listRowInsets`):系统长按时只把「行内容」浮起,
+        // 内边距在内容外面的话,浮起的就是一块窄了一圈、文字紧贴边缘的长方形,和卡片里的这一行对不上。
+        // 两栏时每台主机是一张独立的圆角卡,卡片四周有留白(见 `rowBackground`),文字的内边距要把留白算进去。
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        // 点击区域只算卡片本身:卡片四周的留白(见 `rowBackground`)不能点,点到缝里会连上旁边那台。
         .contentShape(Rectangle())
+        .padding(.horizontal, cardInset)
+        .padding(.vertical, splitLayout ? Self.cardGap / 2 : 0)
+    }
+
+    static let cardGap: CGFloat = 8
+    /// 两栏时卡片宽 = 侧栏宽的 94%,左右各留 3%(参考图里卡片和分界线之间就是这么一条窄缝)。
+    /// 按侧栏实际宽度算,拖动改宽后比例不变。列表自带的左右边距已去掉(见 `SplitListMargins`)。
+    private var cardInset: CGFloat { splitLayout ? listWidth * 0.03 : 0 }
+
+    /// 一屏窄的时候是一整张圆角卡里分行(行间有细线);两栏时(内屏)是一台一张独立的圆角卡,
+    /// 卡与卡之间露出侧栏底色,连着的那台卡片更亮并描边。
+    @ViewBuilder private func rowBackground(_ host: Host) -> some View {
+        if splitLayout {
+            let on = host.id == activeID
+            let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
+            shape.fill(on ? Color.appSidebarSelected : Color.appSidebarCard)
+                .overlay { shape.strokeBorder(Color.primary.opacity(on ? 0.2 : 0), lineWidth: 1) }
+                .animation(.easeOut(duration: 0.2), value: on)
+                .padding(.horizontal, cardInset)
+                .padding(.vertical, Self.cardGap / 2)
+        } else {
+            Color.appCard
+        }
     }
 
     private var searchField: some View {
@@ -154,13 +237,33 @@ struct HostsView: View {
         .padding(.horizontal, 14)
         .frame(minHeight: 44)
         .background(.regularMaterial, in: Capsule())
-        // 和下面的列表卡片同一套左右边距:靠竖条那一侧边距更小,固定的 16 会让搜索框和卡片边缘对不齐。
-        .scenePadding(.horizontal)
+        // 左右边缘和宽度都取自下面列表卡片的实际位置(靠竖条那一侧边距更小,固定边距会对不齐);
+        // 还没有卡片(列表为空)时退回到系统的场景边距。
+        .modifier(MatchCard(x: cardX.map { $0 + (splitLayout ? cardInset : 0) }, width: cardWidth.map { $0 - (splitLayout ? cardInset * 2 : 0) }))
         .padding(.vertical, 8)
     }
 
     private func startAdding() { isNew = true; editing = Host() }
     private func startEditing(_ host: Host) { isNew = false; editing = host }
+}
+
+private struct SplitListMargins: ViewModifier {
+    let split: Bool
+    func body(content: Content) -> some View {
+        if split { content.contentMargins(.horizontal, 0, for: .scrollContent) } else { content }
+    }
+}
+
+private struct MatchCard: ViewModifier {
+    let x: CGFloat?
+    let width: CGFloat?
+    func body(content: Content) -> some View {
+        if let x, let width {
+            content.frame(width: width).frame(maxWidth: .infinity, alignment: .leading).padding(.leading, x)
+        } else {
+            content.scenePadding(.horizontal)
+        }
+    }
 }
 
 struct HostEditor: View {
@@ -213,24 +316,24 @@ struct HostEditor: View {
                         .focused($focus, equals: .address).submitLabel(.next)
                         .onSubmit { applyTarget(); focus = .port }
                     TextField("Port", text: $portText)
-                        .keyboardType(.numberPad)
-                        .focused($focus, equals: .port)
+                        // 数字键盘(numberPad)没有回车键,收键盘就得另放一个浮在键盘上方的「完成」,它的位置系统说了算:
+                        // 右边缘既不对齐表单也不对齐右侧竖条,还盖住下面的内容。用带回车键的数字 / 符号键盘,回车键就是「完成」。
+                        .keyboardType(.numbersAndPunctuation)
+                        .focused($focus, equals: .port).submitLabel(.done)
+                        .onSubmit { applyTarget(); focus = nil }
                 } footer: {
                     if !portText.isEmpty, port == nil {
                         Text("Port must be between 1 and 65535.").foregroundStyle(.red)
                     }
                 }
+                .listRowBackground(Color.appCard)
                 Section {
                     TextField("User", text: $host.username)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                         .textContentType(.username)
                         .focused($focus, equals: .user).submitLabel(.next)
                         .onSubmit { focus = host.authKind == .password ? .password : nil }
-                    Picker("Authentication", selection: $host.authKind) {
-                        Text("Password").tag(AuthKind.password)
-                        Text("Private Key").tag(AuthKind.key)
-                    }
-                    .pickerStyle(.segmented)
+                    AuthKindPicker(selection: $host.authKind)
                     if host.authKind == .password {
                         SecureField("Password", text: $credentials.password)
                             .textContentType(.password)
@@ -238,8 +341,13 @@ struct HostEditor: View {
                             .onSubmit { focus = nil }
                     }
                 }
+                .listRowBackground(Color.appCard)
                 if host.authKind == .key { keySection }
             }
+            .scrollContentBackground(.hidden)
+            .background(Color.appBackground)
+            // 上下拖表单就收键盘(各个输入框的回车键也都能收),不再需要键盘上方那颗悬浮的「完成」。
+            .scrollDismissesKeyboard(.interactively)
             .navigationTitle(host.displayName.isEmpty ? String(localized: "New Host") : host.displayName)
             .navigationBarTitleDisplayMode(.inline)
             .fileImporter(isPresented: $importing, allowedContentTypes: [.data, .plainText]) { result in
@@ -265,12 +373,20 @@ struct HostEditor: View {
                         Button("Save", systemImage: "checkmark", action: save).disabled(!canSave)
                     }
                 }
-                // 数字键盘没有回车键,得给个收起的地方。
-                ToolbarItemGroup(placement: .keyboard) {
-                    Spacer()
-                    Button("Done") { focus = nil }
+            }
+            #if DEBUG
+            .task {
+                // `-autoFocus <字段>`:编辑页打开后让那个字段拿到焦点(弹出键盘),模拟器里核对键盘上方的「完成」用。
+                try? await Task.sleep(for: .seconds(1.2))
+                switch DebugLaunch.value("-autoFocus") {
+                case "address": focus = .address
+                case "port": focus = .port
+                case "user": focus = .user
+                case "name": focus = .name
+                default: break
                 }
             }
+            #endif
             .alert("Couldn't Save", isPresented: $saveFailed) {
                 Button("OK", role: .cancel) {}
             } message: {
@@ -313,6 +429,7 @@ struct HostEditor: View {
         } footer: {
             Text("The key is stored in the Keychain on this device. Add the public key to ~/.ssh/authorized_keys on the server.")
         }
+                .listRowBackground(Color.appCard)
     }
 
     private func refreshKeyInfo() {
@@ -388,5 +505,41 @@ struct HostEditor: View {
         var h = host
         h.port = port ?? 0
         if onSave(h, credentials) { dismiss() } else { saveFailed = true }
+    }
+}
+
+/// 「密码 / 私钥」切换。系统分段控件整体高约 31.4pt、没法单独调高,这里自己画:整体 34.5pt(高 10%),
+/// 同样的胶囊形,选中那一格是高亮的胶囊。
+private struct AuthKindPicker: View {
+    @Binding var selection: AuthKind
+    /// 每一格的高度。整个控件 = 38 + 上下内边距各 2 = 42pt(系统分段控件约 31.4pt → 34.5 → 38 → 40 → 42pt)。
+    static let height: CGFloat = 38
+    @Namespace private var pill
+
+    var body: some View {
+        HStack(spacing: 0) {
+            option("Password", .password)
+            option("Private Key", .key)
+        }
+        .padding(2)
+        .background(Capsule().fill(Color.primary.opacity(0.08)))
+        .accessibilityElement(children: .contain)
+    }
+
+    private func option(_ title: LocalizedStringKey, _ kind: AuthKind) -> some View {
+        let on = selection == kind
+        return Button { withAnimation(.smooth(duration: 0.2)) { selection = kind } } label: {
+            Text(title)
+                .font(.subheadline.weight(on ? .semibold : .regular))
+                .foregroundStyle(Color.primary)
+                .frame(maxWidth: .infinity)
+                .frame(height: Self.height)
+                .background {
+                    if on { Capsule().fill(Color.primary.opacity(0.16)).matchedGeometryEffect(id: "pill", in: pill) }
+                }
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(on ? [.isButton, .isSelected] : .isButton)
     }
 }

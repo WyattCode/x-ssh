@@ -1,4 +1,5 @@
 import Foundation
+import GameController
 import SwiftUI
 import UIKit
 
@@ -34,7 +35,10 @@ final class TerminalModel: Identifiable {
     var ctrlArmed = false
     /// Alt 待用:下一次发出去的内容前面加 ESC(终端里 Alt+键 就是这么编码的)。
     var altArmed = false
-    var wantsKeyboard = true
+    /// 默认不弹系统键盘:连上后要打字,点屏幕或按工具栏的键盘钮再弹(和主机列表、编辑页里的输入框无关)。
+    var wantsKeyboard = false
+    /// 接着外接键盘:系统不会弹软键盘,工具栏上的「键盘」钮没有用,置灰。
+    private(set) var hasHardwareKeyboard = false
     /// 快捷键面板(Esc / Tab / Ctrl / 方向键…)。和系统键盘各自独立开关,默认收起 —— 同安卓。
     var showsKeys = false
 
@@ -49,12 +53,29 @@ final class TerminalModel: Identifiable {
         self.host = host
         self.credentials = credentials
         self.knownKey = knownKey
+        // 接着外接键盘时系统本来就不弹软键盘,但隐形输入框得是第一响应者,实体键盘的字才进得来:
+        // 默认不弹软键盘不能连带让外接键盘打不了字。外接键盘接上就当作「要键盘」,拔掉就收回。
+        hasHardwareKeyboard = GCKeyboard.coalesced != nil
+        wantsKeyboard = hasHardwareKeyboard
+        keyboardObservers = [
+            NotificationCenter.default.addObserver(forName: .GCKeyboardDidConnect, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.hasHardwareKeyboard = true; self?.wantsKeyboard = true }
+            },
+            NotificationCenter.default.addObserver(forName: .GCKeyboardDidDisconnect, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.hasHardwareKeyboard = false; self?.wantsKeyboard = false }
+            },
+        ]
         backend.onOutput = { [weak self] output in
             Task { @MainActor [weak self] in self?.apply(output) }
         }
     }
 
-    deinit { backend.shutdown() }
+    @ObservationIgnored private var keyboardObservers: [NSObjectProtocol] = []
+
+    deinit {
+        keyboardObservers.forEach(NotificationCenter.default.removeObserver)
+        backend.shutdown()
+    }
 
     /// 正在显示需要用户处理的卡片(信任 / 密钥变更 / 失败):这时不弹键盘,别把卡片挤得只剩一条缝。
     var showsPrompt: Bool {

@@ -2870,6 +2870,23 @@ M3.51 已有「用生物识别解锁」开关,连私钥密文(`lockedKeyData` / 
 
 **线程铁律**:Rust 的 `write` / `resize` / `disconnect` 是 `block_on`,`Backend` 用串行队列保序 —— **界面层一律只在 `Backend` 的串行队列里调,别挪回主线程**,否则会卡 UI 甚至串行化破坏。
 
+### iOS 近期踩过的坑(0.6.5 这一批,别再踩)
+
+- **左边缘右滑返回**:隐藏系统返回键后系统的边缘手势没了;重新打开 `interactivePopGestureRecognizer` 会"开始但不返回"(NavigationSplitView 紧凑栈里),SwiftUI 的 22pt 拖动条收不到触摸。可行的做法:`EdgeSwipeBack`(`BrandMark.swift`)往导航控制器的视图上挂 `UIScreenEdgePanGestureRecognizer`,右滑 >60pt 调 `onBack`。
+- **紧凑布局在主机列表页不要弹终端键盘**:`RootView` 里 `wantsKeyboard` 要再 `&& !(compact && compactColumn == .sidebar)`,`CaptureField.wanted` 同步给「系统收走焦点后要不要抢回」的逻辑,否则搜索框打字会被抢焦点。
+- **直板机(iPhone 17/18 Pro / Pro Max 等)**:底部工具栏是横的,软键盘一弹就盖住。`FoldState.isStandardPhone`(没有铰链 = 旧系统,或窗口上屏 1.5 秒仍没收到铰链状态)为真时,会话页不再放 `.bottomBar` 工具项,改在 `safeAreaInset(.bottom)` 里画自己的控制条(主机 / 快捷键 / 键盘 / 粘贴 / 断开)。Duo 上永远不会置位,结构不变(Duo 的竖条对结构变化很敏感)。
+- **控制条只在 `.connected` / `.closed` 时显示**:连接中 / 要确认主机密钥 / 失败的状态卡片自己带「取消」,和控制条同时占着底部会布局死循环(主线程 100% CPU)。排查用 `sample <pid>`,别靠猜。
+- **模拟器**:`iPhone 17/18` 系列只有 iOS 27.0 运行时(27.1 只给 Duo 用),建临时模拟器要指定 `SimRuntime.iOS-27-0`;用完 `simctl delete`。
+- **Device Hub 里测手势**:用 CGEvent 鼠标事件(`mouseDown` → 多段 `mouseDragged` → `mouseUp`)才是真触摸;从屏幕最左缘内 3–10pt 起拖才算边缘手势。
+- **内屏分栏配色**:侧栏用 `Color.appSidebar`(深灰)/ `appSidebarCard`,会话区保持纯黑,一眼分得出。长按主机行用 `Button` + `.contextMenu` + `.contentShape(.contextMenuPreview, 圆角矩形)`(系统自带触觉反馈,浮起的形状每行一致)。**不要用 `Menu`**:内屏侧栏里 `Menu` 一弹出整栏内容被盖黑,像是列表被收起;也不要给 `.contextMenu` 加 `preview:`,模拟器里长按浮起的仍是系统取的形状,自定义预览没用上。
+
+**内屏两栏的布局规则(0.6.5 这一批,别改回去)**:
+- **侧栏宽度**默认 320pt,可拖分界线上的把手(`SidebarHandle`,20pt 宽触摸区 + 4×40pt 小胶囊)调到 240–480pt(最多占窗口 60%),记在 `sidebarWidth`;把手默认显示,2 秒没人碰就淡出,碰它 / 拖它 / 在会话区碰滑(`TouchSpy`,挂在窗口上的只听不管手势识别器)就再出来。一直往左拖过最小宽度再多 60pt,或在列表上用力左甩(>140pt 且很快)= 收起列表(`columns = .detailOnly`);**收起时要把宽度恢复成拖之前的**,否则下次展开是被压窄的。把手的位置不能受软键盘影响(`.ignoresSafeArea(.keyboard)`)。
+- **卡片**:每台主机一张独立圆角卡(宽 = 侧栏的 94%,左右各 3%,按实际宽度算),正在连着的更亮 + 描边 + 绿点;列表自带的左右边距用 `contentMargins(.horizontal, 0)` 去掉,否则卡片宽度算不准。列表按添加顺序排,**不因连接而置顶**。
+- **半折**(`fold.hinge == .partiallyOpen`):侧栏 = 整屏宽度的 50%(用忽略安全区的 GeometryReader 量,否则偏小),一律并排(不看宽高比,否则折的过程里侧栏一会收一会开,空会话的 logo 一会在中间一会在右边)。半折 ↔ 展开 / 合上的过渡是「整块淡出 → 换宽度 → 淡入」。**不要逐帧改栏宽**:系统不给栏宽变化做动画,逐帧改还会把详情栏弄丢(折一次再折平,会话区空白)。取消旧过渡任务时要自己 `if Task.isCancelled { return }`,`try?` 会吞掉取消。
+- **竖着拿、完全展开**:列表收起,会话占满整屏(系统在竖屏里会让列表浮在会话上面盖住一半,`.balanced` 和改 `UISplitViewController` 都试过,没用)。拉出列表:左上角系统按钮 / 空会话的「主机」按钮 / 左边缘右滑。
+- **键盘**:连上后默认不弹软键盘(点终端或按工具栏键盘钮才弹);接着外接键盘时默认「要键盘」(`GCKeyboard`),否则外接键盘打不了字。听写的现场追踪日志已经删了(Debug 版会把敲的字,包括密码,写进文件)。
+
 ## 四、桌面端 macOS 图标(踩过的坑,三端都适用)
 
 `package.json` 的 `build.mac.icon` 现在是 `build/icon.icon`(Icon Composer 的 Liquid Glass 源目录,PR #6)。electron-builder 在 macOS 上用 Xcode 的 `actool` 把它编成 `Resources/Assets.car`(亮 / 暗 / 着色三套)并写入 `CFBundleIconName`,同时生成 `icon.icns` 兜底。**只能在装了 Xcode 的 Mac 上打 mac 包。**

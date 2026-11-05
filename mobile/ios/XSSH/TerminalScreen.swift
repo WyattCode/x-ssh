@@ -18,6 +18,7 @@ struct TermMetrics: Equatable {
 struct TerminalScreen: View {
     @Environment(HostStore.self) private var store
     @Environment(\.displayScale) private var displayScale
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(FoldState.self) private var fold
     @AppStorage("terminalFontSize") private var fontSize = 13.0
 
@@ -68,7 +69,8 @@ struct TerminalScreen: View {
                         cellPixels: (UInt32(m.width * displayScale), UInt32(m.height * displayScale)))
                 }
             }
-            .padding(.horizontal, 4)
+            // 内屏(常规宽度)左边紧挨着侧栏的分界线,文字贴着边太挤:多留一些;外屏窄,保持 4pt。
+            .padding(.horizontal, sizeClass == .regular ? 16 : 4)
             .accessibilityElement()
             .accessibilityLabel(Text("Terminal"))
             .accessibilityValue(UIAccessibility.isVoiceOverRunning ? model.screenText : "")
@@ -80,7 +82,11 @@ struct TerminalScreen: View {
                 .padding(.top, usable.map { $0.minY - container.minY } ?? 0)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            if model.showsKeys, model.state == .connected { TerminalKeyPanel(model: model) }
+            VStack(spacing: 0) {
+                if model.showsKeys, model.state == .connected { TerminalKeyPanel(model: model) }
+                // 直板机:系统的底部工具栏是横的,软键盘一弹就盖住了,控制按钮自己放在键盘上方。
+                if fold.isStandardPhone, showsControlBar { controlBar }
+            }
         }
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { container = $0 }
         .navigationTitle(model.title.isEmpty ? model.host.displayName : model.title)
@@ -91,6 +97,8 @@ struct TerminalScreen: View {
         // 系统返回键在外屏竖条最上面,紧贴状态区;改成底部工具栏里的「主机」按钮。
         // 工具栏结构不随尺寸类变:姿态切换时(折叠 / 展开)内容变了,系统会丢掉竖条。
         .navigationBarBackButtonHidden(true)
+        // 隐藏了系统返回键,系统的「从屏幕左边缘右滑返回」也就跟着没了。自己补一条:屏幕最左边一条窄带,右滑回主机列表。
+        .background { EdgeSwipeBack(onBack: onBack).frame(width: 0, height: 0) }
         .toolbar {
             // 会话页左上角:应用 logo + 主机名。自定义视图(不是单纯的图标或标题)不会被系统竖排进竖条,留在顶部左边。
             ToolbarItem(placement: .topBarLeading) {
@@ -103,31 +111,73 @@ struct TerminalScreen: View {
             }
             // 去掉系统给工具栏项套的玻璃圆泡,否则 logo + 主机名被裁在一个小圆里。
             .sharedBackgroundVisibility(.hidden)
-            // 返回主机列表是导航,键盘弹着、竖条放不下时让位:进溢出菜单。这时最需要的是键盘 / 快捷键两颗开关。
-            ToolbarItem(placement: .bottomBar) {
-                Button("Hosts", systemImage: "chevron.left", action: onBack)
+            if !fold.isStandardPhone {
+                // 返回主机列表是导航,键盘弹着、竖条放不下时让位:进溢出菜单。这时最需要的是键盘 / 快捷键两颗开关。
+                ToolbarItem(placement: .bottomBar) {
+                    Button("Hosts", systemImage: "chevron.left", action: onBack)
+                }
+                // 系统工具栏:iPhone Duo 外屏上带图标的按钮自动竖排到右侧,放不下的从下往上收进溢出菜单。
+                // 键盘开关是终端里最常用的,最后才收;断开最不常用,最先收。每颗都带标题,溢出菜单里才看得懂。
+                // 快捷键面板和系统键盘是两颗独立的按钮,各自亮着(蓝)表示开着 —— 同安卓的 ⌘ / ⌨。
+                ToolbarItem(placement: .bottomBar) {
+                    Button("Shortcuts", systemImage: "command") { withAnimation(.smooth(duration: 0.25)) { model.showsKeys.toggle() } }
+                        .tint(model.showsKeys ? Color.accentColor : nil)
+                }
+                .visibilityPriority(.high)
+                ToolbarItem(placement: .bottomBar) {
+                    Button("Keyboard", systemImage: "keyboard") { model.wantsKeyboard.toggle() }
+                        .tint(model.wantsKeyboard ? Color.accentColor : nil)
+                        .disabled(model.hasHardwareKeyboard)
+                }
+                .visibilityPriority(.high)
+                ToolbarItem(placement: .bottomBar) {
+                    Button("Paste", systemImage: "clipboard") { model.paste() }
+                }
+                ToolbarItem(placement: .bottomBar) {
+                    Button("Disconnect", systemImage: "xmark", role: .destructive, action: onClose)
+                }
+                .visibilityPriority(.low)
             }
-            // 系统工具栏:iPhone Duo 外屏上带图标的按钮自动竖排到右侧,放不下的从下往上收进溢出菜单。
-            // 键盘开关是终端里最常用的,最后才收;断开最不常用,最先收。每颗都带标题,溢出菜单里才看得懂。
-            // 快捷键面板和系统键盘是两颗独立的按钮,各自亮着(蓝)表示开着 —— 同安卓的 ⌘ / ⌨。
-            ToolbarItem(placement: .bottomBar) {
-                Button("Shortcuts", systemImage: "command") { withAnimation(.smooth(duration: 0.25)) { model.showsKeys.toggle() } }
-                    .tint(model.showsKeys ? Color.accentColor : nil)
-            }
-            .visibilityPriority(.high)
-            ToolbarItem(placement: .bottomBar) {
-                Button("Keyboard", systemImage: "keyboard") { model.wantsKeyboard.toggle() }
-                    .tint(model.wantsKeyboard ? Color.accentColor : nil)
-            }
-            .visibilityPriority(.high)
-            ToolbarItem(placement: .bottomBar) {
-                Button("Paste", systemImage: "clipboard") { model.paste() }
-            }
-            ToolbarItem(placement: .bottomBar) {
-                Button("Disconnect", systemImage: "xmark", role: .destructive, action: onClose)
-            }
-            .visibilityPriority(.low)
         }
+    }
+
+    /// 连接中 / 出错 / 要确认主机密钥时,状态卡片自带「取消」,不显示控制条(卡片和控制条同时占着底部,会互相撑来撑去、布局死循环)。
+    private var showsControlBar: Bool {
+        switch model.state {
+        case .connected, .closed: true
+        default: false
+        }
+    }
+
+    /// 直板机上的控制条:和 Duo 外屏竖条里的是同一组按钮。
+    private var controlBar: some View {
+        HStack(spacing: 4) {
+            barButton("chevron.left", "Hosts", action: onBack)
+            barButton("command", "Shortcuts", on: model.showsKeys) { withAnimation(.smooth(duration: 0.25)) { model.showsKeys.toggle() } }
+            barButton("keyboard", "Keyboard", on: model.wantsKeyboard) { model.wantsKeyboard.toggle() }
+                .disabled(model.hasHardwareKeyboard)
+                .opacity(model.hasHardwareKeyboard ? 0.4 : 1)
+            barButton("clipboard", "Paste") { model.paste() }
+            barButton("xmark", "Disconnect", role: .destructive, action: onClose)
+        }
+        .padding(4)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay(Capsule().strokeBorder(.white.opacity(0.10), lineWidth: 0.5))
+        .environment(\.colorScheme, .dark)
+        .padding(.horizontal, 12).padding(.bottom, 8)
+    }
+
+    private func barButton(_ icon: String, _ label: LocalizedStringKey, on: Bool = false, role: ButtonRole? = nil,
+                           action: @escaping () -> Void) -> some View {
+        Button(role: role, action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 17, weight: .medium))
+                .foregroundStyle(on ? Color.accentColor : (role == .destructive ? Color.red : Color.white))
+                .frame(width: 56, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(label))
     }
 
     /// 整个页面扣掉接缝和遮挡区之后的可用矩形;还没量到页面尺寸时不限制。
@@ -228,7 +278,6 @@ struct TerminalScreen: View {
         switch model.state {
         case .idle, .connecting:
             card {
-                BrandMark(size: 56)
                 ProgressView().tint(.white)
                 Text("Connecting…").font(.headline)
                 Button("Cancel", role: .cancel, action: onClose).buttonStyle(.bordered)
