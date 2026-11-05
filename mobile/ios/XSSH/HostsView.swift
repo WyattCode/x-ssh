@@ -183,6 +183,8 @@ struct HostsView: View {
         }
         }
         // 收起时整个侧栏内容顺着手势滑出去并渐隐(标题栏的 logo 和系统按钮是导航栏的,留到收起那一刻一起消失)。
+        // 侧栏这一栏自己的底(系统默认是一块灰色材质):内容滑走之后它会露出来,换成和侧栏一样的深灰,再跟着内容一起渐隐。
+        .containerBackground(splitLayout ? Color.appSidebar : Color.appBackground, for: .navigationSplitView)
         .offset(x: slideOffset)
         .opacity(1 - min(1, abs(slideOffset) / 300) * 0.5)
     }
@@ -574,8 +576,10 @@ private struct AuthKindPicker: View {
 }
 
 
-/// 内屏侧栏里的主机卡:系统的液态玻璃(`.glassEffect(.interactive())`),按住 / 按下时和系统 App 的侧栏一样会放大、有光泽流动;
-/// 正在连着的那台玻璃上加一层偏亮的着色。窄屏(单栏)不用,保持一整张圆角卡里分行。
+/// 内屏侧栏里的主机卡。**突出选中的、弱化没选的 / 没连的**:
+/// - 选中(正在连着的):系统液态玻璃 + 偏亮着色,文字全亮,按住有系统那种放大和光泽;
+/// - 没选中:不用玻璃,只有一层几乎看不见的底色,文字压暗 —— 退到背景里,不跟选中的抢眼。
+/// 窄屏(单栏)不用,保持一整张圆角卡里分行。
 private struct HostCardGlass: ViewModifier {
     let enabled: Bool
     let selected: Bool
@@ -583,13 +587,20 @@ private struct HostCardGlass: ViewModifier {
     func body(content: Content) -> some View {
         if enabled {
             let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
-            content.glassEffect(selected ? .regular.tint(.white.opacity(0.18)).interactive() : .regular.interactive(), in: shape)
+            if selected {
+                content
+                    .glassEffect(.regular.tint(.white.opacity(0.16)).interactive(), in: shape)
+            } else {
+                content
+                    .opacity(0.5)
+                    .background(Color.white.opacity(0.035), in: shape)
+                    .contentShape(shape)
+            }
         } else {
             content
         }
     }
 }
-
 
 /// 只听不管的「向左横滑」识别器:一开始就明显是横着的(横向位移远大于纵向)才开始,所以不会和列表的上下滑动抢手势;
 /// 起手点换算成所在视图自己的坐标回报。滑过 60pt 才算。

@@ -105,8 +105,12 @@ struct RootView: View {
     @State private var active: TerminalModel?
     @State private var addHostRequested = false
     @State private var searching = false
+    /// 右边竖条里的「搜索 / 新建」是否在:列表展开立刻出现;列表收起要等收起动画走完才撤(系统工具栏没有自己的过渡,动画中途撤会让竖条生硬地跳一下)。
+    @State private var hostActionsShown = true
     /// 拖把手 / 收起时侧栏内容跟手滑出去的位移(0 = 原位,-侧栏宽度 = 完全滑出)。
     @State private var slide: CGFloat = 0
+    /// 会话(详情)的临时水平位移:列变化的瞬间给一个反向位移让它视觉上不动,再平滑归零(见 `slideAwayThenCollapse`)。
+    @State private var detailShift: CGFloat = 0
     @State private var containerSize: CGSize = .zero
     @State private var columns: NavigationSplitViewVisibility = .automatic
     @State private var compactColumn: NavigationSplitViewColumn = .sidebar
@@ -156,34 +160,44 @@ struct RootView: View {
 
     /// 收起列表:侧栏内容先顺着手势方向滑出屏幕(0.22 秒),滑出去之后再无动画地把列只改成「收起」,
     /// 用户看到的是一整条连贯的「抽屉滑走」,不是淡出再突然变样。
+    /// 收起列表,丝滑版。系统的导航容器改列可见性是「一步到位」的(不带动画,实测),侧栏内容滑走之后还会露出一块系统灰底,
+    /// 所以整个界面「淡出 → 改列 → 会话带着反向位移淡入并滑到位」:
+    /// ① 整屏先快速淡出(侧栏内容也跟着消失,不会露出灰底);
+    /// ② 全透明的那一刻改列 —— 会话瞬间变宽,同时给它一个等宽的位移,让它从原来的位置出发;
+    /// ③ 一边淡入一边用弹簧滑到最左、占满整屏。
     private func slideAwayThenCollapse() {
         widthTween?.cancel()
-        withAnimation(.easeIn(duration: 0.22)) { slide = -CGFloat(shownSidebarWidth) }
+        let w = CGFloat(shownSidebarWidth)
         widthTween = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(235))
+            withAnimation(.easeIn(duration: Self.slideOutDuration)) { dip = true }
+            try? await Task.sleep(for: .milliseconds(Int(Self.slideOutDuration * 1000) + 15))
             if Task.isCancelled { return }
             var t = Transaction(animation: nil)
             t.disablesAnimations = true
-            withTransaction(t) { columns = .detailOnly; slide = 0 }
+            withTransaction(t) { columns = .detailOnly; slide = 0; detailShift = w }
+            withAnimation(.smooth(duration: Self.settleDuration)) { dip = false; detailShift = 0 }
             widthTween = nil
         }
     }
 
-    /// 展开 / 收起列表的过渡:整块内容快速淡出 → 换状态 → 淡入。系统工具栏(右边竖条里的搜索 / 新建按钮随列表出现 / 消失)
-    /// 没有自己的过渡,按钮会生硬地一下跳掉;整块淡一下,按钮的切换就藏在过渡里了。
-    private func setColumnsAnimated(_ new: NavigationSplitViewVisibility) {
+    /// 展开列表(从左边缘拉出来 / 点小把手):反过来 —— 淡出、改列(会话变窄)、会话从原位置带反向位移淡入并滑到右边,侧栏跟着淡入。
+    private func expandListSmoothly() {
         widthTween?.cancel()
+        let w = CGFloat(shownSidebarWidth)
         widthTween = Task { @MainActor in
-            withAnimation(.easeIn(duration: 0.12)) { dip = true }
-            try? await Task.sleep(for: .milliseconds(130))
+            withAnimation(.easeIn(duration: Self.slideOutDuration)) { dip = true }
+            try? await Task.sleep(for: .milliseconds(Int(Self.slideOutDuration * 1000) + 15))
             if Task.isCancelled { return }
-            columns = new
-            try? await Task.sleep(for: .milliseconds(60))
-            if Task.isCancelled { return }
-            withAnimation(.easeOut(duration: 0.28)) { dip = false }
+            var t = Transaction(animation: nil)
+            t.disablesAnimations = true
+            withTransaction(t) { columns = .all; slide = 0; detailShift = -w }
+            withAnimation(.smooth(duration: Self.settleDuration)) { dip = false; detailShift = 0 }
             widthTween = nil
         }
     }
+
+    static let slideOutDuration = 0.18
+    static let settleDuration = 0.45
 
     /// 列表(侧栏)现在是展开的。两栏的 NavigationSplitView 里系统会把 `.all` 改写成 `.doubleColumn`(用户点系统按钮展开后尤其会),
     /// 只认 `.all` 的话,把手、收起手势都会在系统改写之后失效。
@@ -192,7 +206,7 @@ struct RootView: View {
     /// 内屏(两栏)里右边竖条放「搜索 / 新建主机」;外屏(单栏)由主机列表自己的竖条放。
     private var hostActions: HostActions? {
         // 列表(左栏)收起着的时候不需要「搜索 / 新建主机」:这两个按钮是管主机列表的,列表不在就不出现。
-        sizeClass == .regular && listVisible ? HostActions(searching: $searching, add: { addHostRequested = true }) : nil
+        sizeClass == .regular && hostActionsShown ? HostActions(searching: $searching, add: { addHostRequested = true }) : nil
     }
 
     /// 正在连着的会话还没连上(连接中 / 等确认主机密钥)。
@@ -277,8 +291,10 @@ struct RootView: View {
                 TerminalScreen(model: active, onBack: { compactColumn = .sidebar; columns = .all }, onClose: close,
                                hostActions: hostActions)
                     .id(active.id)
+                    .offset(x: detailShift)
             } else {
-                EmptySessionView(showHosts: listVisible ? nil : { columns = .all })
+                EmptySessionView(showHosts: listVisible ? nil : { expandListSmoothly() })
+                    .offset(x: detailShift)
                     // 没会话时右侧竖条放「搜索 / 新建主机」(内屏只放这一份,左栏里不再有)。
                     .toolbar {
                         if let hostActions {
@@ -321,7 +337,7 @@ struct RootView: View {
         // 列表被收起时,屏幕左边缘留一个淡淡的小把手:点一下或往右拖就把列表拉出来(不然只有左上角的系统按钮,看不出来能拉)。
         .overlay(alignment: .leading) {
             if sizeClass == .regular, columns == .detailOnly {
-                EdgeRevealHandle(visible: handleShown) { setColumnsAnimated(.all) }
+                EdgeRevealHandle(visible: handleShown) { expandListSmoothly() }
                     .ignoresSafeArea(.keyboard)
             }
         }
@@ -350,7 +366,16 @@ struct RootView: View {
             if !Task.isCancelled { handleShown = false }
         }
         // 列表展开 ↔ 收起、姿态 / 尺寸变化:都让把手出来一下(以前只有碰才出来,折叠屏展开后它是不出现的)。
-        .onChange(of: listVisible) { _, _ in if sizeClass == .regular { pokeHandle() } }
+        .onChange(of: listVisible) { _, visible in
+            if sizeClass == .regular { pokeHandle() }
+            if visible { hostActionsShown = true }
+            else {
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(Int((Self.slideOutDuration + Self.settleDuration) * 1000) + 60))
+                    if !listVisible { hostActionsShown = false }
+                }
+            }
+        }
         // 从右边竖条点搜索:搜索框在左栏里,列表收起着的话先拉出来。
         .onChange(of: searching) { _, on in if on, sizeClass == .regular, !listVisible { columns = .all } }
         .onChange(of: sizeClass) { _, _ in pokeHandle() }
