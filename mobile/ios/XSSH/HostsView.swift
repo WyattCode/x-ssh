@@ -59,13 +59,11 @@ struct HostsView: View {
     var body: some View {
         ScrollViewReader { proxy in
         List {
-            // 聚光灯版式:标题 + 数量 → 连着的那台一张大卡 → 其余每台一行(颜色点 + 名字 + 地址)。
+            // 聚光灯版式:标题 + 数量 → 每台一行(颜色点 + 名字),连着的那台在原位置变成一张大卡。
             titleRow
-            if let featured = shown.first(where: { $0.id == activeID }) {
-                hostRow(featured, featured: true)
-            }
-            ForEach(shown.filter { $0.id != activeID }) { host in
-                hostRow(host, featured: false)
+            // 连着的那台就在它原来的位置变成大卡,不往上提(主机的顺序一直按添加先后)。
+            ForEach(shown) { host in
+                hostRow(host, featured: host.id == activeID)
             }
         }
         // 连上一台时,让列表滚到那张卡片(它在视野外也能看到自己选中了哪台)。
@@ -266,7 +264,7 @@ struct HostsView: View {
             Text(verbatim: host.displayName).font(.title3.weight(.semibold)).lineLimit(1).truncationMode(.tail).padding(.top, 2)
         }
         .animation(.easeOut(duration: 0.2), value: activeConnecting)
-        .padding(.horizontal, 16).padding(.vertical, 18)
+        .padding(.horizontal, 16).padding(.vertical, 20)
         .frame(maxWidth: .infinity, alignment: .leading)
         .modifier(HostCardGlass(enabled: true, selected: true))
         .padding(.horizontal, splitLayout ? 0 : 0).padding(.bottom, 8)
@@ -280,7 +278,7 @@ struct HostsView: View {
             Text(verbatim: host.displayName).font(.body).lineLimit(1).truncationMode(.tail)
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 16).padding(.vertical, 19)   // 行高比 14pt 的版本再高 20%(48 → 58pt)
+        .padding(.horizontal, 16).padding(.vertical, 22)   // 行高:48 → 58 → 再高 10% ≈ 64pt
     }
 
     static let cardGap: CGFloat = 6
