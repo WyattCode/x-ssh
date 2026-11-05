@@ -168,6 +168,20 @@ struct RootView: View {
         }
     }
 
+    /// 交给导航容器的列可见性绑定。我们自己改 `columns` 都是直接赋值(不走这里),所以走到这里的 setter 都是系统发起的:
+    /// 用户点了系统的侧栏按钮(在窗口顶部、刚刚有触摸),或系统自己决定要收(比如换详情时顺手收起)。
+    /// 横着拿 / 半折时,后一种一律拒绝 —— 连接主机之后列表(会话抽屉)自己收起来就是这么来的。
+    private var columnsFromSystem: Binding<NavigationSplitViewVisibility> {
+        Binding(get: { columns }, set: { new in
+            if new == .detailOnly, sizeClass == .regular, halfFolded || containerSize.width > containerSize.height {
+                let recent = Date().timeIntervalSince(pokeClock.lastTouchAt) < 0.8
+                let onToggle = pokeClock.lastTouch.y >= 0 && pokeClock.lastTouch.y < 130
+                guard recent, onToggle else { return }
+            }
+            columns = new
+        })
+    }
+
     /// 列表(侧栏)现在是展开的。两栏的 NavigationSplitView 里系统会把 `.all` 改写成 `.doubleColumn`(用户点系统按钮展开后尤其会),
     /// 只认 `.all` 的话,把手、收起手势都会在系统改写之后失效。
     private var listVisible: Bool { columns == .all || columns == .doubleColumn }
@@ -238,7 +252,7 @@ struct RootView: View {
     }
 
     private var split: some View {
-        NavigationSplitView(columnVisibility: $columns, preferredCompactColumn: $compactColumn) {
+        NavigationSplitView(columnVisibility: columnsFromSystem, preferredCompactColumn: $compactColumn) {
             HostsView(splitLayout: sizeClass == .regular, activeID: active.flatMap { $0.isEnded ? nil : $0.host.id },
                       activeConnecting: activeConnecting, addRequested: $addHostRequested, searching: $searching, onConnect: open,
                       onCollapse: { setColumnsAnimated(.detailOnly) })
@@ -305,7 +319,10 @@ struct RootView: View {
         }
         // 有人在会话区域(分界线右边)碰 / 滑,把手重新显示。UIKit 手势识别器只旁听触摸,不影响终端自己的手势。
         .background {
-            TouchSpy { x in
+            TouchSpy { point in
+                let x = point.x
+                pokeClock.lastTouch = point
+                pokeClock.lastTouchAt = Date()
                 // 列表展开时只有碰会话区域(分界线右边)才算;列表收起时碰屏幕任何地方都让左边缘的小把手出来。
                 guard sizeClass == .regular, !listVisible || x > sidebarWidth else { return }
                 if !handleShown || Date().timeIntervalSince(pokeClock.last) > 0.5 { pokeHandle() }
@@ -400,35 +417,40 @@ struct EdgeRevealHandle: View {
     }
 }
 
-final class PokeClock { var last = Date.distantPast }
+final class PokeClock {
+    var last = Date.distantPast
+    /// 最近一次触摸的位置(窗口坐标)和时间:判断「列表被收起」是不是用户点了系统的侧栏按钮造成的。
+    var lastTouch = CGPoint(x: -1, y: -1)
+    var lastTouchAt = Date.distantPast
+}
 
 /// 挂在窗口上的「只听不管」手势识别器:收到触摸就把横坐标报出去,自己永远不进入识别状态,
 /// 所以不会拦截 / 延迟任何别的手势。
 struct TouchSpy: UIViewRepresentable {
-    let onTouch: (CGFloat) -> Void
+    let onTouch: (CGPoint) -> Void
 
     func makeUIView(context: Context) -> UIView { Anchor(onTouch: onTouch) }
     func updateUIView(_ view: UIView, context: Context) { (view as? Anchor)?.onTouch = onTouch }
 
     private final class Anchor: UIView {
-        var onTouch: (CGFloat) -> Void
+        var onTouch: (CGPoint) -> Void
         private var spy: Spy?
-        init(onTouch: @escaping (CGFloat) -> Void) { self.onTouch = onTouch; super.init(frame: .zero); isUserInteractionEnabled = false }
+        init(onTouch: @escaping (CGPoint) -> Void) { self.onTouch = onTouch; super.init(frame: .zero); isUserInteractionEnabled = false }
         required init?(coder: NSCoder) { fatalError("not used") }
         override func didMoveToWindow() {
             super.didMoveToWindow()
             if let spy, spy.view != nil { spy.view?.removeGestureRecognizer(spy) }
             spy = nil
             guard let window else { return }
-            let g = Spy { [weak self] x in self?.onTouch(x) }
+            let g = Spy { [weak self] p in self?.onTouch(p) }
             window.addGestureRecognizer(g)
             spy = g
         }
     }
 
     private final class Spy: UIGestureRecognizer, UIGestureRecognizerDelegate {
-        let report: (CGFloat) -> Void
-        init(report: @escaping (CGFloat) -> Void) {
+        let report: (CGPoint) -> Void
+        init(report: @escaping (CGPoint) -> Void) {
             self.report = report
             super.init(target: nil, action: nil)
             cancelsTouchesInView = false
@@ -441,7 +463,7 @@ struct TouchSpy: UIViewRepresentable {
         override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) { state = .failed }
         override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) { state = .failed }
         private func forward(_ touches: Set<UITouch>) {
-            if let t = touches.first, let v = view { report(t.location(in: v).x) }
+            if let t = touches.first, let v = view { report(t.location(in: v)) }
         }
         func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
     }
