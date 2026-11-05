@@ -107,7 +107,7 @@ struct RootView: View {
     @State private var containerSize: CGSize = .zero
     @State private var columns: NavigationSplitViewVisibility = .automatic
     @State private var compactColumn: NavigationSplitViewColumn = .sidebar
-    /// 两栏时侧栏的宽度(可拖分界线上的把手调整,记住)。系统默认 320pt。
+    /// 两栏时侧栏的宽度(可拖分界线上的把手调整,记住)。默认 352pt(系统默认 320pt 再宽 10%)。
     @AppStorage("sidebarWidth") private var sidebarWidth = SidebarHandle.defaultWidth
     @State private var handleShown = true
     @State private var handleToken = 0
@@ -386,7 +386,7 @@ struct TouchSpy: UIViewRepresentable {
 /// 侧栏和会话之间的分界线把手:左右拖动调侧栏宽度。默认显示,两秒没人用就慢慢淡出;
 /// 点它所在的位置、拖它、或在会话区域里碰 / 滑,都会让它重新出现。淡出之后触摸区域还在,点一下就回来。
 struct SidebarHandle: View {
-    static let defaultWidth = 320.0
+    static let defaultWidth = 352.0   // 系统默认 320pt,再宽 10%
     static let hitWidth: CGFloat = 20
     /// 胶囊在分界线右边 7pt(参考图里胶囊和侧栏边缘之间有一条缝)。
     static let gap: CGFloat = 7
