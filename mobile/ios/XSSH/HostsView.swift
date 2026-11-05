@@ -266,7 +266,7 @@ struct HostsView: View {
             Text(verbatim: host.displayName).font(.title3.weight(.semibold)).lineLimit(1).truncationMode(.tail).padding(.top, 2)
         }
         .animation(.easeOut(duration: 0.2), value: activeConnecting)
-        .padding(.horizontal, 16).padding(.vertical, 14)
+        .padding(.horizontal, 16).padding(.vertical, 18)
         .frame(maxWidth: .infinity, alignment: .leading)
         .modifier(HostCardGlass(enabled: true, selected: true))
         .padding(.horizontal, splitLayout ? 0 : 0).padding(.bottom, 8)
@@ -280,7 +280,7 @@ struct HostsView: View {
             Text(verbatim: host.displayName).font(.body).lineLimit(1).truncationMode(.tail)
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 16).padding(.vertical, 14)
+        .padding(.horizontal, 16).padding(.vertical, 19)   // 行高比 14pt 的版本再高 20%(48 → 58pt)
     }
 
     static let cardGap: CGFloat = 6
