@@ -99,7 +99,7 @@ struct TerminalScreen: View {
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { container = $0 }
         .navigationTitle(model.title.isEmpty ? model.host.displayName : model.title)
         .navigationBarTitleDisplayMode(.inline)
-        // 标题由左上角的 logo + 主机名自己画,去掉系统标题,否则主机名出现两遍。
+        // 标题由左上角的主机名自己画,去掉系统标题,否则主机名出现两遍。
         .toolbar(removing: .title)
         .toolbarColorScheme(.dark, for: .navigationBar, .bottomBar)
         // 系统返回键在外屏竖条最上面,紧贴状态区;改成底部工具栏里的「主机」按钮。
@@ -108,14 +108,11 @@ struct TerminalScreen: View {
         // 隐藏了系统返回键,系统的「从屏幕左边缘右滑返回」也就跟着没了。自己补一条:屏幕最左边一条窄带,右滑回主机列表。
         .background { EdgeSwipeBack(onBack: onBack).frame(width: 0, height: 0) }
         .toolbar {
-            // 会话页左上角:应用 logo + 主机名。自定义视图(不是单纯的图标或标题)不会被系统竖排进竖条,留在顶部左边。
+            // 会话页左上角:只有主机名(不再带应用图标)。自定义视图(不是单纯的图标或标题)不会被系统竖排进竖条,留在顶部左边。
             ToolbarItem(placement: .topBarLeading) {
-                HStack(spacing: 8) {
-                    BrandMark(size: 26)
-                    Text(verbatim: model.title.isEmpty ? model.host.displayName : model.title)
-                        .font(.headline).lineLimit(1)
-                }
-                .fixedSize()
+                Text(verbatim: model.title.isEmpty ? model.host.displayName : model.title)
+                    .font(.headline).lineLimit(1)
+                    .fixedSize()
             }
             // 去掉系统给工具栏项套的玻璃圆泡,否则 logo + 主机名被裁在一个小圆里。
             .sharedBackgroundVisibility(.hidden)

@@ -152,6 +152,22 @@ struct RootView: View {
         }
     }
 
+    /// 展开 / 收起列表的过渡:整块内容快速淡出 → 换状态 → 淡入。系统工具栏(右边竖条里的搜索 / 新建按钮随列表出现 / 消失)
+    /// 没有自己的过渡,按钮会生硬地一下跳掉;整块淡一下,按钮的切换就藏在过渡里了。
+    private func setColumnsAnimated(_ new: NavigationSplitViewVisibility) {
+        widthTween?.cancel()
+        widthTween = Task { @MainActor in
+            withAnimation(.easeIn(duration: 0.12)) { dip = true }
+            try? await Task.sleep(for: .milliseconds(130))
+            if Task.isCancelled { return }
+            columns = new
+            try? await Task.sleep(for: .milliseconds(60))
+            if Task.isCancelled { return }
+            withAnimation(.easeOut(duration: 0.28)) { dip = false }
+            widthTween = nil
+        }
+    }
+
     /// 列表(侧栏)现在是展开的。两栏的 NavigationSplitView 里系统会把 `.all` 改写成 `.doubleColumn`(用户点系统按钮展开后尤其会),
     /// 只认 `.all` 的话,把手、收起手势都会在系统改写之后失效。
     private var listVisible: Bool { columns == .all || columns == .doubleColumn }
@@ -225,7 +241,7 @@ struct RootView: View {
         NavigationSplitView(columnVisibility: $columns, preferredCompactColumn: $compactColumn) {
             HostsView(splitLayout: sizeClass == .regular, activeID: active.flatMap { $0.isEnded ? nil : $0.host.id },
                       activeConnecting: activeConnecting, addRequested: $addHostRequested, searching: $searching, onConnect: open,
-                      onCollapse: { withAnimation(.smooth(duration: 0.3)) { columns = .detailOnly } })
+                      onCollapse: { setColumnsAnimated(.detailOnly) })
                 .navigationSplitViewColumnWidth(min: shownSidebarWidth, ideal: shownSidebarWidth, max: shownSidebarWidth)
         } detail: {
             if let active {
@@ -274,7 +290,7 @@ struct RootView: View {
         .overlay(alignment: .leading) {
             if sizeClass == .regular, listVisible, !halfFolded {
                 SidebarHandle(visible: handleShown, onTouch: pokeHandle,
-                              onCollapse: { withAnimation(.smooth(duration: 0.3)) { columns = .detailOnly } })
+                              onCollapse: { setColumnsAnimated(.detailOnly) })
                     .offset(x: shownSidebarWidth + SidebarHandle.gap - SidebarHandle.hitWidth / 2)
                     // 软键盘弹出时竖向居中的位置不能跟着挪(中间线不动)。
                     .ignoresSafeArea(.keyboard)
@@ -283,7 +299,7 @@ struct RootView: View {
         // 列表被收起时,屏幕左边缘留一个淡淡的小把手:点一下或往右拖就把列表拉出来(不然只有左上角的系统按钮,看不出来能拉)。
         .overlay(alignment: .leading) {
             if sizeClass == .regular, columns == .detailOnly {
-                EdgeRevealHandle(visible: handleShown) { withAnimation(.smooth(duration: 0.3)) { columns = .all } }
+                EdgeRevealHandle(visible: handleShown) { setColumnsAnimated(.all) }
                     .ignoresSafeArea(.keyboard)
             }
         }
