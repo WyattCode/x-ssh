@@ -474,12 +474,17 @@ struct RootView: View {
         }
         active?.disconnect()
         let model = TerminalModel(host: host, credentials: hosts.credentials(for: host), knownKey: hosts.knownKey(host))
-        compactColumn = .detail
         if sizeClass == .regular {
+            compactColumn = .detail
             if collapse { setDrawer(false, swapping: { active = model }) }
             else { withAnimation(.smooth(duration: 0.25)) { active = model } }
         } else {
-            active = model
+            // 外屏(翻页):先把会话放好、再翻到详情页,而且放在同一个无动画事务里。以前先翻页后换会话,
+            // 翻进去的那一瞬间详情页还是「没有会话」的空页面,换成终端时就闪一下。
+            var t = Transaction(animation: nil)
+            t.disablesAnimations = true
+            withTransaction(t) { active = model }
+            compactColumn = .detail
         }
     }
 
@@ -491,7 +496,12 @@ struct RootView: View {
             if !drawerOpen, !halfFolded { setDrawer(true, swapping: { active = nil }) }
             else { withAnimation(.smooth(duration: 0.25)) { active = nil } }
         } else {
-            active = nil
+            // 外屏:等翻回列表的动画走完再清掉会话;立刻清的话,翻回去的过程中详情页会先变成「没有会话」的空页面,闪一下。
+            let leaving = active?.id
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(550))
+                if active?.id == leaving { active = nil }
+            }
         }
     }
 }

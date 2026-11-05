@@ -128,8 +128,10 @@ struct TerminalScreen: View {
             // 会话页左上角:只有主机名(不再带应用图标)。自定义视图(不是单纯的图标或标题)不会被系统竖排进竖条,留在顶部左边。
             ToolbarItem(placement: .topBarLeading) {
                 Text(verbatim: model.title.isEmpty ? model.host.displayName : model.title)
-                    .font(.headline).lineLimit(1)
-                    .fixedSize()
+                    .font(.headline).lineLimit(1).truncationMode(.tail)
+                    .frame(maxWidth: 280, alignment: .leading)
+                    // 系统给顶部工具栏项留了约 20pt 的左边距,名字被推得离屏幕边太远:往回收,和终端文字的左边对齐。
+                    .padding(.leading, -16)
             }
             // 去掉系统给工具栏项套的玻璃圆泡,否则 logo + 主机名被裁在一个小圆里。
             .sharedBackgroundVisibility(.hidden)
