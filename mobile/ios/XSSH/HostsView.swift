@@ -264,9 +264,6 @@ struct HostsView: View {
                     .foregroundStyle(activeConnecting ? Color.white.opacity(0.7) : Color.green.opacity(0.95))
             }
             Text(verbatim: host.displayName).font(.title3.weight(.semibold)).lineLimit(1).truncationMode(.tail).padding(.top, 2)
-            Text(verbatim: "\(host.username)@\(host.address)" + (host.port == 22 ? "" : ":\(host.port)"))
-                .font(.caption.monospaced()).foregroundStyle(Color.white.opacity(0.62))
-                .lineLimit(1).truncationMode(.middle)
         }
         .animation(.easeOut(duration: 0.2), value: activeConnecting)
         .padding(.horizontal, 16).padding(.vertical, 14)
@@ -279,14 +276,11 @@ struct HostsView: View {
     private func plainRow(_ host: Host) -> some View {
         HStack(spacing: 11) {
             Circle().fill(HostColor.pip(for: host.displayName)).frame(width: 8, height: 8)
-            // 名字必须一行(长了截断),地址让位:名字优先占宽,地址再挤也是一行、从中间截断。
-            Text(verbatim: host.displayName).font(.body).lineLimit(1).truncationMode(.tail).layoutPriority(2)
-            Spacer(minLength: 8)
-            Text(verbatim: host.address + (host.port == 22 ? "" : ":\(host.port)"))
-                .font(.caption.monospaced()).foregroundStyle(Color.white.opacity(0.4))
-                .lineLimit(1).truncationMode(.middle).frame(maxWidth: 150, alignment: .trailing).layoutPriority(3)
+            // 名字必须一行(长了截断)。列表里不显示 IP / 端口:名字认得清就够了,地址在编辑页里看。
+            Text(verbatim: host.displayName).font(.body).lineLimit(1).truncationMode(.tail)
+            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 16).padding(.vertical, 12)
+        .padding(.horizontal, 16).padding(.vertical, 14)
     }
 
     static let cardGap: CGFloat = 6
