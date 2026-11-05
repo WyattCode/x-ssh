@@ -53,25 +53,7 @@ struct HostsView: View {
         let hosts: [Host]
     }
     private var groups: [HostGroup] {
-        var order: [String] = []
-        var byAddress: [String: [Host]] = [:]
-        for h in shown {
-            let key = h.address.lowercased()
-            if byAddress[key] == nil { order.append(key) }
-            byAddress[key, default: []].append(h)
-        }
-        // 单台的合成一段(不加组头,卡片挨在一起);2 台以上同地址的各自一段,组头写地址。
-        var singles: [Host] = []
-        var multi: [HostGroup] = []
-        for key in order {
-            let hosts: [Host] = byAddress[key] ?? []
-            if hosts.count == 1 { singles.append(hosts[0]) }
-            else if hosts.count > 1 { multi.append(HostGroup(id: key, title: hosts[0].address, hosts: hosts)) }
-        }
-        var result: [HostGroup] = []
-        if !singles.isEmpty { result.append(HostGroup(id: "singles", title: nil, hosts: singles)) }
-        result.append(contentsOf: multi)
-        return result
+        shown.isEmpty ? [] : [HostGroup(id: "all", title: nil, hosts: shown)]
     }
 
     var body: some View {
@@ -97,7 +79,7 @@ struct HostsView: View {
         // 连上一台时,让列表滚到那张卡片(它在视野外也能看到自己选中了哪台)。
         .onChange(of: activeID) { _, id in
             guard let id else { return }
-            withAnimation(.smooth(duration: 0.3)) { proxy.scrollTo(id, anchor: .center) }
+            withAnimation(.smooth(duration: 0.3)) { proxy.scrollTo(id) }
         }
         // 紧凑宽度(主页)背景纯黑;展开成两栏时左边这一栏要和右边的会话(终端纯黑)有颜色区分,用深灰。
         .scrollContentBackground(.hidden)
@@ -145,6 +127,8 @@ struct HostsView: View {
                 }
                 if searching { searchField.transition(.move(edge: .top).combined(with: .opacity)) }
             }
+            // 顶部这一块要有实底:列表往上滚时卡片不能从 logo 后面透出来。
+            .background(splitLayout ? Color.appSidebar : Color.clear)
         }
         .animation(.smooth(duration: 0.25), value: searching)
         .coordinateSpace(name: "hostsRoot")
@@ -261,7 +245,8 @@ struct HostsView: View {
     }
 
     private func row(_ host: Host, grouped: Bool) -> some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 12) {
+            MonogramTile(name: host.displayName, lit: host.id == activeID)
             VStack(alignment: .leading, spacing: 2) {
                 Text(verbatim: host.displayName).font(.headline)
                 // 组头已经写了地址,卡片上只留用户和端口;单台的写完整。
@@ -756,5 +741,50 @@ struct HorizontalSwipeSpy: UIViewRepresentable {
             return abs(v.x) > abs(v.y) * 1.5
         }
         func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
+    }
+}
+
+
+/// 主机卡左边的字标方块:取名字的首字母(两个词取两个词的首字母),底色按名字稳定地挑一种沉稳的渐变 ——
+/// 列表里一眼能认出哪台是哪台,不用逐行读字。
+private struct MonogramTile: View {
+    let name: String
+    /// 正在连着的那台亮一点。
+    let lit: Bool
+
+    private static let palette: [(Color, Color)] = [
+        (Color(red: 0.36, green: 0.52, blue: 0.95), Color(red: 0.24, green: 0.34, blue: 0.78)),   // 蓝
+        (Color(red: 0.30, green: 0.72, blue: 0.62), Color(red: 0.16, green: 0.50, blue: 0.46)),   // 青绿
+        (Color(red: 0.62, green: 0.48, blue: 0.92), Color(red: 0.43, green: 0.30, blue: 0.74)),   // 紫
+        (Color(red: 0.93, green: 0.58, blue: 0.36), Color(red: 0.76, green: 0.38, blue: 0.22)),   // 橙
+        (Color(red: 0.90, green: 0.45, blue: 0.58), Color(red: 0.70, green: 0.28, blue: 0.42)),   // 粉
+        (Color(red: 0.55, green: 0.70, blue: 0.35), Color(red: 0.36, green: 0.52, blue: 0.20)),   // 草绿
+    ]
+
+    private var letters: String {
+        let words = name.split(whereSeparator: { $0 == " " || $0 == "-" || $0 == "_" }).filter { $0.first?.isLetter == true }
+        if words.count >= 2 { return String(words.prefix(2).compactMap { $0.first }).uppercased() }
+        return String(name.prefix(2)).uppercased()
+    }
+
+    private var colors: (Color, Color) {
+        // 稳定的哈希(`hashValue` 每次启动都不同,不能用)。
+        var h: UInt64 = 0xcbf29ce484222325                      // FNV-1a
+        for b in name.utf8 { h = (h ^ UInt64(b)) &* 0x100000001b3 }
+        h ^= h >> 29; h = h &* 0xbf58476d1ce4e5b9; h ^= h >> 32   // 再混一次,相近的名字颜色也拉得开
+        return Self.palette[Int(h % UInt64(Self.palette.count))]
+    }
+
+    var body: some View {
+        let c = colors
+        Text(verbatim: letters)
+            .font(.system(size: 15, weight: .bold, design: .rounded))
+            .foregroundStyle(.white)
+            .frame(width: 38, height: 38)
+            .background(LinearGradient(colors: [c.0, c.1], startPoint: .topLeading, endPoint: .bottomTrailing),
+                        in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+            .saturation(lit ? 1.0 : 0.55)
+            .brightness(lit ? 0.0 : -0.08)
+            .accessibilityHidden(true)
     }
 }

@@ -181,11 +181,6 @@ struct RootView: View {
         sizeClass == .regular ? drawerOpen : (columns == .all || columns == .doubleColumn)
     }
 
-    /// 最近连过的几台(没有会话时的空页面里给快捷入口)。
-    private var recentHosts: [Host] {
-        Array(hosts.hosts.filter { $0.lastUsed != nil }.sorted { ($0.lastUsed ?? .distantPast) > ($1.lastUsed ?? .distantPast) }.prefix(3))
-    }
-
     /// 正在连着的会话还没连上(连接中 / 等确认主机密钥)。
     private var activeConnecting: Bool {
         switch active?.state {
@@ -316,7 +311,7 @@ struct RootView: View {
                 TerminalScreen(model: active, onBack: { compactColumn = .sidebar }, onClose: close)
                     .id(active.id)
             } else {
-                EmptySessionView(recents: recentHosts, onConnect: open)
+                EmptySessionView()
             }
         }
     }
@@ -332,7 +327,7 @@ struct RootView: View {
                         .id(active.id)
                         .transition(.opacity)
                 } else {
-                    EmptySessionView(recents: recentHosts, onConnect: open)
+                    EmptySessionView()
                         .transition(.opacity)
                 }
             }
@@ -478,7 +473,6 @@ struct RootView: View {
             return
         }
         active?.disconnect()
-        hosts.touch(host)
         let model = TerminalModel(host: host, credentials: hosts.credentials(for: host), knownKey: hosts.knownKey(host))
         compactColumn = .detail
         if sizeClass == .regular {
