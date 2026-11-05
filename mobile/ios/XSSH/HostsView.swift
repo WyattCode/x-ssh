@@ -12,6 +12,8 @@ struct HostsView: View {
     var activeConnecting = false
     /// 详情那一侧的「新建主机」按钮通过它让这里弹出编辑页。
     @Binding var addRequested: Bool
+    /// 搜索框开着没有。内屏里搜索 / 新建按钮放在右边会话那一侧的竖条里,状态由外层持有。
+    @Binding var searching: Bool
     let onConnect: (Host) -> Void
     /// 在列表的空白处(不在任何一台主机卡片上、也不在标题区)用力往左一甩 = 收起列表。
     var onCollapse: (() -> Void)?
@@ -20,7 +22,6 @@ struct HostsView: View {
     @State private var isNew = false
     @State private var pendingDelete: Host?
     @State private var query = ""
-    @State private var searching = false
     @FocusState private var searchFocused: Bool
     /// 列表卡片的实际左边缘和宽度(量出来的,不是估的):搜索框按它对齐。
     @State private var cardX: CGFloat?
@@ -105,13 +106,13 @@ struct HostsView: View {
         }
         .animation(.smooth(duration: 0.25), value: searching)
         .coordinateSpace(name: "hostsRoot")
-        // 只有从空白处开始的用力左甩才收起列表:滑主机卡片本身(删除 / 编辑)、标题区、会话内容都不算。
-        .simultaneousGesture(DragGesture(minimumDistance: 40, coordinateSpace: .named("hostsRoot")).onEnded { v in
-            guard splitLayout, onCollapse != nil else { return }
+        // 只有从空白处(最后一张卡片下面)开始的向左滑才收起列表:滑主机卡片本身(删除 / 编辑)、标题区、会话内容都不算。
+        // 不要求速度:慢慢往左滑一段(够长、基本是横着的)就收。
+        .simultaneousGesture(DragGesture(minimumDistance: 24, coordinateSpace: .named("hostsRoot")).onEnded { v in
+            guard splitLayout, let onCollapse else { return }
             guard v.startLocation.y > lastRowBottom + 8 else { return }
-            if v.translation.width < -140, abs(v.translation.height) < 120, v.predictedEndTranslation.width < -400 {
-                onCollapse?()
-            }
+            guard v.translation.width < -60, abs(v.translation.height) < abs(v.translation.width) * 0.6 else { return }
+            onCollapse()
         })        // 把排版变化告诉开屏:稳定之后开屏才淡出,过渡中间不会再有重排。
         .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.trailing } action: { gate.touch(trailingInset: $0) }
         .onGeometryChange(for: CGSize.self) { $0.size } action: { listWidth = $0.width; gate.touch(trailingInset: 0) }
@@ -128,14 +129,17 @@ struct HostsView: View {
                 BrandLockup(height: 19)
             }
             .sharedBackgroundVisibility(.hidden)
-            ToolbarItem(placement: .bottomBar) {
-                Button(searching ? "Close Search" : "Search", systemImage: searching ? "xmark" : "magnifyingglass") {
-                    searching.toggle()
-                    if searching { searchFocused = true } else { query = ""; searchFocused = false }
+            // 内屏(两栏)里搜索和新建都放在右边那一侧的竖条里(RootView 的详情栏),只放一份,不在左栏再放一份;
+            // 外屏(单栏)整个屏幕就是主机列表,按钮在它自己的竖条里。
+            if !splitLayout {
+                ToolbarItem(placement: .bottomBar) {
+                    Button(searching ? "Close Search" : "Search", systemImage: searching ? "xmark" : "magnifyingglass") {
+                        searching.toggle()
+                    }
                 }
-            }
-            ToolbarItem(placement: .bottomBar) {
-                Button("Add Host", systemImage: "plus") { startAdding() }
+                ToolbarItem(placement: .bottomBar) {
+                    Button("Add Host", systemImage: "plus") { startAdding() }
+                }
             }
         }
         #if DEBUG
@@ -147,6 +151,9 @@ struct HostsView: View {
                     let host = store.hosts.first(where: { $0.displayName == name }) { startEditing(host) }
         }
         #endif
+        .onChange(of: searching) { _, on in
+            if on { searchFocused = true } else { query = ""; searchFocused = false }
+        }
         .onChange(of: addRequested) { _, requested in
             if requested { addRequested = false; startAdding() }
         }
@@ -177,17 +184,21 @@ struct HostsView: View {
             }
             Spacer(minLength: 0)
             if host.id == activeID {
-                Group {
+                // 转圈完全消失之后绿点才出现,两个不能叠在一起:转圈 0.18 秒淡出,绿点等 0.2 秒再淡入。
+                ZStack {
                     if activeConnecting {
                         ProgressView().controlSize(.small)
                             .accessibilityLabel(Text("Connecting…"))
+                            .transition(.opacity.animation(.easeOut(duration: 0.18)))
                     } else {
                         Label("Running", systemImage: "circle.fill")
                             .labelStyle(.iconOnly).foregroundStyle(.green).font(.caption2)
                             .accessibilityLabel(Text("Running"))
+                            .transition(.asymmetric(insertion: .opacity.animation(.easeIn(duration: 0.2).delay(0.2)),
+                                                    removal: .opacity.animation(.easeOut(duration: 0.1))))
                     }
                 }
-                .transition(.opacity)
+                .frame(width: 20, height: 20)
             }
         }
         .animation(.easeOut(duration: 0.2), value: activeConnecting)

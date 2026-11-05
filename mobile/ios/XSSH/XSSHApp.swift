@@ -104,6 +104,7 @@ struct RootView: View {
     @Environment(FoldState.self) private var fold
     @State private var active: TerminalModel?
     @State private var addHostRequested = false
+    @State private var searching = false
     @State private var containerSize: CGSize = .zero
     @State private var columns: NavigationSplitViewVisibility = .automatic
     @State private var compactColumn: NavigationSplitViewColumn = .sidebar
@@ -153,6 +154,11 @@ struct RootView: View {
     /// 只认 `.all` 的话,把手、收起手势都会在系统改写之后失效。
     private var listVisible: Bool { columns == .all || columns == .doubleColumn }
 
+    /// 内屏(两栏)里右边竖条放「搜索 / 新建主机」;外屏(单栏)由主机列表自己的竖条放。
+    private var hostActions: HostActions? {
+        sizeClass == .regular ? HostActions(searching: $searching, add: { addHostRequested = true }) : nil
+    }
+
     /// 正在连着的会话还没连上(连接中 / 等确认主机密钥)。
     private var activeConnecting: Bool {
         switch active?.state {
@@ -161,7 +167,13 @@ struct RootView: View {
         }
     }
 
-    /// 显示把手,两秒没人碰就慢慢淡出(开屏盖着时第一次多等一会儿,不然用户还没看到就没了)。
+    /// App 启动的时刻。启动后头 3.5 秒里的把手不淡出(开屏盖着,不然用户还没看到它就没了)。
+    private static let launchTime = Date()
+
+    /// 把手(列表展开时是分界线上的竖条,收起时是左边缘的小条)的显示逻辑,只有一条规则:
+    /// **有「该让用户看到它」的事情发生就显示,两秒后没人再动就淡出。** 这些事情是:
+    /// ① 列表展开 / 收起了(启动、折叠屏展开、半折、转屏、点系统按钮、从边缘拉出来);
+    /// ② 姿态 / 窗口尺寸变了;③ 手指碰了会话区域(列表展开时)或屏幕(列表收起时);④ 碰 / 滑把手本身。
     private func pokeHandle() {
         pokeClock.last = Date()
         if !handleShown { handleShown = true }
@@ -180,6 +192,7 @@ struct RootView: View {
                         .onChange(of: layoutKey(geo.size), initial: true) { _, _ in
                             containerSize = geo.size
                             updateColumns(geo.size)
+                            pokeHandle()
                         }
                         // 宽高比没变但宽度变了(半折的一半宽度要跟着走)也要更新。
                         .onChange(of: geo.size) { _, size in containerSize = size }
@@ -208,19 +221,27 @@ struct RootView: View {
     private var split: some View {
         NavigationSplitView(columnVisibility: $columns, preferredCompactColumn: $compactColumn) {
             HostsView(splitLayout: sizeClass == .regular, activeID: active.flatMap { $0.isEnded ? nil : $0.host.id },
-                      activeConnecting: activeConnecting, addRequested: $addHostRequested, onConnect: open,
+                      activeConnecting: activeConnecting, addRequested: $addHostRequested, searching: $searching, onConnect: open,
                       onCollapse: { withAnimation(.smooth(duration: 0.3)) { columns = .detailOnly } })
                 .navigationSplitViewColumnWidth(min: shownSidebarWidth, ideal: shownSidebarWidth, max: shownSidebarWidth)
         } detail: {
             if let active {
-                TerminalScreen(model: active, onBack: { compactColumn = .sidebar; columns = .all }, onClose: close)
+                TerminalScreen(model: active, onBack: { compactColumn = .sidebar; columns = .all }, onClose: close,
+                               hostActions: hostActions)
                     .id(active.id)
             } else {
                 EmptySessionView(showHosts: listVisible ? nil : { columns = .all })
-                    // 没会话时右侧竖条也要有按钮:内屏上主机列表在左边的侧栏里,详情这一侧的竖条放「新建主机」。
+                    // 没会话时右侧竖条放「搜索 / 新建主机」(内屏只放这一份,左栏里不再有)。
                     .toolbar {
-                        ToolbarItem(placement: .bottomBar) {
-                            Button("Add Host", systemImage: "plus") { addHostRequested = true }
+                        if let hostActions {
+                            ToolbarItem(placement: .bottomBar) {
+                                Button(searching ? "Close Search" : "Search", systemImage: searching ? "xmark" : "magnifyingglass") {
+                                    hostActions.searching.wrappedValue.toggle()
+                                }
+                            }
+                            ToolbarItem(placement: .bottomBar) {
+                                Button("Add Host", systemImage: "plus", action: hostActions.add)
+                            }
                         }
                     }
             }
@@ -252,14 +273,15 @@ struct RootView: View {
         // 列表被收起时,屏幕左边缘留一个淡淡的小把手:点一下或往右拖就把列表拉出来(不然只有左上角的系统按钮,看不出来能拉)。
         .overlay(alignment: .leading) {
             if sizeClass == .regular, columns == .detailOnly {
-                EdgeRevealHandle { withAnimation(.smooth(duration: 0.3)) { columns = .all } }
+                EdgeRevealHandle(visible: handleShown) { withAnimation(.smooth(duration: 0.3)) { columns = .all } }
                     .ignoresSafeArea(.keyboard)
             }
         }
         // 有人在会话区域(分界线右边)碰 / 滑,把手重新显示。UIKit 手势识别器只旁听触摸,不影响终端自己的手势。
         .background {
             TouchSpy { x in
-                guard sizeClass == .regular, listVisible, x > sidebarWidth else { return }
+                // 列表展开时只有碰会话区域(分界线右边)才算;列表收起时碰屏幕任何地方都让左边缘的小把手出来。
+                guard sizeClass == .regular, !listVisible || x > sidebarWidth else { return }
                 if !handleShown || Date().timeIntervalSince(pokeClock.last) > 0.5 { pokeHandle() }
             }
             .frame(width: 0, height: 0)
@@ -272,9 +294,17 @@ struct RootView: View {
         .onAppear { shownSidebarWidth = effectiveSidebarWidth }
         .onChange(of: containerSize) { _, _ in syncSidebarWidth(animated: false) }
         .task(id: handleToken) {
-            try? await Task.sleep(for: .seconds(handleToken == 0 ? 3.5 : 2))
+            let launchRemaining = 3.5 - Date().timeIntervalSince(Self.launchTime)
+            try? await Task.sleep(for: .seconds(max(2.0, launchRemaining)))
             if !Task.isCancelled { handleShown = false }
         }
+        // 列表展开 ↔ 收起、姿态 / 尺寸变化:都让把手出来一下(以前只有碰才出来,折叠屏展开后它是不出现的)。
+        .onChange(of: listVisible) { _, _ in if sizeClass == .regular { pokeHandle() } }
+        // 从右边竖条点搜索:搜索框在左栏里,列表收起着的话先拉出来。
+        .onChange(of: searching) { _, on in if on, sizeClass == .regular, !listVisible { columns = .all } }
+        .onChange(of: sizeClass) { _, _ in pokeHandle() }
+        .onChange(of: halfFolded) { _, _ in pokeHandle() }
+        .onAppear { pokeHandle() }
         #if DEBUG
         .overlay { SeamOutline() }
         .task { await autoOpenFromLaunchArguments() }
@@ -315,16 +345,24 @@ struct RootView: View {
     }
 }
 
-/// 列表收起后贴在屏幕左边缘的小把手。
+/// 列表收起后贴在屏幕左边缘的小把手:和分界线上的把手同一套显示逻辑(出现、两秒后淡出);
+/// 淡出后触摸区域还在(几乎透明的矩形撑着),点一下 / 往右拖照样拉得出列表。
 struct EdgeRevealHandle: View {
+    let visible: Bool
     let onReveal: () -> Void
 
     var body: some View {
-        Capsule()
-            .fill(Color.white.opacity(0.28))
-            .frame(width: 4, height: 40)
-            .padding(.leading, 4)
-            .frame(width: 24, height: 140, alignment: .leading)
+        Color.black.opacity(0.001)
+            .frame(width: 24, height: 140)
+            .overlay(alignment: .leading) {
+                Capsule()
+                    .fill(Color.white.opacity(0.28))
+                    .frame(width: 4, height: 40)
+                    .padding(.leading, 4)
+                    .opacity(visible ? 1 : 0)
+                    .animation(.easeOut(duration: visible ? 0.15 : 0.7), value: visible)
+                    .allowsHitTesting(false)
+            }
             .contentShape(Rectangle())
             .onTapGesture(perform: onReveal)
             .gesture(DragGesture(minimumDistance: 8).onEnded { v in

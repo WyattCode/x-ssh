@@ -15,6 +15,12 @@ struct TermMetrics: Equatable {
     }
 }
 
+/// 内屏里放在右边竖条的「搜索 / 新建主机」。
+struct HostActions {
+    var searching: Binding<Bool>
+    var add: () -> Void
+}
+
 struct TerminalScreen: View {
     @Environment(HostStore.self) private var store
     @Environment(\.displayScale) private var displayScale
@@ -26,6 +32,8 @@ struct TerminalScreen: View {
     /// 回到主机列表,会话保留(和「断开」不同)。
     let onBack: () -> Void
     let onClose: () -> Void
+    /// 内屏(两栏)里「搜索 / 新建主机」放在会话这一侧的竖条里(只放一份);nil = 不放(外屏 / 直板机)。
+    var hostActions: HostActions?
 
     @State private var pinchBase: Double?
     @State private var dragLast: CGFloat = 0
@@ -137,6 +145,19 @@ struct TerminalScreen: View {
                 }
                 .visibilityPriority(.low)
             }
+            if let hostActions {
+                ToolbarItem(placement: .bottomBar) {
+                    Button(hostActions.searching.wrappedValue ? "Close Search" : "Search",
+                           systemImage: hostActions.searching.wrappedValue ? "xmark" : "magnifyingglass") {
+                        hostActions.searching.wrappedValue.toggle()
+                    }
+                }
+                .visibilityPriority(.low)
+                ToolbarItem(placement: .bottomBar) {
+                    Button("Add Host", systemImage: "plus", action: hostActions.add)
+                }
+                .visibilityPriority(.low)
+            }
         }
     }
 
@@ -158,8 +179,8 @@ struct TerminalScreen: View {
             barButton("xmark", "Disconnect", role: .destructive, action: onClose)
         }
         .padding(4)
-        .background(.ultraThinMaterial, in: Capsule())
-        .overlay(Capsule().strokeBorder(.white.opacity(0.10), lineWidth: 0.5))
+        // 液态玻璃,可交互:按住时整条会像系统工具栏那样微微放大、随手指流动。
+        .glassEffect(.regular.interactive(), in: Capsule())
         .environment(\.colorScheme, .dark)
         .padding(.horizontal, 12).padding(.bottom, 8)
     }
