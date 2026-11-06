@@ -132,7 +132,9 @@ struct HostsView: View {
                 }
                 .padding(4)
                 .glassEffect(.regular.interactive(), in: Capsule())
-                .padding(.bottom, 12)
+                // 底边和右边按钮竖条同一条线(都离屏幕底 25pt);不吃底部安全区,不然会比竖条高一截。
+                .padding(.bottom, 25)
+                .ignoresSafeArea(.container, edges: .bottom)
             }
         }
         .safeAreaInset(edge: .top, spacing: 0) {
