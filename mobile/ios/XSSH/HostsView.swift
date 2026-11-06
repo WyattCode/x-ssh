@@ -44,6 +44,12 @@ struct HostsView: View {
     /// 刚断开的那台是谁、列表单元格缩短之后「抵消位移」是不是已经放掉(见 `collapseShift`)。
     @State private var lastFeatured: UUID?
     @State private var settled = true
+    /// 断开收场时虚线的「替身」:真正的虚线是 1pt 高的单元格,位移时会被单元格裁掉,所以收起的这一小段由一根替身线
+    /// 从原来的位置一直滑到新位置,真线让位,落定的瞬间无缝换回来 —— 眼睛看到的是同一根线连续地走。
+    @State private var ghostMoved = false
+    @State private var ghostDone = true
+    /// 连着那台还在的时候,每一行的底边(`rowBottoms` 的快照):单元格缩短之后 `rowBottoms` 已经变了,替身线要从缩短之前的位置出发。
+    @State private var frozenBottoms: [UUID: CGFloat] = [:]
     /// `❯` 的字形比字母的中线低约 1.3pt(量过),整体往上抬一点,和名字的中线对齐;随字号缩放。
     private var arrowLift: CGFloat { rowFont * 0.07 }
     @State private var editing: Host?
@@ -104,18 +110,22 @@ struct HostsView: View {
         }
         // 连上一台时,让列表滚到那张卡片(它在视野外也能看到自己选中了哪台)。
         .onChange(of: activeID) { old, id in
-            if let id { lastFeatured = id; settled = false }
+            if let id { lastFeatured = id; settled = false; ghostDone = false; ghostMoved = false }
             else if old != nil {
-                // 单元格高度已经一下子缩短了(列表做不到平滑改高度),下面的行在那一帧被抵消回原位(`collapseShift`);
-                // 等那一帧画出来,再用动画把抵消放掉 —— 下面的行和虚线是平滑地往上走,不是猛地一提。
+                // 单元格高度已经一下子缩短了(列表做不到平滑改高度):下面的行在那一帧被抵消回原位(`collapseShift`),
+                // 虚线由替身线顶上(`ghostSeparators`);等那一帧画出来,再用同一条曲线把它们一起滑到新位置。
                 Task { @MainActor in
                     try? await Task.sleep(for: .milliseconds(30))
-                    withAnimation(.smooth(duration: 0.2)) { settled = true }
+                    withAnimation(Self.collapseCurve) { settled = true; ghostMoved = true }
+                    try? await Task.sleep(for: .milliseconds(340))
+                    var t = Transaction(animation: nil); t.disablesAnimations = true
+                    withTransaction(t) { ghostDone = true }   // 替身线走到头了:真线在同一个位置,无缝换回来
                 }
             }
             guard let id else { return }
             withAnimation(.smooth(duration: 0.3)) { proxy.scrollTo(id) }
         }
+        .onChange(of: rowBottoms) { _, new in if activeID != nil { frozenBottoms = new } }
         // 触觉:开始连接给一下轻的,连上给一下「成功」。
         .sensoryFeedback(trigger: activeID) { _, new in new != nil ? .impact(weight: .light) : nil }
         .sensoryFeedback(trigger: connectedSince) { _, new in new != nil ? .success : nil }
@@ -195,6 +205,7 @@ struct HostsView: View {
         }
         .animation(.smooth(duration: 0.25), value: searching)
         .coordinateSpace(name: "hostsRoot")
+        .modifier(GhostOverlay(ghosts: ghostSeparators))
         // 列表本身要能上下滑、有滚动条(主机多了要翻)。
         .scrollIndicators(.visible)
         // 只有从空白处(最后一张卡片下面)开始的向左滑才收起列表:滑主机卡片本身(删除 / 编辑)、标题区、会话内容都不算。
@@ -372,7 +383,7 @@ struct HostsView: View {
                 .clipped()
                 .padding(.top, featured ? 8 : 0)
         }
-        .animation(.smooth(duration: 0.2), value: featured)
+        .animation(HostsView.collapseCurve, value: featured)
         .animation(.easeOut(duration: 0.2), value: activeConnecting)
         // 断开收场:箭头绿 → 灰、光标淡出、状态行换成「已断开」,各自 0.45s 平滑过渡。
         .animation(.smooth(duration: 0.45), value: activeClosing)
@@ -450,10 +461,37 @@ struct HostsView: View {
         return (separator ? index >= k : index > k) ? statusSlot : 0
     }
 
-    /// 连着那台下面(含它自己下面)的虚线:断开收场开始就淡出,下面的行落定后淡入回来(见 `SeparatorFade`)。
+    /// 断开收场的动画曲线:起步快、落地软(easeOutQuint 一类),0.3s —— 快,又不生硬。
+    static let collapseCurve = Animation.timingCurve(0.22, 1, 0.36, 1, duration: 0.3)
+
+    /// 现在是不是在「替身线」阶段(单元格已缩短、下面的行正在滑上去)。
+    private var ghostsOn: Bool { activeID == nil && !ghostDone && lastFeatured != nil && !frozenBottoms.isEmpty }
+
+    /// 替身线要画在哪几条虚线上:连着那台下面(含它自己下面)的每一条,有缩短之前位置的才画。
+    private var ghostIndices: [Int] {
+        let rows = shown
+        guard let id = lastFeatured, let k = rows.firstIndex(where: { $0.id == id }) else { return [] }
+        return (k..<max(k, rows.count - 1)).filter { frozenBottoms[rows[$0].id] != nil }
+    }
+
+    /// 真线在替身线顶上的这段时间里让位(不带动画,和替身线同一帧换手)。
     private func separatorHidden(index: Int, rows: [Host]) -> Bool {
-        guard let id = activeID ?? lastFeatured, let k = rows.firstIndex(where: { $0.id == id }), index >= k else { return false }
-        return activeID != nil ? activeClosing : !settled
+        ghostsOn && ghostIndices.contains(index)
+    }
+
+    @ViewBuilder private var ghostSeparators: some View {
+        if ghostsOn, let x = cardX, let w = cardWidth {
+            let rows = shown
+            ForEach(ghostIndices, id: \.self) { i in
+                let y = frozenBottoms[rows[i].id] ?? 0
+                DashedLine().stroke(Color.white.opacity(0.16), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                    .frame(width: w - rowInset * 2, height: 1)
+                    .offset(x: x + rowInset, y: y - (ghostMoved ? statusSlot : 0))
+                    .transition(.identity)   // 插入时不淡入:和真线同一帧换手,虚线一帧都不能断
+                    .animation(Self.collapseCurve, value: ghostMoved)
+            }
+            .allowsHitTesting(false)
+        }
     }
 
     /// 长按菜单要收掉的边:默认字号时外屏 7pt、内屏 13pt(内屏同样的行高下系统给的空隙比外屏大约 6pt),量过两边文字到菜单都约 42pt、虚线到菜单约 9pt。
@@ -986,15 +1024,14 @@ private enum HostColor {
 }
 
 
-/// 虚线是只有 1pt 高的单元格,偏移出去会被单元格裁掉,所以断开收场时它先慢慢淡出(趁「已断开」停着的那段),
-/// 下面的行平滑上移的时候它不在,落定之后再淡入回来。
+/// 替身线顶上的时候真线藏起来:不带动画(和替身线同一帧换手),看起来虚线一直在。
 private struct SeparatorFade: ViewModifier {
     let hidden: Bool
 
     func body(content: Content) -> some View {
         content
             .opacity(hidden ? 0 : 1)
-            .animation(hidden ? .easeOut(duration: 0.4) : .easeOut(duration: 0.2).delay(0.1), value: hidden)
+            .transaction { $0.animation = nil }
     }
 }
 
@@ -1006,6 +1043,22 @@ private struct CollapseShift: ViewModifier {
     func body(content: Content) -> some View {
         content
             .offset(y: y)
-            .animation(settled ? .smooth(duration: 0.2) : nil, value: y)
+            .animation(settled ? HostsView.collapseCurve : nil, value: y)
+    }
+}
+
+
+/// 替身线的覆盖层。坐标和行的 `hostsRoot` 一致(原点是整块视图的左上角):覆盖层要吃掉安全区,不然整体错位一个安全区顶边的高度。
+/// (单独成修饰器:`HostsView.body` 的修饰符链已经长到编译器类型推断快超时了。)
+private struct GhostOverlay<Ghosts: View>: ViewModifier {
+    let ghosts: Ghosts
+
+    func body(content: Content) -> some View {
+        content.overlay {
+            ZStack(alignment: .topLeading) { ghosts }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
+        }
     }
 }

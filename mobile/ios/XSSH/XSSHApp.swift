@@ -532,9 +532,9 @@ struct RootView: View {
                 withAnimation(.smooth(duration: 0.5)) { closing = true }
                 try? await Task.sleep(for: .milliseconds(650))
                 guard active?.id == leaving else { return }
-                withAnimation(.smooth(duration: 0.2)) { active = nil }
+                withAnimation(HostsView.collapseCurve) { active = nil }
                 // 收起的 0.2s 里状态行还显示着「✕ 已断开」,收完了才把标志复位(同时复位的话,这一行会在淡出的最后一刻闪回「✓ 已连接」)。
-                try? await Task.sleep(for: .milliseconds(350))
+                try? await Task.sleep(for: .milliseconds(400))
                 if active == nil { closing = false }
             }
         }
