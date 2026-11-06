@@ -117,7 +117,7 @@ struct HostsView: View {
                 Task { @MainActor in
                     try? await Task.sleep(for: .milliseconds(30))
                     withAnimation(Self.collapseCurve) { settled = true; ghostMoved = true }
-                    try? await Task.sleep(for: .milliseconds(340))
+                    try? await Task.sleep(for: .milliseconds(280))
                     var t = Transaction(animation: nil); t.disablesAnimations = true
                     withTransaction(t) { ghostDone = true }   // 替身线走到头了:真线在同一个位置,无缝换回来
                 }
@@ -386,7 +386,7 @@ struct HostsView: View {
         .animation(HostsView.collapseCurve, value: featured)
         .animation(.easeOut(duration: 0.2), value: activeConnecting)
         // 断开收场:箭头绿 → 灰、光标淡出、状态行换成「已断开」,各自 0.45s 平滑过渡。
-        .animation(.smooth(duration: 0.45), value: activeClosing)
+        .animation(.smooth(duration: 0.36), value: activeClosing)
         // 读屏:一行 = 主机名;连着的报状态(`❯`、光标、颜色点都只是装饰)。
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(verbatim: host.displayName))
@@ -420,7 +420,7 @@ struct HostsView: View {
             .lineLimit(1)
             .padding(.leading, promptWidth + Self.promptGap)
             // 旧的一行先淡出(0.15s),这一行晚一点点再淡入:两行字不会叠在一起。
-            .transition(.opacity.animation(.easeOut(duration: 0.3).delay(0.16)))
+            .transition(.opacity.animation(.easeOut(duration: 0.24).delay(0.12)))
         } else if activeConnecting {
             Text(activeNeedsConfirm ? "Waiting for confirmation" : "Connecting…").foregroundStyle(Color.white.opacity(activeNeedsConfirm ? 0.85 : 0.6))
                 .font(.system(size: smallFont, design: .monospaced))
@@ -443,7 +443,7 @@ struct HostsView: View {
             .lineLimit(1)
             // 和上面那行名字的起点对齐(❯ 的宽度 + 间距)。
             .padding(.leading, promptWidth + Self.promptGap)
-            .transition(.opacity.animation(.easeOut(duration: 0.15)))
+            .transition(.opacity.animation(.easeOut(duration: 0.12)))
         }
     }
 
@@ -462,7 +462,7 @@ struct HostsView: View {
     }
 
     /// 断开收场的动画曲线:起步快、落地软(easeOutQuint 一类),0.3s —— 快,又不生硬。
-    static let collapseCurve = Animation.timingCurve(0.22, 1, 0.36, 1, duration: 0.3)
+    static let collapseCurve = Animation.timingCurve(0.22, 1, 0.36, 1, duration: 0.24)
 
     /// 现在是不是在「替身线」阶段(单元格已缩短、下面的行正在滑上去)。
     private var ghostsOn: Bool { activeID == nil && !ghostDone && lastFeatured != nil && !frozenBottoms.isEmpty }
