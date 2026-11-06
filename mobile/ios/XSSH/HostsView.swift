@@ -457,11 +457,14 @@ private struct RowMenu: ViewModifier {
 
     /// 内外屏一样:不给自定义预览卡,让系统把被按的这一行本身浮起来,菜单跟在它下面靠左
     /// (给了预览卡,系统会把菜单对齐到卡片的右边缘 / 摆到右边,不是靠左)。
+    /// 外屏收 7pt;内屏同样的行高下系统给的空隙比外屏大约 6pt,多收 6pt,让内外屏菜单离文字的距离一样(文字到菜单约 42pt、虚线到菜单约 9pt)。
+    private var trim: CGFloat { split ? 13 : 7 }
+
     func body(content: Content) -> some View {
         // 系统按「被按那一块」的底边摆菜单。被按的一块默认含行下面的留白(约 21pt),菜单就离文字太远:
         // 内外屏都把这一块的底边往上收 7pt、顶边往下收 7pt(上下对称):量过,菜单离文字、离虚线的距离往上弹、往下弹一样大(文字到菜单约 120 显示像素,虚线到菜单约 22)。
         content
-            .contentShape(.contextMenuPreview, TrimmedRoundedRect(top: 7, bottom: 7, radius: 14))
+            .contentShape(.contextMenuPreview, TrimmedRoundedRect(top: trim, bottom: trim, radius: 14))
             .contextMenu { items }
     }
 
