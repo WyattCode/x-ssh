@@ -307,7 +307,7 @@ struct HostsView: View {
             .contentShape(Rectangle())
     }
 
-    /// 每台一行,就是一条要敲的命令:`❯ ssh 名字`(等宽字体,`ssh` 淡、名字亮),行尾一个这台的颜色点,行与行之间一条虚线。
+    /// 每台一行:`❯ 名字`(等宽字体,名字一行;不再写 `ssh` —— 每行都有太重复),行尾一个这台的颜色点,行与行之间一条虚线。
     /// 连着的那台:`❯` 变绿、名字后面一个闪烁的光标,下面多一行绿色的「✓ 已连接 · 时长」;连接中是「连接中…」,颜色点的位置转圈。
     /// 名字必须一行(太长截断)。不显示 IP / 端口。
     private func sshRow(_ host: Host, featured: Bool, last: Bool) -> some View {
@@ -318,8 +318,7 @@ struct HostsView: View {
                     .foregroundStyle(featured ? Color.green : Color.white.opacity(0.4))
                     .frame(width: promptWidth, alignment: .leading)
                     .padding(.trailing, Self.promptGap)
-                (Text(verbatim: "ssh ").foregroundStyle(Color.white.opacity(0.4))
-                    + Text(verbatim: host.displayName).foregroundStyle(Color.white.opacity(0.93)))
+                Text(verbatim: host.displayName).foregroundStyle(Color.white.opacity(0.93))
                     .lineLimit(1).truncationMode(.tail)
                 if featured && !activeConnecting { BlinkingCursor().padding(.leading, 8) }
                 Spacer(minLength: 8)
