@@ -459,9 +459,9 @@ private struct RowMenu: ViewModifier {
     /// (给了预览卡,系统会把菜单对齐到卡片的右边缘 / 摆到右边,不是靠左)。
     func body(content: Content) -> some View {
         // 系统按「被按那一块」的底边摆菜单。被按的一块默认含行下面的留白(约 21pt),菜单就离文字太远:
-        // 内外屏都把这一块的底边往上收 15pt(菜单到文字的距离比默认缩短约 30%)。
+        // 内外屏都把这一块的底边往上收 13pt(菜单往下弹时离文字近);顶边往下收 11pt(菜单往上弹时离文字近):量过,往上、往下弹的空隙都是约 30pt,一样大。
         content
-            .contentShape(.contextMenuPreview, BottomTrimmedRoundedRect(trim: 15, radius: 14))
+            .contentShape(.contextMenuPreview, TrimmedRoundedRect(top: 11, bottom: 13, radius: 14))
             .contextMenu { items }
     }
 
@@ -473,14 +473,17 @@ private struct RowMenu: ViewModifier {
     }
 }
 
-/// 底边往上收 `trim` 的圆角矩形(给长按菜单当「被按的那一块」,收掉下面的留白,菜单就离文字近一些)。
-private struct BottomTrimmedRoundedRect: Shape {
-    let trim: CGFloat
+/// 顶边往下收 `top`、底边往上收 `bottom` 的圆角矩形(给长按菜单当「被按的那一块」):
+/// 系统按这一块的底边摆往下弹的菜单、按顶边摆往上弹的菜单,收掉行里的留白,菜单就离文字近一些。
+private struct TrimmedRoundedRect: Shape {
+    let top: CGFloat
+    let bottom: CGFloat
     let radius: CGFloat
 
     func path(in rect: CGRect) -> Path {
         var r = rect
-        r.size.height = max(1, rect.height - trim)
+        r.origin.y += top
+        r.size.height = max(1, rect.height - top - bottom)
         return RoundedRectangle(cornerRadius: radius, style: .continuous).path(in: r)
     }
 }
