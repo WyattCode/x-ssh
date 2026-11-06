@@ -317,7 +317,7 @@ struct HostsView: View {
     /// 连着的那台:`❯` 变绿、名字后面一个闪烁的光标,下面多一行绿色的「✓ 已连接 · 时长」;连接中是「连接中…」,颜色点的位置转圈。
     /// 名字必须一行(太长截断)。不显示 IP / 端口。
     private func sshRow(_ host: Host, featured: Bool, last: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 0) {
             // 间距自己控制(HStack 间距为 0):名字和颜色点之间只留 8pt,长名字才不会被提前截断。
             HStack(alignment: .firstTextBaseline, spacing: 0) {
                 Text(verbatim: "❯")
@@ -346,13 +346,18 @@ struct HostsView: View {
                 Text(verbatim: hint)
                     .font(.system(size: smallFont, design: .monospaced)).foregroundStyle(Color.white.opacity(0.4))
                     .lineLimit(1).truncationMode(.middle)
+                    .padding(.top, 8)
                     .padding(.leading, promptWidth + Self.promptGap)
             }
-            if featured {
-                statusLine
-                    .transition(.opacity.animation(.easeOut(duration: 0.3)))
-            }
+            // 状态行一直在布局里,收起 = 高度和透明度一起平滑变到 0(不是直接从布局里拿掉):
+            // 拿掉的话列表单元格的高度瞬间缩短,名字被猛地顶上去,箭头走另一条动画、慢半拍追上来,看起来「闪跳一下」。
+            statusLine
+                .opacity(featured ? 1 : 0)
+                .frame(height: featured ? smallFont * 1.3 : 0, alignment: .top)
+                .clipped()
+                .padding(.top, featured ? 8 : 0)
         }
+        .animation(.smooth(duration: 0.45), value: featured)
         .animation(.easeOut(duration: 0.2), value: activeConnecting)
         // 断开收场:箭头绿 → 灰、光标淡出、状态行换成「已断开」,各自 0.45s 平滑过渡。
         .animation(.smooth(duration: 0.45), value: activeClosing)
@@ -361,6 +366,8 @@ struct HostsView: View {
         .accessibilityLabel(Text(verbatim: host.displayName))
         .accessibilityValue(featured ? (activeConnecting ? Text("Connecting…") : Text("Connected")) : Text(verbatim: ""))
         .padding(.horizontal, 0).padding(.vertical, rowPad)   // 每行的 `❯` 和标题的 `$`、logo、虚线起点同一条竖线
+        // 内容贴着单元格顶边(不居中):状态行收起时单元格高度是一下子变的、内容是慢慢缩的,居中的话名字会先被顶上去再落回来。
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     /// 搜索时,名字没匹配上、是地址 / 用户名匹配上的,在名字下面小字写出匹配到的那一项(平时列表不显示地址)。
