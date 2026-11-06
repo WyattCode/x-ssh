@@ -14,6 +14,14 @@ import { readFile } from 'node:fs/promises'
 import { homedir, hostname } from 'node:os'
 import { join } from 'node:path'
 
+/** True for an address a *local* X server can be reached on. A remote DISPLAY
+ *  (`otherhost:0`) must not trigger a local spawn, and its cookie must not be
+ *  replaced with this machine's. */
+export function isLoopbackHost(host: string): boolean {
+  const h = host.trim().toLowerCase()
+  return h === '' || h === 'localhost' || h === '127.0.0.1' || h === '::1' || h === '[::1]'
+}
+
 /** Where the local X server listens. $DISPLAY (`:1`, `:10.0`, `host:2`) picks
  *  the display; X servers on Windows (VcXsrv/Xming) listen on 6000 + N. */
 export function localX11Target(env: NodeJS.ProcessEnv = process.env): { host: string; port: number; display: string } {

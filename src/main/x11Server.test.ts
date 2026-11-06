@@ -12,7 +12,7 @@ import {
   resetXServerState,
   xServerCandidates
 } from './x11Server'
-import { parseXauthority } from './x11'
+import { parseXauthority, readLocalX11Cookie } from './x11'
 
 let dir: string
 
@@ -139,8 +139,15 @@ describe('ensureXauthority', () => {
   it('does not hand a non-xauth file to the X server as -auth', async () => {
     const p = join(dir, 'existing')
     await writeFile(p, 'keep me')
-    expect(await ensureXauthority('0', { XAUTHORITY: p })).toBeUndefined()
+    const auth = await ensureXauthority('0', { XAUTHORITY: p })
     expect(await readFile(p, 'utf8')).toBe('keep me')
+    // It must still hand the server a usable auth file: starting without
+    // `-auth` falls back to host-based access, which can be `-ac` in practice.
+    expect(auth).toBeTruthy()
+    expect(auth).not.toBe(p)
+    expect(parseXauthority(await readFile(auth!))).toBeTruthy()
+    expect(await readLocalX11Cookie('0', { XAUTHORITY: auth })).toBeTruthy()
+    await rm(auth!, { force: true })
   })
 })
 

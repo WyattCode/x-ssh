@@ -2743,7 +2743,9 @@ app.whenReady().then(async () => {
     try {
       if (!findXServer()) return
       const t = localX11Target()
-      void ensureLocalXServer({ host: t.host, port: t.port, display: t.display })
+      // Warm the server we would actually spawn, i.e. on loopback: $DISPLAY
+      // may name another host, which this machine cannot start a server for.
+      void ensureLocalXServer({ host: '127.0.0.1', port: t.port, display: t.display })
     } catch {
       /* X server discovery must never delay startup. */
     }

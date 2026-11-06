@@ -13,9 +13,9 @@
  */
 import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { readFile, writeFile } from 'node:fs/promises'
+import { readFile, rename, writeFile } from 'node:fs/promises'
 import { createConnection } from 'node:net'
-import { homedir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { parseXauthority, readLocalX11Cookie } from './x11'
@@ -113,19 +113,33 @@ export async function ensureXauthority(
   const path = env.XAUTHORITY || join(homedir(), '.Xauthority')
   try {
     if (!existsSync(path)) {
-      await writeFile(path, xauthEntry(randomBytes(16), display))
+      await writeAtomic(path, xauthEntry(randomBytes(16), display))
       return path
     }
     const raw = await readFile(path)
     if (await readLocalX11Cookie(display, env)) return path
-    // A file we cannot parse may belong to a completely different tool. Do not
-    // append to it, and do not hand it to `xauth` as `-auth`.
-    if (!parseXauthority(raw)) return undefined
-    await writeFile(path, Buffer.concat([raw, xauthEntry(randomBytes(16), display)]))
+    // A file we cannot parse belongs to another tool (or is corrupt): never
+    // append to or rewrite it. Give the server its own file instead of starting
+    // it without `-auth`, which would fall back to host-based access — often
+    // equivalent to `-ac`.
+    if (!parseXauthority(raw)) {
+      const alt = join(tmpdir(), `x-ssh-xauth-${process.pid}-${display}`)
+      await writeAtomic(alt, xauthEntry(randomBytes(16), display))
+      return alt
+    }
+    await writeAtomic(path, Buffer.concat([raw, xauthEntry(randomBytes(16), display)]))
     return path
   } catch {
     return undefined
   }
+}
+
+/** Temp file + rename: a crash or a second X-SSH instance never observes a
+ *  half-written auth file, and the user's existing entries are never truncated. */
+async function writeAtomic(path: string, data: Buffer): Promise<void> {
+  const tmp = `${path}.${process.pid}.${Date.now()}.tmp`
+  await writeFile(tmp, data, { mode: 0o600 })
+  await rename(tmp, path)
 }
 
 let child: ChildProcess | undefined

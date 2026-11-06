@@ -17,6 +17,17 @@
 const DEL = '\x7f'
 const CONTROL = /[\x00-\x1f\x7f]/
 
+/**
+ * Never erase more than this many characters for one correction.
+ *
+ * A voice IME can rewrite text it committed long ago (a punctuation fix at the
+ * start of a paragraph). Mirroring that faithfully means one DEL per character
+ * *of the whole paragraph* — hundreds of backspaces in a single keystroke, which
+ * a line editor handles badly and a TUI can reject outright. Past this window we
+ * accept a duplicated tail: a wrong-but-bounded line beats a DEL flood.
+ */
+export const IME_MAX_UNDO = 512
+
 /** Printable text only — no C0 controls, DEL or escape sequences. */
 export const isPlainText = (data: string): boolean => data !== '' && !CONTROL.test(data)
 
@@ -56,6 +67,17 @@ export interface ImeMirror {
 const imeEvent = (type: string | undefined): boolean =>
   type === undefined || type === 'input' || type === 'compositionend'
 
+/** Pre-mirror behaviour, behind `localStorage['xssh.imeMirror'] = '0'`: useful
+ *  for A/B diagnosis on a machine where a specific IME misbehaves. */
+export function createPassthroughMirror(): ImeMirror {
+  return {
+    input: (data) => data,
+    sync: () => '',
+    adopt: () => undefined,
+    clear: () => undefined
+  }
+}
+
 export function createImeMirror(): ImeMirror {
   /** Textarea text already reflected on the remote (or deliberately left alone). */
   let synced = ''
@@ -73,15 +95,18 @@ export function createImeMirror(): ImeMirror {
     let p = 0
     while (p < a.length && p < b.length && a[p] === b[p]) p++
     let out: string
-    if (p >= floor) {
-      out = DEL.repeat(a.length - p) + b.slice(p).join('')
+    const erase = a.length - p
+    if (p >= floor && erase <= IME_MAX_UNDO) {
+      out = DEL.repeat(erase) + b.slice(p).join('')
     } else {
       // The change reaches into text we must not touch (it predates a manual
-      // edit, or never went to the remote at all). Erase only what we own and
-      // send the rest as new — a possible duplicate, never a wrong deletion.
-      // From here the remote line ends with b[p..] only; b[0..p) is still the
-      // untouched text, so it stays protected.
-      out = DEL.repeat(Math.max(0, a.length - floor)) + b.slice(p).join('')
+      // edit, or never went to the remote at all), or undoing it would flood
+      // the remote. Erase at most what we own and within the window, then send
+      // the rest as new — a possible duplicate, never a wrong deletion and
+      // never an unbounded DEL burst.
+      out =
+        DEL.repeat(Math.min(Math.max(0, a.length - floor), IME_MAX_UNDO)) +
+        b.slice(p).join('')
       floor = p
     }
     synced = next

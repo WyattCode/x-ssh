@@ -25,7 +25,7 @@ import { pasteLineCount } from '../lib/pasteLines'
 import { isMac } from '../composables/platform'
 
 const modKey = isMac ? '⌘' : 'Ctrl'
-import { createImeMirror, isPlainText } from '../lib/imeSync'
+import { createImeMirror, createPassthroughMirror, isPlainText } from '../lib/imeSync'
 import Icon from './Icon.vue'
 
 const props = withDefaults(
@@ -568,29 +568,79 @@ onMounted(() => {
   // straight from xterm — see lib/imeSync. The textarea is the source of
   // truth; the flags below say which part of it is settled.
   const ta = term.textarea
-  const ime = createImeMirror()
-  const send = (data: string): void => window.api.ssh.input(props.sessionId, data)
+  // Escape hatch for A/B diagnosis on a machine with a misbehaving IME:
+  //   localStorage['xssh.imeMirror'] = '0'  (then reload the window)
+  // sends xterm's bytes verbatim, i.e. the pre-mirror behaviour.
+  const useMirror = ((): boolean => {
+    try {
+      return window.localStorage.getItem('xssh.imeMirror') !== '0'
+    } catch {
+      return true
+    }
+  })()
+  const ime = useMirror ? createImeMirror() : createPassthroughMirror()
+  /** Large payloads are split. One multi-kilobyte write lands in the main
+   *  process stream buffer as a single burst; cutting it keeps memory bounded
+   *  and lets the remote shell read it in order. Cut on a code-point boundary
+   *  so an emoji is never split across two writes. */
+  const SEND_CHUNK = 8192
+  const send = (data: string): void => {
+    if (data.length <= SEND_CHUNK) {
+      window.api.ssh.input(props.sessionId, data)
+      return
+    }
+    let i = 0
+    while (i < data.length) {
+      let end = Math.min(i + SEND_CHUNK, data.length)
+      const unit = data.charCodeAt(end - 1)
+      if (end < data.length && unit >= 0xd800 && unit <= 0xdbff) end--
+      window.api.ssh.input(props.sessionId, data.slice(i, end))
+      i = Math.max(end, i + 1)
+    }
+  }
   let composing = false
   let compStart = 0
+  /** A commit whose deferred flush was skipped because the next composition
+   *  started within the same tick — sent before that new draft is mirrored. */
+  let pendingCommit: string | null = null
   /** A keystroke's own character was just sent; its input event (if the
    *  browser still inserts it) must not be sent a second time. */
   let keyTextSent = false
   if (ta) {
     const signal = imeAbort.signal
+    const flushCommit = (snapshot: string): void => {
+      const out = ime.sync(snapshot)
+      if (out) send(out)
+    }
     ta.addEventListener('compositionstart', () => {
       composing = true
       // A reconversion starts at the replaced range, not at the end.
       compStart = ta.selectionStart ?? ta.value.length
+      // The textarea already holds the new draft, so the previous commit's
+      // deferred flush would see `composing === true` and be dropped. Send it
+      // against the snapshot taken at its own compositionend instead.
+      if (pendingCommit !== null) {
+        const snapshot = pendingCommit
+        pendingCommit = null
+        flushCommit(snapshot)
+      }
     }, { signal })
     // Catch up after each commit in case xterm emitted nothing for it (see
     // ImeMirror.sync). Deferred so xterm's own timer-based send runs first;
     // whatever it mirrors makes this a no-op.
     ta.addEventListener('compositionend', () => {
       composing = false
+      const snapshot = ta.value
       setTimeout(() => {
-        if (composing || signal.aborted) return
-        const out = ime.sync(ta.value)
-        if (out) send(out)
+        if (signal.aborted) return
+        if (composing) {
+          // A new composition began before this timer ran. Keep the committed
+          // text for compositionstart to flush: dropping it lost every commit
+          // that happened to be followed by another one in the same tick.
+          pendingCommit = snapshot
+          return
+        }
+        flushCommit(snapshot)
       }, 0)
     }, { signal })
     // Same for text committed without a composition (voice input). xterm's
