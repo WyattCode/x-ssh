@@ -250,12 +250,15 @@ struct HostsView: View {
     /// 点一下 = 连接,长按 = 系统的液态玻璃上下文菜单(大圆角、图标在左、组与组之间有分隔线,和系统应用一致)。
     /// 窄屏(外屏)带一张浮起的预览卡;宽屏(内屏)不给自定义预览,让系统把被按的这一行本身浮起来,菜单跟在它下面、靠左。
     private func rowControl(_ host: Host, featured: Bool, last: Bool) -> some View {
+        // 左右留白(`rowInset`)放在按钮和菜单的外面:长按浮起的只是文字那一块,不带留白,
+        // 不然系统在宽屏侧栏里把整行(含留白)往右平移,行尾的圆点就冲出了侧栏。
         Button { onConnect(host) } label: { row(host, featured: featured, last: last) }
             .modifier(RowMenu(split: splitLayout, font: rowFont,
                               onConnect: { onConnect(host) },
                               onEdit: { startEditing(host) },
                               onDelete: { pendingDelete = host },
                               host: host))
+            .padding(.horizontal, rowInset)
     }
 
     private func hostRow(_ host: Host, featured: Bool, last: Bool) -> some View {
@@ -292,7 +295,6 @@ struct HostsView: View {
         sshRow(host, featured: featured, last: last)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
-            .padding(.horizontal, rowInset)
     }
 
     /// 每台一行,就是一条要敲的命令:`❯ ssh 名字`(等宽字体,`ssh` 淡、名字亮),行尾一个这台的颜色点,行与行之间一条虚线。
