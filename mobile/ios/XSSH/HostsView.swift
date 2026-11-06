@@ -37,8 +37,6 @@ struct HostsView: View {
     private var rowPad: CGFloat { min(rowPadBase, 28) }
     @ScaledMetric(relativeTo: .title) private var titleFont: CGFloat = 26
     private var promptWidth: CGFloat { rowFont * 14 / 19 }
-    /// 内屏长按弹出的菜单属于哪一台(系统的上下文菜单在宽屏下会摆到侧栏右边的会话区里,所以内屏用锚在这一行右侧的 popover)。
-    @State private var menuHostID: UUID?
     @State private var editing: Host?
     @State private var isNew = false
     @State private var pendingDelete: Host?
@@ -249,63 +247,15 @@ struct HostsView: View {
     }
 
     /// 一张主机卡(带点击、长按菜单、左滑操作、卡片背景):单独成函数,List 里的表达式才不会复杂到编译器类型推断超时。
-    /// 点一下 = 连接,长按 = 菜单。窄屏(外屏)用系统上下文菜单(带预览卡);宽屏(内屏)用 `Menu`:轻点是主操作(连接),长按弹出液态玻璃菜单。
-    @ViewBuilder private func rowControl(_ host: Host, featured: Bool, last: Bool) -> some View {
-        if splitLayout {
-            // 菜单开着时(长按刚弹出、手指还没松)松手不算「点一下」,不然会误触连接。
-            Button { if menuHostID == nil { onConnect(host) } } label: { row(host, featured: featured, last: last) }
-                .simultaneousGesture(LongPressGesture(minimumDuration: 0.4).onEnded { _ in
-                    withAnimation(.snappy(duration: 0.2)) { menuHostID = host.id }
-                })
-                // 内屏:popover(系统液态玻璃,无箭头)弹在这一行下面、右边缘和对齐线对齐,不会伸到右边的会话区。
-                .overlay(alignment: .bottomTrailing) {
-                    // 没有箭头的 popover 系统会居中摆在锚点上:锚点区域(236 × 152)用负的下边距放在这一行下面,
-                    // 菜单高约 144pt,居中 → 从行底下约 4pt 起;右边和文字的对齐线对齐。(不能用 offset:系统取的是布局位置。)
-                    Color.clear.frame(width: 236, height: 152).allowsHitTesting(false)
-                        .popover(isPresented: Binding(get: { menuHostID == host.id },
-                                                      set: { if !$0 && menuHostID == host.id { menuHostID = nil } }),
-                                 arrowEdge: .top) { popoverMenu(host) }
-                        .padding(.bottom, -152)
-                        .padding(.trailing, rowInset)
-                }
-        } else {
-            Button { onConnect(host) } label: { row(host, featured: featured, last: last) }
-                .modifier(RowMenu(font: rowFont,
-                                  onConnect: { onConnect(host) },
-                                  onEdit: { startEditing(host) },
-                                  onDelete: { pendingDelete = host },
-                                  host: host))
-        }
-    }
-
-    private func popoverMenu(_ host: Host) -> some View {
-        VStack(spacing: 0) {
-            popoverItem("Connect", "play") { onConnect(host) }
-            popoverItem("Edit", "pencil") { startEditing(host) }
-            popoverItem("Delete", "trash", destructive: true) { pendingDelete = host }
-        }
-        .frame(width: 236)
-        .background(PopoverArrowHider())   // 不要箭头(尖尖)
-        .presentationCompactAdaptation(.popover)
-    }
-
-    private func popoverItem(_ title: LocalizedStringKey, _ icon: String, destructive: Bool = false,
-                             _ action: @escaping () -> Void) -> some View {
-        Button {
-            menuHostID = nil
-            action()
-        } label: {
-            HStack(spacing: 14) {
-                Image(systemName: icon).frame(width: 22)
-                Text(title)
-                Spacer(minLength: 0)
-            }
-            .font(.system(size: 17))
-            .foregroundStyle(destructive ? Color.red : Color.primary)
-            .padding(.horizontal, 16).frame(height: 48)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
+    /// 点一下 = 连接,长按 = 系统的液态玻璃上下文菜单(大圆角、图标在左、组与组之间有分隔线,和系统应用一致)。
+    /// 窄屏(外屏)带一张浮起的预览卡;宽屏(内屏)不给自定义预览,让系统把被按的这一行本身浮起来,菜单跟在它下面、靠左。
+    private func rowControl(_ host: Host, featured: Bool, last: Bool) -> some View {
+        Button { onConnect(host) } label: { row(host, featured: featured, last: last) }
+            .modifier(RowMenu(split: splitLayout, font: rowFont,
+                              onConnect: { onConnect(host) },
+                              onEdit: { startEditing(host) },
+                              onDelete: { pendingDelete = host },
+                              host: host))
     }
 
     private func hostRow(_ host: Host, featured: Bool, last: Bool) -> some View {
@@ -483,53 +433,45 @@ struct HostsView: View {
     private func startEditing(_ host: Host) { isNew = false; editing = host }
 }
 
-/// 外屏(窄)主机行的长按菜单:系统上下文菜单(带浮起的预览卡,系统摆在预览下面,位置没问题)。内屏另用 `Menu`(见 `HostsView.rowControl`)。
+/// 主机行的长按菜单:系统上下文菜单。三项分成两组(连接 | 编辑 / 删除),组间有分隔线;图标用主色(不跟随全局绿色强调色)。
 private struct RowMenu: ViewModifier {
+    let split: Bool
     let font: CGFloat
     let onConnect: () -> Void
     let onEdit: () -> Void
     let onDelete: () -> Void
     let host: Host
 
-    func body(content: Content) -> some View {
-        content
-            .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .contextMenu {
-                Button("Connect", systemImage: "play", action: onConnect)
-                Button("Edit", systemImage: "pencil", action: onEdit)
-                Button("Delete", systemImage: "trash", role: .destructive, action: onDelete)
-            } preview: {
-                // 行本身没有底:浮起来的预览单独给一张卡,不然是一条悬空的字。
-                HStack(spacing: 12) {
-                    Text(verbatim: "❯").foregroundStyle(Color.white.opacity(0.4))
-                    (Text(verbatim: "ssh ").foregroundStyle(Color.white.opacity(0.4)) + Text(verbatim: host.displayName))
-                        .lineLimit(1).truncationMode(.tail)
-                    Spacer(minLength: 12)
-                    Circle().fill(HostColor.pip(host.colorIndex)).frame(width: 9, height: 9)
+    @ViewBuilder func body(content: Content) -> some View {
+        if split {
+            content
+                .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .contextMenu { items }
+        } else {
+            content
+                .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .contextMenu { items } preview: {
+                    // 行本身没有底:浮起来的预览单独给一张卡,不然是一条悬空的字。
+                    HStack(spacing: 12) {
+                        Text(verbatim: "❯").foregroundStyle(Color.white.opacity(0.4))
+                        (Text(verbatim: "ssh ").foregroundStyle(Color.white.opacity(0.4)) + Text(verbatim: host.displayName))
+                            .lineLimit(1).truncationMode(.tail)
+                        Spacer(minLength: 12)
+                        Circle().fill(HostColor.pip(host.colorIndex)).frame(width: 9, height: 9)
+                    }
+                    .font(.system(size: font, design: .monospaced))
+                    .padding(.horizontal, 20).padding(.vertical, 22)
+                    .frame(width: 320)
+                    .background(Color.appSheetCard)
                 }
-                .font(.system(size: font, design: .monospaced))
-                .padding(.horizontal, 20).padding(.vertical, 22)
-                .frame(width: 320)
-                .background(Color.appSheetCard)
-            }
+        }
     }
-}
 
-/// 去掉 popover 的小箭头:SwiftUI 没有这个接口,在 popover 内容里放一个看不见的视图控制器,
-/// 它出现时找到外层的 `UIPopoverPresentationController`,把允许的箭头方向设成空。
-private struct PopoverArrowHider: UIViewControllerRepresentable {
-    func makeUIViewController(context: Context) -> Hider { Hider() }
-    func updateUIViewController(_ vc: Hider, context: Context) {}
-
-    final class Hider: UIViewController {
-        override func viewWillAppear(_ animated: Bool) {
-            super.viewWillAppear(animated)
-            popoverPresentationController?.permittedArrowDirections = []
-        }
-        override func viewDidLayoutSubviews() {
-            super.viewDidLayoutSubviews()
-            popoverPresentationController?.permittedArrowDirections = []
-        }
+    @ViewBuilder private var items: some View {
+        Button("Connect", systemImage: "play", action: onConnect).tint(.primary)
+        Divider()
+        Button("Edit", systemImage: "pencil", action: onEdit).tint(.primary)
+        Button("Delete", systemImage: "trash", role: .destructive, action: onDelete).tint(.red)
     }
 }
 
