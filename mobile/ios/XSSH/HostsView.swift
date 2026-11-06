@@ -65,7 +65,7 @@ struct HostsView: View {
             if !store.hosts.isEmpty { Text("\(store.hosts.count)").font(.footnote).foregroundStyle(Color.white.opacity(0.45)) }
         }
         // 外屏:列表自带的左边距(约 20pt)正好和顶部 logo 的左边缘对齐,标题不再额外缩进;内屏标题和 logo 同样从 16 + 卡片边距起。
-        .padding(.horizontal, (splitLayout ? 16 : 0) + cardInset).padding(.top, splitLayout ? 2 : 6).padding(.bottom, 8)
+        .padding(.horizontal, rowInset).padding(.top, splitLayout ? 2 : 6).padding(.bottom, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .listRowBackground(Color.clear).listRowSeparator(.hidden).listRowInsets(EdgeInsets())
         // 读屏:「Hosts,5」,不念 `$` 符号。
@@ -144,7 +144,7 @@ struct HostsView: View {
                 if splitLayout {
                     BrandLockup(height: 19)
                         // 左边和下面的 `$ hosts` 标题对齐(同一个起点),不贴着屏幕圆角。
-                        .padding(.leading, 16 + cardInset).padding(.top, 38)
+                        .padding(.leading, rowInset).padding(.top, 38)
                         .frame(maxWidth: .infinity, alignment: .topLeading)
                         .frame(height: 57, alignment: .top)   // 上留白 38 + logo 19:框要装得下,不然 logo 溢出压到下面的搜索框
                 }
@@ -286,7 +286,7 @@ struct HostsView: View {
         sshRow(host, featured: featured, last: last)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
-            .padding(.horizontal, cardInset)
+            .padding(.horizontal, rowInset)
     }
 
     /// 每台一行,就是一条要敲的命令:`❯ ssh 名字`(等宽字体,`ssh` 淡、名字亮),行尾一个这台的颜色点,行与行之间一条虚线。
@@ -378,6 +378,9 @@ struct HostsView: View {
     /// 两栏时卡片宽 = 侧栏宽的 92%,左右各留 4%(参考图里卡片和分界线之间就是这么一条窄缝)。
     /// 按侧栏实际宽度算,拖动改宽后比例不变。列表自带的左右边距已去掉(见 `SplitListMargins`)。
     private var cardInset: CGFloat { splitLayout ? listWidth * 0.04 : 0 }
+    /// 内屏侧栏的左右对齐线:logo、`$ hosts`、每行虚线的起点都在这条线上(和外屏一致:外屏是列表自带的约 20pt 边距),
+    /// 每行的 `❯` 在它里面缩进 10pt;右边虚线的终点对称。外屏不用(0)。
+    private var rowInset: CGFloat { splitLayout ? 16 + cardInset : 0 }
 
     /// 搜索框也是一行命令:`❯ grep ▍输入`,没有圆角底,下面一条虚线;文字和列表行的 `❯` 对齐(同样的左右 10pt)。
     private var searchField: some View {
@@ -400,7 +403,7 @@ struct HostsView: View {
         }
         // 左右边缘和宽度都取自下面列表行的实际位置(靠竖条那一侧边距更小,固定边距会对不齐);
         // 还没有行(列表为空)时退回到系统的场景边距。
-        .modifier(MatchCard(x: cardX.map { $0 + (splitLayout ? cardInset : 0) }, width: cardWidth.map { $0 - (splitLayout ? cardInset * 2 : 0) }))
+        .modifier(MatchCard(x: cardX.map { $0 + rowInset }, width: cardWidth.map { $0 - rowInset * 2 }))
         .padding(.top, 10).padding(.bottom, 4)
     }
 
