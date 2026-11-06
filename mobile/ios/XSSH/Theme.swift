@@ -52,10 +52,10 @@ extension Color {
 }
 
 extension Text {
-    /// 名字里的空格收窄 `fraction`(默认 50%),按**眼睛看到的空隙**算:两个字母之间的空白 ≈ 空格字宽的 1.4 倍(量过:
+    /// 名字里的空格收窄 `fraction`(默认 30%),按**眼睛看到的空隙**算:两个字母之间的空白 ≈ 空格字宽的 1.4 倍(量过:
     /// 等宽字体 48px / 34.5px,系统标题字体 20px / 14px),所以每个空格后面收回字宽的 `fraction * 1.4`。
     /// 空格宽度按给定的字体量(随系统字号变),所以比例在任何字号下都一样。
-    static func narrowingSpaces(_ string: String, font: UIFont, by fraction: CGFloat = 0.5) -> Text {
+    static func narrowingSpaces(_ string: String, font: UIFont, by fraction: CGFloat = 0.3) -> Text {
         let cut = (" " as NSString).size(withAttributes: [.font: font]).width * fraction * 1.4
         let parts = string.split(separator: " ", omittingEmptySubsequences: false)
         var out = Text(verbatim: "")
