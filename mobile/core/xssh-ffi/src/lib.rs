@@ -632,6 +632,11 @@ impl Term {
         self.lock().scroll_offset() as u32
     }
 
+    /// 回滚历史一共有多少行(界面画滚动条:滑块大小 = 视口 / (视口 + 历史),位置由 `scroll_offset` 算)。
+    pub fn history_len(&self) -> u32 {
+        self.lock().history_len() as u32
+    }
+
     /// 是否处于备用屏(全屏 TUI)。
     pub fn alt_screen(&self) -> bool {
         self.lock().alt_screen()

@@ -2870,6 +2870,33 @@ M3.51 已有「用生物识别解锁」开关,连私钥密文(`lockedKeyData` / 
 
 **线程铁律**:Rust 的 `write` / `resize` / `disconnect` 是 `block_on`,`Backend` 用串行队列保序 —— **界面层一律只在 `Backend` 的串行队列里调,别挪回主线程**,否则会卡 UI 甚至串行化破坏。
 
+### iOS 近期踩过的坑(0.6.5 这一批,别再踩)
+
+- **左边缘右滑返回**:隐藏系统返回键后系统的边缘手势没了;重新打开 `interactivePopGestureRecognizer` 会"开始但不返回"(NavigationSplitView 紧凑栈里),SwiftUI 的 22pt 拖动条收不到触摸。可行的做法:`EdgeSwipeBack`(`BrandMark.swift`)往导航控制器的视图上挂 `UIScreenEdgePanGestureRecognizer`,右滑 >60pt 调 `onBack`。
+- **紧凑布局在主机列表页不要弹终端键盘**:`RootView` 里 `wantsKeyboard` 要再 `&& !(compact && compactColumn == .sidebar)`,`CaptureField.wanted` 同步给「系统收走焦点后要不要抢回」的逻辑,否则搜索框打字会被抢焦点。
+- **直板机(iPhone 17/18 Pro / Pro Max 等)**:底部工具栏是横的,软键盘一弹就盖住。`FoldState.isStandardPhone`(没有铰链 = 旧系统,或窗口上屏 1.5 秒仍没收到铰链状态)为真时,会话页不再放 `.bottomBar` 工具项,改在 `safeAreaInset(.bottom)` 里画自己的控制条(主机 / 快捷键 / 键盘 / 粘贴 / 断开)。Duo 上永远不会置位,结构不变(Duo 的竖条对结构变化很敏感)。
+- **控制条只在 `.connected` / `.closed` 时显示**:连接中 / 要确认主机密钥 / 失败的状态卡片自己带「取消」,和控制条同时占着底部会布局死循环(主线程 100% CPU)。排查用 `sample <pid>`,别靠猜。
+- **模拟器**:`iPhone 17/18` 系列只有 iOS 27.0 运行时(27.1 只给 Duo 用),建临时模拟器要指定 `SimRuntime.iOS-27-0`;用完 `simctl delete`。
+- **Device Hub 里测手势**:用 CGEvent 鼠标事件(`mouseDown` → 多段 `mouseDragged` → `mouseUp`)才是真触摸;从屏幕最左缘内 3–10pt 起拖才算边缘手势。
+- **内屏分栏配色**:侧栏用 `Color.appSidebar`(深灰)/ `appSidebarCard`,会话区保持纯黑,一眼分得出。长按主机行用 `Button` + `.contextMenu` + `.contentShape(.contextMenuPreview, 圆角矩形)`(系统自带触觉反馈,浮起的形状每行一致)。**不要用 `Menu`**:内屏侧栏里 `Menu` 一弹出整栏内容被盖黑,像是列表被收起;也不要给 `.contextMenu` 加 `preview:`,模拟器里长按浮起的仍是系统取的形状,自定义预览没用上。
+
+**内屏两栏的布局规则(0.6.5 这一批,别改回去)**:
+- **侧栏宽度**固定 334pt(系统默认 320pt;先加宽 10% 到 352pt,再减 5%),**不让用户拖到别的位置**,只有「展开」和「收起」两种状态(`SidebarHandle.width`;窗口小时最多占 60%)。分界线上有一个小把手(`SidebarHandle`,20pt 宽触摸区 + 4×40pt 小胶囊):默认显示,2 秒没人碰就淡出;碰它、在会话区碰滑(`TouchSpy`,挂在窗口上的只听不管手势识别器)就再出来;**在把手上一滑(超过 12pt)就收起整个列表**(`columns = .detailOnly`),在列表空白处用力左甩(>140pt 且很快)也收起;收起后左边缘有小把手(`EdgeRevealHandle`),点一下或往右拖拉回来。读屏:把手有「收起侧栏」操作。把手的位置不能受软键盘影响(`.ignoresSafeArea(.keyboard)`)。
+- **把手的显示逻辑只有一条**:有「该让用户看到它」的事发生就显示(列表展开 / 收起、姿态 / 尺寸变化、碰会话区、碰把手;启动头 3.5 秒不淡出),两秒后没人再动就淡出;列表收起时同一个逻辑管左边缘的小把手(淡出后触摸区域还在,用「几乎透明但不是全透明」的矩形撑触摸区,全透明的视图系统不派发触摸)。收起手势:在把手上滑动,或在列表**空白处**(最后一张卡片下面)向左滑 60pt 以上,滑卡片本身不收。
+- **内屏的「搜索 / 新建主机」只放一份,在右边会话那一侧的竖条里**(空会话时是搜索 + 新建;连上后接在会话按钮后面,优先级最低),左栏里不再放;外屏(单栏)仍在主机列表自己的竖条里。
+- ~~**主机列表的版式 = 「聚光灯」**~~(**已被下面的「ssh 命令行」取代,只留作历史;其中「不显示 IP、不分组、不放最近连接」仍然有效**)(用户从 A/B/C 三版里选的,外屏、内屏同一套):顶上 `Hosts N` 标题;**连着的那台是列表里唯一的一张大卡**(液态玻璃,状态「已连接 / 连接中…」+ 名字 + 地址;转圈消失后绿点才出现);其余每台只有一行 —— 颜色点(名字的稳定哈希,**不能用 `hashValue`**,用 FNV-1a)+ 名字(一行,太长截断),没有卡片、没有分隔线。**列表里不显示 IP / 端口**(用户明确不要,地址只在编辑页里看)。不分组、不放「最近连接」(都试过,用户明确不要)。内屏的「搜索 / 新建」是列表底部的玻璃小工具条(右边竖条只放会话按钮);外屏它们在系统竖条里。
+- **主机列表的版式(最终,外屏 / 内屏同一套)= 「ssh 命令行」**(用户从多轮方案里选了「终端提示符 → 2B」;前面的聚光灯、玻璃胶囊都已弃用):标题 `$ hosts N`(等宽);每台一行 `❯ ssh 名字`(等宽 19pt,`ssh` 淡、名字亮,名字一行截断),行尾一个这台的颜色点(颜色编号存在 `Host.colorIndex`,添加时挑还没被用的,老数据启动时补齐),行与行之间一条虚线(最后一行不画);连着的那台 `❯` 变绿、名字后一个闪烁的绿色光标(`BlinkingCursor`),下面多一行绿色「✓ 已连接 · 时长」(`Text(date, style: .timer)`,时长来自 `TerminalModel.connectedAt`,经 `HostsView.connectedSince` 传入);连接中是「连接中…」,行尾颜色点的位置转圈。位置、顺序不变,不显示 IP;长按菜单的预览圆角 12。代码:`HostsView.sshRow` / `statusLine`。
+- **内屏的主机卡用系统液态玻璃**(`HostCardGlass`,`.glassEffect(.regular.interactive())`,连着的那台加偏亮着色):按住 / 按下有系统 App 侧栏那种放大和光泽,不要再改回纯色填充。**不要在列表上挂 SwiftUI 的 `DragGesture`**(和列表上下滑抢手势,滑不动)——空白处左滑收起用 UIKit 的 `HorizontalSwipeSpy`(一开始就明显横着才开始)。列表要有滚动条(`.scrollIndicators(.visible)`)。搜索框的位置 / 宽度只在列表宽度变化时才重新量,滚动时行的瞬时抖动会让它变形。列表(左栏)收起时右边竖条里的「搜索 / 新建」也不出现。连接主机后 1.5 秒内系统把列表收成 `.detailOnly` 的要拦回去。
+- **终端的滚动条和长按复制 / 粘贴**:回滚历史有内容、不在备用屏时,右边缘有滚动条(轨道一直淡淡地在,滚动时滑块变亮变粗,停下 1.2 秒后回落;按住右边 28pt 触摸条拖动直接定位);滑块位置来自 `Term.scroll_offset` / `Term.history_len`(**`history_len` 是这一批新加进 Rust FFI 的**,改 `mobile/core/xssh-ffi` 后要跑 `mobile/tools/build-ios-core.sh` 重编 `ios/Core`)。长按终端 0.4 秒开始选择(默认选一个词,手指不抬继续拖就扩展),松手弹出玻璃胶囊「复制 / 粘贴」;选区高亮来自 `Term.view_selection`,文字来自 `selection_text`。**长按用单个 `DragGesture` + 自己计时**,不要用 `LongPressGesture.sequenced(before: DragGesture)`:手指按住不动时后者拿不到位置,模拟器里鼠标按住不动就一直不触发。
+- **内屏(常规宽度)不用 `NavigationSplitView`,自己排两栏**(`RootView.regularLayout`):系统改列可见性一步到位、系统工具栏里按钮增减也没有过渡(实测,3 秒动画也不生效),所以内屏的抽屉(主机列表)、会话、右边的玻璃竖条、左上角的侧栏开关 + 标题全部自己画,走同一条弹簧(`drawerSpring`,0.46s):侧栏滑出 / 滑入、`detailInset` 跟着变(会话顺滑变宽 / 变窄;终端 PTY 尺寸有 150ms 防抖,动画走完才重排一次)、竖条里的按钮 `.scale + .opacity` 增减。`TerminalScreen(embedded: true)` 时不挂系统导航栏 / 工具栏。**外屏(紧凑)仍用系统导航容器和系统工具栏**(Duo 外屏的竖条是系统行为)。半折 ↔ 展开 / 合上改侧栏宽度仍是整屏淡出 → 换宽度 → 淡入(`syncSidebarWidth`)。
+- **主机卡突出选中、弱化没选的**:选中 = 液态玻璃 + 着色 + 文字全亮;没选 = 不用玻璃,淡淡的底色 + 整体 85% 不透明(退后但清楚可读,之前压到 50% 太暗)。
+- **全屏程序(备用屏:vim / less / htop / Codex)里拖动怎么滚**(`TerminalModel.scroll`):备用屏没有回滚历史,拖动要翻译成程序听得懂的输入 —— ① 程序开了鼠标上报就发鼠标滚轮(SGR 或 X10 编码,位置取屏幕中心);② 开了 alternateScroll 发方向键;③ 都没开发翻页键(攒够半屏一次)。以前只有 ② 一种,所以 Codex 这类程序里拖不动。**备用屏的滚动条是估算的**(程序总长未知):`altOffset` 往回拖了多少行、`altSeen` 拖到过多远,总长按「拖到过的最远 + 一屏」算;一敲字 / 按键 `altOffset` 归零(多数 TUI 会跳回底部);进出备用屏全部重置。
+- **点一台主机,抽屉立刻收起**(不等连上):`open()` 里横屏 / 展开且抽屉开着时走 `setDrawer(false, swapping:)`,会话在同一条弹簧里淡入;半折不收、外屏是翻页。断开 / 取消 / 点竖条里的「‹」回列表时 `close()` / `setDrawer(true)`。
+- **卡片**:每台主机一张独立圆角卡(宽 = 侧栏的 92%,左右各 4%,按实际宽度算),正在连着的更亮 + 描边 + 绿点;列表自带的左右边距用 `contentMargins(.horizontal, 0)` 去掉,否则卡片宽度算不准。列表按添加顺序排,**不因连接而置顶**。
+- **半折**(`fold.hinge == .partiallyOpen`):侧栏 = 整屏宽度的 50%(用忽略安全区的 GeometryReader 量,否则偏小),一律并排(不看宽高比,否则折的过程里侧栏一会收一会开,空会话的 logo 一会在中间一会在右边)。半折 ↔ 展开 / 合上的过渡是「整块淡出 → 换宽度 → 淡入」。**不要逐帧改栏宽**:系统不给栏宽变化做动画,逐帧改还会把详情栏弄丢(折一次再折平,会话区空白)。取消旧过渡任务时要自己 `if Task.isCancelled { return }`,`try?` 会吞掉取消。
+- **竖着拿、完全展开**:列表收起,会话占满整屏(系统在竖屏里会让列表浮在会话上面盖住一半,`.balanced` 和改 `UISplitViewController` 都试过,没用)。拉出列表:左上角系统按钮 / 空会话的「主机」按钮 / 左边缘右滑。
+- **键盘**:连上后默认不弹软键盘(点终端或按工具栏键盘钮才弹);接着外接键盘时默认「要键盘」(`GCKeyboard`),否则外接键盘打不了字。听写的现场追踪日志已经删了(Debug 版会把敲的字,包括密码,写进文件)。
+
 ## 四、桌面端 macOS 图标(踩过的坑,三端都适用)
 
 `package.json` 的 `build.mac.icon` 现在是 `build/icon.icon`(Icon Composer 的 Liquid Glass 源目录,PR #6)。electron-builder 在 macOS 上用 Xcode 的 `actool` 把它编成 `Resources/Assets.car`(亮 / 暗 / 着色三套)并写入 `CFBundleIconName`,同时生成 `icon.icns` 兜底。**只能在装了 Xcode 的 Mac 上打 mac 包。**
@@ -2894,3 +2921,11 @@ M3.51 已有「用生物识别解锁」开关,连私钥密文(`lockedKeyData` / 
 1. **iOS 真机 + 真折叠**(`reservedRegions` / `onHingeChange` 接上) —— 壳层已经能跑,差折叠形态适配。
 2. iOS 补齐私钥登录、跳板机、SFTP(与 Android M3.61 / M3.70 对齐)。
 3. 移动端剩下硬编码中文串迁到 `strings.xml`(见根目录 HANDOVER 第七节)。
+
+- **内屏会话页和外屏同一套设计**:左上角一直显示会话名(`headerRow`,侧栏开关收起时名字靠到最左 x=16),终端从名字下面开始(`TerminalScreen` 嵌入时顶部留 74pt,位置对齐外屏导航栏下面);按钮竖条在右下角,按钮顺序同外屏(⌘ / 键盘 / 粘贴 / 断开),抽屉收起时最上面多一颗「‹」(内屏特有)。以前连上后名字会隐藏,现已改成一直显示。
+
+- **主机列表的收尾(第三轮审核)**:颜色 12 种(`Host.paletteSize`),编号存 `Host.colorIndex`;光标闪约 5 秒后常亮(不无限循环,减弱动态效果时常亮);点连着那行的「时长」在时长 / 连上的时刻之间切换;搜索时若是地址 / 用户名匹配上的,名字下面小字写出匹配项(平时不显示地址);没有主机时是一行 `❯ ssh --new` 提示符(点一下新建);新建 / 编辑页小节标题前有绿色 `# `。iOS 现在有单元测试:`xcodebuild test -scheme XSSH`(`XSSHTests/HostColorTests`,覆盖选色和旧文件迁移)。SSH 层有 15 秒心跳、连续 2 次失败即断,所以「已连接」时长在断网后最多多走约 45 秒。
+
+- **第四轮审核的修复**:内屏顶部 logo 的布局高度改成 57pt(上留白 38 + logo 19),搜索框不再被 logo 压住;删除一台主机时若它正连着,外层会断开那个会话(`HostsView.onDeleted`);「已连接」那行的时长 / 时刻显示状态移到 `TerminalModel.showsConnectedClock`(跟着会话走);行字号、小字、行内留白、`❯` 宽度随系统字体缩放(`@ScaledMetric`);等用户确认主机密钥时行上写「等待确认」而不是「连接中…」;`❯` 和虚线对比度提高。**iOS 没有进 CI**:需要带 iOS 27 SDK 的 macOS runner,GitHub 托管的 runner 还没有,所以本机跑 `mobile/tools/test-ios.sh`。
+
+- **第五轮审核的修复**:标题读屏念「Hosts」(不念 `$`);「主机密钥变了」时那台主机留在列表里显示「等待确认」(`RootView.listActive`);搜索框改成 `❯ grep` 一行命令(无圆角底,下面虚线,和行对齐);连接开始 / 连上有触觉反馈(`.sensoryFeedback`);左滑的编辑 / 删除只显示图标;`test-ios.sh` 找不到「iPhone Duo」时用第一个可用的 iPhone 模拟器;测试里存的主机和钥匙串条目测完会删。发版用的更新日志草稿已按当前状态重写。

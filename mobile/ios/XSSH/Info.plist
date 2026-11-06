@@ -25,5 +25,7 @@
 		<key>UIImageName</key>
 		<string>LaunchLogo</string>
 	</dict>
+	<key>UIUserInterfaceStyle</key>
+	<string>Dark</string>
 </dict>
 </plist>
