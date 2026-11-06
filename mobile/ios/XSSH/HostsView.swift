@@ -444,29 +444,12 @@ private struct RowMenu: ViewModifier {
     let onDelete: () -> Void
     let host: Host
 
-    @ViewBuilder func body(content: Content) -> some View {
-        if split {
-            content
-                .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .contextMenu { items }
-        } else {
-            content
-                .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .contextMenu { items } preview: {
-                    // 行本身没有底:浮起来的预览单独给一张卡,不然是一条悬空的字。
-                    HStack(spacing: 12) {
-                        Text(verbatim: "❯").foregroundStyle(Color.white.opacity(0.4))
-                        (Text(verbatim: "ssh ").foregroundStyle(Color.white.opacity(0.4)) + Text(verbatim: host.displayName))
-                            .lineLimit(1).truncationMode(.tail)
-                        Spacer(minLength: 12)
-                        Circle().fill(HostColor.pip(host.colorIndex)).frame(width: 9, height: 9)
-                    }
-                    .font(.system(size: font, design: .monospaced))
-                    .padding(.horizontal, 20).padding(.vertical, 22)
-                    .frame(width: 320)
-                    .background(Color.appSheetCard)
-                }
-        }
+    /// 内外屏一样:不给自定义预览卡,让系统把被按的这一行本身浮起来,菜单跟在它下面靠左
+    /// (给了预览卡,系统会把菜单对齐到卡片的右边缘 / 摆到右边,不是靠左)。
+    func body(content: Content) -> some View {
+        content
+            .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .contextMenu { items }
     }
 
     @ViewBuilder private var items: some View {
