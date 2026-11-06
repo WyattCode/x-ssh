@@ -19,10 +19,14 @@ targets:
     info:
       path: XSSH/Info.plist
       properties:
+        # 只有深色界面:不跟随系统的浅色模式。
+        UIUserInterfaceStyle: Dark
         # 系统启动画面:纯黑底 + 居中的 logo(120pt)。开屏页(SplashView)接着画同样的 logo,所以交接时看不出换了一层。
         UILaunchScreen:
           UIColorName: LaunchBackground
           UIImageName: LaunchLogo
+    scheme:
+      testTargets: [XSSHTests]
     sources:
       - XSSH
       - path: Core/generated/xssh_ffi.swift
@@ -40,3 +44,13 @@ targets:
         INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
         INFOPLIST_KEY_NSLocalNetworkUsageDescription: "X-SSH connects to servers on your local network."
+  XSSHTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [XSSHTests]
+    dependencies:
+      - target: XSSH
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.xssh.ios.tests
+        GENERATE_INFOPLIST_FILE: YES

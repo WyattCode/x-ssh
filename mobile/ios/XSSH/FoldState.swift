@@ -19,6 +19,15 @@ final class FoldState {
     private(set) var occlusions: [CGRect] = []
     private(set) var windowHeight: CGFloat = 0
 
+    /// 这台设备没有铰链(直板机 / iPad)。只会从「不确定」变成「是」,一旦在有铰链的设备上收到过铰链状态就永远不会变成「是」。
+    /// 有铰链的机器(Duo)底部工具栏会被系统竖排到右侧;没有铰链的机器底部工具栏是横的、会被软键盘盖住,
+    /// 所以会话页的控制按钮要自己放到键盘上方。
+    private(set) var isStandardPhone = false
+    private var sawHinge = false
+
+    func markHasHinge() { sawHinge = true; isStandardPhone = false }
+    func markNoHinge() { if !sawHinge, !isStandardPhone { isStandardPhone = true } }
+
     /// 折线横着:屏幕分成上下两半,终端放上半、键盘落在下半。
     var horizontalSeam: CGRect? { seam.flatMap { $0.isHorizontal ? $0.frame : nil } }
     /// 折线竖着:屏幕分成左右两半,主机列表在左、终端在右。
@@ -105,6 +114,7 @@ struct FoldTracker: UIViewRepresentable {
             if #available(iOS 27.1, *) {
                 addInteraction(UIHingeInteraction { [weak self] _, update in
                     guard let self else { return }
+                    if update.hinge == nil { state.markNoHinge() } else { state.markHasHinge() }
                     hinge = switch update.hinge?.status {
                     case .closed: .closed
                     case .partiallyOpen: .partiallyOpen
@@ -117,6 +127,17 @@ struct FoldTracker: UIViewRepresentable {
         }
 
         required init?(coder: NSCoder) { fatalError("not used") }
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            guard window != nil else { return }
+            // 旧系统没有这套 API;新系统在没有铰链的机器上也可能一直不回调。窗口上屏 3 秒还没收到过铰链状态,就当没有铰链(用户 3 秒内不会连上会话,晚一点判定没有可见影响;太短会把 Duo 误判成直板机,闪一下多余的控制条)。
+            if #unavailable(iOS 27.1) { state.markNoHinge(); return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
+                guard let self, self.hinge == .unknown else { return }
+                self.state.markNoHinge()
+            }
+        }
 
         override func layoutSubviews() {
             super.layoutSubviews()

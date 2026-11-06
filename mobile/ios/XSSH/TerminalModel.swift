@@ -1,4 +1,5 @@
 import Foundation
+import GameController
 import SwiftUI
 import UIKit
 
@@ -27,14 +28,43 @@ final class TerminalModel: Identifiable {
     private let credentials: Credentials
     private(set) var knownKey: String?
 
-    private(set) var state: State = .idle
+    private(set) var state: State = .idle {
+        didSet { if state == .connected, oldValue != .connected { connectedAt = Date() } }
+    }
+    /// 这次会话连上的时刻(主机列表里连着的那一行显示已连接时长)。
+    private(set) var connectedAt: Date?
+    /// 主机列表里「已连接」那行显示连上的时刻(true)还是时长(false):点一下切换,跟着会话走。
+    var showsConnectedClock = false
     private(set) var rows: [ScreenRow] = []
     private(set) var cursor = CursorState(col: 0, row: 0, visible: true)
     private(set) var title = ""
+    /// 滚动位置(离底部多少行 / 回滚历史共多少行)、是否备用屏、视口里的选区:画滚动条和选区高亮用。
+    private(set) var scrollOffset = 0
+    private(set) var historyLen = 0
+    private(set) var onAltScreen = false {
+        didSet { if onAltScreen != oldValue { resetAltScroll() } }
+    }
+    /// 全屏程序(备用屏)里没有回滚历史,程序一共多长我们不知道。滚动条用「估算」:记下用户拖动累计走了多少行(`altPos`,往回拖为正、往前为负)
+    /// 以及这次走到过的最远两端(`altMin` / `altMax`);总长 = 两端之差 + 一屏,滑块位置 = 当前在两端之间的哪里。
+    /// 起点在底部的程序(聊天类)往回拖,滑块往上走;起点在顶部的程序(less)往前拖,滑块往下走 —— 都对。
+    private var altPos = 0
+    private var altMin = 0
+    private var altMax = 0
+    private func resetAltScroll() { altPos = 0; altMin = 0; altMax = 0; altScrollRemainder = 0 }
+    /// 滚动条用的「历史长度 / 离底部多少行」:普通屏是真实的,备用屏是上面的估算。
+    var barHistory: Int { onAltScreen ? altMax - altMin : historyLen }
+    var barOffset: Int { onAltScreen ? altPos - altMin : scrollOffset }
+    private(set) var selection: ViewSelection?
+    /// 用户已经开始用这个终端(敲了字 / 按了键 / 粘贴 / 滚动):界面据此把顶部的侧栏开关和会话名称收起来,不挡着内容。
+    private(set) var userActive = false
     var ctrlArmed = false
     /// Alt 待用:下一次发出去的内容前面加 ESC(终端里 Alt+键 就是这么编码的)。
     var altArmed = false
-    var wantsKeyboard = true
+    /// 默认不弹系统键盘:连上后要打字,点屏幕或按工具栏的键盘钮再弹(和主机列表、编辑页里的输入框无关)。
+    var wantsKeyboard = false
+    /// 接着外接键盘。注意不能因此把「键盘」钮置灰:模拟器(和 iPad 的浮动键盘)接着外接键盘时软键盘照样会弹出来,
+    /// 钮灰了就收不掉它。
+    private(set) var hasHardwareKeyboard = false
     /// 快捷键面板(Esc / Tab / Ctrl / 方向键…)。和系统键盘各自独立开关,默认收起 —— 同安卓。
     var showsKeys = false
 
@@ -49,12 +79,38 @@ final class TerminalModel: Identifiable {
         self.host = host
         self.credentials = credentials
         self.knownKey = knownKey
+        // 接着外接键盘时系统本来就不弹软键盘,但隐形输入框得是第一响应者,实体键盘的字才进得来:
+        // 默认不弹软键盘不能连带让外接键盘打不了字。外接键盘接上就当作「要键盘」,拔掉就收回。
+        #if targetEnvironment(simulator)
+        // 模拟器会把 Mac 的键盘当成外接键盘,连上就弹软键盘,和真机没接键盘时的行为对不上;模拟器里不检测。
+        hasHardwareKeyboard = false
+        #else
+        hasHardwareKeyboard = GCKeyboard.coalesced != nil
+        #endif
+        wantsKeyboard = hasHardwareKeyboard
+        keyboardObservers = [
+            NotificationCenter.default.addObserver(forName: .GCKeyboardDidConnect, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    #if !targetEnvironment(simulator)
+                    self?.hasHardwareKeyboard = true; self?.wantsKeyboard = true
+                    #endif
+                }
+            },
+            NotificationCenter.default.addObserver(forName: .GCKeyboardDidDisconnect, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.hasHardwareKeyboard = false; self?.wantsKeyboard = false }
+            },
+        ]
         backend.onOutput = { [weak self] output in
             Task { @MainActor [weak self] in self?.apply(output) }
         }
     }
 
-    deinit { backend.shutdown() }
+    @ObservationIgnored private var keyboardObservers: [NSObjectProtocol] = []
+
+    deinit {
+        keyboardObservers.forEach(NotificationCenter.default.removeObserver)
+        backend.shutdown()
+    }
 
     /// 正在显示需要用户处理的卡片(信任 / 密钥变更 / 失败):这时不弹键盘,别把卡片挤得只剩一条缝。
     var showsPrompt: Bool {
@@ -143,6 +199,8 @@ final class TerminalModel: Identifiable {
 
     #if DEBUG
     /// `-autoKeyboard` 弹出软键盘;`-autoRun "<命令>"` 连上后自动敲这条命令(分号分隔多条)。
+    private func resetUserActive() { userActive = false }
+
     private func runLaunchCommand() {
         if DebugLaunch.flag("-autoKeyboard") { wantsKeyboard = true }
         if DebugLaunch.flag("-autoKeys") { showsKeys = true }
@@ -150,6 +208,7 @@ final class TerminalModel: Identifiable {
         Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(1.5))
             self?.send(command + "\r")
+            self?.resetUserActive()
         }
     }
     #endif
@@ -187,9 +246,13 @@ final class TerminalModel: Identifiable {
 
     private func apply(_ output: Backend.Output) {
         switch output {
-        case .frame(let rows, let cursor):
+        case .frame(let rows, let cursor, let view):
             self.rows = rows
             self.cursor = cursor
+            scrollOffset = Int(view.scrollOffset)
+            historyLen = Int(view.history)
+            onAltScreen = view.altScreen
+            selection = view.selection
             backend.ackFrame()
         case .title(let t): title = t
         case .closed(let status): if state == .connected { state = .closed(exitStatus: status) }
@@ -209,6 +272,8 @@ final class TerminalModel: Identifiable {
     // MARK: 输入
 
     func send(_ text: String) {
+        userActive = true
+        resetAltScroll()
         var bytes = Array(text.utf8)
         if ctrlArmed, text.unicodeScalars.count == 1, let first = text.unicodeScalars.first {
             ctrlArmed = false
@@ -234,11 +299,15 @@ final class TerminalModel: Identifiable {
     }
 
     func sendRaw(_ bytes: [UInt8]) {
+        userActive = true
+        resetAltScroll()
         ctrlArmed = false
         emit(bytes)
     }
 
     func press(_ key: Key) {
+        userActive = true
+        resetAltScroll()
         let app = backend.currentTerm.inputModes().appCursor
         let csi = "\u{1B}["
         let ss3 = "\u{1B}O"
@@ -273,6 +342,7 @@ final class TerminalModel: Identifiable {
 
     /// 粘贴:换行统一成回车;程序开了括号粘贴就包起来,多行文本不会被当成逐行输入执行。
     func paste() {
+        userActive = true
         guard var text = UIPasteboard.general.string, !text.isEmpty else { return }
         text = text.replacingOccurrences(of: "\r\n", with: "\r").replacingOccurrences(of: "\n", with: "\r")
         if backend.currentTerm.inputModes().bracketedPaste {
@@ -285,19 +355,89 @@ final class TerminalModel: Identifiable {
         backend.send(Data(text.utf8))
     }
 
+    // MARK: 选择 / 复制
+
+    /// 长按开始选择(视口坐标;默认选一个词),拖动时扩展。
+    func selectStart(row: Int, col: Int, rightHalf: Bool, kind: SelectKind = .word) {
+        backend.perform { $0.selectStart(row: UInt32(row), col: UInt32(col), rightHalf: rightHalf, kind: kind) }
+    }
+
+    func selectUpdate(row: Int, col: Int, rightHalf: Bool) {
+        backend.perform { $0.selectUpdate(row: UInt32(row), col: UInt32(col), rightHalf: rightHalf) }
+    }
+
+    func selectClear() {
+        guard selection != nil else { return }
+        backend.perform { $0.selectClear() }
+    }
+
+    /// 选中的文字(没选为 nil)。
+    var selectedText: String? { backend.currentTerm.selectionText() }
+
+    /// 把选中的文字放进系统剪贴板;返回有没有复制到东西。
+    @discardableResult
+    func copySelection() -> Bool {
+        guard let text = selectedText, !text.isEmpty else { return false }
+        UIPasteboard.general.string = text
+        return true
+    }
+
+    /// 拖滚动条:直接滚到离底部 `offset` 行的位置(0 = 贴底)。
+    func scrollTo(offset: Int) {
+        let target = max(0, min(offset, barHistory))
+        let delta = target - barOffset
+        guard delta != 0 else { return }
+        if onAltScreen { scroll(lines: delta, maxEvents: 40) } else { backend.scroll(lines: Int32(delta)) }
+    }
+
     /// 拖动滚动:普通屏滚回滚历史;备用屏(vim / less)开了 alternateScroll 就发方向键。
-    func scroll(lines: Int) {
+    func scroll(lines: Int, maxEvents: Int = 10) {
         guard lines != 0 else { return }
+        userActive = true
         let term = backend.currentTerm
         let modes = term.inputModes()
-        if modes.altScreen {
-            guard modes.alternateScroll else { return }
-            let seq = (modes.appCursor ? "\u{1B}O" : "\u{1B}[") + (lines > 0 ? "A" : "B")
-            backend.send(Data(String(repeating: seq, count: min(abs(lines), 10)).utf8))
-        } else {
+        guard modes.altScreen else {
+            // 普通屏(命令行):滚回滚历史。
             backend.scroll(lines: Int32(lines))
+            return
+        }
+        // 备用屏(vim / less / htop / Codex 这类全屏程序)没有回滚历史,拖动要翻译成程序听得懂的输入,按优先级:
+        // ① 程序开了鼠标上报 → 发鼠标滚轮(现代 TUI 的聊天 / 长输出区都是靠这个滚);
+        // ② 开了 alternateScroll(DECSET 1007)→ 发方向键;
+        // ③ 都没开 → 发翻页键(半屏一次),让 less / 大多数 TUI 至少能翻。
+        let count = min(abs(lines), maxEvents)
+        altPos += lines
+        altMin = min(altMin, altPos)
+        altMax = max(altMax, altPos)
+        if modes.mouseReport {
+            let (cols, rows) = measured ?? (80, 24)
+            let col = max(1, cols / 2), row = max(1, rows / 2)
+            // 手指往下拖(lines > 0)= 看更早的内容 = 滚轮向上(按钮 64);向下是 65。
+            let button = lines > 0 ? 64 : 65
+            let event: String
+            if modes.sgrMouse {
+                event = "\u{1B}[<\(button);\(col);\(row)M"
+            } else {
+                let b = Character(UnicodeScalar(UInt8(32 + button)))
+                let c = Character(UnicodeScalar(UInt8(min(255, 32 + col))))
+                let r = Character(UnicodeScalar(UInt8(min(255, 32 + row))))
+                event = "\u{1B}[M\(b)\(c)\(r)"
+            }
+            backend.send(Data(String(repeating: event, count: count).utf8))
+        } else if modes.alternateScroll {
+            let seq = (modes.appCursor ? "\u{1B}O" : "\u{1B}[") + (lines > 0 ? "A" : "B")
+            backend.send(Data(String(repeating: seq, count: count).utf8))
+        } else {
+            altScrollRemainder += lines
+            let page = max(3, (measured?.rows ?? 24) / 2)
+            while abs(altScrollRemainder) >= page {
+                backend.send(Data((altScrollRemainder > 0 ? "\u{1B}[5~" : "\u{1B}[6~").utf8))
+                altScrollRemainder += altScrollRemainder > 0 ? -page : page
+            }
         }
     }
+    /// 备用屏里没有鼠标 / alternateScroll 时,拖动累计的行数(攒够半屏发一次翻页键)。
+    private var altScrollRemainder = 0
 }
 
 extension FfiError {

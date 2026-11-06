@@ -4,6 +4,7 @@ import UIKit
 /// 隐形的第一响应者:接软键盘文字和实体键盘的组合键。终端专用键行是 `TerminalKeyRow`(SwiftUI,放在终端自己那一栏里)。
 /// 用 UITextField 而不是裸 UIKeyInput:拼音等输入法靠它的「标记文本」组字,
 /// 只有组字结束(没有 markedTextRange)才把定稿的文字发给服务器 —— 裸 UIKeyInput 会把拼音字母整个吞掉。
+
 struct KeyCapture: UIViewRepresentable {
     let model: TerminalModel
     let ctrlArmed: Bool
@@ -17,6 +18,7 @@ struct KeyCapture: UIViewRepresentable {
     }
 
     func updateUIView(_ field: CaptureField, context: Context) {
+        field.wanted = wantsKeyboard
         // 等视图进了窗口再要焦点;键盘开关由 `wantsKeyboard` 决定。
         DispatchQueue.main.async {
             field.syncing = true
@@ -32,30 +34,41 @@ struct KeyCapture: UIViewRepresentable {
         private var settle: DispatchWorkItem?
 
         @objc func changed(_ field: UITextField) {
-            guard let field = field as? CaptureField, field.markedTextRange == nil,
-                  let text = field.text, !text.isEmpty else { return }
-            switch InputGate.decide(text: text, dictating: field.isDictating) {
+            guard let field = field as? CaptureField else { return }
+            // 拼音等输入法正在组字:等定稿。
+            guard field.markedTextRange == nil else { return }
+            switch InputGate.decide(sinceKeyActivity: field.sinceKeyActivity) {
             case .sendNow:
+                // 敲键盘:立刻把输入框相对「已发出去的」多出 / 少掉的部分发走,然后清空(没有听写会话要保护)。
                 settle?.cancel()
-                flush(field)
+                sync(field)
+                // 有字被发走了(或垫底的占位符快用完了)才重置;只是删占位符时不能动输入框,否则按住退格的连发会被打断。
+                if !field.content.isEmpty || field.padCount < CaptureField.padLow { field.resetField() }
             case .settle(let delay):
-                // 听写 / 一次进来一整段:系统还在往这个输入框里写结果(后面的识别会改写前面的),
-                // 这时清空输入框会把整个听写会话弄断,只剩第一个字。等一段时间没有新变化再整段发出去。
+                // 听写 / 粘贴:**不清空输入框**。听写会话要回头改写、补全它写进去的字,清空就等于打断它(只剩第一个字、
+                // 或者说着说着自己停了)。原生 iOS 听写一直录到用户自己点停止,这里也一样。
+                // 等识别安静下来,只把新增的部分发出去;识别回头改了已发出的字,就退格再补。
                 settle?.cancel()
                 let item = DispatchWorkItem { [weak self, weak field] in
-                    guard let self, let field else { return }
-                    if field.isDictating || field.markedTextRange != nil { self.changed(field); return }
-                    self.flush(field)
+                    guard let self, let field, field.markedTextRange == nil else { return }
+                    self.sync(field)
+                    // 听写文字一直攒在隐形输入框里;长到没必要时才清(这时再断一次会话也不心疼)。
+                    if field.content.count > 2000 { field.resetField() }
                 }
                 settle = item
                 DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
             }
         }
 
-        private func flush(_ field: CaptureField) {
-            guard let text = field.text, !text.isEmpty else { return }
-            field.text = ""
-            MainActor.assumeIsolated { field.model?.send(text) }
+        /// 把输入框现在的内容和「已经发给服务器的」对一下:公共前缀之外,已发出的多余部分发退格,新增部分照发。
+        private func sync(_ field: CaptureField) {
+            let now = field.content
+            let (backspaces, insert) = InputGate.diff(sent: field.sentText, now: now)
+            field.sentText = now
+            MainActor.assumeIsolated {
+                if backspaces > 0 { field.model?.sendRaw(Array(repeating: 0x7F, count: backspaces)) }
+                if !insert.isEmpty { field.model?.send(insert) }
+            }
         }
 
         func textFieldShouldReturn(_ textField: UITextField) -> Bool {
@@ -68,6 +81,8 @@ struct KeyCapture: UIViewRepresentable {
         weak var model: TerminalModel?
         /// 程序自己开关键盘时置位:这种焦点变化不该改写用户的「要不要键盘」偏好。
         var syncing = false
+        /// 此刻界面上是否该有终端键盘(紧凑布局里在主机列表页就不该有)。系统收走焦点后,只有它为真才会把焦点拿回来。
+        var wanted = true
 
         init(model: TerminalModel) {
             self.model = model
@@ -82,17 +97,61 @@ struct KeyCapture: UIViewRepresentable {
             keyboardAppearance = .dark
             isAccessibilityElement = false
             alpha = 0.01
+            resetField()
         }
 
         @available(*, unavailable) required init?(coder: NSCoder) { fatalError() }
 
-        /// 系统听写(键盘上的麦克风)进行中。听写模式的输入语言是 "dictation"。
-        var isDictating: Bool { textInputMode?.primaryLanguage == "dictation" }
+
+        /// 最近一次来自键盘的输入动作(敲字 / 组字 / 定稿 / 删除)的时间。听写不经过这些方法,见 `InputGate`。
+        private var lastKeyActivity: CFTimeInterval = 0
+        var sinceKeyActivity: TimeInterval { CACurrentMediaTime() - lastKeyActivity }
+        private func stamp() { lastKeyActivity = CACurrentMediaTime() }
+
+        /// 输入框里已经发给服务器的那部分(听写期间输入框不清空,靠它算增量)。
+        var sentText = ""
+
+        // MARK: 垫底的占位字符(让按住退格能连发)
+        //
+        // iOS 的键盘按住退格能不能连发,看的是输入框里光标前面**真有没有字**:空的时候只删一下就停(`hasText` 骗不过它)。
+        // 终端的输入框平时是空的(字都立刻发给了服务器),所以在光标前垫一排零宽空格:
+        // 每按一下退格,吃掉一个占位符、同时发一个退格给服务器,键盘一直觉得「还有字可删」,按住就连发。
+        static let padChar: Character = "\u{200B}"
+        static let padSize = 200
+        /// 占位符少于这个数就补满(只在不影响连发的时候补)。
+        static let padLow = 16
+
+        /// 输入框里真正的内容(去掉占位符)。
+        var content: String { (text ?? "").filter { $0 != Self.padChar } }
+        var padCount: Int { (text ?? "").filter { $0 == Self.padChar }.count }
+
+        /// 清空内容、补满占位符,光标落在最后。
+        func resetField() {
+            text = String(repeating: Self.padChar, count: Self.padSize)
+            sentText = ""
+        }
+
+        override func insertText(_ text: String) {
+            stamp()
+            super.insertText(text)
+        }
+
+        override func setMarkedText(_ markedText: String?, selectedRange: NSRange) {
+            stamp()
+            super.setMarkedText(markedText, selectedRange: selectedRange)
+        }
+
+        override func unmarkText() {
+            stamp()
+            super.unmarkText()
+        }
+
 
         // 键盘被系统收起 / 我们收起时,同步回模型,按钮图标和点击唤起才对得上。
         override func becomeFirstResponder() -> Bool {
             let ok = super.becomeFirstResponder()
             if ok, !syncing { MainActor.assumeIsolated { if model?.wantsKeyboard == false { model?.wantsKeyboard = true } } }
+            if ok, content.isEmpty, padCount < Self.padLow { resetField() }
             return ok
         }
 
@@ -100,10 +159,10 @@ struct KeyCapture: UIViewRepresentable {
         /// 不能当成用户要收键盘;用户还想要键盘的话,稍后把焦点拿回来。
         override func resignFirstResponder() -> Bool {
             let ok = super.resignFirstResponder()
-            if ok, !syncing, model?.wantsKeyboard == true {
+            if ok, !syncing, wanted, model?.wantsKeyboard == true {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
                     guard let self, self.window != nil, !self.isFirstResponder else { return }
-                    guard MainActor.assumeIsolated({ self.model?.wantsKeyboard == true }) else { return }
+                    guard self.wanted, MainActor.assumeIsolated({ self.model?.wantsKeyboard == true }) else { return }
                     self.syncing = true
                     _ = self.becomeFirstResponder()
                     self.syncing = false
@@ -113,10 +172,14 @@ struct KeyCapture: UIViewRepresentable {
         }
 
         override func deleteBackward() {
-            if (text ?? "").isEmpty && markedTextRange == nil {
+            stamp()
+            if markedTextRange != nil { super.deleteBackward(); return }   // 正在组字:删的是拼音字母
+            if content.isEmpty {
+                // 光标前只有占位符:这一下退格要删的是服务器上的一个字。吃掉一个占位符让键盘继续认为有字可删。
+                if !(text ?? "").isEmpty { super.deleteBackward() } else { resetField() }
                 MainActor.assumeIsolated { model?.send("\u{7F}") }
             } else {
-                super.deleteBackward()
+                super.deleteBackward()   // 删的是听写 / 刚打的字:`changed` 里按增量把退格发出去
             }
         }
 
@@ -348,15 +411,31 @@ private struct KeyCap: View {
 }
 
 /// 输入框里冒出新文字时,是立刻发给服务器,还是先等一等。纯逻辑,方便单独验证。
+///
+/// 听写(键盘上的麦克风)和敲键盘的区别不在输入语言(真机上听写时 `primaryLanguage` 一直是 zh-Hans),
+/// 而在**来路**:敲键盘的字符一定经过 `insertText` / `setMarkedText` / `unmarkText` / `deleteBackward`;
+/// 听写的结果是系统直接改写输入框内容,不经过这些方法。
+/// 听写会话要回头改写、补全它刚写进去的文字,所以**听写时不能清空输入框**(清空 = 取消会话,只剩第一个字),
+/// 要等识别停下来再整段发。
 enum InputGate {
-    enum Decision: Equatable { case sendNow, settle(TimeInterval) }
+    enum Decision: Equatable {
+        /// 敲键盘:立刻发,并清空输入框。
+        case sendNow
+        /// 听写 / 粘贴 / 其它不经键盘的改写:保留输入框内容,安静下来再整段发。
+        case settle(TimeInterval)
+    }
 
-    /// - 听写中:一律等(识别还在改写前面的结果)。
-    /// - 一次进来不止一个字:可能是听写的整段结果,等一小会儿让后续改写落定,再整段发。
-    /// - 单个字符:是敲键盘,立刻发,不能让打字有延迟。
-    static func decide(text: String, dictating: Bool) -> Decision {
-        if dictating { return .settle(0.7) }
-        if text.count > 1 { return .settle(0.3) }
-        return .sendNow
+    /// 已发给服务器的 `sent` 变成现在的 `now`:公共前缀(按字符,不拆开组合字符)之外,
+    /// `sent` 多出来的部分要用退格删掉,`now` 多出来的部分要补发。
+    static func diff(sent: String, now: String) -> (backspaces: Int, insert: String) {
+        let a = Array(sent), b = Array(now)
+        var i = 0
+        while i < a.count, i < b.count, a[i] == b[i] { i += 1 }
+        return (a.count - i, String(b[i...]))
+    }
+
+    /// - `sinceKeyActivity`:距离最近一次键盘动作过了多久(秒)。
+    static func decide(sinceKeyActivity: TimeInterval) -> Decision {
+        sinceKeyActivity < 0.15 ? .sendNow : .settle(0.9)
     }
 }

@@ -8,7 +8,10 @@
 
 /* Begin PBXBuildFile section */
 		04D733AE31069B943C4C8B27 /* XSSHCore.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = F1FE87F7078E3613BAB91B46 /* XSSHCore.xcframework */; };
+		2175E5428A7EE1CE2FCE7FE2 /* RandomArtTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63198260A1ECC75FA2943D5F /* RandomArtTests.swift */; };
 		265B7FC008DF6F6A3CF64CE9 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 908C2C163E9BCA7CB86BF5AD /* Localizable.xcstrings */; };
+		40EE40507D7DFFE7A27ECE62 /* HostKeyCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4373C270F3E41F7199FC61A4 /* HostKeyCard.swift */; };
+		41C69A498FA34F991C061049 /* HostColorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9DC29624730B2DE554F1073 /* HostColorTests.swift */; };
 		4C423AAD5F442F103B6AA367 /* XSSHApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8F34A73B5A93309E875F953 /* XSSHApp.swift */; };
 		701248AC7809523E89810737 /* KeyCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67546D7180CF39865A1FCEA9 /* KeyCapture.swift */; };
 		730F1D8CB36D4752C73EF293 /* TerminalModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7AA13AB1E8539719A7AD181 /* TerminalModel.swift */; };
@@ -23,11 +26,24 @@
 		FEDB013B6F7A6011481F21AE /* TerminalScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF0F57A4214E6389AC275F83 /* TerminalScreen.swift */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		53E5A891C4C559065BF1437D /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 91F384CD13913AA3AD5949B3 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 9134B14E0F7175E4E03A49B7;
+			remoteInfo = XSSH;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
 		167F9953B597EB1D7BA057E4 /* FoldState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoldState.swift; sourceTree = "<group>"; };
 		1B28A299AC2BED65E98F5049 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		2941ED6EF4B1CDC190C9D36F /* XSSHTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = XSSHTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		3A6376447A9D21D6FDD076D3 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
+		4373C270F3E41F7199FC61A4 /* HostKeyCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostKeyCard.swift; sourceTree = "<group>"; };
 		5BDF8ABACFC555DF2E97187B /* Backend.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Backend.swift; sourceTree = "<group>"; };
+		63198260A1ECC75FA2943D5F /* RandomArtTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RandomArtTests.swift; sourceTree = "<group>"; };
 		66C7531350EB43494A36FEC7 /* BrandMark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrandMark.swift; sourceTree = "<group>"; };
 		67546D7180CF39865A1FCEA9 /* KeyCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyCapture.swift; sourceTree = "<group>"; };
 		7368087C0BFDB2DD4A225C02 /* Host.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Host.swift; sourceTree = "<group>"; };
@@ -39,6 +55,7 @@
 		F1FE87F7078E3613BAB91B46 /* XSSHCore.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = XSSHCore.xcframework; path = Core/XSSHCore.xcframework; sourceTree = "<group>"; };
 		F7AA13AB1E8539719A7AD181 /* TerminalModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalModel.swift; sourceTree = "<group>"; };
 		F8F34A73B5A93309E875F953 /* XSSHApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XSSHApp.swift; sourceTree = "<group>"; };
+		F9DC29624730B2DE554F1073 /* HostColorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostColorTests.swift; sourceTree = "<group>"; };
 		FF0F57A4214E6389AC275F83 /* TerminalScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalScreen.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -67,6 +84,7 @@
 			children = (
 				E0426A24DA2843FA32A976EF /* Core */,
 				F0D17993CF0599CA7240B200 /* XSSH */,
+				580525ABB70A3EFF9F35F468 /* XSSHTests */,
 				F4533EF1E144B1D32FAD3242 /* Frameworks */,
 				54A7ABC8E179439926E479C7 /* Products */,
 			);
@@ -76,8 +94,18 @@
 			isa = PBXGroup;
 			children = (
 				B2CB2495746BDBF4939BFC12 /* XSSH.app */,
+				2941ED6EF4B1CDC190C9D36F /* XSSHTests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		580525ABB70A3EFF9F35F468 /* XSSHTests */ = {
+			isa = PBXGroup;
+			children = (
+				F9DC29624730B2DE554F1073 /* HostColorTests.swift */,
+				63198260A1ECC75FA2943D5F /* RandomArtTests.swift */,
+			);
+			path = XSSHTests;
 			sourceTree = "<group>";
 		};
 		E0426A24DA2843FA32A976EF /* Core */ = {
@@ -96,6 +124,7 @@
 				66C7531350EB43494A36FEC7 /* BrandMark.swift */,
 				167F9953B597EB1D7BA057E4 /* FoldState.swift */,
 				7368087C0BFDB2DD4A225C02 /* Host.swift */,
+				4373C270F3E41F7199FC61A4 /* HostKeyCard.swift */,
 				90A700116E14789B6722DE37 /* HostsView.swift */,
 				1B28A299AC2BED65E98F5049 /* Info.plist */,
 				67546D7180CF39865A1FCEA9 /* KeyCapture.swift */,
@@ -119,6 +148,24 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		3A390763B321C5CD623D3737 /* XSSHTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1D358582A1B7B3C237E55516 /* Build configuration list for PBXNativeTarget "XSSHTests" */;
+			buildPhases = (
+				254EA40987DCC47D40693730 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				538A39C2696331178D647935 /* PBXTargetDependency */,
+			);
+			name = XSSHTests;
+			packageProductDependencies = (
+			);
+			productName = XSSHTests;
+			productReference = 2941ED6EF4B1CDC190C9D36F /* XSSHTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 		9134B14E0F7175E4E03A49B7 /* XSSH */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = A679AFF1BAFD89474ECACFD6 /* Build configuration list for PBXNativeTarget "XSSH" */;
@@ -166,6 +213,7 @@
 			projectRoot = "";
 			targets = (
 				9134B14E0F7175E4E03A49B7 /* XSSH */,
+				3A390763B321C5CD623D3737 /* XSSHTests */,
 			);
 		};
 /* End PBXProject section */
@@ -183,6 +231,15 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		254EA40987DCC47D40693730 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				41C69A498FA34F991C061049 /* HostColorTests.swift in Sources */,
+				2175E5428A7EE1CE2FCE7FE2 /* RandomArtTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		FF152BD52CD59306D53FEE44 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -191,6 +248,7 @@
 				EC7D541E7552005CD67949A1 /* BrandMark.swift in Sources */,
 				CD156F4F021AC0E696678464 /* FoldState.swift in Sources */,
 				CDA543690DA21D9A89F3745D /* Host.swift in Sources */,
+				40EE40507D7DFFE7A27ECE62 /* HostKeyCard.swift in Sources */,
 				766889B2E5FD72AB857145AF /* HostsView.swift in Sources */,
 				701248AC7809523E89810737 /* KeyCapture.swift in Sources */,
 				730F1D8CB36D4752C73EF293 /* TerminalModel.swift in Sources */,
@@ -203,7 +261,32 @@
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		538A39C2696331178D647935 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 9134B14E0F7175E4E03A49B7 /* XSSH */;
+			targetProxy = 53E5A891C4C559065BF1437D /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
+		7D14B7DA4BE6D319C449EA15 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = dev.xssh.ios.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/XSSH.app/XSSH";
+			};
+			name = Release;
+		};
 		AA95AFBC3D2AA0B875BFEA5D /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -262,6 +345,23 @@
 				SWIFT_VERSION = 5.0;
 			};
 			name = Release;
+		};
+		BA0093D86B414B69F0A7652D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = dev.xssh.ios.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/XSSH.app/XSSH";
+			};
+			name = Debug;
 		};
 		CD21ABE5310AC5470F3B0F88 /* Debug */ = {
 			isa = XCBuildConfiguration;
@@ -384,6 +484,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		1D358582A1B7B3C237E55516 /* Build configuration list for PBXNativeTarget "XSSHTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				BA0093D86B414B69F0A7652D /* Debug */,
+				7D14B7DA4BE6D319C449EA15 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
 		8BB22C7D38DBC9CDAE874A90 /* Build configuration list for PBXProject "XSSH" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

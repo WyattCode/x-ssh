@@ -4,8 +4,16 @@ import Foundation
 /// 断网时最长等 10 秒,而且持着通道锁、`poll` 也跟着停 —— 放在主线程就是整个界面卡死。
 /// 界面只拿到打包好的帧(屏幕行 + 光标),在主线程画。
 final class Backend: @unchecked Sendable {
+    /// 一帧里除了屏幕行和光标之外界面要用的:滚动位置(画滚动条)和选区(画高亮)。
+    struct ViewState: Sendable {
+        var scrollOffset: UInt32 = 0
+        var history: UInt32 = 0
+        var altScreen = false
+        var selection: ViewSelection?
+    }
+
     enum Output {
-        case frame(rows: [ScreenRow], cursor: CursorState)
+        case frame(rows: [ScreenRow], cursor: CursorState, view: ViewState)
         case title(String)
         case closed(exitStatus: UInt32?)
         case clipboard(String)
@@ -101,6 +109,11 @@ final class Backend: @unchecked Sendable {
         }
     }
 
+    /// 在 IO 队列上对终端做一件事(选择 / 清选区……),完了刷新一帧。
+    func perform(_ block: @escaping @Sendable (Term) -> Void) {
+        queue.async { [self] in block(currentTerm); needsFrame = true }
+    }
+
     func scroll(lines: Int32) {
         queue.async { [self] in currentTerm.scroll(lines: lines); needsFrame = true }
     }
@@ -145,7 +158,9 @@ final class Backend: @unchecked Sendable {
             lock.unlock()
             if free {
                 needsFrame = false
-                onOutput?(.frame(rows: term.rows(), cursor: term.cursor()))
+                let view = ViewState(scrollOffset: term.scrollOffset(), history: term.historyLen(),
+                                     altScreen: term.altScreen(), selection: term.viewSelection())
+                onOutput?(.frame(rows: term.rows(), cursor: term.cursor(), view: view))
             } else {
                 needsFrame = true
             }
