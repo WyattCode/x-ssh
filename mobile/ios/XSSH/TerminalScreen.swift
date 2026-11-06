@@ -153,12 +153,12 @@ struct TerminalScreen: View {
                 // 快捷键面板和系统键盘是两颗独立的按钮,各自亮着(蓝)表示开着 —— 同安卓的 ⌘ / ⌨。
                 ToolbarItem(placement: .bottomBar) {
                     Button("Shortcuts", systemImage: "command") { withAnimation(.smooth(duration: 0.25)) { model.showsKeys.toggle() } }
-                        .tint(model.showsKeys ? Color.accentColor : nil)
+                        .tint(model.showsKeys ? Color.appAccent : nil)
                 }
                 .visibilityPriority(.high)
                 ToolbarItem(placement: .bottomBar) {
                     Button("Keyboard", systemImage: "keyboard") { model.wantsKeyboard.toggle() }
-                        .tint(model.wantsKeyboard ? Color.accentColor : nil)
+                        .tint(model.wantsKeyboard ? Color.appAccent : nil)
                 }
                 .visibilityPriority(.high)
                 ToolbarItem(placement: .bottomBar) {
@@ -201,7 +201,7 @@ struct TerminalScreen: View {
         Button(role: role, action: action) {
             Image(systemName: icon)
                 .font(.system(size: 17, weight: .medium))
-                .foregroundStyle(on ? Color.accentColor : (role == .destructive ? Color.red : Color.white))
+                .foregroundStyle(on ? Color.appAccent : (role == .destructive ? Color.red : Color.white))
                 .frame(width: 56, height: 44)
                 .contentShape(Rectangle())
         }
@@ -233,7 +233,7 @@ struct TerminalScreen: View {
                         guard to >= from else { continue }
                         ctx.fill(Path(CGRect(x: CGFloat(from) * m.width, y: CGFloat(row) * m.height,
                                              width: CGFloat(to - from + 1) * m.width, height: m.height)),
-                                 with: .color(Color.accentColor.opacity(0.4)))
+                                 with: .color(Color.appAccent.opacity(0.4)))
                     }
                 }
                 let c = model.cursor
@@ -415,8 +415,9 @@ struct TerminalScreen: View {
             .glassEffect(.regular.interactive(), in: Capsule())
             .environment(\.colorScheme, .dark)
             .fixedSize()
-            // 在手指上方 56pt 处;贴着边就往里收。
-            .position(x: min(max(anchor.x, 80), max(80, size.width - 80)), y: max(30, anchor.y - 56))
+            // 在手指上方 56pt 处;上面放不下(按在会话区最上面几行)就放到手指下面;左右上下都收在会话区里,不会伸到外面。
+            .position(x: min(max(anchor.x, 80), max(80, size.width - 80)),
+                      y: min(max(30, anchor.y >= 86 ? anchor.y - 56 : anchor.y + 52), max(30, size.height - 30)))
             .transition(.scale(scale: 0.85).combined(with: .opacity))
         }
     }

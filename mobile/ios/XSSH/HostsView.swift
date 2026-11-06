@@ -37,6 +37,10 @@ struct HostsView: View {
     private var rowPad: CGFloat { min(rowPadBase, 28) }
     @ScaledMetric(relativeTo: .title) private var titleFont: CGFloat = 26
     private var promptWidth: CGFloat { rowFont * 14 / 19 }
+    /// 内屏里长按主机行弹出的菜单:系统菜单在宽屏下会摆到侧栏右边的会话区里,所以内屏自己画一个,锚在这一行下面、限制在侧栏里。
+    @State private var menuHost: Host?
+    @State private var rowFrames: [UUID: CGRect] = [:]
+    @State private var listHeight: CGFloat = 600
     @State private var editing: Host?
     @State private var isNew = false
     @State private var pendingDelete: Host?
@@ -136,6 +140,8 @@ struct HostsView: View {
                 .accessibilityElement(children: .combine)
             }
         }
+        .overlay(alignment: .topLeading) { inlineMenuOverlay }
+        .modifier(MenuHousekeeping(split: splitLayout, activeID: activeID, menuHost: $menuHost))
         // 自己的搜索框,不用系统的 `.searchable`:系统搜索展开时整个标题区收起 / 重排,列表跟着跳,过渡不连贯。
         // 这里点一下搜索钮,顶部滑出一个搜索框,列表跟着平滑下移,标题和右侧竖条纹丝不动。
         // 内屏:搜索和新建就在列表底部(和列表在一起,不用够到屏幕另一头);外屏它们在系统竖条里。
@@ -181,7 +187,7 @@ struct HostsView: View {
             }
         }        // 把排版变化告诉开屏:稳定之后开屏才淡出,过渡中间不会再有重排。
         .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.trailing } action: { gate.touch(trailingInset: $0) }
-        .onGeometryChange(for: CGSize.self) { $0.size } action: { listWidth = $0.width; gate.touch(trailingInset: 0) }
+        .onGeometryChange(for: CGSize.self) { $0.size } action: { listWidth = $0.width; listHeight = $0.height; gate.touch(trailingInset: 0) }
         .navigationTitle("Hosts")
         // 固定的小标题:大标题会在搜索展开时收起,整张列表跟着往上跳一截,过渡就不顺了。
         // 页面左上角直接放横向 logo(不是图标加文字)。系统标题只留给读屏用,不显示。
@@ -252,26 +258,13 @@ struct HostsView: View {
         // 用 `.contextMenu` 带自定义 `preview:`:长按浮起来的是下面那张统一的圆角卡(每一行形状都一样),
         // 不是系统从列表单元格里取的形状(最上 / 最下一行变成胶囊、中间行是方的)。
         // 以前用 `Menu`:内屏的侧栏里菜单一弹出,整栏内容就被盖黑,看起来像「把会话收起来了」。
-        Button { onConnect(host) } label: { row(host, featured: featured, last: last) }
-            .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .contextMenu {
-                Button("Connect", systemImage: "play") { onConnect(host) }
-                Button("Edit", systemImage: "pencil") { startEditing(host) }
-                Button("Delete", systemImage: "trash", role: .destructive) { pendingDelete = host }
-            } preview: {
-                // 行本身没有底:浮起来的预览单独给一张卡,不然是一条悬空的字。
-                HStack(spacing: 12) {
-                    Text(verbatim: "❯").foregroundStyle(Color.white.opacity(0.4))
-                    (Text(verbatim: "ssh ").foregroundStyle(Color.white.opacity(0.4)) + Text(verbatim: host.displayName))
-                        .lineLimit(1).truncationMode(.tail)
-                    Spacer(minLength: 12)
-                    Circle().fill(HostColor.pip(host.colorIndex)).frame(width: 9, height: 9)
-                }
-                .font(.system(size: rowFont, design: .monospaced))
-                .padding(.horizontal, 20).padding(.vertical, 22)
-                .frame(width: 320)
-                .background(Color.appSheetCard)
-            }
+        Button { if menuHost == nil { onConnect(host) } } label: { row(host, featured: featured, last: last) }
+            .modifier(RowMenu(split: splitLayout, font: rowFont,
+                              onOpen: { openMenu(host) },
+                              onConnect: { onConnect(host) },
+                              onEdit: { startEditing(host) },
+                              onDelete: { pendingDelete = host },
+                              host: host))
         .buttonStyle(.plain)
         .foregroundStyle(.primary)
         // 读屏:正在连着的那台报「已选中」(视觉上是更亮 + 描边 + 绿点)。
@@ -281,6 +274,7 @@ struct HostsView: View {
                 cardX = $0.minX; cardWidth = $0.width; measuredForWidth = listWidth
             }
             rowBottoms[host.id] = $0.maxY
+            rowFrames[host.id] = $0
         }
         // 不允许一滑到底直接触发(第一个动作是删除,太容易误触);只能点露出来的按钮。
         .swipeActions(allowsFullSwipe: false) {
@@ -437,8 +431,124 @@ struct HostsView: View {
         .accessibilityLabel(Text(label))
     }
 
+    // MARK: 内屏的长按菜单
+
+    @ViewBuilder private var inlineMenuOverlay: some View {
+        if splitLayout, let host = menuHost { inlineMenu(for: host) }
+    }
+
+    private func openMenu(_ host: Host) {
+        withAnimation(.spring(duration: 0.3, bounce: 0.12)) { menuHost = host }
+    }
+
+    private func closeMenu() {
+        withAnimation(.smooth(duration: 0.18)) { menuHost = nil }
+    }
+
+    /// 锚在被按的那一行下面(下面放不下就放到它上面),左边对齐文字的对齐线,宽度固定:整个菜单都在侧栏里,不会伸到右边的会话区。
+    private func inlineMenu(for host: Host) -> some View {
+        let f = rowFrames[host.id] ?? .zero
+        let menuW: CGFloat = min(236, max(180, listWidth - rowInset * 2))
+        let menuH: CGFloat = 3 * 50
+        let below = f.maxY + 4
+        // 70:底部那颗搜索 / 新建药丸要留出来。
+        let y = below + menuH <= listHeight - 70 ? below : max(8, f.minY - 4 - menuH)
+        return ZStack(alignment: .topLeading) {
+            // 点菜单以外的任何地方 = 关掉。
+            // 捕获层向右、向下伸出侧栏(不裁剪):点会话区的空白处也能关掉,不会留着一个孤零零的菜单。
+            Color.black.opacity(0.001).frame(width: 3000, height: 3000).contentShape(Rectangle()).onTapGesture { closeMenu() }
+            // 被按的那一行:淡淡的底,表示这个菜单是它的。
+            RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.white.opacity(0.07))
+                .frame(width: max(0, f.width - rowInset * 2 + 20), height: f.height)
+                .offset(x: f.minX + rowInset - 10, y: f.minY).allowsHitTesting(false)
+            VStack(spacing: 0) {
+                menuItem("Connect", "play") { onConnect(host) }
+                Divider().overlay(Color.white.opacity(0.1))
+                menuItem("Edit", "pencil") { startEditing(host) }
+                Divider().overlay(Color.white.opacity(0.1))
+                menuItem("Delete", "trash", destructive: true) { pendingDelete = host }
+            }
+            .frame(width: menuW)
+            .cardChrome(cornerRadius: 18)
+            .offset(x: f.minX + rowInset, y: y)
+            .transition(.scale(scale: 0.94, anchor: .topLeading).combined(with: .opacity))
+        }
+    }
+
+    private func menuItem(_ title: LocalizedStringKey, _ icon: String, destructive: Bool = false,
+                          _ action: @escaping () -> Void) -> some View {
+        Button {
+            closeMenu()
+            action()
+        } label: {
+            HStack(spacing: 14) {
+                Image(systemName: icon).frame(width: 22)
+                Text(title)
+                Spacer(minLength: 0)
+            }
+            .font(.system(size: 17))
+            .foregroundStyle(destructive ? Color.red : Color.white)
+            .padding(.horizontal, 16).frame(height: 50)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
     private func startAdding() { isNew = true; editing = Host() }
     private func startEditing(_ host: Host) { isNew = false; editing = host }
+}
+
+/// 主机行的长按菜单。外屏(窄)用系统的上下文菜单(带浮起的预览卡,系统摆在预览下面,位置没问题);
+/// 内屏(宽,自己排的两栏)系统会把菜单摆到侧栏右边的会话区里,所以内屏改成长按 0.4 秒触发自己画的菜单(见 `HostsView.inlineMenu`)。
+private struct RowMenu: ViewModifier {
+    let split: Bool
+    let font: CGFloat
+    let onOpen: () -> Void
+    let onConnect: () -> Void
+    let onEdit: () -> Void
+    let onDelete: () -> Void
+    let host: Host
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if split {
+            content.simultaneousGesture(LongPressGesture(minimumDuration: 0.4).onEnded { _ in onOpen() })
+        } else {
+            content
+                .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .contextMenu {
+                    Button("Connect", systemImage: "play", action: onConnect)
+                    Button("Edit", systemImage: "pencil", action: onEdit)
+                    Button("Delete", systemImage: "trash", role: .destructive, action: onDelete)
+                } preview: {
+                    // 行本身没有底:浮起来的预览单独给一张卡,不然是一条悬空的字。
+                    HStack(spacing: 12) {
+                        Text(verbatim: "❯").foregroundStyle(Color.white.opacity(0.4))
+                        (Text(verbatim: "ssh ").foregroundStyle(Color.white.opacity(0.4)) + Text(verbatim: host.displayName))
+                            .lineLimit(1).truncationMode(.tail)
+                        Spacer(minLength: 12)
+                        Circle().fill(HostColor.pip(host.colorIndex)).frame(width: 9, height: 9)
+                    }
+                    .font(.system(size: font, design: .monospaced))
+                    .padding(.horizontal, 20).padding(.vertical, 22)
+                    .frame(width: 320)
+                    .background(Color.appSheetCard)
+                }
+        }
+    }
+}
+
+/// 内屏菜单的收尾:折叠 / 展开切换、连上另一台时把菜单关掉;打开 / 关闭时一下触觉。
+private struct MenuHousekeeping: ViewModifier {
+    let split: Bool
+    let activeID: UUID?
+    @Binding var menuHost: Host?
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: split) { _, _ in menuHost = nil }
+            .onChange(of: activeID) { _, _ in menuHost = nil }
+            .sensoryFeedback(trigger: menuHost?.id) { _, new in new != nil ? .impact(weight: .medium) : nil }
+    }
 }
 
 private struct SectionSpacing: ViewModifier {

@@ -50,3 +50,11 @@ extension Color {
     /// 弹层里的卡片 / 表单行:再亮一档(#2B2B2B),和弹层的底拉开层次。
     static let appSheetCard = Color(uiColor: UIColor { _ in UIColor(white: 0.17, alpha: 1) })
 }
+
+extension Color {
+    /// 全应用的强调色:绿色(和连着的主机、确认卡的主按钮同一个绿)。系统控件靠根视图的 `.tint(.appAccent)`,
+    /// 自己画的地方(键盘开关、快捷键帽、选区高亮)直接用它。
+    static let appAccent = Color(red: 0.19, green: 0.82, blue: 0.345)
+    /// 画在 `appAccent` 底上的文字 / 图标:深绿(亮绿底上用白字对比度不够)。
+    static let appAccentInk = Color(red: 0.016, green: 0.13, blue: 0.047)
+}

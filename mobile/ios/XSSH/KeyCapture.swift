@@ -368,7 +368,7 @@ private struct KeyCap: View {
     var body: some View {
         content
             .font(.body)
-            .foregroundStyle(.white)
+            .foregroundStyle((emphasis || active) ? Color.appAccentInk : Color.white)   // 亮绿底上用深绿字
             .frame(width: 52, height: 44)
             .background(Capsule().fill(fill))
             .contentShape(Capsule())
@@ -400,7 +400,7 @@ private struct KeyCap: View {
     }
 
     private var fill: Color {
-        if emphasis || active { return Color.accentColor.opacity(pressed ? 0.8 : 1) }
+        if emphasis || active { return Color.appAccent.opacity(pressed ? 0.8 : 1) }
         return Color.white.opacity(pressed ? 0.30 : 0.14)
     }
 
