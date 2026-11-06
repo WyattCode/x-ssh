@@ -523,7 +523,7 @@ struct RootView: View {
             // 外屏:翻页(系统的滑动)照旧;列表里这台那一行的收场放在翻页快到位的时候才开始 —— 那时列表已经看得见了,
             // 用户眼睛正落在那一行上(以前翻回来之后它还「连着」约半秒,然后猛地一变,最不顺的就是这里)。
             //   320ms   箭头绿 → 灰、光标淡出、「✓ 已连接 · 时长」换成灰色的「✕ 已断开」(0.5s,轻轻一下震动);
-            //   970ms   停了一会儿,状态行收起(高度 + 透明度一起,0.45s,下面的行平滑上移),这时才真正清掉会话
+            //   970ms   停了一会儿,状态行收起(高度 + 透明度一起,0.3s,下面的行平滑上移),这时才真正清掉会话
             //           (早清的话翻页中途详情页会先变成「没有会话」的空页面,闪一下)。
             let leaving = active?.id
             Task { @MainActor in
@@ -532,9 +532,9 @@ struct RootView: View {
                 withAnimation(.smooth(duration: 0.5)) { closing = true }
                 try? await Task.sleep(for: .milliseconds(650))
                 guard active?.id == leaving else { return }
-                withAnimation(.smooth(duration: 0.45)) { active = nil }
-                // 收起的 0.45s 里状态行还显示着「✕ 已断开」,收完了才把标志复位(同时复位的话,这一行会在淡出的最后一刻闪回「✓ 已连接」)。
-                try? await Task.sleep(for: .milliseconds(600))
+                withAnimation(.smooth(duration: 0.3)) { active = nil }
+                // 收起的 0.3s 里状态行还显示着「✕ 已断开」,收完了才把标志复位(同时复位的话,这一行会在淡出的最后一刻闪回「✓ 已连接」)。
+                try? await Task.sleep(for: .milliseconds(450))
                 if active == nil { closing = false }
             }
         }

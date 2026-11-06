@@ -110,7 +110,7 @@ struct HostsView: View {
                 // 等那一帧画出来,再用动画把抵消放掉 —— 下面的行和虚线是平滑地往上走,不是猛地一提。
                 Task { @MainActor in
                     try? await Task.sleep(for: .milliseconds(30))
-                    withAnimation(.smooth(duration: 0.45)) { settled = true }
+                    withAnimation(.smooth(duration: 0.3)) { settled = true }
                 }
             }
             guard let id else { return }
@@ -372,7 +372,7 @@ struct HostsView: View {
                 .clipped()
                 .padding(.top, featured ? 8 : 0)
         }
-        .animation(.smooth(duration: 0.45), value: featured)
+        .animation(.smooth(duration: 0.3), value: featured)
         .animation(.easeOut(duration: 0.2), value: activeConnecting)
         // 断开收场:箭头绿 → 灰、光标淡出、状态行换成「已断开」,各自 0.45s 平滑过渡。
         .animation(.smooth(duration: 0.45), value: activeClosing)
@@ -994,7 +994,7 @@ private struct SeparatorFade: ViewModifier {
     func body(content: Content) -> some View {
         content
             .opacity(hidden ? 0 : 1)
-            .animation(hidden ? .easeOut(duration: 0.4) : .easeOut(duration: 0.3).delay(0.22), value: hidden)
+            .animation(hidden ? .easeOut(duration: 0.4) : .easeOut(duration: 0.25).delay(0.15), value: hidden)
     }
 }
 
@@ -1006,6 +1006,6 @@ private struct CollapseShift: ViewModifier {
     func body(content: Content) -> some View {
         content
             .offset(y: y)
-            .animation(settled ? .smooth(duration: 0.45) : nil, value: y)
+            .animation(settled ? .smooth(duration: 0.3) : nil, value: y)
     }
 }
