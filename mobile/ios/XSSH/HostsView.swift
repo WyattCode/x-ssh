@@ -32,7 +32,10 @@ struct HostsView: View {
     /// 随系统字体大小缩放的尺寸(行字号、小字、行内留白、`❯` 宽度)。
     @ScaledMetric(relativeTo: .body) private var rowFont: CGFloat = 19
     @ScaledMetric(relativeTo: .caption) private var smallFont: CGFloat = 12
-    @ScaledMetric(relativeTo: .body) private var rowPad: CGFloat = 21
+    @ScaledMetric(relativeTo: .body) private var rowPadBase: CGFloat = 21
+    /// 字号放大时行内上下留白只跟着涨一点(封顶 28pt),不然行高会被撑得很大。
+    private var rowPad: CGFloat { min(rowPadBase, 28) }
+    @ScaledMetric(relativeTo: .title) private var titleFont: CGFloat = 26
     private var promptWidth: CGFloat { rowFont * 14 / 19 }
     @State private var editing: Host?
     @State private var isNew = false
@@ -61,10 +64,11 @@ struct HostsView: View {
 
     private var titleRow: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(verbatim: "$ hosts").font(.system(size: 26, weight: .semibold, design: .monospaced)).tracking(-0.4)
-            Text("\(store.hosts.count)").font(.footnote).foregroundStyle(Color.white.opacity(0.45))
+            Text(verbatim: "$ hosts").font(.system(size: titleFont, weight: .semibold, design: .monospaced)).tracking(-0.4)
+            if !store.hosts.isEmpty { Text("\(store.hosts.count)").font(.footnote).foregroundStyle(Color.white.opacity(0.45)) }
         }
-        .padding(.horizontal, 16 + cardInset).padding(.top, splitLayout ? 2 : 6).padding(.bottom, 8)
+        // 标题和 logo、每行的 `❯` 同一条竖线:外屏靠列表自带的约 20pt 左边距,内屏靠 rowInset。
+        .padding(.horizontal, rowInset).padding(.top, (splitLayout ? 2 : 6) + 6).padding(.bottom, 8 + 4)   // +6 / +4:以前这一行被列表的最小行高撑着,现在最小行高是 1,补回来
         .frame(maxWidth: .infinity, alignment: .leading)
         .listRowBackground(Color.clear).listRowSeparator(.hidden).listRowInsets(EdgeInsets())
         // 读屏:「Hosts,5」,不念 `$` 符号。
@@ -83,6 +87,9 @@ struct HostsView: View {
             let rows = shown
             ForEach(rows) { host in
                 hostRow(host, featured: host.id == activeID, last: host.id == rows.last?.id)
+                // 行间的虚线是独立的一行(单元格):长按时系统把被按的那一格整个换成浮起的预览,
+                // 虚线要是画在这一格里,会跟着消失、松手又弹回来。
+                if host.id != rows.last?.id { separatorRow }
             }
         }
         // 连上一台时,让列表滚到那张卡片(它在视野外也能看到自己选中了哪台)。
@@ -95,6 +102,8 @@ struct HostsView: View {
         .sensoryFeedback(trigger: connectedSince) { _, new in new != nil ? .success : nil }
         // 紧凑宽度(主页)背景纯黑;展开成两栏时左边这一栏要和右边的会话(终端纯黑)有颜色区分,用深灰。
         .scrollContentBackground(.hidden)
+        // 虚线是独立的一行(高 1pt):列表默认的最小行高会把它撑大,行距就乱了。
+        .environment(\.defaultMinListRowHeight, 1)
         // 两栏时去掉列表自带的左右边距(约 20pt),卡片才能占满侧栏宽度;窄屏单栏保持系统边距。
         .modifier(SplitListMargins(split: splitLayout))
         // 底部的玻璃工具条浮在列表上,最后一张卡片要能滚到它上面。
@@ -118,7 +127,18 @@ struct HostsView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel(Text("Add Host"))
             } else if shown.isEmpty {
-                ContentUnavailableView.search(text: query)
+                // 搜不到:一行 `❯ grep "关键字"` + 一句话,和列表同一套终端风格(不用系统的放大镜图)。
+                VStack(spacing: 10) {
+                    HStack(spacing: 8) {
+                        Text(verbatim: "❯").foregroundStyle(Color.green)
+                        Text(verbatim: "grep").foregroundStyle(Color.white.opacity(0.4))
+                        Text(verbatim: "\"\(query)\"").lineLimit(1).truncationMode(.middle)
+                    }
+                    .font(.system(size: rowFont, design: .monospaced))
+                    Text("No matching hosts").font(.footnote).foregroundStyle(.secondary)
+                }
+                .padding(24)
+                .accessibilityElement(children: .combine)
             }
         }
         // 自己的搜索框,不用系统的 `.searchable`:系统搜索展开时整个标题区收起 / 重排,列表跟着跳,过渡不连贯。
@@ -132,7 +152,9 @@ struct HostsView: View {
                 }
                 .padding(4)
                 .glassEffect(.regular.interactive(), in: Capsule())
-                .padding(.bottom, 12)
+                // 底边和右边按钮竖条同一条线(都离屏幕底 25pt);不吃底部安全区,不然会比竖条高一截。
+                .padding(.bottom, 25)
+                .ignoresSafeArea(.container, edges: .bottom)
             }
         }
         .safeAreaInset(edge: .top, spacing: 0) {
@@ -140,7 +162,8 @@ struct HostsView: View {
                 // 内屏(自己排的两栏)没有系统导航栏,logo 自己画在侧栏顶部(右边留给外层画的「侧栏开关」)。
                 if splitLayout {
                     BrandLockup(height: 19)
-                        .padding(.leading, 16).padding(.top, 38)
+                        // 左边和下面的 `$ hosts` 标题对齐(同一个起点),不贴着屏幕圆角。
+                        .padding(.leading, rowInset).padding(.top, 38)
                         .frame(maxWidth: .infinity, alignment: .topLeading)
                         .frame(height: 57, alignment: .top)   // 上留白 38 + logo 19:框要装得下,不然 logo 溢出压到下面的搜索框
                 }
@@ -229,31 +252,31 @@ struct HostsView: View {
     }
 
     /// 一张主机卡(带点击、长按菜单、左滑操作、卡片背景):单独成函数,List 里的表达式才不会复杂到编译器类型推断超时。
+    /// 点一下 = 连接,长按 = 系统的液态玻璃上下文菜单(大圆角、图标在左、组与组之间有分隔线,和系统应用一致)。
+    /// 内外屏都不给自定义预览:让系统把被按的这一行本身浮起来,菜单跟在它上面 / 下面、靠左(见 `RowMenu`)。
+    private func rowControl(_ host: Host, featured: Bool, last: Bool) -> some View {
+        // 左右留白(`rowInset`)放在按钮和菜单的外面:长按浮起的只是文字那一块,不带留白,
+        // 不然系统在宽屏侧栏里把整行(含留白)往右平移,行尾的圆点就冲出了侧栏。
+        Button { onConnect(host) } label: { row(host, featured: featured, last: last) }
+            .modifier(RowMenu(trim: menuTrim,
+                              onConnect: { onConnect(host) },
+                              onEdit: { startEditing(host) },
+                              onDelete: { pendingDelete = host }))
+            .padding(.horizontal, rowInset)
+    }
+
+    private var separatorRow: some View {
+        DashedLine().stroke(Color.white.opacity(0.16), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+            .frame(height: 1)
+            .padding(.horizontal, rowInset)
+            .frame(maxWidth: .infinity)
+            .listRowBackground(Color.clear).listRowInsets(EdgeInsets()).listRowSeparator(.hidden)
+            .accessibilityHidden(true)
+    }
+
     private func hostRow(_ host: Host, featured: Bool, last: Bool) -> some View {
         // 点一下 = 连接;长按 = 弹菜单(系统自带触觉反馈)。
-        // 用 `.contextMenu` 带自定义 `preview:`:长按浮起来的是下面那张统一的圆角卡(每一行形状都一样),
-        // 不是系统从列表单元格里取的形状(最上 / 最下一行变成胶囊、中间行是方的)。
-        // 以前用 `Menu`:内屏的侧栏里菜单一弹出,整栏内容就被盖黑,看起来像「把会话收起来了」。
-        Button { onConnect(host) } label: { row(host, featured: featured, last: last) }
-            .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .contextMenu {
-                Button("Connect", systemImage: "play") { onConnect(host) }
-                Button("Edit", systemImage: "pencil") { startEditing(host) }
-                Button("Delete", systemImage: "trash", role: .destructive) { pendingDelete = host }
-            } preview: {
-                // 行本身没有底:浮起来的预览单独给一张卡,不然是一条悬空的字。
-                HStack(spacing: 12) {
-                    Text(verbatim: "❯").foregroundStyle(Color.white.opacity(0.4))
-                    (Text(verbatim: "ssh ").foregroundStyle(Color.white.opacity(0.4)) + Text(verbatim: host.displayName))
-                        .lineLimit(1).truncationMode(.tail)
-                    Spacer(minLength: 12)
-                    Circle().fill(HostColor.pip(host.colorIndex)).frame(width: 9, height: 9)
-                }
-                .font(.system(size: rowFont, design: .monospaced))
-                .padding(.horizontal, 20).padding(.vertical, 22)
-                .frame(width: 320)
-                .background(Color.appSheetCard)
-            }
+        rowControl(host, featured: featured, last: last)
         .buttonStyle(.plain)
         .foregroundStyle(.primary)
         // 读屏:正在连着的那台报「已选中」(视觉上是更亮 + 描边 + 绿点)。
@@ -264,9 +287,13 @@ struct HostsView: View {
             }
             rowBottoms[host.id] = $0.maxY
         }
-        .swipeActions {
+        // 不允许一滑到底直接触发(第一个动作是删除,太容易误触);只能点露出来的按钮。
+        .swipeActions(allowsFullSwipe: false) {
+            // 只要图标,不要文字(读屏仍然念「删除 / 编辑」)。
             Button("Delete", systemImage: "trash", role: .destructive) { pendingDelete = host }
-            Button("Edit", systemImage: "pencil") { startEditing(host) }.tint(Color(white: 0.3))
+                .labelStyle(.iconOnly)
+            Button("Edit", systemImage: "pencil") { startEditing(host) }
+                .labelStyle(.iconOnly).tint(Color(white: 0.3))
         }
             .listRowBackground(Color.clear)
             .listRowInsets(EdgeInsets())
@@ -278,7 +305,6 @@ struct HostsView: View {
         sshRow(host, featured: featured, last: last)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
-            .padding(.horizontal, cardInset)
     }
 
     /// 每台一行,就是一条要敲的命令:`❯ ssh 名字`(等宽字体,`ssh` 淡、名字亮),行尾一个这台的颜色点,行与行之间一条虚线。
@@ -286,15 +312,17 @@ struct HostsView: View {
     /// 名字必须一行(太长截断)。不显示 IP / 端口。
     private func sshRow(_ host: Host, featured: Bool, last: Bool) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline, spacing: Self.promptGap) {
+            // 间距自己控制(HStack 间距为 0):名字和颜色点之间只留 8pt,长名字才不会被提前截断。
+            HStack(alignment: .firstTextBaseline, spacing: 0) {
                 Text(verbatim: "❯")
                     .foregroundStyle(featured ? Color.green : Color.white.opacity(0.4))
                     .frame(width: promptWidth, alignment: .leading)
+                    .padding(.trailing, Self.promptGap)
                 (Text(verbatim: "ssh ").foregroundStyle(Color.white.opacity(0.4))
                     + Text(verbatim: host.displayName).foregroundStyle(Color.white.opacity(0.93)))
                     .lineLimit(1).truncationMode(.tail)
-                if featured && !activeConnecting { BlinkingCursor() }
-                Spacer(minLength: 6)
+                if featured && !activeConnecting { BlinkingCursor().padding(.leading, 8) }
+                Spacer(minLength: 8)
                 ZStack {
                     if featured && activeConnecting {
                         ProgressView().controlSize(.mini).tint(.white)
@@ -304,6 +332,8 @@ struct HostsView: View {
                     }
                 }
                 .frame(width: 14, height: 14)
+                // 圆点和转圈用同一条基线(框的底边在文字基线上):不然转圈没有基线,会比这一行低一截。
+                .alignmentGuide(.firstTextBaseline) { $0[.bottom] }
             }
             .font(.system(size: rowFont, design: .monospaced))
             if let hint = matchHint(host) {
@@ -322,10 +352,7 @@ struct HostsView: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(verbatim: host.displayName))
         .accessibilityValue(featured ? (activeConnecting ? Text("Connecting…") : Text("Connected")) : Text(verbatim: ""))
-        .padding(.horizontal, 10).padding(.vertical, rowPad)
-        .overlay(alignment: .bottom) {
-            if !last { DashedLine().stroke(Color.white.opacity(0.16), style: StrokeStyle(lineWidth: 1, dash: [3, 3])).frame(height: 1) }
-        }
+        .padding(.horizontal, 0).padding(.vertical, rowPad)   // 每行的 `❯` 和标题的 `$`、logo、虚线起点同一条竖线
     }
 
     /// 搜索时,名字没匹配上、是地址 / 用户名匹配上的,在名字下面小字写出匹配到的那一项(平时列表不显示地址)。
@@ -344,6 +371,8 @@ struct HostsView: View {
         if activeConnecting {
             Text(activeNeedsConfirm ? "Waiting for confirmation" : "Connecting…").foregroundStyle(Color.white.opacity(activeNeedsConfirm ? 0.85 : 0.6))
                 .font(.system(size: smallFont, design: .monospaced))
+                // 和「已连接」那行一样缩进到名字的起点。
+                .padding(.leading, promptWidth + Self.promptGap)
         } else {
             HStack(spacing: 0) {
                 Text(verbatim: "✓ ")
@@ -368,8 +397,18 @@ struct HostsView: View {
     /// 两栏时卡片宽 = 侧栏宽的 92%,左右各留 4%(参考图里卡片和分界线之间就是这么一条窄缝)。
     /// 按侧栏实际宽度算,拖动改宽后比例不变。列表自带的左右边距已去掉(见 `SplitListMargins`)。
     private var cardInset: CGFloat { splitLayout ? listWidth * 0.04 : 0 }
+    /// 内屏侧栏的左右对齐线:logo、`$ hosts`、每行的 `❯`、虚线的起点都在这条线上(和外屏一致:外屏是列表自带的约 20pt 边距),
+    /// 右边虚线的终点对称。外屏不用(0)。
+    private var rowInset: CGFloat { splitLayout ? 16 + cardInset : 0 }
 
-    /// 搜索框也是一行命令:`❯ grep ▍输入`,没有圆角底,下面一条虚线;文字和列表行的 `❯` 对齐(同样的左右 10pt)。
+    /// 长按菜单要收掉的边:默认字号时外屏 7pt、内屏 13pt(内屏同样的行高下系统给的空隙比外屏大约 6pt),量过两边文字到菜单都约 42pt、虚线到菜单约 9pt。
+    /// 字号变大时,行内上下留白和文字自己都变高,跟着多收(留白每多 1pt 多收 1pt,文字半高每多 1pt 多收 1pt),文字到菜单的距离不变。
+    private var menuTrim: CGFloat {
+        let base: CGFloat = splitLayout ? 13 : 7
+        return max(0, base + (rowPad - 21) + 0.6 * (rowFont - 19))
+    }
+
+    /// 搜索框也是一行命令:`❯ grep ▍输入`,没有圆角底,下面一条虚线;`❯` 和列表行的 `❯` 在同一条竖线上。
     private var searchField: some View {
         HStack(spacing: 10) {
             Text(verbatim: "❯").foregroundStyle(Color.green)
@@ -383,15 +422,15 @@ struct HostsView: View {
             }
         }
         .font(.system(size: rowFont, design: .monospaced))
-        .padding(.horizontal, 10)
+        .padding(.horizontal, 0)   // 搜索行的 `❯` 也在同一条竖线上
         .frame(minHeight: 48)
         .overlay(alignment: .bottom) {
             DashedLine().stroke(Color.white.opacity(0.16), style: StrokeStyle(lineWidth: 1, dash: [3, 3])).frame(height: 1)
         }
         // 左右边缘和宽度都取自下面列表行的实际位置(靠竖条那一侧边距更小,固定边距会对不齐);
         // 还没有行(列表为空)时退回到系统的场景边距。
-        .modifier(MatchCard(x: cardX.map { $0 + (splitLayout ? cardInset : 0) }, width: cardWidth.map { $0 - (splitLayout ? cardInset * 2 : 0) }))
-        .padding(.vertical, 4)
+        .modifier(MatchCard(x: cardX.map { $0 + rowInset }, width: cardWidth.map { $0 - rowInset * 2 }))
+        .padding(.top, 10).padding(.bottom, 4)
     }
 
     private func toolButton(_ icon: String, _ label: LocalizedStringKey, action: @escaping () -> Void) -> some View {
@@ -408,6 +447,45 @@ struct HostsView: View {
 
     private func startAdding() { isNew = true; editing = Host() }
     private func startEditing(_ host: Host) { isNew = false; editing = host }
+}
+
+/// 主机行的长按菜单:系统上下文菜单。三项分成两组(连接 | 编辑 / 删除),组间有分隔线;图标用主色(不跟随全局绿色强调色)。
+private struct RowMenu: ViewModifier {
+    /// 被按那一块顶边、底边各往里收多少 pt(见 `HostsView.menuTrim`)。
+    let trim: CGFloat
+    let onConnect: () -> Void
+    let onEdit: () -> Void
+    let onDelete: () -> Void
+
+    func body(content: Content) -> some View {
+        // 系统按「被按那一块」的底边摆往下弹的菜单、按顶边摆往上弹的菜单。这一块默认含行里上下的留白,菜单就离文字太远:
+        // 顶、底各往里收 `trim`(上下对称,往上弹、往下弹离文字一样远),菜单就近了。
+        content
+            .contentShape(.contextMenuPreview, TrimmedRoundedRect(top: trim, bottom: trim, radius: 14))
+            .contextMenu { items }
+    }
+
+    @ViewBuilder private var items: some View {
+        Button("Connect", systemImage: "play", action: onConnect).tint(.primary)
+        Divider()
+        Button("Edit", systemImage: "pencil", action: onEdit).tint(.primary)
+        Button("Delete", systemImage: "trash", role: .destructive, action: onDelete).tint(.red)
+    }
+}
+
+/// 顶边往下收 `top`、底边往上收 `bottom` 的圆角矩形(给长按菜单当「被按的那一块」):
+/// 系统按这一块的底边摆往下弹的菜单、按顶边摆往上弹的菜单,收掉行里的留白,菜单就离文字近一些。
+private struct TrimmedRoundedRect: Shape {
+    let top: CGFloat
+    let bottom: CGFloat
+    let radius: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        var r = rect
+        r.origin.y += top
+        r.size.height = max(1, rect.height - top - bottom)
+        return RoundedRectangle(cornerRadius: radius, style: .continuous).path(in: r)
+    }
 }
 
 private struct SectionSpacing: ViewModifier {

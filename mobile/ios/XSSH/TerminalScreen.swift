@@ -91,7 +91,9 @@ struct TerminalScreen: View {
                 }
             }
             // 内屏(常规宽度)左边紧挨着侧栏的分界线,文字贴着边太挤:多留一些;外屏窄,保持 4pt。
-            .padding(.horizontal, sizeClass == .regular ? 16 : 4)
+            // 外屏:20pt,和主机列表页的对齐线(logo / `$ hosts` / `❯`)同一条竖线,从列表点进会话左边缘不跳;
+            // 内屏:16pt(左边紧挨着侧栏的分界线,文字贴着边太挤)。
+            .padding(.horizontal, sizeClass == .regular ? 16 : 20)
             // 内屏自己排版没有导航栏:终端从会话名下面开始(和外屏导航栏下面的位置一致)。
             .padding(.top, embedded ? embeddedTop : 0)
             .accessibilityElement()
@@ -133,8 +135,11 @@ struct TerminalScreen: View {
                 Text(verbatim: model.title.isEmpty ? model.host.displayName : model.title)
                     .font(.headline).lineLimit(1).truncationMode(.tail)
                     .frame(maxWidth: 280, alignment: .leading)
-                    // 系统给顶部工具栏项留了约 20pt 的左边距,名字被推得离屏幕边太远:往回收,和终端文字的左边对齐。
-                    .padding(.leading, -16)
+                    // 按文字自己的宽度(最多 280pt)定大小:不然系统分给这个左上角项的宽度很小,「Home Lab」会被截成「Home…」。
+                    .fixedSize(horizontal: true, vertical: false)
+                    // 系统只给这个项约 64pt 的宽度:短名字(「duo」)要靠左,否则会在这块里居中。
+                    .frame(minWidth: 80, alignment: .leading)
+                // 注意:不要再给它加负的左边距。系统给顶部工具栏项留的约 20pt 左边距,正好和列表页 logo、终端文字的左边缘在同一条竖线上。
             }
             // 去掉系统给工具栏项套的玻璃圆泡,否则 logo + 主机名被裁在一个小圆里。
             .sharedBackgroundVisibility(.hidden)
@@ -366,13 +371,13 @@ struct TerminalScreen: View {
                 Capsule()
                     .fill(Color.white.opacity(0.07))
                     .frame(width: 3, height: size.height - 12)
-                    .padding(.trailing, 4.5).padding(.top, 6)
+                    .padding(.trailing, 3.5).padding(.top, 6)
                     .opacity(shown ? 1 : 0)
                     .animation(.easeOut(duration: shown ? 0.12 : 0.5), value: shown)
                 Capsule()
                     .fill(Color.white.opacity(barDragging ? 0.85 : 0.6))
                     .frame(width: barDragging ? 6 : 4, height: thumbH)
-                    .padding(.trailing, 4)
+                    .padding(.trailing, 3)
                     .offset(y: thumbY)
                     .opacity(shown ? 1 : 0)
                     .animation(.easeOut(duration: shown ? 0.12 : 0.5), value: shown)
@@ -410,8 +415,9 @@ struct TerminalScreen: View {
             .glassEffect(.regular.interactive(), in: Capsule())
             .environment(\.colorScheme, .dark)
             .fixedSize()
-            // 在手指上方 56pt 处;贴着边就往里收。
-            .position(x: min(max(anchor.x, 80), max(80, size.width - 80)), y: max(30, anchor.y - 56))
+            // 在手指上方 56pt 处;上面放不下(按在会话区最上面几行)就放到手指下面;左右上下都收在会话区里,不会伸到外面。
+            .position(x: min(max(anchor.x, 80), max(80, size.width - 80)),
+                      y: min(max(30, anchor.y >= 86 ? anchor.y - 56 : anchor.y + 52), max(30, size.height - 30)))
             .transition(.scale(scale: 0.85).combined(with: .opacity))
         }
     }
@@ -445,29 +451,17 @@ struct TerminalScreen: View {
             card {
                 ProgressView().tint(.white)
                 Text("Connecting…").font(.headline)
-                Button("Cancel", role: .cancel, action: onClose).buttonStyle(.bordered)
+                CardGhostButton(title: "Cancel", action: onClose)
             }
         case .needsTrust(let fp):
             card {
-                Text("Unknown host key").font(.headline)
-                Text("Check that this fingerprint belongs to the server before trusting it.")
-                    .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
-                fingerprint(fp)
-                Button("Trust and connect") { model.trust(fingerprint: fp, store: store) }
-                    .buttonStyle(.borderedProminent)
-                Button("Cancel", role: .cancel, action: onClose).buttonStyle(.bordered)
+                HostKeyCard(host: model.host.displayName, kind: .unknown(fingerprint: fp),
+                            onPrimary: { model.trust(fingerprint: fp, store: store) }, onCancel: onClose)
             }
         case .keyChanged(let new, let old):
             card {
-                Label("Host key changed", systemImage: "exclamationmark.triangle.fill")
-                    .font(.headline).foregroundStyle(.yellow)
-                Text("The server presented a different key than the one you trusted. This can mean the server was reinstalled — or that someone is intercepting the connection.")
-                    .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
-                if let old { labeled("Trusted key", old) }
-                labeled("Presented key", new)
-                Button("Replace key and connect", role: .destructive) { confirmReplace = true }
-                    .buttonStyle(.borderedProminent)
-                Button("Cancel", role: .cancel, action: onClose).buttonStyle(.bordered)
+                HostKeyCard(host: model.host.displayName, kind: .changed(new: new, old: old),
+                            onPrimary: { confirmReplace = true }, onCancel: onClose)
             }
             .alert("Replace the trusted key?", isPresented: $confirmReplace) {
                 Button("Cancel", role: .cancel) {}
@@ -477,11 +471,20 @@ struct TerminalScreen: View {
             }
         case .failed(let message):
             card {
-                Label("Connection failed", systemImage: "wifi.exclamationmark").font(.headline)
-                Text(verbatim: message).font(.footnote.monospaced()).foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center).textSelection(.enabled)
-                Button("Retry") { model.connect() }.buttonStyle(.borderedProminent)
-                Button("Cancel", role: .cancel, action: onClose).buttonStyle(.bordered)
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(spacing: 12) {
+                        CardIconRing(systemImage: "wifi.exclamationmark", tint: .orange)
+                        Text("Connection failed").font(.headline)
+                    }
+                    Text(verbatim: message).font(.footnote.monospaced())
+                        .foregroundStyle(Color.white.opacity(0.62)).textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    VStack(spacing: 6) {
+                        CardPrimaryButton(title: "Retry") { model.connect() }
+                        CardGhostButton(title: "Cancel", action: onClose)
+                    }
+                    .padding(.top, 4)
+                }
             }
         case .closed(let status):
             VStack {
@@ -490,10 +493,10 @@ struct TerminalScreen: View {
                     Image(systemName: "bolt.slash")
                     if let status, status != 0 { Text("Session ended (exit \(Int(status)))") } else { Text("Session ended") }
                     Spacer(minLength: 8)
-                    Button("Reconnect") { model.connect() }.buttonStyle(.borderedProminent).controlSize(.large)
+                    CardPrimaryButton(title: "Reconnect", compact: true) { model.connect() }
                 }
                 .padding(12)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
+                .cardChrome(cornerRadius: 24)
                 .padding(12)
             }
             .foregroundStyle(.white)
@@ -514,20 +517,12 @@ struct TerminalScreen: View {
             .controlSize(.large)
             .padding(20)
             .frame(maxWidth: 420)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 28))
+            // 暗色渐变卡片 + 细边(和主机列表同一套终端风格),取代系统的毛玻璃。
+            .cardChrome(cornerRadius: 26)
+            // 卡片最大跟到「辅助功能 1」档:再大按钮和指纹就塞不进屏幕了。
+            .dynamicTypeSize(...DynamicTypeSize.accessibility1)
             .padding(16)
             .foregroundStyle(.white)
             .environment(\.colorScheme, .dark)
-    }
-
-    private func fingerprint(_ fp: String) -> some View {
-        Text(verbatim: fp).font(.caption.monospaced()).textSelection(.enabled).multilineTextAlignment(.center)
-    }
-
-    private func labeled(_ title: LocalizedStringKey, _ fp: String) -> some View {
-        VStack(spacing: 2) {
-            Text(title).font(.caption2).foregroundStyle(.secondary)
-            fingerprint(fp)
-        }
     }
 }
