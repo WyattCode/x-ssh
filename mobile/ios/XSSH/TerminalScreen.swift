@@ -29,6 +29,8 @@ struct TerminalScreen: View {
     /// 内屏(自己排的两栏布局)里嵌着用:标题、右边的玻璃竖条、返回手势都由外层 `RootView` 画,这里不挂系统导航栏 / 工具栏。
     var embedded = false
 
+    /// 内屏终端顶部让出的高度(会话名那一行),随字体大小缩放,不压到标题。
+    @ScaledMetric(relativeTo: .headline) private var embeddedTop: CGFloat = 74
     @State private var pinchBase: Double?
     @State private var dragLast: CGFloat = 0
     @State private var confirmReplace = false
@@ -90,7 +92,7 @@ struct TerminalScreen: View {
             // 内屏(常规宽度)左边紧挨着侧栏的分界线,文字贴着边太挤:多留一些;外屏窄,保持 4pt。
             .padding(.horizontal, sizeClass == .regular ? 16 : 4)
             // 内屏自己排版没有导航栏:终端从会话名下面开始(和外屏导航栏下面的位置一致)。
-            .padding(.top, embedded ? 74 : 0)
+            .padding(.top, embedded ? embeddedTop : 0)
             .accessibilityElement()
             .accessibilityLabel(Text("Terminal"))
             .accessibilityValue(UIAccessibility.isVoiceOverRunning ? model.screenText : "")

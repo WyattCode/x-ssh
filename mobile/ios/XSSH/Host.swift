@@ -21,6 +21,9 @@ struct Host: Identifiable, Codable, Hashable {
     var username = ""
     var authKind: AuthKind = .password
     var lastUsed: Date?
+    /// 列表里这台的颜色(0..<`paletteSize`)。添加时挑一个还没被用的,存下来,同一台永远是同一个颜色。
+    var colorIndex: Int?
+    static let paletteSize = 6
 
     init(id: UUID = UUID(), name: String = "", address: String = "", port: Int = 22,
          username: String = "", authKind: AuthKind = .password, lastUsed: Date? = nil) {
@@ -43,6 +46,7 @@ struct Host: Identifiable, Codable, Hashable {
         username = (try? c.decode(String.self, forKey: .username)) ?? ""
         authKind = (try? c.decode(AuthKind.self, forKey: .authKind)) ?? .password
         lastUsed = try? c.decode(Date.self, forKey: .lastUsed)
+        colorIndex = try? c.decode(Int.self, forKey: .colorIndex)
     }
 
     var displayName: String { name.isEmpty ? address : name }
@@ -91,6 +95,12 @@ final class HostStore {
         dir = directory ?? base.appendingPathComponent("X-SSH", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         hosts = Durable.read([Host].self, from: dir.appendingPathComponent("hosts.json")) ?? []
+        // 老版本存的主机没有颜色:按现有顺序补上(尽量不重复),存回去。
+        if hosts.contains(where: { $0.colorIndex == nil }) {
+            var filled: [Host] = []
+            for var h in hosts { if h.colorIndex == nil { h.colorIndex = Self.freeColorIndex(among: filled) }; filled.append(h) }
+            if persist("hosts.json", filled) { hosts = filled }
+        }
         known = Durable.read([String: String].self, from: dir.appendingPathComponent("known_hosts.json")) ?? [:]
         #if DEBUG
         seedFromLaunchArguments()
@@ -122,8 +132,16 @@ final class HostStore {
     /// 先写钥匙串再写列表:凭据存不进去就整个失败,不留一台「没有凭据」的主机。
     /// 换了登录方式,另一种方式的凭据一并清掉(不在钥匙串里留旧密码 / 旧私钥)。
     @discardableResult
+    /// 还没被用过的颜色里编号最小的;全用过了就挑用得最少的。
+    static func freeColorIndex(among hosts: [Host]) -> Int {
+        var counts = Array(repeating: 0, count: Host.paletteSize)
+        for h in hosts { if let i = h.colorIndex, counts.indices.contains(i) { counts[i] += 1 } }
+        return counts.indices.min { (counts[$0], $0) < (counts[$1], $1) } ?? 0
+    }
+
     func save(_ host: Host, credentials: Credentials) -> Bool {
-        let host = host.normalized()
+        var host = host.normalized()
+        if host.colorIndex == nil { host.colorIndex = Self.freeColorIndex(among: hosts.filter { $0.id != host.id }) }
         let id = host.id.uuidString
         switch host.authKind {
         case .password:

@@ -213,6 +213,19 @@ struct HostsView: View {
                 Button("Connect", systemImage: "play") { onConnect(host) }
                 Button("Edit", systemImage: "pencil") { startEditing(host) }
                 Button("Delete", systemImage: "trash", role: .destructive) { pendingDelete = host }
+            } preview: {
+                // 行本身没有底:浮起来的预览单独给一张卡,不然是一条悬空的字。
+                HStack(spacing: 12) {
+                    Text(verbatim: "❯").foregroundStyle(Color.white.opacity(0.4))
+                    (Text(verbatim: "ssh ").foregroundStyle(Color.white.opacity(0.4)) + Text(verbatim: host.displayName))
+                        .lineLimit(1).truncationMode(.tail)
+                    Spacer(minLength: 12)
+                    Circle().fill(HostColor.pip(host.colorIndex)).frame(width: 9, height: 9)
+                }
+                .font(.system(size: 19, design: .monospaced))
+                .padding(.horizontal, 20).padding(.vertical, 22)
+                .frame(width: 320)
+                .background(Color.appSheetCard)
             }
         .buttonStyle(.plain)
         .foregroundStyle(.primary)
@@ -246,9 +259,10 @@ struct HostsView: View {
     /// 名字必须一行(太长截断)。不显示 IP / 端口。
     private func sshRow(_ host: Host, featured: Bool, last: Bool) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
+            HStack(alignment: .firstTextBaseline, spacing: Self.promptGap) {
                 Text(verbatim: "❯")
                     .foregroundStyle(featured ? Color.green : Color.white.opacity(0.28))
+                    .frame(width: Self.promptWidth, alignment: .leading)
                 (Text(verbatim: "ssh ").foregroundStyle(Color.white.opacity(0.4))
                     + Text(verbatim: host.displayName).foregroundStyle(Color.white.opacity(0.93)))
                     .lineLimit(1).truncationMode(.tail)
@@ -259,7 +273,7 @@ struct HostsView: View {
                         ProgressView().controlSize(.mini).tint(.white)
                             .transition(.opacity.animation(.easeOut(duration: 0.18)))
                     } else {
-                        Circle().fill(HostColor.pip(for: host.displayName)).frame(width: 9, height: 9)
+                        Circle().fill(HostColor.pip(host.colorIndex)).frame(width: 9, height: 9)
                     }
                 }
                 .frame(width: 14, height: 14)
@@ -271,11 +285,19 @@ struct HostsView: View {
             }
         }
         .animation(.easeOut(duration: 0.2), value: activeConnecting)
+        // 读屏:一行 = 主机名;连着的报状态(`❯`、光标、颜色点都只是装饰)。
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(verbatim: host.displayName))
+        .accessibilityValue(featured ? (activeConnecting ? Text("Connecting…") : Text("Connected")) : Text(verbatim: ""))
         .padding(.horizontal, 10).padding(.vertical, 21)
         .overlay(alignment: .bottom) {
             if !last { DashedLine().stroke(Color.white.opacity(0.1), style: StrokeStyle(lineWidth: 1, dash: [3, 3])).frame(height: 1) }
         }
     }
+
+    /// `❯` 占的宽度和它到名字的间距:状态那一行的缩进用同一组数,才和名字的起点对齐。
+    private static let promptWidth: CGFloat = 14
+    private static let promptGap: CGFloat = 12
 
     @ViewBuilder private var statusLine: some View {
         if activeConnecting {
@@ -294,7 +316,7 @@ struct HostsView: View {
             .font(.system(size: 12, design: .monospaced))
             .lineLimit(1)
             // 和上面那行名字的起点对齐(❯ 的宽度 + 间距)。
-            .padding(.leading, 28)
+            .padding(.leading, Self.promptWidth + Self.promptGap)
         }
     }
 
@@ -659,15 +681,22 @@ private struct DashedLine: Shape {
     }
 }
 
-/// 连着的那台名字后面的光标:一个绿色的块,慢慢明暗闪烁。
+/// 连着的那台名字后面的光标:一个绿色的块,慢慢明暗闪烁。用 phaseAnimator(滚出屏幕再回来会自己重新开始);
+/// 系统开了「减弱动态效果」就不闪,常亮。
 private struct BlinkingCursor: View {
-    @State private var on = true
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
+        block(opacity: 1)
+            .phaseAnimator(reduceMotion ? [true] : [true, false]) { view, bright in
+                view.opacity(bright ? 1 : 0.15)
+            } animation: { _ in .easeInOut(duration: 0.6) }
+            .accessibilityHidden(true)
+    }
+
+    private func block(opacity: Double) -> some View {
         RoundedRectangle(cornerRadius: 1).fill(Color.green).frame(width: 8, height: 15)
             .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 2 }
-            .opacity(on ? 1 : 0.15)
-            .onAppear { withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) { on = false } }
-            .accessibilityHidden(true)
     }
 }
 
@@ -737,7 +766,7 @@ struct HorizontalSwipeSpy: UIViewRepresentable {
 }
 
 
-/// 主机行左边那个小圆点的颜色:按名字稳定地(不是 `hashValue`,它每次启动都变)在 6 种沉稳的色相里挑一种,一眼认出哪台是哪台。
+/// 主机行右边那个小圆点的颜色:6 种沉稳的色相,编号存在主机记录里(添加时挑一个还没被用的,见 `HostStore.freeColorIndex`),一眼认出哪台是哪台。
 private enum HostColor {
     private static let palette: [Color] = [
         Color(red: 0.44, green: 0.55, blue: 1.00),   // 蓝
@@ -748,10 +777,8 @@ private enum HostColor {
         Color(red: 0.62, green: 0.76, blue: 0.40),   // 草绿
     ]
 
-    static func pip(for name: String) -> Color {
-        var h: UInt64 = 0xcbf29ce484222325                      // FNV-1a
-        for b in name.utf8 { h = (h ^ UInt64(b)) &* 0x100000001b3 }
-        h ^= h >> 29; h = h &* 0xbf58476d1ce4e5b9; h ^= h >> 32
-        return palette[Int(h % UInt64(palette.count))]
+    static func pip(_ index: Int?) -> Color {
+        guard let index, palette.indices.contains(index) else { return palette[0] }
+        return palette[index]
     }
 }

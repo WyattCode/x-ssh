@@ -392,8 +392,13 @@ struct RootView: View {
             // 会话名一直显示(和外屏一样:左上角是主机名,终端从它下面开始)。侧栏开关收起时名字靠到最左,和终端文字对齐。
             if let active {
                 Text(verbatim: active.title.isEmpty ? active.host.displayName : active.title)
-                    .font(.headline).lineLimit(1)
+                    .font(.headline).lineLimit(1).truncationMode(.tail)
+                    // shell 发来的标题可以很长:限宽(同外屏),不压到右上角的时间 / 信号。
+                    .frame(maxWidth: 280, alignment: .leading)
                     .foregroundStyle(.white)
+                    // 用户开始操作之后淡成半透明(不隐藏):不抢终端内容,又一直知道在哪台上。
+                    .opacity((active.userActive) ? 0.45 : 1)
+                    .animation(.easeOut(duration: 0.3), value: active.userActive)
                     .offset(x: drawerOpen ? w + 16 : (showToggle ? 76 : 16), y: 24 + 14)
                     .animation(.easeOut(duration: 0.25), value: showToggle)
                     .transition(.opacity)
