@@ -25,6 +25,8 @@ targets:
         UILaunchScreen:
           UIColorName: LaunchBackground
           UIImageName: LaunchLogo
+    scheme:
+      testTargets: [XSSHTests]
     sources:
       - XSSH
       - path: Core/generated/xssh_ffi.swift
@@ -42,3 +44,13 @@ targets:
         INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
         INFOPLIST_KEY_NSLocalNetworkUsageDescription: "X-SSH connects to servers on your local network."
+  XSSHTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [XSSHTests]
+    dependencies:
+      - target: XSSH
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.xssh.ios.tests
+        GENERATE_INFOPLIST_FILE: YES

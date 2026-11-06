@@ -382,7 +382,6 @@ struct RootView: View {
             }
             .buttonStyle(.plain)
             .glassEffect(.regular.interactive(), in: Circle())
-            .environment(\.colorScheme, .dark)
             .offset(x: drawerOpen ? w - 16 - 48 + slide : 16, y: 24)
             .opacity(showToggle ? 1 : 0)
             .allowsHitTesting(showToggle)
@@ -453,7 +452,6 @@ struct RootView: View {
             .padding(5)
             // 液态玻璃,整条可交互:按住时整条像系统工具栏那样放大、随手指流动。
             .glassEffect(.regular.interactive(), in: Capsule())
-            .environment(\.colorScheme, .dark)
             // 按钮增减(抽屉展开 / 收起、连上 / 断开)用同一条弹簧,缩放着出现 / 消失,竖条随之伸缩。
             .animation(Self.drawerSpring, value: items.map(\.id))
             .transition(.scale(scale: 0.6, anchor: .bottomTrailing).combined(with: .opacity))

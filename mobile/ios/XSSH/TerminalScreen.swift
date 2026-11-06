@@ -30,7 +30,8 @@ struct TerminalScreen: View {
     var embedded = false
 
     /// 内屏终端顶部让出的高度(会话名那一行),随字体大小缩放,不压到标题。
-    @ScaledMetric(relativeTo: .headline) private var embeddedTop: CGFloat = 74
+    @ScaledMetric(relativeTo: .headline) private var titleHeight: CGFloat = 22
+    private var embeddedTop: CGFloat { 52 + titleHeight }   // 52 = 标题上方的固定留白 + 标题下面到终端的间距
     @State private var pinchBase: Double?
     @State private var dragLast: CGFloat = 0
     @State private var confirmReplace = false

@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import os
 
 /// 登录方式。老文件里没有这个字段 → 按密码处理。
 enum AuthKind: String, Codable, Hashable, CaseIterable {
@@ -23,7 +24,7 @@ struct Host: Identifiable, Codable, Hashable {
     var lastUsed: Date?
     /// 列表里这台的颜色(0..<`paletteSize`)。添加时挑一个还没被用的,存下来,同一台永远是同一个颜色。
     var colorIndex: Int?
-    static let paletteSize = 6
+    static let paletteSize = 12
 
     init(id: UUID = UUID(), name: String = "", address: String = "", port: Int = 22,
          username: String = "", authKind: AuthKind = .password, lastUsed: Date? = nil) {
@@ -99,7 +100,8 @@ final class HostStore {
         if hosts.contains(where: { $0.colorIndex == nil }) {
             var filled: [Host] = []
             for var h in hosts { if h.colorIndex == nil { h.colorIndex = Self.freeColorIndex(among: filled) }; filled.append(h) }
-            if persist("hosts.json", filled) { hosts = filled }
+            hosts = filled
+            if !persist("hosts.json", filled) { Logger(subsystem: "dev.xssh.ios", category: "hosts").error("couldn't save host colours; will retry next launch") }
         }
         known = Durable.read([String: String].self, from: dir.appendingPathComponent("known_hosts.json")) ?? [:]
         #if DEBUG

@@ -22,6 +22,8 @@ struct HostsView: View {
     /// 收起时侧栏内容滑出去的位移(见 `SidebarHandle`)。
     var slideOffset: CGFloat = 0
 
+    /// 点一下连着那行的「时长」,在时长和连上的时刻之间切换。
+    @State private var showsClock = false
     @State private var editing: Host?
     @State private var isNew = false
     @State private var pendingDelete: Host?
@@ -82,13 +84,21 @@ struct HostsView: View {
         .background((splitLayout ? Color.appSidebar : Color.appBackground).ignoresSafeArea())
         .overlay {
             if store.hosts.isEmpty {
-                ContentUnavailableView {
-                    Label("No Hosts", systemImage: "server.rack")
-                } description: {
-                    Text("Add a host to get started.")
-                } actions: {
-                    Button("Add Host") { startAdding() }.buttonStyle(.borderedProminent).controlSize(.large)
+                // 没有主机:一行提示符,点一下就新建(和列表同一套终端风格)。
+                Button { startAdding() } label: {
+                    VStack(spacing: 10) {
+                        HStack(spacing: 8) {
+                            Text(verbatim: "❯").foregroundStyle(Color.green)
+                            Text(verbatim: "ssh --new")
+                            BlinkingCursor()
+                        }
+                        .font(.system(size: 22, design: .monospaced))
+                        Text("Add a host to get started.").font(.footnote).foregroundStyle(.secondary)
+                    }
+                    .padding(24).contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel(Text("Add Host"))
             } else if shown.isEmpty {
                 ContentUnavailableView.search(text: query)
             }
@@ -104,7 +114,6 @@ struct HostsView: View {
                 }
                 .padding(4)
                 .glassEffect(.regular.interactive(), in: Capsule())
-                .environment(\.colorScheme, .dark)
                 .padding(.bottom, 12)
             }
         }
@@ -279,6 +288,12 @@ struct HostsView: View {
                 .frame(width: 14, height: 14)
             }
             .font(.system(size: 19, design: .monospaced))
+            if let hint = matchHint(host) {
+                Text(verbatim: hint)
+                    .font(.system(size: 12, design: .monospaced)).foregroundStyle(Color.white.opacity(0.4))
+                    .lineLimit(1).truncationMode(.middle)
+                    .padding(.leading, Self.promptWidth + Self.promptGap)
+            }
             if featured {
                 statusLine
                     .transition(.opacity.animation(.easeOut(duration: 0.2)))
@@ -295,6 +310,15 @@ struct HostsView: View {
         }
     }
 
+    /// 搜索时,名字没匹配上、是地址 / 用户名匹配上的,在名字下面小字写出匹配到的那一项(平时列表不显示地址)。
+    private func matchHint(_ host: Host) -> String? {
+        let q = query.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty, !host.displayName.localizedCaseInsensitiveContains(q) else { return nil }
+        if host.address.localizedCaseInsensitiveContains(q) { return host.address }
+        if host.username.localizedCaseInsensitiveContains(q) { return host.username }
+        return nil
+    }
+
     /// `❯` 占的宽度和它到名字的间距:状态那一行的缩进用同一组数,才和名字的起点对齐。
     private static let promptWidth: CGFloat = 14
     private static let promptGap: CGFloat = 12
@@ -309,9 +333,12 @@ struct HostsView: View {
                 Text("Connected")
                 if let connectedSince {
                     Text(verbatim: " · ")
-                    Text(connectedSince, style: .timer).monospacedDigit()
+                    if showsClock { Text(connectedSince, style: .time) }
+                    else { Text(connectedSince, style: .timer).monospacedDigit() }
                 }
             }
+            .contentShape(Rectangle())
+            .highPriorityGesture(TapGesture().onEnded { showsClock.toggle() })
             .foregroundStyle(Color.green.opacity(0.95))
             .font(.system(size: 12, design: .monospaced))
             .lineLimit(1)
@@ -434,21 +461,24 @@ struct HostEditor: View {
             Form {
                 Section {
                     TextField("Name", text: $host.name)
+                        .font(.system(.body, design: .monospaced))
                         .focused($focus, equals: .name).submitLabel(.next)
                         .onSubmit { focus = .address }
                     TextField("Address", text: $host.address)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                         .keyboardType(.URL).textContentType(.URL)
+                        .font(.system(.body, design: .monospaced))
                         .focused($focus, equals: .address).submitLabel(.next)
                         .onSubmit { applyTarget(); focus = .port }
                     TextField("Port", text: $portText)
                         // 数字键盘(numberPad)没有回车键,收键盘就得另放一个浮在键盘上方的「完成」,它的位置系统说了算:
                         // 右边缘既不对齐表单也不对齐右侧竖条,还盖住下面的内容。用带回车键的数字 / 符号键盘,回车键就是「完成」。
                         .keyboardType(.numbersAndPunctuation)
+                        .font(.system(.body, design: .monospaced))
                         .focused($focus, equals: .port).submitLabel(.done)
                         .onSubmit { applyTarget(); focus = nil }
                 } header: {
-                    Text("Server")
+                    Text(verbatim: "# ") .foregroundStyle(Color.green) + Text("Server")
                 } footer: {
                     if !portText.isEmpty, port == nil {
                         Text("Port must be between 1 and 65535.").foregroundStyle(.red)
@@ -459,23 +489,27 @@ struct HostEditor: View {
                     TextField("User", text: $host.username)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                         .textContentType(.username)
+                        .font(.system(.body, design: .monospaced))
                         .focused($focus, equals: .user).submitLabel(.next)
                         .onSubmit { focus = host.authKind == .password ? .password : nil }
                     AuthKindPicker(selection: $host.authKind)
                     if host.authKind == .password {
                         SecureField("Password", text: $credentials.password)
                             .textContentType(.password)
-                            .focused($focus, equals: .password).submitLabel(.done)
+                            .font(.system(.body, design: .monospaced))
+                        .focused($focus, equals: .password).submitLabel(.done)
                             .onSubmit { focus = nil }
                     }
                 } header: {
-                    Text("Sign In")
+                    Text(verbatim: "# ") .foregroundStyle(Color.green) + Text("Sign In")
                 }
                 .listRowBackground(cardColor)
                 if host.authKind == .key { keySection }
             }
             .scrollContentBackground(.hidden)
             .background(pageColor)
+            // 表单和列表同一套终端风格:等宽字体,小节标题前面一个绿色的 `# `。
+            .font(.system(.body, design: .monospaced))
             // 上下拖表单就收键盘(各个输入框的回车键也都能收),不再需要键盘上方那颗悬浮的「完成」。
             .scrollDismissesKeyboard(.interactively)
             .navigationTitle(host.displayName.isEmpty ? String(localized: "New Host") : host.displayName)
@@ -547,7 +581,8 @@ struct HostEditor: View {
                     .font(.footnote).foregroundStyle(keyProblem == nil ? Color.secondary : Color.red)
             }
             SecureField("Key passphrase (optional)", text: $credentials.passphrase)
-                .focused($focus, equals: .passphrase).submitLabel(.done)
+                .font(.system(.body, design: .monospaced))
+                        .focused($focus, equals: .passphrase).submitLabel(.done)
                 .onSubmit { focus = nil; refreshKeyInfo() }
                 .onChange(of: credentials.passphrase) { _, _ in refreshKeyInfo() }
             // 一行一个按钮:三个并排在窄的弹层里会把文字挤成竖排。
@@ -555,7 +590,7 @@ struct HostEditor: View {
             Button("Import…", systemImage: "arrow.down.doc") { importing = true }
             Button("Paste", systemImage: "clipboard", action: pasteKey)
         } header: {
-            Text("Private Key")
+            Text(verbatim: "# ") .foregroundStyle(Color.green) + Text("Private Key")
         } footer: {
             Text("The key is stored in the Keychain on this device. Add the public key to ~/.ssh/authorized_keys on the server.")
         }
@@ -681,22 +716,26 @@ private struct DashedLine: Shape {
     }
 }
 
-/// 连着的那台名字后面的光标:一个绿色的块,慢慢明暗闪烁。用 phaseAnimator(滚出屏幕再回来会自己重新开始);
+/// 连着的那台名字后面的光标:一个绿色的块,闪几下(约 5 秒)就常亮 —— 不无限循环,省电;滚出屏幕再回来会再闪一轮。
 /// 系统开了「减弱动态效果」就不闪,常亮。
 private struct BlinkingCursor: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var bright = true
 
     var body: some View {
-        block(opacity: 1)
-            .phaseAnimator(reduceMotion ? [true] : [true, false]) { view, bright in
-                view.opacity(bright ? 1 : 0.15)
-            } animation: { _ in .easeInOut(duration: 0.6) }
-            .accessibilityHidden(true)
-    }
-
-    private func block(opacity: Double) -> some View {
         RoundedRectangle(cornerRadius: 1).fill(Color.green).frame(width: 8, height: 15)
             .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 2 }
+            .opacity(bright ? 1 : 0.15)
+            .task {
+                guard !reduceMotion else { return }
+                for _ in 0..<8 {
+                    try? await Task.sleep(for: .milliseconds(600))
+                    if Task.isCancelled { return }
+                    withAnimation(.easeInOut(duration: 0.5)) { bright.toggle() }
+                }
+                withAnimation(.easeInOut(duration: 0.5)) { bright = true }
+            }
+            .accessibilityHidden(true)
     }
 }
 
@@ -775,6 +814,12 @@ private enum HostColor {
         Color(red: 0.88, green: 0.54, blue: 0.36),   // 橙
         Color(red: 0.91, green: 0.45, blue: 0.56),   // 粉
         Color(red: 0.62, green: 0.76, blue: 0.40),   // 草绿
+        Color(red: 0.36, green: 0.74, blue: 0.90),   // 天蓝
+        Color(red: 0.90, green: 0.76, blue: 0.34),   // 黄
+        Color(red: 0.80, green: 0.45, blue: 0.80),   // 洋红
+        Color(red: 0.55, green: 0.66, blue: 0.66),   // 灰青
+        Color(red: 0.86, green: 0.50, blue: 0.46),   // 珊瑚
+        Color(red: 0.52, green: 0.52, blue: 0.92),   // 靛
     ]
 
     static func pip(_ index: Int?) -> Color {
