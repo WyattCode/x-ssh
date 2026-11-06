@@ -257,12 +257,16 @@ struct HostsView: View {
                 .simultaneousGesture(LongPressGesture(minimumDuration: 0.4).onEnded { _ in
                     withAnimation(.snappy(duration: 0.2)) { menuHostID = host.id }
                 })
-                // popover 锚在这一行右边的 236pt 宽、整行高的区域:弹在这一行下面、右边缘和这一行对齐,不会伸到右边的会话区。
-                .overlay(alignment: .trailing) {
-                    Color.clear.frame(width: 236).allowsHitTesting(false)
+                // 内屏:popover(系统液态玻璃,无箭头)弹在这一行下面、右边缘和对齐线对齐,不会伸到右边的会话区。
+                .overlay(alignment: .bottomTrailing) {
+                    // 没有箭头的 popover 系统会居中摆在锚点上:锚点区域(236 × 152)用负的下边距放在这一行下面,
+                    // 菜单高约 144pt,居中 → 从行底下约 4pt 起;右边和文字的对齐线对齐。(不能用 offset:系统取的是布局位置。)
+                    Color.clear.frame(width: 236, height: 152).allowsHitTesting(false)
                         .popover(isPresented: Binding(get: { menuHostID == host.id },
                                                       set: { if !$0 && menuHostID == host.id { menuHostID = nil } }),
                                  arrowEdge: .top) { popoverMenu(host) }
+                        .padding(.bottom, -152)
+                        .padding(.trailing, rowInset)
                 }
         } else {
             Button { onConnect(host) } label: { row(host, featured: featured, last: last) }
@@ -281,6 +285,7 @@ struct HostsView: View {
             popoverItem("Delete", "trash", destructive: true) { pendingDelete = host }
         }
         .frame(width: 236)
+        .background(PopoverArrowHider())   // 不要箭头(尖尖)
         .presentationCompactAdaptation(.popover)
     }
 
@@ -507,6 +512,24 @@ private struct RowMenu: ViewModifier {
                 .frame(width: 320)
                 .background(Color.appSheetCard)
             }
+    }
+}
+
+/// 去掉 popover 的小箭头:SwiftUI 没有这个接口,在 popover 内容里放一个看不见的视图控制器,
+/// 它出现时找到外层的 `UIPopoverPresentationController`,把允许的箭头方向设成空。
+private struct PopoverArrowHider: UIViewControllerRepresentable {
+    func makeUIViewController(context: Context) -> Hider { Hider() }
+    func updateUIViewController(_ vc: Hider, context: Context) {}
+
+    final class Hider: UIViewController {
+        override func viewWillAppear(_ animated: Bool) {
+            super.viewWillAppear(animated)
+            popoverPresentationController?.permittedArrowDirections = []
+        }
+        override func viewDidLayoutSubviews() {
+            super.viewDidLayoutSubviews()
+            popoverPresentationController?.permittedArrowDirections = []
+        }
     }
 }
 

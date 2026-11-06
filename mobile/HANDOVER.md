@@ -2946,3 +2946,5 @@ M3.51 已有「用生物识别解锁」开关,连私钥密文(`lockedKeyData` / 
 
 - **强调色统一成绿色**:`Color.appAccent`(= 连着的主机 / 确认卡主按钮的绿),根视图 `.tint(.appAccent)`,自己画的地方(键盘 / 快捷键开关、快捷键帽、选区高亮)直接用它;画在绿底上的字用 `appAccentInk`(深绿)。以后不要再用 `Color.accentColor` 或系统蓝。
 - **内屏长按主机行的菜单 = 系统 popover(液态玻璃、带箭头)**(`HostsView.rowControl` / `popoverMenu`):系统的上下文菜单(`.contextMenu`)在宽屏(regular)下会摆到侧栏右边的会话区里,没法指定位置;`Menu` 会从被按的行原地展开、盖住这一行且靠左;**自己画的菜单试过,坐标系有偏移,菜单和高亮会出现在别的行上,已删除,不要再自己画**。现在内屏长按 0.4 秒弹 popover,锚在被按那一行右侧 236pt 宽的区域(`.overlay(alignment: .trailing)` 上的 `.popover`,`arrowEdge: .top`),弹在这一行下面、右边缘和侧栏右边对齐、箭头指着这一行。轻点仍然是连接,按钮要判断 `menuHostID == nil`,不然长按松手会误触连接。外屏(窄)仍用系统的上下文菜单(`RowMenu`,带预览卡)。终端里长按的「复制 / 粘贴」小菜单:放不下手指上方(按在最上面几行)时放到手指下面,并收在会话区里。
+
+- **内屏长按菜单去掉了 popover 的小箭头**(用户明确不要):SwiftUI 没有接口,用 `PopoverArrowHider`(放在 popover 内容里的隐形 UIViewController,在 viewWillAppear / viewDidLayoutSubviews 里把外层 `UIPopoverPresentationController.permittedArrowDirections` 设成空)。无箭头的 popover 系统会**居中**摆在锚点上,所以锚点区域是 236×152、用 `.padding(.bottom, -152)`(真实布局,不能用 `.offset`,系统取的是布局位置)放在被按那一行的下面,右边和对齐线对齐。
