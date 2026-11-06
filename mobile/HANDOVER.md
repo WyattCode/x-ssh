@@ -2953,4 +2953,4 @@ M3.51 已有「用生物识别解锁」开关,连私钥密文(`lockedKeyData` / 
 
 - **长按菜单离文字的距离**:系统按「被按那一块」的底边摆菜单,默认那一块含行下面约 21pt 的留白;`RowMenu` 用 `BottomTrimmedRoundedRect(trim: 14)` 把底边往上收 14pt,菜单到文字的距离缩短约 30%(内外屏都是)。要再近 / 再远就改 `trim`。
 
-- **行间虚线是列表里独立的一行(`HostsView.separatorRow`),不属于主机行的单元格**:长按时系统把被按的那一**格(整个 List 单元格)**换成浮起的预览,单元格里不在预览范围内的东西(包括画在行底的虚线、挪到 `Button` 外面的 overlay)会被一起藏掉、松手又弹回来。虚线行高 1pt,所以 List 要 `.environment(\.defaultMinListRowHeight, 1)`,标题行的上下留白相应加了 6 / 4pt 补回。长按菜单的 `trim` 现在是 19pt(菜单到文字比默认近约 40%)。
+- **行间虚线是列表里独立的一行(`HostsView.separatorRow`),不属于主机行的单元格**:长按时系统把被按的那一**格(整个 List 单元格)**换成浮起的预览,单元格里不在预览范围内的东西(包括画在行底的虚线、挪到 `Button` 外面的 overlay)会被一起藏掉、松手又弹回来。虚线行高 1pt,所以 List 要 `.environment(\.defaultMinListRowHeight, 1)`,标题行的上下留白相应加了 6 / 4pt 补回。长按菜单的 `trim` 现在是 17pt(菜单到文字比默认近约 35%)。
