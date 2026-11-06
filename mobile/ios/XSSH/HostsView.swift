@@ -447,8 +447,10 @@ private struct RowMenu: ViewModifier {
     /// 内外屏一样:不给自定义预览卡,让系统把被按的这一行本身浮起来,菜单跟在它下面靠左
     /// (给了预览卡,系统会把菜单对齐到卡片的右边缘 / 摆到右边,不是靠左)。
     func body(content: Content) -> some View {
+        // 系统按「被按那一块」的底边摆菜单。被按的一块默认含行下面的留白(约 21pt),菜单就离文字太远:
+        // 内外屏都把这一块的底边往上收 14pt(菜单到文字的距离缩短约 30%)。
         content
-            .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .contentShape(.contextMenuPreview, BottomTrimmedRoundedRect(trim: 14, radius: 14))
             .contextMenu { items }
     }
 
@@ -457,6 +459,18 @@ private struct RowMenu: ViewModifier {
         Divider()
         Button("Edit", systemImage: "pencil", action: onEdit).tint(.primary)
         Button("Delete", systemImage: "trash", role: .destructive, action: onDelete).tint(.red)
+    }
+}
+
+/// 底边往上收 `trim` 的圆角矩形(给长按菜单当「被按的那一块」,收掉下面的留白,菜单就离文字近一些)。
+private struct BottomTrimmedRoundedRect: Shape {
+    let trim: CGFloat
+    let radius: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        var r = rect
+        r.size.height = max(1, rect.height - trim)
+        return RoundedRectangle(cornerRadius: radius, style: .continuous).path(in: r)
     }
 }
 
