@@ -328,6 +328,8 @@ struct HostsView: View {
                     }
                 }
                 .frame(width: 14, height: 14)
+                // 圆点和转圈用同一条基线(框的底边在文字基线上):不然转圈没有基线,会比这一行低一截。
+                .alignmentGuide(.firstTextBaseline) { $0[.bottom] }
             }
             .font(.system(size: rowFont, design: .monospaced))
             if let hint = matchHint(host) {
@@ -346,7 +348,7 @@ struct HostsView: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(verbatim: host.displayName))
         .accessibilityValue(featured ? (activeConnecting ? Text("Connecting…") : Text("Connected")) : Text(verbatim: ""))
-        .padding(.horizontal, 10).padding(.vertical, rowPad)
+        .padding(.horizontal, 0).padding(.vertical, rowPad)   // 每行的 `❯` 和标题的 `$`、logo、虚线起点同一条竖线
         .overlay(alignment: .bottom) {
             if !last { DashedLine().stroke(Color.white.opacity(0.16), style: StrokeStyle(lineWidth: 1, dash: [3, 3])).frame(height: 1) }
         }
@@ -368,6 +370,8 @@ struct HostsView: View {
         if activeConnecting {
             Text(activeNeedsConfirm ? "Waiting for confirmation" : "Connecting…").foregroundStyle(Color.white.opacity(activeNeedsConfirm ? 0.85 : 0.6))
                 .font(.system(size: smallFont, design: .monospaced))
+                // 和「已连接」那行一样缩进到名字的起点。
+                .padding(.leading, promptWidth + Self.promptGap)
         } else {
             HStack(spacing: 0) {
                 Text(verbatim: "✓ ")
@@ -410,7 +414,7 @@ struct HostsView: View {
             }
         }
         .font(.system(size: rowFont, design: .monospaced))
-        .padding(.horizontal, 10)
+        .padding(.horizontal, 0)   // 搜索行的 `❯` 也在同一条竖线上
         .frame(minHeight: 48)
         .overlay(alignment: .bottom) {
             DashedLine().stroke(Color.white.opacity(0.16), style: StrokeStyle(lineWidth: 1, dash: [3, 3])).frame(height: 1)
