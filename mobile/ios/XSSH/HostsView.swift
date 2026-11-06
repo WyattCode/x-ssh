@@ -28,6 +28,9 @@ struct HostsView: View {
     var onCollapse: (() -> Void)?
     /// 收起时侧栏内容滑出去的位移(见 `SidebarHandle`)。
     var slideOffset: CGFloat = 0
+    /// 外屏从会话翻回列表时加一(见 `RootView.close`):行依次淡入、轻轻上浮。
+    var arrival = 0
+    @State private var rowsIn = true
 
     /// 随系统字体大小缩放的尺寸(行字号、小字、行内留白、`❯` 宽度)。
     @ScaledMetric(relativeTo: .body) private var rowFont: CGFloat = 19
@@ -87,11 +90,22 @@ struct HostsView: View {
             titleRow
             // 连着的那台就在它原来的位置变成大卡,不往上提(主机的顺序一直按添加先后)。
             let rows = shown
-            ForEach(rows) { host in
+            ForEach(Array(rows.enumerated()), id: \.element.id) { index, host in
                 hostRow(host, featured: host.id == activeID, last: host.id == rows.last?.id)
+                    .modifier(RowReveal(index: index * 2, shown: rowsIn))
                 // 行间的虚线是独立的一行(单元格):长按时系统把被按的那一格整个换成浮起的预览,
                 // 虚线要是画在这一格里,会跟着消失、松手又弹回来。
-                if host.id != rows.last?.id { separatorRow }
+                if host.id != rows.last?.id { separatorRow.modifier(RowReveal(index: index * 2 + 1, shown: rowsIn)) }
+            }
+        }
+        // 从会话翻回来:行先一下子藏起来(没有动画,这时列表还在页面下面看不见),翻页滑到一半再依次淡入。
+        .onChange(of: arrival) { _, _ in
+            var t = Transaction(animation: nil)
+            t.disablesAnimations = true
+            withTransaction(t) { rowsIn = false }
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(130))
+                rowsIn = true
             }
         }
         // 连上一台时,让列表滚到那张卡片(它在视野外也能看到自己选中了哪台)。
@@ -964,5 +978,19 @@ struct OuterTitleBar<Content: View>: View {
             .offset(y: -lift)
             .allowsHitTesting(false)
             .accessibilityHidden(true)   // 系统导航标题(读屏用)已经念了名字
+    }
+}
+
+
+/// 列表行的「到场」动画:`shown` 变成 true 时按序号错开 28ms,依次淡入并从下面 12pt 处轻轻浮上来;变成 false 时立刻藏起(不带动画)。
+private struct RowReveal: ViewModifier {
+    let index: Int
+    let shown: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(shown ? 1 : 0)
+            .offset(y: shown ? 0 : 12)
+            .animation(shown ? .smooth(duration: 0.4).delay(Double(index) * 0.028) : nil, value: shown)
     }
 }

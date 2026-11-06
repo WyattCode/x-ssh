@@ -108,6 +108,8 @@ struct RootView: View {
     @State private var active: TerminalModel?
     /// 外屏点「断开 / 取消」之后、翻回列表的那段时间:会话页还在(要等翻页动画走完才能清),但列表里那一行不能再显示成「连着」。
     @State private var closing = false
+    /// 外屏每次关闭会话加一,让列表的行依次淡入(见 `HostsView.arrival`)。
+    @State private var arrival = 0
     @State private var addHostRequested = false
     @State private var searching = false
     /// 拖把手时侧栏内容跟手滑出去的位移(0 = 原位,-侧栏宽度 = 完全滑出)。
@@ -319,7 +321,7 @@ struct RootView: View {
                   activeConnecting: activeConnecting, connectedSince: active?.connectedAt, activeNeedsConfirm: activeNeedsConfirm,
                   showsClock: active?.showsConnectedClock ?? false, onToggleClock: { active?.showsConnectedClock.toggle() },
                   onDeleted: { if active?.host.id == $0.id { close() } }, addRequested: $addHostRequested, searching: $searching, onConnect: open,
-                  onCollapse: { setDrawer(false) }, slideOffset: 0)
+                  onCollapse: { setDrawer(false) }, slideOffset: 0, arrival: arrival)
     }
 
     /// 外屏(单栏翻页):系统导航容器。
@@ -489,6 +491,9 @@ struct RootView: View {
     /// 点一台主机:内屏横屏 / 展开时**立刻**收起抽屉,会话顺着滑进来(抽屉、会话、按钮竖条一条弹簧);
     /// 半折是并排设计、竖屏抽屉本来就是收起的,都不用收;外屏是翻页。
     private func open(_ host: Host) {
+        // 关闭动画的 650ms 里又点了主机:别让会话页停在淡出的状态。
+        closing = false
+        active?.leaving = false
         let collapse = sizeClass == .regular && drawerOpen && !halfFolded
         // 点的就是正在跑的那台:直接回到它,别断了重连。
         if let current = active, current.host.id == host.id, !current.isEnded {
@@ -496,7 +501,6 @@ struct RootView: View {
             if collapse { setDrawer(false) }
             return
         }
-        closing = false
         active?.disconnect()
         let model = TerminalModel(host: host, credentials: hosts.credentials(for: host), knownKey: hosts.knownKey(host))
         if sizeClass == .regular {
@@ -515,19 +519,25 @@ struct RootView: View {
 
     private func close() {
         active?.disconnect()
-        compactColumn = .sidebar
         // 断开 / 取消之后回到主机列表:横屏 / 展开时抽屉是收起的,要滑出来让人重新选。
         if sizeClass == .regular {
+            compactColumn = .sidebar
             if !drawerOpen, !halfFolded { setDrawer(true, swapping: { active = nil }) }
             else { withAnimation(.smooth(duration: 0.25)) { active = nil } }
         } else {
-            // 外屏:等翻回列表的动画走完再清掉会话;立刻清的话,翻回去的过程中详情页会先变成「没有会话」的空页面,闪一下。
+            // 外屏,编排一段完整的关闭动画(系统自己的翻页只有一下很短的滑动):
+            //   0ms     会话页开始淡出、略缩小,会话名往左飘走(220ms);列表里这台那一行马上变回普通行(300ms);
+            //   70ms    开始翻回列表(系统的滑动),和淡出叠在一起,不是等它做完;
+            //   130ms   列表的行依次淡入、轻轻浮上来(每行错开 28ms,每行 400ms);
+            //   650ms   清掉会话(这时早就看不见了;立刻清的话翻页中途详情页会先变成「没有会话」的空页面,闪一下)。
             let leaving = active?.id
-            // 列表那一行马上平滑地变回普通行(不再是绿箭头 / 光标 / 停住的「已连接」时长),
-            // 不要等翻页走完才突然切换:以前翻回来之后还「连着」约半秒,然后猛地一变。
+            withAnimation(.easeIn(duration: 0.22)) { active?.leaving = true }
             withAnimation(.smooth(duration: 0.3)) { closing = true }
+            arrival += 1
             Task { @MainActor in
-                try? await Task.sleep(for: .milliseconds(550))
+                try? await Task.sleep(for: .milliseconds(70))
+                if active?.id == leaving { compactColumn = .sidebar }
+                try? await Task.sleep(for: .milliseconds(580))
                 if active?.id == leaving { active = nil; closing = false }
             }
         }

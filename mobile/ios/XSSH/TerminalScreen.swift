@@ -48,7 +48,10 @@ struct TerminalScreen: View {
     private var metrics: TermMetrics { TermMetrics(fontSize: fontSize) }
 
     var body: some View {
-        if embedded { core } else { navChrome(core) }
+        if embedded { core } else {
+            // 关闭会话时整页先淡出、略微缩小(`leaving`,动画由 `RootView.close` 编排),再翻回列表。
+            navChrome(core.opacity(model.leaving ? 0 : 1).scaleEffect(model.leaving ? 0.965 : 1))
+        }
     }
 
     @ViewBuilder private var core: some View {
@@ -134,6 +137,8 @@ struct TerminalScreen: View {
                     .font(.headline).lineLimit(1).truncationMode(.tail)
                     .foregroundStyle(.white)
                     .frame(maxWidth: 280, alignment: .leading)
+                    // 关闭时会话名往左飘一点、淡出,和整页的淡出一起。
+                    .offset(x: model.leaving ? -18 : 0).opacity(model.leaving ? 0 : 1)
             }
         }
         // 隐藏了系统返回键,系统的「从屏幕左边缘右滑返回」也就跟着没了。自己补一条:屏幕最左边一条窄带,右滑回主机列表。

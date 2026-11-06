@@ -2958,3 +2958,5 @@ M3.51 已有「用生物识别解锁」开关,连私钥密文(`lockedKeyData` / 
 - **第五轮审核(二次审查)**:`Host.swift` 里 `save()` 的文档注释和 `@discardableResult` 被插到 `freeColorIndex` 前面去了,已挪回;`RowMenu` 去掉没用的 `font` / `host` 参数,过时的注释(外屏预览卡、两边都收 7pt)已改;长按菜单的收边改成 `HostsView.menuTrim`,随字号缩放;主机密钥确认卡 / 失败卡的小字(主机名、指纹、`SHA256` 标注、按钮)改成 `@ScaledMetric`,字号很大时指纹图案和指纹文字自动改成上下排(`ViewThatFits`),整张卡最大跟到「辅助功能 1」档(`.dynamicTypeSize(...accessibility1)`)。字号调到最大时,系统会把被按的那一行整体往上挪给大菜单让位,这是系统行为,不是我们的 bug。
 
 - **`❯` 的字形比字母中线低约 1.3pt**:`HostsView.arrowLift`(`rowFont * 0.07`)用 `.offset(y:)` 往上抬(不用 `baselineOffset`:它会撑高每行、列表被拉开);量过箭头中线和名字首字母中线差 0–1px。
+
+- **外屏关闭会话的过渡(`RootView.close`)**:系统自己的翻页只有一下很短的滑动,所以自己编排一段:点「断开 / 取消」→ 0ms 会话页淡出并略缩小(`TerminalModel.leaving`,220ms),会话名往左飘走;列表里这台那一行马上变回普通行(`closing`);70ms 才开始系统翻页(和淡出叠在一起);130ms 列表的行依次淡入、上浮 12pt(`HostsView.arrival` / `RowReveal`,每行错开 28ms,虚线算独立的一行);650ms 才清掉会话(立刻清会在翻页中途闪一下「没有会话」的空页面)。logo 和会话名**不放系统工具栏**(`OuterTitleBar`,画在页面里):工具栏项翻页时由系统做模糊渐变交接,和页面的滑动不同步;工具栏里留一个看不见的占位项撑住导航栏高度(没有项时导航栏高度是 0,列表会顶到屏幕最上面)。Duo 外屏标题位相对安全区顶边 56.7pt(普通 iPhone 44pt,没真机验证)。
