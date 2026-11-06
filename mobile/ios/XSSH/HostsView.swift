@@ -64,7 +64,8 @@ struct HostsView: View {
             Text(verbatim: "$ hosts").font(.system(size: 26, weight: .semibold, design: .monospaced)).tracking(-0.4)
             if !store.hosts.isEmpty { Text("\(store.hosts.count)").font(.footnote).foregroundStyle(Color.white.opacity(0.45)) }
         }
-        .padding(.horizontal, 16 + cardInset).padding(.top, splitLayout ? 2 : 6).padding(.bottom, 8)
+        // 外屏:列表自带的左边距(约 20pt)正好和顶部 logo 的左边缘对齐,标题不再额外缩进;内屏标题和 logo 同样从 16 + 卡片边距起。
+        .padding(.horizontal, (splitLayout ? 16 : 0) + cardInset).padding(.top, splitLayout ? 2 : 6).padding(.bottom, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .listRowBackground(Color.clear).listRowSeparator(.hidden).listRowInsets(EdgeInsets())
         // 读屏:「Hosts,5」,不念 `$` 符号。
