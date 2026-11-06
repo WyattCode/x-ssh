@@ -24,6 +24,8 @@ import { MasterLock } from './lock'
 import { registerUserVerifyIpc, gateKeyConnect, userVerifyBlocksQuiet } from './userVerifyIpc'
 import { capHistory } from './sessionHistory'
 import { displayIdForBounds, pickWindowPlacement } from './windowPlacement'
+import { localX11Target } from './x11'
+import { ensureLocalXServer } from './x11Server'
 
 const store = new HostStore()
 const knownHosts = new KnownHosts()
@@ -607,7 +609,8 @@ async function withTempHosts(
       auth: h.auth,
       keyPath: h.keyPath,
       hostId: h.id,
-      agentForward: h.agentForward
+      agentForward: h.agentForward,
+      x11Forward: h.x11Forward
     }
     try {
       if (store.isLocked && !params.password && !params.passphrase) {
@@ -736,6 +739,7 @@ interface SshConfigHost {
   proxyJump?: string
   /** Conditional keywords forwarded/imported when present. */
   agentForward?: boolean
+  x11Forward?: boolean
   forwards?: HostForward[]
 }
 /** Minimal single-pass parser for the common OpenSSH `Host` blocks. */
@@ -782,6 +786,9 @@ function parseSshConfig(raw: string): SshConfigHost[] {
         // OpenSSH accepts "yes/no" (also optional host list); only a leading
         // `yes` enables it — `no`, `none` and a host list all disable.
         current.agentForward = /^yes/i.test(val)
+        break
+      case 'forwardx11':
+        current.x11Forward = /^yes/i.test(val)
         break
       case 'localforward':
         // "LocalForward [bind:]port host:port". The optional bind address is
@@ -867,6 +874,7 @@ async function importSshConfig(): Promise<{ ok: boolean; count: number; error?: 
       keyPath: c.identityFile,
       group: 'OpenSSH',
       agentForward: c.agentForward || undefined,
+      x11Forward: c.x11Forward || undefined,
       portForwards: c.forwards?.length ? c.forwards : undefined
     }
     // Map ProxyJump to a jump host entry so the tunnel is actually established
@@ -1625,6 +1633,7 @@ function registerIpc(): void {
           params.portForwards = [...h.portForwards, ...extra]
         }
         if (params.agentForward === undefined) params.agentForward = h.agentForward
+        if (params.x11Forward === undefined) params.x11Forward = h.x11Forward
         if (params.onConnect === undefined) params.onConnect = h.onConnect
         if (params.onConnectDelayMs === undefined) params.onConnectDelayMs = h.onConnectDelayMs
         if (!params.proxy && h.proxy) params.proxy = h.proxy
@@ -2726,6 +2735,19 @@ app.whenReady().then(async () => {
     Menu.setApplicationMenu(null)
   }
   registerIpc()
+  // VcXsrv needs ~15 s to bind :6000 on a cold start — much longer than a
+  // remote clipboard read will wait. Boot it now, but only when some saved
+  // host actually asks for X11 forwarding, and never block startup on it.
+  void (async () => {
+    try {
+      const hosts = await store.list()
+      if (!hosts.some((h) => h.x11Forward)) return
+      const t = localX11Target()
+      void ensureLocalXServer({ host: t.host, port: t.port, display: t.display })
+    } catch {
+      /* A locked or unreadable host store must never delay startup. */
+    }
+  })()
   // Shrink a settings.json that grew under the old count-only history cap.
   // Existing installs carry up to ~100 MB of session buffers; settings.json is
   // rewritten whole on every settings write, and at that size the rename step

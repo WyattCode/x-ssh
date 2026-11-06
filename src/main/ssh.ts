@@ -1,7 +1,7 @@
 import { readFile, stat, readdir, mkdir, unlink } from 'node:fs/promises'
 import { createReadStream, createWriteStream } from 'node:fs'
 import { basename, dirname, join, resolve, relative, isAbsolute } from 'node:path'
-import { randomUUID, createHash } from 'node:crypto'
+import { randomUUID, createHash, randomBytes } from 'node:crypto'
 import { createServer, createConnection, type Server, Socket } from 'node:net'
 import { Duplex } from 'node:stream'
 import { Client, type ClientChannel, type SFTPWrapper } from 'ssh2'
@@ -31,6 +31,8 @@ import {
   passphraseConnectCode
 } from './friendlyError'
 import { posixJoin, parentOf, clampConcurrency, buildPackCommand, buildExtractCommand, treeDirMode } from '../shared/fsUtils'
+import { localX11Target, parseX11Hello, readLocalX11Cookie, rewriteX11Hello } from './x11'
+import { ensureLocalXServer } from './x11Server'
 
 /** Streams a local file through SHA-256 and resolves its lowercase hex digest. */
 function sha256File(p: string): Promise<string> {
@@ -971,6 +973,178 @@ export class SshManager {
     session.remoteForwards = undefined
   }
 
+  /** Per-client X11 state. A multiplexed master serves several shells, so the
+   *  'x11' listener and the pseudo cookie must be shared, not per-session. */
+  private x11Attached = new WeakSet<Client>()
+  private x11Cookies = new WeakMap<Client, Buffer>()
+  private x11Sockets = new WeakMap<Client, Set<Socket>>()
+  private x11Warned = new WeakSet<Client>()
+
+  /** Registers the client-side half of `ssh -X` once per SSH connection and
+   *  returns the request options to put on each shell that wants forwarding. */
+  private x11Options(client: Client, sessionId: string): { single: boolean; cookie: string } {
+    let pseudo = this.x11Cookies.get(client)
+    if (!pseudo) {
+      pseudo = randomBytes(16)
+      this.x11Cookies.set(client, pseudo)
+    }
+    if (!this.x11Attached.has(client)) {
+      this.x11Attached.add(client)
+      this.x11Sockets.set(client, new Set())
+      client.on('x11', (_details, accept, reject) => {
+        let accepted = false
+        const safeAccept = (): Duplex => {
+          accepted = true
+          return accept()
+        }
+        void this.pipeX11(client, sessionId, safeAccept, reject).catch(() => {
+          // A failed cookie read must not leak an unhandled rejection. Only
+          // reject the channel when accept() was never called — rejecting an
+          // already-accepted channel would corrupt the SSH connection.
+          if (!accepted) reject()
+        })
+      })
+      client.on('close', () => {
+        this.x11Sockets.get(client)?.forEach((s) => s.destroy())
+        this.x11Sockets.delete(client)
+      })
+    }
+    // ssh2 converts a Buffer cookie to hex on the wire; we pass hex ourselves
+    // so the exact bytes are also available to rewriteX11Hello as `expected`.
+    return { single: false, cookie: pseudo.toString('hex') }
+  }
+
+  /** Pipes one forwarded X11 connection to the local X server, swapping the
+   *  pseudo cookie in the setup hello for the machine's real one. */
+  private async pipeX11(
+    client: Client,
+    sessionId: string,
+    accept: () => Duplex,
+    reject: () => void
+  ): Promise<void> {
+    const target = localX11Target()
+    const warn = (notice: string): void => {
+      if (this.x11Warned.has(client)) return
+      this.x11Warned.add(client)
+      // On a multiplexed master the session that registered the listener
+      // may already be closed; route the toast to a live peer instead.
+      let to = sessionId
+      if (!this.sessions.has(sessionId)) {
+        for (const [sid, s] of this.sessions) {
+          if (s.client === client) {
+            to = sid
+            break
+          }
+        }
+      }
+      this.emit({ sessionId: to, status: 'connected', notice })
+    }
+    // Warm-up normally happens at app startup; this is the fallback for a
+    // server installed later or one that was quit while X-SSH was open.
+    // A cold VcXsrv boot needs ~15 s, so never hold a clipboard read that
+    // long: give it a short grace period, then report once while the boot
+    // keeps running in the background (the next paste will succeed).
+    const state = await Promise.race([
+      ensureLocalXServer({
+        host: target.host,
+        port: target.port,
+        display: target.display
+      }),
+      new Promise<'pending'>((r) => {
+        const t = setTimeout(() => r('pending'), 1200)
+        t.unref?.()
+      })
+    ])
+    if (state !== 'ready' && state !== 'started') {
+      warn('x11-no-server')
+      reject()
+      return
+    }
+    const localCookie = await readLocalX11Cookie(target.display)
+    const expected = this.x11Cookies.get(client)
+    const local = createConnection({ host: target.host, port: target.port })
+    this.x11Sockets.get(client)?.add(local)
+    const sockets = this.x11Sockets.get(client)
+    let settled = false
+    let channel: Duplex | undefined
+    // A *connect* timer, deliberately not socket.setTimeout(): an idle but
+    // healthy X11 session (a GUI window, a clipboard owner) must stay open.
+    let connectTimer: ReturnType<typeof setTimeout>
+
+    const fail = (notice: string): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(connectTimer)
+      local.destroy()
+      sockets?.delete(local)
+      reject()
+      channel?.destroy()
+      // Once per connection, not once per X client (Claude Code reconnects to
+      // DISPLAY on every paste, which would otherwise flood the UI).
+      warn(notice)
+    }
+    connectTimer = setTimeout(() => fail('x11-no-server'), 5000)
+    connectTimer.unref?.()
+
+    local.on('error', () => {
+      if (settled) channel?.destroy()
+      else fail('x11-no-server')
+    })
+    local.on('close', () => sockets?.delete(local))
+    local.on('connect', () => {
+      if (settled) return
+      settled = true
+      clearTimeout(connectTimer)
+      const chan = accept()
+      channel = chan
+      let head: Buffer[] = []
+      let headLen = 0
+      let forwarded = false
+      const flush = (buf: Buffer, hello: Buffer | null): void => {
+        forwarded = true
+        head = []
+        headLen = 0
+        if (hello) {
+          local.write(hello)
+          if (buf.length > hello.length) local.write(buf.subarray(hello.length))
+        } else {
+          local.write(buf)
+        }
+      }
+
+      chan.on('data', (chunk: Buffer) => {
+        if (forwarded) {
+          local.write(chunk)
+          return
+        }
+        head.push(chunk)
+        headLen += chunk.length
+        if (headLen < 12) return // header still incomplete
+        const buf = Buffer.concat(head, headLen)
+        const h = parseX11Hello(buf)
+        if (!h) {
+          // Not X11 (or absurd lengths) — forward verbatim rather than stall.
+          flush(buf, null)
+          return
+        }
+        if (buf.length < h.needed) return // wait for the whole hello
+        const rewritten = rewriteX11Hello(buf.subarray(0, h.needed), localCookie, expected)
+        flush(buf, rewritten)
+      })
+      chan.on('close', () => local.end())
+      chan.on('error', () => local.destroy())
+      local.on('data', (d: Buffer) => chan.write(d))
+      local.on('close', () => chan.end())
+    })
+  }
+
+  /** A shell with X11 forwarding requested can be refused outright by sshd
+   *  (`X11Forwarding no`, SELinux, missing xauth). Retrying the same shell
+   *  without X11 keeps the session usable — exactly what OpenSSH does. */
+  private x11Refusal(err: Error | undefined): boolean {
+    return !!err && /x11/i.test(err.message)
+  }
+
   async connect(params: ConnectParams): Promise<ConnectResult> {
     const id = randomUUID()
 
@@ -1122,10 +1296,20 @@ export class SshManager {
           client.on('close', () => this.teardownMaster(this.masterKey(params)))
           client.on('error', () => this.teardownMaster(this.masterKey(params)))
         }
-        client.shell(
-          { term: 'xterm-256color', cols: params.cols ?? 80, rows: params.rows ?? 24 },
-          (err, stream) => {
+        const x11 = params.x11Forward ? this.x11Options(client, id) : undefined
+        const openShell = (withX11: boolean): void => {
+          client.shell(
+            { term: 'xterm-256color', cols: params.cols ?? 80, rows: params.rows ?? 24 },
+            withX11 && x11 ? { x11 } : {},
+            (err, stream) => {
             if (err) {
+              // sshd without X11Forwarding refuses the whole shell request.
+              // Drop X11 and try once more so the terminal still opens.
+              if (withX11 && this.x11Refusal(err)) {
+                this.emit({ sessionId: id, status: 'connected', notice: 'x11-refused' })
+                openShell(false)
+                return
+              }
               const message = friendlyError(err.message)
               this.emit({ sessionId: id, status: 'error', message })
               client.end()
@@ -1212,7 +1396,9 @@ export class SshManager {
               settle({ ok: true, sessionId: id, code: forwardCode, error: forwardError })
             })()
           }
-        )
+          )
+        }
+        openShell(!!x11)
       })
 
       client.on('error', (err) => {
@@ -1282,10 +1468,18 @@ export class SshManager {
         resolve(r)
       }
       this.emit({ sessionId: id, status: 'connecting' })
+      const x11 = params.x11Forward ? this.x11Options(client, id) : undefined
+      const openShell = (withX11: boolean): void => {
       client.shell(
         { term: 'xterm-256color', cols: params.cols ?? 80, rows: params.rows ?? 24 },
+        withX11 && x11 ? { x11 } : {},
         (err, stream) => {
           if (err) {
+            if (withX11 && this.x11Refusal(err)) {
+              this.emit({ sessionId: id, status: 'connected', notice: 'x11-refused' })
+              openShell(false)
+              return
+            }
             const message = friendlyError(err.message)
             this.emit({ sessionId: id, status: 'error', message })
             this.releaseMaster(key, id)
@@ -1336,6 +1530,8 @@ export class SshManager {
           })()
         }
       )
+      }
+      openShell(!!x11)
     })
   }
 

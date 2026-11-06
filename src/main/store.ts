@@ -383,6 +383,7 @@ export class HostStore {
       lines.push(`\tUser ${h.username}`)
       if (h.auth === 'key' && h.keyPath) lines.push(`\tIdentityFile ${h.keyPath}`)
       if (h.agentForward) lines.push(`\tForwardAgent yes`)
+      if (h.x11Forward) lines.push(`\tForwardX11 yes`)
       if (h.jumpHostId) {
         const j = byId.get(h.jumpHostId)
         if (j) lines.push(`\tProxyJump ${this.configAlias(j)}`)

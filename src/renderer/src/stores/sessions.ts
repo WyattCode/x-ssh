@@ -2033,6 +2033,7 @@ export const useSessions = defineStore('sessions', {
           keyPath: host.keyPath,
           hostId: host.id,
           agentForward: host.agentForward,
+          x11Forward: host.x11Forward,
           onConnect: host.onConnect,
           onConnectDelayMs: host.onConnectDelayMs
         },
