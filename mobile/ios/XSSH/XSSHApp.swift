@@ -190,6 +190,12 @@ struct RootView: View {
         }
     }
 
+    /// 主机列表里算「连着的那台」的会话:已结束的不算;但「主机密钥变了」在等用户处理,这台要留在列表里(显示等待确认)。
+    private func listActive(_ model: TerminalModel) -> UUID? {
+        if case .keyChanged = model.state { return model.host.id }
+        return model.isEnded ? nil : model.host.id
+    }
+
     /// 正连着的会话在等用户确认主机密钥(新主机 / 密钥变了)。
     private var activeNeedsConfirm: Bool {
         switch active?.state {
@@ -306,7 +312,7 @@ struct RootView: View {
     }
 
     private var hostsView: some View {
-        HostsView(splitLayout: sizeClass == .regular, activeID: active.flatMap { $0.isEnded ? nil : $0.host.id },
+        HostsView(splitLayout: sizeClass == .regular, activeID: active.flatMap { listActive($0) },
                   activeConnecting: activeConnecting, connectedSince: active?.connectedAt, activeNeedsConfirm: activeNeedsConfirm,
                   showsClock: active?.showsConnectedClock ?? false, onToggleClock: { active?.showsConnectedClock.toggle() },
                   onDeleted: { if active?.host.id == $0.id { close() } }, addRequested: $addHostRequested, searching: $searching, onConnect: open,

@@ -2927,3 +2927,5 @@ M3.51 已有「用生物识别解锁」开关,连私钥密文(`lockedKeyData` / 
 - **主机列表的收尾(第三轮审核)**:颜色 12 种(`Host.paletteSize`),编号存 `Host.colorIndex`;光标闪约 5 秒后常亮(不无限循环,减弱动态效果时常亮);点连着那行的「时长」在时长 / 连上的时刻之间切换;搜索时若是地址 / 用户名匹配上的,名字下面小字写出匹配项(平时不显示地址);没有主机时是一行 `❯ ssh --new` 提示符(点一下新建);新建 / 编辑页小节标题前有绿色 `# `。iOS 现在有单元测试:`xcodebuild test -scheme XSSH`(`XSSHTests/HostColorTests`,覆盖选色和旧文件迁移)。SSH 层有 15 秒心跳、连续 2 次失败即断,所以「已连接」时长在断网后最多多走约 45 秒。
 
 - **第四轮审核的修复**:内屏顶部 logo 的布局高度改成 57pt(上留白 38 + logo 19),搜索框不再被 logo 压住;删除一台主机时若它正连着,外层会断开那个会话(`HostsView.onDeleted`);「已连接」那行的时长 / 时刻显示状态移到 `TerminalModel.showsConnectedClock`(跟着会话走);行字号、小字、行内留白、`❯` 宽度随系统字体缩放(`@ScaledMetric`);等用户确认主机密钥时行上写「等待确认」而不是「连接中…」;`❯` 和虚线对比度提高。**iOS 没有进 CI**:需要带 iOS 27 SDK 的 macOS runner,GitHub 托管的 runner 还没有,所以本机跑 `mobile/tools/test-ios.sh`。
+
+- **第五轮审核的修复**:标题读屏念「Hosts」(不念 `$`);「主机密钥变了」时那台主机留在列表里显示「等待确认」(`RootView.listActive`);搜索框改成 `❯ grep` 一行命令(无圆角底,下面虚线,和行对齐);连接开始 / 连上有触觉反馈(`.sensoryFeedback`);左滑的编辑 / 删除只显示图标;`test-ios.sh` 找不到「iPhone Duo」时用第一个可用的 iPhone 模拟器;测试里存的主机和钥匙串条目测完会删。发版用的更新日志草稿已按当前状态重写。

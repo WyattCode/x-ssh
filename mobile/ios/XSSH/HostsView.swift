@@ -67,6 +67,10 @@ struct HostsView: View {
         .padding(.horizontal, 16 + cardInset).padding(.top, splitLayout ? 2 : 6).padding(.bottom, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .listRowBackground(Color.clear).listRowSeparator(.hidden).listRowInsets(EdgeInsets())
+        // 读屏:「Hosts,5」,不念 `$` 符号。
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text("Hosts"))
+        .accessibilityValue(Text(verbatim: "\(store.hosts.count)"))
         .accessibilityAddTraits(.isHeader)
     }
 
@@ -86,6 +90,9 @@ struct HostsView: View {
             guard let id else { return }
             withAnimation(.smooth(duration: 0.3)) { proxy.scrollTo(id) }
         }
+        // 触觉:开始连接给一下轻的,连上给一下「成功」。
+        .sensoryFeedback(trigger: activeID) { _, new in new != nil ? .impact(weight: .light) : nil }
+        .sensoryFeedback(trigger: connectedSince) { _, new in new != nil ? .success : nil }
         // 紧凑宽度(主页)背景纯黑;展开成两栏时左边这一栏要和右边的会话(终端纯黑)有颜色区分,用深灰。
         .scrollContentBackground(.hidden)
         // 两栏时去掉列表自带的左右边距(约 20pt),卡片才能占满侧栏宽度;窄屏单栏保持系统边距。
@@ -258,8 +265,8 @@ struct HostsView: View {
             rowBottoms[host.id] = $0.maxY
         }
         .swipeActions {
-            Button("Delete", role: .destructive) { pendingDelete = host }
-            Button("Edit") { startEditing(host) }.tint(.blue)
+            Button("Delete", systemImage: "trash", role: .destructive) { pendingDelete = host }
+            Button("Edit", systemImage: "pencil") { startEditing(host) }.tint(Color(white: 0.3))
         }
             .listRowBackground(Color.clear)
             .listRowInsets(EdgeInsets())
@@ -362,9 +369,11 @@ struct HostsView: View {
     /// 按侧栏实际宽度算,拖动改宽后比例不变。列表自带的左右边距已去掉(见 `SplitListMargins`)。
     private var cardInset: CGFloat { splitLayout ? listWidth * 0.04 : 0 }
 
+    /// 搜索框也是一行命令:`❯ grep ▍输入`,没有圆角底,下面一条虚线;文字和列表行的 `❯` 对齐(同样的左右 10pt)。
     private var searchField: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+        HStack(spacing: 10) {
+            Text(verbatim: "❯").foregroundStyle(Color.green)
+            Text(verbatim: "grep").foregroundStyle(Color.white.opacity(0.4))
             TextField("Search hosts", text: $query)
                 .textInputAutocapitalization(.never).autocorrectionDisabled()
                 .focused($searchFocused).submitLabel(.search)
@@ -373,13 +382,16 @@ struct HostsView: View {
                     .labelStyle(.iconOnly).foregroundStyle(.secondary).buttonStyle(.plain)
             }
         }
-        .padding(.horizontal, 14)
-        .frame(minHeight: 44)
-        .background(.regularMaterial, in: Capsule())
-        // 左右边缘和宽度都取自下面列表卡片的实际位置(靠竖条那一侧边距更小,固定边距会对不齐);
-        // 还没有卡片(列表为空)时退回到系统的场景边距。
+        .font(.system(size: rowFont, design: .monospaced))
+        .padding(.horizontal, 10)
+        .frame(minHeight: 48)
+        .overlay(alignment: .bottom) {
+            DashedLine().stroke(Color.white.opacity(0.16), style: StrokeStyle(lineWidth: 1, dash: [3, 3])).frame(height: 1)
+        }
+        // 左右边缘和宽度都取自下面列表行的实际位置(靠竖条那一侧边距更小,固定边距会对不齐);
+        // 还没有行(列表为空)时退回到系统的场景边距。
         .modifier(MatchCard(x: cardX.map { $0 + (splitLayout ? cardInset : 0) }, width: cardWidth.map { $0 - (splitLayout ? cardInset * 2 : 0) }))
-        .padding(.vertical, 8)
+        .padding(.vertical, 4)
     }
 
     private func toolButton(_ icon: String, _ label: LocalizedStringKey, action: @escaping () -> Void) -> some View {

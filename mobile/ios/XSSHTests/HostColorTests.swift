@@ -48,6 +48,8 @@ final class HostColorTests: XCTestCase {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: dir) }
         let store = HostStore(directory: dir)
+        // 存主机会把密码写进系统钥匙串:测完要删掉,不留垃圾。
+        defer { for h in store.hosts { store.delete(h) } }
         var first = host("one"); first.address = "one.test"
         var second = host("two"); second.address = "two.test"
         _ = store.save(first, credentials: Credentials(password: "x"))
