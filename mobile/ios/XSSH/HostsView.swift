@@ -267,9 +267,13 @@ struct HostsView: View {
             }
             rowBottoms[host.id] = $0.maxY
         }
-        .swipeActions {
+        // 不允许一滑到底直接触发(第一个动作是删除,太容易误触);只能点露出来的按钮。
+        .swipeActions(allowsFullSwipe: false) {
+            // 只要图标,不要文字(读屏仍然念「删除 / 编辑」)。
             Button("Delete", systemImage: "trash", role: .destructive) { pendingDelete = host }
-            Button("Edit", systemImage: "pencil") { startEditing(host) }.tint(Color(white: 0.3))
+                .labelStyle(.iconOnly)
+            Button("Edit", systemImage: "pencil") { startEditing(host) }
+                .labelStyle(.iconOnly).tint(Color(white: 0.3))
         }
             .listRowBackground(Color.clear)
             .listRowInsets(EdgeInsets())
