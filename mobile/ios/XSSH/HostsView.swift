@@ -459,9 +459,9 @@ private struct RowMenu: ViewModifier {
     /// (给了预览卡,系统会把菜单对齐到卡片的右边缘 / 摆到右边,不是靠左)。
     func body(content: Content) -> some View {
         // 系统按「被按那一块」的底边摆菜单。被按的一块默认含行下面的留白(约 21pt),菜单就离文字太远:
-        // 内外屏都把这一块的底边往上收 17pt(菜单到文字的距离比默认缩短约 35%)。
+        // 内外屏都把这一块的底边往上收 15pt(菜单到文字的距离比默认缩短约 30%)。
         content
-            .contentShape(.contextMenuPreview, BottomTrimmedRoundedRect(trim: 17, radius: 14))
+            .contentShape(.contextMenuPreview, BottomTrimmedRoundedRect(trim: 15, radius: 14))
             .contextMenu { items }
     }
 
