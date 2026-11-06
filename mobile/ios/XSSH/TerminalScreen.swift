@@ -449,25 +449,13 @@ struct TerminalScreen: View {
             }
         case .needsTrust(let fp):
             card {
-                Text("Unknown host key").font(.headline)
-                Text("Check that this fingerprint belongs to the server before trusting it.")
-                    .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
-                fingerprint(fp)
-                Button("Trust and connect") { model.trust(fingerprint: fp, store: store) }
-                    .buttonStyle(.borderedProminent)
-                Button("Cancel", role: .cancel, action: onClose).buttonStyle(.bordered)
+                HostKeyCard(host: model.host.displayName, kind: .unknown(fingerprint: fp),
+                            onPrimary: { model.trust(fingerprint: fp, store: store) }, onCancel: onClose)
             }
         case .keyChanged(let new, let old):
             card {
-                Label("Host key changed", systemImage: "exclamationmark.triangle.fill")
-                    .font(.headline).foregroundStyle(.yellow)
-                Text("The server presented a different key than the one you trusted. This can mean the server was reinstalled — or that someone is intercepting the connection.")
-                    .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
-                if let old { labeled("Trusted key", old) }
-                labeled("Presented key", new)
-                Button("Replace key and connect", role: .destructive) { confirmReplace = true }
-                    .buttonStyle(.borderedProminent)
-                Button("Cancel", role: .cancel, action: onClose).buttonStyle(.bordered)
+                HostKeyCard(host: model.host.displayName, kind: .changed(new: new, old: old),
+                            onPrimary: { confirmReplace = true }, onCancel: onClose)
             }
             .alert("Replace the trusted key?", isPresented: $confirmReplace) {
                 Button("Cancel", role: .cancel) {}
@@ -514,20 +502,12 @@ struct TerminalScreen: View {
             .controlSize(.large)
             .padding(20)
             .frame(maxWidth: 420)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 28))
+            // 暗色渐变卡片 + 细边(和主机列表同一套终端风格),取代系统的毛玻璃。
+            .background(LinearGradient(colors: [Color(white: 0.09), Color(white: 0.065)], startPoint: .top, endPoint: .bottom),
+                        in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous).stroke(Color.white.opacity(0.12), lineWidth: 1))
             .padding(16)
             .foregroundStyle(.white)
             .environment(\.colorScheme, .dark)
-    }
-
-    private func fingerprint(_ fp: String) -> some View {
-        Text(verbatim: fp).font(.caption.monospaced()).textSelection(.enabled).multilineTextAlignment(.center)
-    }
-
-    private func labeled(_ title: LocalizedStringKey, _ fp: String) -> some View {
-        VStack(spacing: 2) {
-            Text(title).font(.caption2).foregroundStyle(.secondary)
-            fingerprint(fp)
-        }
     }
 }

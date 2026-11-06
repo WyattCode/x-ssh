@@ -662,6 +662,23 @@
         }
       }
     },
+    "First connection": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "First connection"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "首次连接"
+          }
+        }
+      }
+    },
     "Connecting…": {
       "extractionState": "manual",
       "localizations": {
