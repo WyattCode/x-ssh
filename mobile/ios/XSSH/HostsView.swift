@@ -62,7 +62,7 @@ struct HostsView: View {
     private var titleRow: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(verbatim: "$ hosts").font(.system(size: 26, weight: .semibold, design: .monospaced)).tracking(-0.4)
-            Text("\(store.hosts.count)").font(.footnote).foregroundStyle(Color.white.opacity(0.45))
+            if !store.hosts.isEmpty { Text("\(store.hosts.count)").font(.footnote).foregroundStyle(Color.white.opacity(0.45)) }
         }
         .padding(.horizontal, 16 + cardInset).padding(.top, splitLayout ? 2 : 6).padding(.bottom, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -289,15 +289,17 @@ struct HostsView: View {
     /// 名字必须一行(太长截断)。不显示 IP / 端口。
     private func sshRow(_ host: Host, featured: Bool, last: Bool) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline, spacing: Self.promptGap) {
+            // 间距自己控制(HStack 间距为 0):名字和颜色点之间只留 8pt,长名字才不会被提前截断。
+            HStack(alignment: .firstTextBaseline, spacing: 0) {
                 Text(verbatim: "❯")
                     .foregroundStyle(featured ? Color.green : Color.white.opacity(0.4))
                     .frame(width: promptWidth, alignment: .leading)
+                    .padding(.trailing, Self.promptGap)
                 (Text(verbatim: "ssh ").foregroundStyle(Color.white.opacity(0.4))
                     + Text(verbatim: host.displayName).foregroundStyle(Color.white.opacity(0.93)))
                     .lineLimit(1).truncationMode(.tail)
-                if featured && !activeConnecting { BlinkingCursor() }
-                Spacer(minLength: 6)
+                if featured && !activeConnecting { BlinkingCursor().padding(.leading, 8) }
+                Spacer(minLength: 8)
                 ZStack {
                     if featured && activeConnecting {
                         ProgressView().controlSize(.mini).tint(.white)
@@ -394,7 +396,7 @@ struct HostsView: View {
         // 左右边缘和宽度都取自下面列表行的实际位置(靠竖条那一侧边距更小,固定边距会对不齐);
         // 还没有行(列表为空)时退回到系统的场景边距。
         .modifier(MatchCard(x: cardX.map { $0 + (splitLayout ? cardInset : 0) }, width: cardWidth.map { $0 - (splitLayout ? cardInset * 2 : 0) }))
-        .padding(.vertical, 4)
+        .padding(.top, 10).padding(.bottom, 4)
     }
 
     private func toolButton(_ icon: String, _ label: LocalizedStringKey, action: @escaping () -> Void) -> some View {
