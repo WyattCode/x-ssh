@@ -32,7 +32,10 @@ struct HostsView: View {
     /// 随系统字体大小缩放的尺寸(行字号、小字、行内留白、`❯` 宽度)。
     @ScaledMetric(relativeTo: .body) private var rowFont: CGFloat = 19
     @ScaledMetric(relativeTo: .caption) private var smallFont: CGFloat = 12
-    @ScaledMetric(relativeTo: .body) private var rowPad: CGFloat = 21
+    @ScaledMetric(relativeTo: .body) private var rowPadBase: CGFloat = 21
+    /// 字号放大时行内上下留白只跟着涨一点(封顶 28pt),不然行高会被撑得很大。
+    private var rowPad: CGFloat { min(rowPadBase, 28) }
+    @ScaledMetric(relativeTo: .title) private var titleFont: CGFloat = 26
     private var promptWidth: CGFloat { rowFont * 14 / 19 }
     @State private var editing: Host?
     @State private var isNew = false
@@ -61,7 +64,7 @@ struct HostsView: View {
 
     private var titleRow: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(verbatim: "$ hosts").font(.system(size: 26, weight: .semibold, design: .monospaced)).tracking(-0.4)
+            Text(verbatim: "$ hosts").font(.system(size: titleFont, weight: .semibold, design: .monospaced)).tracking(-0.4)
             if !store.hosts.isEmpty { Text("\(store.hosts.count)").font(.footnote).foregroundStyle(Color.white.opacity(0.45)) }
         }
         // 外屏:列表自带的左边距(约 20pt)正好和顶部 logo 的左边缘对齐,标题不再额外缩进;内屏标题和 logo 同样从 16 + 卡片边距起。
@@ -119,7 +122,18 @@ struct HostsView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel(Text("Add Host"))
             } else if shown.isEmpty {
-                ContentUnavailableView.search(text: query)
+                // 搜不到:一行 `❯ grep "关键字"` + 一句话,和列表同一套终端风格(不用系统的放大镜图)。
+                VStack(spacing: 10) {
+                    HStack(spacing: 8) {
+                        Text(verbatim: "❯").foregroundStyle(Color.green)
+                        Text(verbatim: "grep").foregroundStyle(Color.white.opacity(0.4))
+                        Text(verbatim: "\"\(query)\"").lineLimit(1).truncationMode(.middle)
+                    }
+                    .font(.system(size: rowFont, design: .monospaced))
+                    Text("No matching hosts").font(.footnote).foregroundStyle(.secondary)
+                }
+                .padding(24)
+                .accessibilityElement(children: .combine)
             }
         }
         // 自己的搜索框,不用系统的 `.searchable`:系统搜索展开时整个标题区收起 / 重排,列表跟着跳,过渡不连贯。
