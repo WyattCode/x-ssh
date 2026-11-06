@@ -127,22 +127,21 @@ struct TerminalScreen: View {
         // 系统返回键在外屏竖条最上面,紧贴状态区;改成底部工具栏里的「主机」按钮。
         // 工具栏结构不随尺寸类变:姿态切换时(折叠 / 展开)内容变了,系统会丢掉竖条。
         .navigationBarBackButtonHidden(true)
+        // 会话名画在页面里,不放系统工具栏(原因见 `OuterTitleBar`):关闭 / 返回时它跟着页面一起滑走,不再和列表的 logo 做模糊交接。
+        .overlay(alignment: .topLeading) {
+            OuterTitleBar {
+                Text(verbatim: model.title.isEmpty ? model.host.displayName : model.title)
+                    .font(.headline).lineLimit(1).truncationMode(.tail)
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: 280, alignment: .leading)
+            }
+        }
         // 隐藏了系统返回键,系统的「从屏幕左边缘右滑返回」也就跟着没了。自己补一条:屏幕最左边一条窄带,右滑回主机列表。
         .background { EdgeSwipeBack(onBack: onBack).frame(width: 0, height: 0) }
         .toolbar {
-            // 会话页左上角:只有主机名(不再带应用图标)。自定义视图(不是单纯的图标或标题)不会被系统竖排进竖条,留在顶部左边。
-            ToolbarItem(placement: .topBarLeading) {
-                Text(verbatim: model.title.isEmpty ? model.host.displayName : model.title)
-                    .font(.headline).lineLimit(1).truncationMode(.tail)
-                    .frame(maxWidth: 280, alignment: .leading)
-                    // 按文字自己的宽度(最多 280pt)定大小:不然系统分给这个左上角项的宽度很小,「Home Lab」会被截成「Home…」。
-                    .fixedSize(horizontal: true, vertical: false)
-                    // 系统只给这个项约 64pt 的宽度:短名字(「duo」)要靠左,否则会在这块里居中。
-                    .frame(minWidth: 80, alignment: .leading)
-                // 注意:不要再给它加负的左边距。系统给顶部工具栏项留的约 20pt 左边距,正好和列表页 logo、终端文字的左边缘在同一条竖线上。
-            }
-            // 去掉系统给工具栏项套的玻璃圆泡,否则 logo + 主机名被裁在一个小圆里。
-            .sharedBackgroundVisibility(.hidden)
+            // 看不见的占位项:撑住导航栏的高度(会话名画在页面里,见 `OuterTitleBar`),终端才从原来的位置开始。
+            ToolbarItem(placement: .topBarLeading) { Color.clear.frame(width: 1, height: 1).accessibilityHidden(true) }
+                .sharedBackgroundVisibility(.hidden)
             if !fold.isStandardPhone {
                 // 返回主机列表是导航,键盘弹着、竖条放不下时让位:进溢出菜单。这时最需要的是键盘 / 快捷键两颗开关。
                 ToolbarItem(placement: .bottomBar) {

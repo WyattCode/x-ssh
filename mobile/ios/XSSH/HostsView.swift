@@ -189,6 +189,11 @@ struct HostsView: View {
         }        // 把排版变化告诉开屏:稳定之后开屏才淡出,过渡中间不会再有重排。
         .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.trailing } action: { gate.touch(trailingInset: $0) }
         .onGeometryChange(for: CGSize.self) { $0.size } action: { listWidth = $0.width; gate.touch(trailingInset: 0) }
+        // 外屏(单栏)的 logo 画在页面里,不放系统工具栏:工具栏项在翻页时由系统做模糊渐变交接,和页面的滑动不同步
+        // (翻回列表时会话名和 logo 一个淡出一个淡入,页面却在滑)。画在页面里它就跟着页面一起滑,过渡一气呵成。
+        .overlay(alignment: .topLeading) {
+            if !splitLayout { OuterTitleBar(backdrop: true) { BrandLockup(height: 19) } }
+        }
         .navigationTitle("Hosts")
         // 固定的小标题:大标题会在搜索展开时收起,整张列表跟着往上跳一截,过渡就不顺了。
         // 页面左上角直接放横向 logo(不是图标加文字)。系统标题只留给读屏用,不显示。
@@ -198,10 +203,9 @@ struct HostsView: View {
         // 放底部工具栏:竖条里顶部那一段紧挨着状态区(灵动岛 / 信号 / 电量),「+」贴上去会和状态图标碰在一起,
         // 按下放大时还会压到它;HIG 里底部工具栏的按钮留在竖条下方,拇指也够得着。
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                BrandLockup(height: 19)
-            }
-            .sharedBackgroundVisibility(.hidden)
+            // 看不见的占位项:撑住导航栏的高度(没有任何项时导航栏收成 0 高,列表会顶到屏幕最上面);logo 本身画在页面里(见 `OuterTitleBar`)。
+            ToolbarItem(placement: .topBarLeading) { Color.clear.frame(width: 1, height: 1).accessibilityHidden(true) }
+                .sharedBackgroundVisibility(.hidden)
             // 内屏(两栏)里搜索和新建都放在右边那一侧的竖条里(RootView 的详情栏),只放一份,不在左栏再放一份;
             // 外屏(单栏)整个屏幕就是主机列表,按钮在它自己的竖条里。
             if !splitLayout {
@@ -395,9 +399,8 @@ struct HostsView: View {
         }
     }
 
-    static let cardGap: CGFloat = 6
-    /// 两栏时卡片宽 = 侧栏宽的 92%,左右各留 4%(参考图里卡片和分界线之间就是这么一条窄缝)。
-    /// 按侧栏实际宽度算,拖动改宽后比例不变。列表自带的左右边距已去掉(见 `SplitListMargins`)。
+    /// 内屏两栏时左右各留侧栏宽的 4%(行的起点和虚线的两端都在这条线内,见 `rowInset`)。
+    /// 按侧栏实际宽度算,宽度变了比例不变。列表自带的左右边距已去掉(见 `SplitListMargins`)。
     private var cardInset: CGFloat { splitLayout ? listWidth * 0.04 : 0 }
     /// 内屏侧栏的左右对齐线:logo、`$ hosts`、每行的 `❯`、虚线的起点都在这条线上(和外屏一致:外屏是列表自带的约 20pt 边距),
     /// 右边虚线的终点对称。外屏不用(0)。
@@ -412,9 +415,11 @@ struct HostsView: View {
 
     /// 搜索框也是一行命令:`❯ grep ▍输入`,没有圆角底,下面一条虚线;`❯` 和列表行的 `❯` 在同一条竖线上。
     private var searchField: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 0) {
+            // 箭头占的宽度和列表行一样(`promptWidth` + `promptGap`):`grep` 和下面名字的起点在同一条竖线上。
             Text(verbatim: "❯").offset(y: -arrowLift).foregroundStyle(Color.green)
-            Text(verbatim: "grep").foregroundStyle(Color.white.opacity(0.4))
+                .frame(width: promptWidth, alignment: .leading).padding(.trailing, Self.promptGap)
+            Text(verbatim: "grep").foregroundStyle(Color.white.opacity(0.4)).padding(.trailing, 10)
             TextField("Search hosts", text: $query)
                 .textInputAutocapitalization(.never).autocorrectionDisabled()
                 .focused($searchFocused).submitLabel(.search)
@@ -927,5 +932,37 @@ private enum HostColor {
     static func pip(_ index: Int?) -> Color {
         guard let index, palette.indices.contains(index) else { return palette[0] }
         return palette[index]
+    }
+}
+
+
+/// 外屏顶部左上角的标题位(logo / 会话名)。画在页面里(不是系统工具栏项),位置和以前的工具栏项一样:
+/// 左边 20pt(和 `$ hosts`、`❯`、终端文字同一条竖线),竖直方向落在导航栏里。
+/// 相对「安全区顶边」定位(导航栏就在它上面),不是离屏幕顶的绝对位置,所以带状态栏 / 灵动岛的普通 iPhone 上也不会压到状态栏。
+/// Duo 外屏量过:工具栏项的中线在安全区顶边上面约 34.7pt(44pt 的导航栏再加 12.7pt),普通 iPhone 是 22pt。
+/// `backdrop`:背后垫一块黑底渐变,列表往上滚时行不会从它后面穿过去(会话页不需要,终端第一行就在它下面)。
+struct OuterTitleBar<Content: View>: View {
+    @Environment(FoldState.self) private var fold
+    var backdrop = false
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        let lift: CGFloat = fold.isStandardPhone ? 44 : 56.7
+        content
+            .padding(.leading, 20)
+            .frame(maxWidth: .infinity, minHeight: 44, maxHeight: 44, alignment: .leading)
+            .background(alignment: .bottom) {
+                if backdrop {
+                    let fade: CGFloat = 14, total: CGFloat = 200
+                    LinearGradient(stops: [.init(color: .black, location: 0),
+                                           .init(color: .black, location: (total - fade) / total),
+                                           .init(color: .black.opacity(0), location: 1)],
+                                   startPoint: .top, endPoint: .bottom)
+                        .frame(height: total).offset(y: fade - 10)
+                }
+            }
+            .offset(y: -lift)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)   // 系统导航标题(读屏用)已经念了名字
     }
 }

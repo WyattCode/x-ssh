@@ -106,6 +106,8 @@ struct RootView: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(FoldState.self) private var fold
     @State private var active: TerminalModel?
+    /// 外屏点「断开 / 取消」之后、翻回列表的那段时间:会话页还在(要等翻页动画走完才能清),但列表里那一行不能再显示成「连着」。
+    @State private var closing = false
     @State private var addHostRequested = false
     @State private var searching = false
     /// 拖把手时侧栏内容跟手滑出去的位移(0 = 原位,-侧栏宽度 = 完全滑出)。
@@ -192,6 +194,7 @@ struct RootView: View {
 
     /// 主机列表里算「连着的那台」的会话:已结束的不算;但「主机密钥变了」在等用户处理,这台要留在列表里(显示等待确认)。
     private func listActive(_ model: TerminalModel) -> UUID? {
+        if closing { return nil }
         if case .keyChanged = model.state { return model.host.id }
         return model.isEnded ? nil : model.host.id
     }
@@ -493,6 +496,7 @@ struct RootView: View {
             if collapse { setDrawer(false) }
             return
         }
+        closing = false
         active?.disconnect()
         let model = TerminalModel(host: host, credentials: hosts.credentials(for: host), knownKey: hosts.knownKey(host))
         if sizeClass == .regular {
@@ -519,9 +523,12 @@ struct RootView: View {
         } else {
             // 外屏:等翻回列表的动画走完再清掉会话;立刻清的话,翻回去的过程中详情页会先变成「没有会话」的空页面,闪一下。
             let leaving = active?.id
+            // 列表那一行马上平滑地变回普通行(不再是绿箭头 / 光标 / 停住的「已连接」时长),
+            // 不要等翻页走完才突然切换:以前翻回来之后还「连着」约半秒,然后猛地一变。
+            withAnimation(.smooth(duration: 0.3)) { closing = true }
             Task { @MainActor in
                 try? await Task.sleep(for: .milliseconds(550))
-                if active?.id == leaving { active = nil }
+                if active?.id == leaving { active = nil; closing = false }
             }
         }
     }
