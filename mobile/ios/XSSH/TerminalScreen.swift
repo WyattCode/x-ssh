@@ -133,6 +133,10 @@ struct TerminalScreen: View {
                 Text(verbatim: model.title.isEmpty ? model.host.displayName : model.title)
                     .font(.headline).lineLimit(1).truncationMode(.tail)
                     .frame(maxWidth: 280, alignment: .leading)
+                    // 按文字自己的宽度(最多 280pt)定大小:不然系统分给这个左上角项的宽度很小,「Home Lab」会被截成「Home…」。
+                    .fixedSize(horizontal: true, vertical: false)
+                    // 系统只给这个项约 64pt 的宽度:短名字(「duo」)要靠左,否则会在这块里居中。
+                    .frame(minWidth: 80, alignment: .leading)
                     // 系统给顶部工具栏项留了约 20pt 的左边距,名字被推得离屏幕边太远:往回收,和终端文字的左边对齐。
                     .padding(.leading, -16)
             }
@@ -445,7 +449,7 @@ struct TerminalScreen: View {
             card {
                 ProgressView().tint(.white)
                 Text("Connecting…").font(.headline)
-                Button("Cancel", role: .cancel, action: onClose).buttonStyle(.bordered)
+                CardGhostButton(title: "Cancel", action: onClose)
             }
         case .needsTrust(let fp):
             card {
@@ -465,11 +469,20 @@ struct TerminalScreen: View {
             }
         case .failed(let message):
             card {
-                Label("Connection failed", systemImage: "wifi.exclamationmark").font(.headline)
-                Text(verbatim: message).font(.footnote.monospaced()).foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center).textSelection(.enabled)
-                Button("Retry") { model.connect() }.buttonStyle(.borderedProminent)
-                Button("Cancel", role: .cancel, action: onClose).buttonStyle(.bordered)
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(spacing: 12) {
+                        CardIconRing(systemImage: "wifi.exclamationmark", tint: .orange)
+                        Text("Connection failed").font(.headline)
+                    }
+                    Text(verbatim: message).font(.system(size: 12, design: .monospaced))
+                        .foregroundStyle(Color.white.opacity(0.62)).textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    VStack(spacing: 6) {
+                        CardPrimaryButton(title: "Retry") { model.connect() }
+                        CardGhostButton(title: "Cancel", action: onClose)
+                    }
+                    .padding(.top, 4)
+                }
             }
         case .closed(let status):
             VStack {
@@ -478,10 +491,10 @@ struct TerminalScreen: View {
                     Image(systemName: "bolt.slash")
                     if let status, status != 0 { Text("Session ended (exit \(Int(status)))") } else { Text("Session ended") }
                     Spacer(minLength: 8)
-                    Button("Reconnect") { model.connect() }.buttonStyle(.borderedProminent).controlSize(.large)
+                    CardPrimaryButton(title: "Reconnect", compact: true) { model.connect() }
                 }
                 .padding(12)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
+                .cardChrome(cornerRadius: 24)
                 .padding(12)
             }
             .foregroundStyle(.white)
@@ -503,9 +516,7 @@ struct TerminalScreen: View {
             .padding(20)
             .frame(maxWidth: 420)
             // 暗色渐变卡片 + 细边(和主机列表同一套终端风格),取代系统的毛玻璃。
-            .background(LinearGradient(colors: [Color(white: 0.09), Color(white: 0.065)], startPoint: .top, endPoint: .bottom),
-                        in: RoundedRectangle(cornerRadius: 26, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous).stroke(Color.white.opacity(0.12), lineWidth: 1))
+            .cardChrome(cornerRadius: 26)
             .padding(16)
             .foregroundStyle(.white)
             .environment(\.colorScheme, .dark)

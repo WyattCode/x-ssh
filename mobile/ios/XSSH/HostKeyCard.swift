@@ -101,12 +101,7 @@ struct HostKeyCard: View {
 
     private var header: some View {
         HStack(spacing: 12) {
-            ZStack {
-                Circle().stroke(accent, lineWidth: 1.5).frame(width: 42, height: 42)
-                    .shadow(color: accent.opacity(0.4), radius: 8)
-                Image(systemName: isChanged ? "exclamationmark.triangle.fill" : "key.fill")
-                    .font(.system(size: 18, weight: .medium)).foregroundStyle(accent)
-            }
+            CardIconRing(systemImage: isChanged ? "exclamationmark.triangle.fill" : "key.fill", tint: accent)
             VStack(alignment: .leading, spacing: 2) {
                 Text(isChanged ? "Host key changed" : "Unknown host key").font(.headline)
                 HStack(spacing: 6) {
@@ -152,28 +147,82 @@ struct HostKeyCard: View {
                 Text(verbatim: line).font(.system(size: size, design: .monospaced))
             }
         }
-        .textSelection(.enabled)
+        .contextMenu {
+            Button("Copy", systemImage: "doc.on.doc") { UIPasteboard.general.string = fp }
+        }
+        // 读屏:整条指纹一次念完(不是四段);长按可以整条复制(拆成四行显示后,系统的文字选择只能选一行)。
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text("Fingerprint"))
+        .accessibilityValue(Text(verbatim: fp))
     }
 
     private var buttons: some View {
         VStack(spacing: 6) {
-            Button(action: onPrimary) {
-                Text(isChanged ? "Replace key and connect" : "Trust and connect")
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(isChanged ? Color.white : Color(red: 0.016, green: 0.13, blue: 0.047))
-                    .frame(maxWidth: .infinity, minHeight: 50)
-                    .background(isChanged ? Self.danger : Color(red: 0.19, green: 0.82, blue: 0.345), in: Capsule())
-                    .contentShape(Capsule())
-            }
-            Button(action: onCancel) {
-                Text("Cancel")
-                    .font(.system(size: 15))
-                    .foregroundStyle(Color.white.opacity(0.65))
-                    .frame(maxWidth: .infinity, minHeight: 42)
-                    .contentShape(Capsule())
-            }
+            CardPrimaryButton(title: isChanged ? "Replace key and connect" : "Trust and connect", danger: isChanged, action: onPrimary)
+            CardGhostButton(title: "Cancel", action: onCancel)
+        }
+        .padding(.top, 4)
+    }
+}
+
+
+/// 状态卡片里共用的按钮:绿色(或红色)的胶囊主按钮 + 无底色的取消。
+struct CardPrimaryButton: View {
+    let title: LocalizedStringKey
+    var danger = false
+    var compact = false
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: compact ? 15 : 16, weight: .bold))
+                .foregroundStyle(danger ? Color.white : Color(red: 0.016, green: 0.13, blue: 0.047))
+                .padding(.horizontal, compact ? 18 : 0)
+                .frame(maxWidth: compact ? nil : .infinity, minHeight: compact ? 40 : 50)
+                .background(danger ? Color(red: 1.0, green: 0.27, blue: 0.23) : Color(red: 0.19, green: 0.82, blue: 0.345), in: Capsule())
+                .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .padding(.top, 4)
+    }
+}
+
+struct CardGhostButton: View {
+    let title: LocalizedStringKey
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 15))
+                .foregroundStyle(Color.white.opacity(0.65))
+                .frame(maxWidth: .infinity, minHeight: 42)
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// 卡片标题前的细圆环图标(钥匙 / 警告 / 断网),带一点同色的光晕。
+struct CardIconRing: View {
+    let systemImage: String
+    var tint: Color = .green
+
+    var body: some View {
+        ZStack {
+            Circle().stroke(tint, lineWidth: 1.5).frame(width: 42, height: 42)
+                .shadow(color: tint.opacity(0.4), radius: 8)
+            Image(systemName: systemImage)
+                .font(.system(size: 18, weight: .medium)).foregroundStyle(tint)
+        }
+    }
+}
+
+/// 状态卡片 / 状态条的背景:暗色渐变 + 细边(和主机列表同一套终端风格)。
+extension View {
+    func cardChrome(cornerRadius: CGFloat) -> some View {
+        background(LinearGradient(colors: [Color(white: 0.09), Color(white: 0.065)], startPoint: .top, endPoint: .bottom),
+                   in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous).stroke(Color.white.opacity(0.12), lineWidth: 1))
     }
 }
