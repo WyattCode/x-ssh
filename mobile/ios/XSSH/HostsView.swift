@@ -39,6 +39,11 @@ struct HostsView: View {
     private var rowPad: CGFloat { min(rowPadBase, 28) }
     @ScaledMetric(relativeTo: .title) private var titleFont: CGFloat = 26
     private var promptWidth: CGFloat { rowFont * 14 / 19 }
+    /// 断开后那一行的状态行占的高度(行高里的 `❯ 名字` 下面多出来的那一截)。
+    private var statusSlot: CGFloat { smallFont * 1.3 + 8 }
+    /// 刚断开的那台是谁、列表单元格缩短之后「抵消位移」是不是已经放掉(见 `collapseShift`)。
+    @State private var lastFeatured: UUID?
+    @State private var settled = true
     /// `❯` 的字形比字母的中线低约 1.3pt(量过),整体往上抬一点,和名字的中线对齐;随字号缩放。
     private var arrowLift: CGFloat { rowFont * 0.07 }
     @State private var editing: Host?
@@ -89,15 +94,25 @@ struct HostsView: View {
             titleRow
             // 连着的那台就在它原来的位置变成大卡,不往上提(主机的顺序一直按添加先后)。
             let rows = shown
-            ForEach(rows) { host in
+            ForEach(Array(rows.enumerated()), id: \.element.id) { index, host in
                 hostRow(host, featured: host.id == activeID, last: host.id == rows.last?.id)
+                    .modifier(CollapseShift(y: collapseShift(index: index, separator: false, rows: rows), settled: settled))
                 // 行间的虚线是独立的一行(单元格):长按时系统把被按的那一格整个换成浮起的预览,
                 // 虚线要是画在这一格里,会跟着消失、松手又弹回来。
-                if host.id != rows.last?.id { separatorRow }
+                if host.id != rows.last?.id { separatorRow.modifier(SeparatorFade(hidden: separatorHidden(index: index, rows: rows))) }
             }
         }
         // 连上一台时,让列表滚到那张卡片(它在视野外也能看到自己选中了哪台)。
-        .onChange(of: activeID) { _, id in
+        .onChange(of: activeID) { old, id in
+            if let id { lastFeatured = id; settled = false }
+            else if old != nil {
+                // 单元格高度已经一下子缩短了(列表做不到平滑改高度),下面的行在那一帧被抵消回原位(`collapseShift`);
+                // 等那一帧画出来,再用动画把抵消放掉 —— 下面的行和虚线是平滑地往上走,不是猛地一提。
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(30))
+                    withAnimation(.smooth(duration: 0.45)) { settled = true }
+                }
+            }
             guard let id else { return }
             withAnimation(.smooth(duration: 0.3)) { proxy.scrollTo(id) }
         }
@@ -427,6 +442,19 @@ struct HostsView: View {
     /// 内屏侧栏的左右对齐线:logo、`$ hosts`、每行的 `❯`、虚线的起点都在这条线上(和外屏一致:外屏是列表自带的约 20pt 边距),
     /// 右边虚线的终点对称。外屏不用(0)。
     private var rowInset: CGFloat { splitLayout ? 16 + cardInset : 0 }
+
+    /// 连着的那台断开、状态行收掉的瞬间,它下面的行 / 虚线要抵消的位移:单元格高度是一下子变的,
+    /// 不抵消的话下面的行会在一帧里猛地往上提。(`settled` 为 false 的那一帧位移 = 缩短的高度,之后动画放到 0。)
+    private func collapseShift(index: Int, separator: Bool, rows: [Host]) -> CGFloat {
+        guard activeID == nil, !settled, let id = lastFeatured, let k = rows.firstIndex(where: { $0.id == id }) else { return 0 }
+        return (separator ? index >= k : index > k) ? statusSlot : 0
+    }
+
+    /// 连着那台下面(含它自己下面)的虚线:断开收场开始就淡出,下面的行落定后淡入回来(见 `SeparatorFade`)。
+    private func separatorHidden(index: Int, rows: [Host]) -> Bool {
+        guard let id = activeID ?? lastFeatured, let k = rows.firstIndex(where: { $0.id == id }), index >= k else { return false }
+        return activeID != nil ? activeClosing : !settled
+    }
 
     /// 长按菜单要收掉的边:默认字号时外屏 7pt、内屏 13pt(内屏同样的行高下系统给的空隙比外屏大约 6pt),量过两边文字到菜单都约 42pt、虚线到菜单约 9pt。
     /// 字号变大时,行内上下留白和文字自己都变高,跟着多收(留白每多 1pt 多收 1pt,文字半高每多 1pt 多收 1pt),文字到菜单的距离不变。
@@ -954,5 +982,30 @@ private enum HostColor {
     static func pip(_ index: Int?) -> Color {
         guard let index, palette.indices.contains(index) else { return palette[0] }
         return palette[index]
+    }
+}
+
+
+/// 虚线是只有 1pt 高的单元格,偏移出去会被单元格裁掉,所以断开收场时它先慢慢淡出(趁「已断开」停着的那段),
+/// 下面的行平滑上移的时候它不在,落定之后再淡入回来。
+private struct SeparatorFade: ViewModifier {
+    let hidden: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(hidden ? 0 : 1)
+            .animation(hidden ? .easeOut(duration: 0.4) : .easeOut(duration: 0.3).delay(0.22), value: hidden)
+    }
+}
+
+/// 抵消位移:`settled` 为 false 时(缩短的那一帧)不带动画直接落在抵消位置,变成 true 时用动画平滑回到 0。
+private struct CollapseShift: ViewModifier {
+    let y: CGFloat
+    let settled: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .offset(y: y)
+            .animation(settled ? .smooth(duration: 0.45) : nil, value: y)
     }
 }

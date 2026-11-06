@@ -2958,3 +2958,5 @@ M3.51 已有「用生物识别解锁」开关,连私钥密文(`lockedKeyData` / 
 - **第五轮审核(二次审查)**:`Host.swift` 里 `save()` 的文档注释和 `@discardableResult` 被插到 `freeColorIndex` 前面去了,已挪回;`RowMenu` 去掉没用的 `font` / `host` 参数,过时的注释(外屏预览卡、两边都收 7pt)已改;长按菜单的收边改成 `HostsView.menuTrim`,随字号缩放;主机密钥确认卡 / 失败卡的小字(主机名、指纹、`SHA256` 标注、按钮)改成 `@ScaledMetric`,字号很大时指纹图案和指纹文字自动改成上下排(`ViewThatFits`),整张卡最大跟到「辅助功能 1」档(`.dynamicTypeSize(...accessibility1)`)。字号调到最大时,系统会把被按的那一行整体往上挪给大菜单让位,这是系统行为,不是我们的 bug。
 
 - **`❯` 的字形比字母中线低约 1.3pt**:`HostsView.arrowLift`(`rowFont * 0.07`)用 `.offset(y:)` 往上抬(不用 `baselineOffset`:它会撑高每行、列表被拉开);量过箭头中线和名字首字母中线差 0–1px。
+
+- **断开后「状态行」收起、下面的行不能猛地上提(`HostsView.collapseShift` / `CollapseShift` / `SeparatorFade`)**:List 单元格的高度是**一下子**变的(做不到平滑改高度),状态行高度动画是在已经缩短的单元格里慢慢缩 —— 所以(1)行内容要贴单元格顶边(`.frame(maxHeight: .infinity, alignment: .topLeading)`),不然居中会先顶上去再落回;(2)它下面的行在缩短的那一帧用 `offset(y: 状态行高度)` 抵消回原位(`settled == false` 那一帧不带动画),等那一帧画出来(30ms)再用动画放到 0;(3)虚线是 1pt 高的单元格,偏移会被裁掉,所以断开收场一开始就淡出、落定后(延迟 0.22s)淡入。测试多主机时多起一个 `PORT=2224 node testsshd.js` 并 `-seedHost` 两台,让要断开的那台排在中间(最后一行测不出下面的行跳)。
