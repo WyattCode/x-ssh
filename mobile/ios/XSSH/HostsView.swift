@@ -67,7 +67,7 @@ struct HostsView: View {
             Text(verbatim: "$ hosts").font(.system(size: titleFont, weight: .semibold, design: .monospaced)).tracking(-0.4)
             if !store.hosts.isEmpty { Text("\(store.hosts.count)").font(.footnote).foregroundStyle(Color.white.opacity(0.45)) }
         }
-        // 外屏:列表自带的左边距(约 20pt)正好和顶部 logo 的左边缘对齐,标题不再额外缩进;内屏标题和 logo 同样从 16 + 卡片边距起。
+        // 标题和 logo、每行的 `❯` 同一条竖线:外屏靠列表自带的约 20pt 左边距,内屏靠 rowInset。
         .padding(.horizontal, rowInset).padding(.top, splitLayout ? 2 : 6).padding(.bottom, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .listRowBackground(Color.clear).listRowSeparator(.hidden).listRowInsets(EdgeInsets())
@@ -396,11 +396,11 @@ struct HostsView: View {
     /// 两栏时卡片宽 = 侧栏宽的 92%,左右各留 4%(参考图里卡片和分界线之间就是这么一条窄缝)。
     /// 按侧栏实际宽度算,拖动改宽后比例不变。列表自带的左右边距已去掉(见 `SplitListMargins`)。
     private var cardInset: CGFloat { splitLayout ? listWidth * 0.04 : 0 }
-    /// 内屏侧栏的左右对齐线:logo、`$ hosts`、每行虚线的起点都在这条线上(和外屏一致:外屏是列表自带的约 20pt 边距),
-    /// 每行的 `❯` 在它里面缩进 10pt;右边虚线的终点对称。外屏不用(0)。
+    /// 内屏侧栏的左右对齐线:logo、`$ hosts`、每行的 `❯`、虚线的起点都在这条线上(和外屏一致:外屏是列表自带的约 20pt 边距),
+    /// 右边虚线的终点对称。外屏不用(0)。
     private var rowInset: CGFloat { splitLayout ? 16 + cardInset : 0 }
 
-    /// 搜索框也是一行命令:`❯ grep ▍输入`,没有圆角底,下面一条虚线;文字和列表行的 `❯` 对齐(同样的左右 10pt)。
+    /// 搜索框也是一行命令:`❯ grep ▍输入`,没有圆角底,下面一条虚线;`❯` 和列表行的 `❯` 在同一条竖线上。
     private var searchField: some View {
         HStack(spacing: 10) {
             Text(verbatim: "❯").foregroundStyle(Color.green)

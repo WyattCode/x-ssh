@@ -139,7 +139,7 @@ struct TerminalScreen: View {
                     .fixedSize(horizontal: true, vertical: false)
                     // 系统只给这个项约 64pt 的宽度:短名字(「duo」)要靠左,否则会在这块里居中。
                     .frame(minWidth: 80, alignment: .leading)
-                    // 系统给顶部工具栏项留的约 20pt 左边距,正好和列表页的 logo / 终端文字的左边缘一致,不再往回收。
+                // 注意:不要再给它加负的左边距。系统给顶部工具栏项留的约 20pt 左边距,正好和列表页 logo、终端文字的左边缘在同一条竖线上。
             }
             // 去掉系统给工具栏项套的玻璃圆泡,否则 logo + 主机名被裁在一个小圆里。
             .sharedBackgroundVisibility(.hidden)
