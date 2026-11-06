@@ -68,7 +68,7 @@ struct HostsView: View {
             if !store.hosts.isEmpty { Text("\(store.hosts.count)").font(.footnote).foregroundStyle(Color.white.opacity(0.45)) }
         }
         // 标题和 logo、每行的 `❯` 同一条竖线:外屏靠列表自带的约 20pt 左边距,内屏靠 rowInset。
-        .padding(.horizontal, rowInset).padding(.top, splitLayout ? 2 : 6).padding(.bottom, 8)
+        .padding(.horizontal, rowInset).padding(.top, (splitLayout ? 2 : 6) + 6).padding(.bottom, 8 + 4)   // +6 / +4:以前这一行被列表的最小行高撑着,现在最小行高是 1,补回来
         .frame(maxWidth: .infinity, alignment: .leading)
         .listRowBackground(Color.clear).listRowSeparator(.hidden).listRowInsets(EdgeInsets())
         // 读屏:「Hosts,5」,不念 `$` 符号。
@@ -87,6 +87,9 @@ struct HostsView: View {
             let rows = shown
             ForEach(rows) { host in
                 hostRow(host, featured: host.id == activeID, last: host.id == rows.last?.id)
+                // 行间的虚线是独立的一行(单元格):长按时系统把被按的那一格整个换成浮起的预览,
+                // 虚线要是画在这一格里,会跟着消失、松手又弹回来。
+                if host.id != rows.last?.id { separatorRow }
             }
         }
         // 连上一台时,让列表滚到那张卡片(它在视野外也能看到自己选中了哪台)。
@@ -99,6 +102,8 @@ struct HostsView: View {
         .sensoryFeedback(trigger: connectedSince) { _, new in new != nil ? .success : nil }
         // 紧凑宽度(主页)背景纯黑;展开成两栏时左边这一栏要和右边的会话(终端纯黑)有颜色区分,用深灰。
         .scrollContentBackground(.hidden)
+        // 虚线是独立的一行(高 1pt):列表默认的最小行高会把它撑大,行距就乱了。
+        .environment(\.defaultMinListRowHeight, 1)
         // 两栏时去掉列表自带的左右边距(约 20pt),卡片才能占满侧栏宽度;窄屏单栏保持系统边距。
         .modifier(SplitListMargins(split: splitLayout))
         // 底部的玻璃工具条浮在列表上,最后一张卡片要能滚到它上面。
@@ -261,6 +266,15 @@ struct HostsView: View {
             .padding(.horizontal, rowInset)
     }
 
+    private var separatorRow: some View {
+        DashedLine().stroke(Color.white.opacity(0.16), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+            .frame(height: 1)
+            .padding(.horizontal, rowInset)
+            .frame(maxWidth: .infinity)
+            .listRowBackground(Color.clear).listRowInsets(EdgeInsets()).listRowSeparator(.hidden)
+            .accessibilityHidden(true)
+    }
+
     private func hostRow(_ host: Host, featured: Bool, last: Bool) -> some View {
         // 点一下 = 连接;长按 = 弹菜单(系统自带触觉反馈)。
         // 用 `.contextMenu` 带自定义 `preview:`:长按浮起来的是下面那张统一的圆角卡(每一行形状都一样),
@@ -343,9 +357,6 @@ struct HostsView: View {
         .accessibilityLabel(Text(verbatim: host.displayName))
         .accessibilityValue(featured ? (activeConnecting ? Text("Connecting…") : Text("Connected")) : Text(verbatim: ""))
         .padding(.horizontal, 0).padding(.vertical, rowPad)   // 每行的 `❯` 和标题的 `$`、logo、虚线起点同一条竖线
-        .overlay(alignment: .bottom) {
-            if !last { DashedLine().stroke(Color.white.opacity(0.16), style: StrokeStyle(lineWidth: 1, dash: [3, 3])).frame(height: 1) }
-        }
     }
 
     /// 搜索时,名字没匹配上、是地址 / 用户名匹配上的,在名字下面小字写出匹配到的那一项(平时列表不显示地址)。
@@ -448,9 +459,9 @@ private struct RowMenu: ViewModifier {
     /// (给了预览卡,系统会把菜单对齐到卡片的右边缘 / 摆到右边,不是靠左)。
     func body(content: Content) -> some View {
         // 系统按「被按那一块」的底边摆菜单。被按的一块默认含行下面的留白(约 21pt),菜单就离文字太远:
-        // 内外屏都把这一块的底边往上收 14pt(菜单到文字的距离缩短约 30%)。
+        // 内外屏都把这一块的底边往上收 19pt(菜单到文字的距离比默认缩短约 40%)。
         content
-            .contentShape(.contextMenuPreview, BottomTrimmedRoundedRect(trim: 14, radius: 14))
+            .contentShape(.contextMenuPreview, BottomTrimmedRoundedRect(trim: 19, radius: 14))
             .contextMenu { items }
     }
 
