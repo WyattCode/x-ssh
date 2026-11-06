@@ -13,11 +13,12 @@
  */
 import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { writeFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
 import { createConnection } from 'node:net'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { randomBytes } from 'node:crypto'
+import { parseXauthority, readLocalX11Cookie } from './x11'
 
 export type XServerResult = 'ready' | 'started' | 'missing' | 'failed'
 
@@ -93,17 +94,34 @@ function xauthEntry(cookie: Buffer, display: string): Buffer {
   ])
 }
 
-/** Never overwrite an existing .Xauthority — WSL or another X tool may own it.
- *  VcXsrv's localhost host-based access makes the cookie optional anyway, so
- *  reusing a file that lacks our display is harmless. */
+/**
+ * Make sure the auth file VcXsrv is started with actually contains a usable
+ * cookie for *this* display. Never discard entries another tool (WSL, Xming)
+ * owns: if the file has no matching entry, append one rather than replacing it.
+ *
+ * This matters because `boot()` passes the file via `-auth`. Reusing a file
+ * that only holds, say, display "0" while $DISPLAY is ":10" makes the X server
+ * reject every forwarded connection; `readLocalX11Cookie()` would also find
+ * nothing, so the pseudo cookie is never rewritten and X11 silently dies.
+ * Returning undefined for a file we cannot parse tells `boot()` to start the
+ * server without `-auth`, which falls back to the localhost host-based rule.
+ */
 export async function ensureXauthority(
   display: string,
   env: NodeJS.ProcessEnv = process.env
 ): Promise<string | undefined> {
   const path = env.XAUTHORITY || join(homedir(), '.Xauthority')
-  if (existsSync(path)) return path
   try {
-    await writeFile(path, xauthEntry(randomBytes(16), display))
+    if (!existsSync(path)) {
+      await writeFile(path, xauthEntry(randomBytes(16), display))
+      return path
+    }
+    const raw = await readFile(path)
+    if (await readLocalX11Cookie(display, env)) return path
+    // A file we cannot parse may belong to a completely different tool. Do not
+    // append to it, and do not hand it to `xauth` as `-auth`.
+    if (!parseXauthority(raw)) return undefined
+    await writeFile(path, Buffer.concat([raw, xauthEntry(randomBytes(16), display)]))
     return path
   } catch {
     return undefined
@@ -112,6 +130,11 @@ export async function ensureXauthority(
 
 let child: ChildProcess | undefined
 let warming: Promise<XServerResult> | undefined
+let lastFailedAt = 0
+/** A server that failed to boot once should not be spawned again on every
+ *  paste. probeTcp() still short-circuits the moment one appears, so this
+ *  cooldown never blocks a user who fixes the problem by hand. */
+const FAIL_COOLDOWN_MS = 30_000
 
 const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
@@ -120,9 +143,12 @@ export async function ensureLocalXServer(opts: XServerOptions): Promise<XServerR
   const env = opts.env ?? process.env
   if (await probeTcp(opts.host, opts.port)) return 'ready'
   if (warming) return warming
+  if (Date.now() - lastFailedAt < FAIL_COOLDOWN_MS) return 'failed'
   warming = boot(opts, env)
   try {
-    return await warming
+    const result = await warming
+    if (result === 'failed') lastFailedAt = Date.now()
+    return result
   } finally {
     warming = undefined
   }
@@ -134,6 +160,7 @@ async function boot(opts: XServerOptions, env: NodeJS.ProcessEnv): Promise<XServ
   const auth = await ensureXauthority(opts.display, env)
   const args = [`:${opts.display}`, '-listen', 'tcp', '-clipboard', '-multiwindow']
   if (auth) args.push('-auth', auth)
+  let spawnFailed = false
   try {
     child = spawn(exe, args, {
       cwd: dirname(exe),
@@ -143,6 +170,7 @@ async function boot(opts: XServerOptions, env: NodeJS.ProcessEnv): Promise<XServ
     })
     child.on('error', () => {
       child = undefined
+      spawnFailed = true
     })
     child.unref()
   } catch {
@@ -151,6 +179,9 @@ async function boot(opts: XServerOptions, env: NodeJS.ProcessEnv): Promise<XServ
   const deadline = Date.now() + (opts.timeoutMs ?? 25000)
   while (Date.now() < deadline) {
     if (await probeTcp(opts.host, opts.port)) return 'started'
+    // A missing/unelevatable executable will never bind the port. Waiting the
+    // full 25 s here used to hold every concurrent paste hostage.
+    if (spawnFailed) return 'failed'
     await delay(400)
   }
   return 'failed'
@@ -160,4 +191,5 @@ async function boot(opts: XServerOptions, env: NodeJS.ProcessEnv): Promise<XServ
 export function resetXServerState(): void {
   warming = undefined
   child = undefined
+  lastFailedAt = 0
 }

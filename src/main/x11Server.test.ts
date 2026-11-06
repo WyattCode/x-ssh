@@ -113,10 +113,53 @@ describe('ensureXauthority', () => {
     expect(parseXauthority(await readFile(p))![0].display).toBe('10')
   })
 
-  it('never overwrites a file another tool owns', async () => {
+  it('leaves an existing file that already serves this display untouched', async () => {
+    const p = join(dir, 'Xauthority')
+    const original = xauthFixture('0', Buffer.alloc(16, 7))
+    await writeFile(p, original)
+    expect(await ensureXauthority('0', { XAUTHORITY: p })).toBe(p)
+    expect((await readFile(p)).equals(original)).toBe(true)
+  })
+
+  it('appends an entry when the existing file has no cookie for this display', async () => {
+    const p = join(dir, 'Xauthority')
+    const original = xauthFixture('0', Buffer.alloc(16, 7))
+    await writeFile(p, original)
+    expect(await ensureXauthority('10', { XAUTHORITY: p })).toBe(p)
+    const entries = parseXauthority(await readFile(p))
+    expect(entries).toHaveLength(2)
+    expect(entries!.map((e) => e.display)).toEqual(['0', '10'])
+    // The other tool's entry is still there, byte for byte.
+    expect((await readFile(p)).subarray(0, original.length).equals(original)).toBe(true)
+    // And the new display now has a real cookie the client can rewrite to.
+    const { readLocalX11Cookie } = await import('./x11')
+    expect(await readLocalX11Cookie('10', { XAUTHORITY: p })).toHaveLength(16)
+  })
+
+  it('does not hand a non-xauth file to the X server as -auth', async () => {
     const p = join(dir, 'existing')
     await writeFile(p, 'keep me')
-    expect(await ensureXauthority('0', { XAUTHORITY: p })).toBe(p)
+    expect(await ensureXauthority('0', { XAUTHORITY: p })).toBeUndefined()
     expect(await readFile(p, 'utf8')).toBe('keep me')
   })
 })
+
+/** Minimal FamilyWild xauth entry, mirroring the real file format. */
+function xauthFixture(display: string, cookie: Buffer): Buffer {
+  const u16 = (n: number): Buffer => {
+    const b = Buffer.alloc(2)
+    b.writeUInt16LE(n)
+    return b
+  }
+  const field = (v: Buffer | string): Buffer => {
+    const s = Buffer.isBuffer(v) ? v : Buffer.from(v, 'latin1')
+    return Buffer.concat([u16(s.length), s])
+  }
+  return Buffer.concat([
+    u16(65535),
+    field(''),
+    field(display),
+    field('MIT-MAGIC-COOKIE-1'),
+    field(cookie)
+  ])
+}

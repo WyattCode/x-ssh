@@ -1044,6 +1044,7 @@ export class SshManager {
     // A cold VcXsrv boot needs ~15 s, so never hold a clipboard read that
     // long: give it a short grace period, then report once while the boot
     // keeps running in the background (the next paste will succeed).
+    let graceTimer: ReturnType<typeof setTimeout> | undefined
     const state = await Promise.race([
       ensureLocalXServer({
         host: target.host,
@@ -1051,10 +1052,19 @@ export class SshManager {
         display: target.display
       }),
       new Promise<'pending'>((r) => {
-        const t = setTimeout(() => r('pending'), 1200)
-        t.unref?.()
+        graceTimer = setTimeout(() => r('pending'), 1200)
+        graceTimer.unref?.()
       })
     ])
+    if (graceTimer) clearTimeout(graceTimer)
+    if (state === 'pending') {
+      // The server is *booting*, not absent. Say so: telling the user to
+      // install VcXsrv while it is already starting sends them chasing a
+      // problem that does not exist.
+      warn('x11-starting')
+      reject()
+      return
+    }
     if (state !== 'ready' && state !== 'started') {
       warn('x11-no-server')
       reject()

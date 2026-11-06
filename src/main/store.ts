@@ -15,6 +15,21 @@ function stripRuntimeFlags(host: Host): Host {
 }
 
 /**
+ * `persist()` writes hosts.json first and the vault second. A caller can only
+ * roll back the *host list* when the failure happened before hosts.json reached
+ * disk; rolling back after a vault failure would contradict the file we just
+ * wrote. Tag those errors instead of changing their messages — the renderer
+ * maps the original error codes (ENOSPC, EPERM, hosts-unreadable…) to text.
+ */
+type DiskError = Error & { hostsUnwritten?: true }
+
+function markHostsUnwritten(e: unknown): DiskError {
+  const err = (e instanceof Error ? e : new Error(String(e))) as DiskError
+  err.hostsUnwritten = true
+  return err
+}
+
+/**
  * Flat-file host store. Hosts live in hosts.json (non-secret metadata).
  * Passwords, when the user opts to save them, are encrypted per-OS via
  * Electron safeStorage and kept in a separate secrets file.
@@ -72,9 +87,15 @@ export class HostStore {
     // `.corrupt` already holds the failed read (see readDurable), so refusing
     // keeps the data recoverable; overwriting does not.
     if (this.hostsLoadFailed) {
-      throw new Error('hosts-unreadable: refusing to overwrite an unreadable host list')
+      throw markHostsUnwritten(
+        new Error('hosts-unreadable: refusing to overwrite an unreadable host list')
+      )
     }
-    await writeDurable(this.hostsFile, JSON.stringify(this.hosts, null, 2))
+    try {
+      await writeDurable(this.hostsFile, JSON.stringify(this.hosts, null, 2))
+    } catch (e) {
+      throw markHostsUnwritten(e)
+    }
     if (!safeStorage.isEncryptionAvailable()) return
     // An existing vault this launch could not decrypt must never be replaced.
     //
@@ -152,16 +173,18 @@ export class HostStore {
     passphrase?: string
   ): Promise<Host[]> {
     await this.ensureLoaded()
+    // Snapshot BEFORE mutating: the rollback below must see the old list.
+    const hostsBefore = this.hosts.slice()
     // Never persist runtime-only flags.
     const clean = stripRuntimeFlags(host)
     const idx = this.hosts.findIndex((h) => h.id === clean.id)
     if (idx >= 0) this.hosts[idx] = clean
     else this.hosts.push(clean)
 
-    // Remember the pre-edit vault so a failed write can be rolled back. Without
-    // this, a save that threw left the *in-memory* vault holding only what this
-    // call touched, and the next successful save wrote that reduced set to disk
-    // — one failed edit could quietly drop every other saved password.
+    // Remember the pre-edit state so a failed write can be rolled back. Both
+    // halves matter: leaving the vault half-applied quietly drops passwords,
+    // and leaving the host list half-applied silently applies an edit the UI
+    // just reported as failed on the *next* unrelated save.
     const secretsBefore = { ...this.secrets }
     const unreadableBefore = this.secretsLoadFailed
     const wroteSecret = password !== undefined || passphrase !== undefined
@@ -183,6 +206,9 @@ export class HostStore {
       // Put the vault back so a later save can't persist the half-applied set.
       this.secrets = secretsBefore
       this.secretsLoadFailed = unreadableBefore
+      // A vault failure happens *after* hosts.json was written, so the host
+      // edit really did land — keep it. Only a hosts.json failure is undone.
+      if ((e as DiskError).hostsUnwritten) this.hosts = hostsBefore
       // The renderer tells "host kept, password not stored" apart by the
       // `secrets-` prefix; anything else is a genuine save failure.
       throw e
@@ -236,9 +262,20 @@ export class HostStore {
     await copyFile(this.secretsFile, `${this.secretsFile}.unreadable-${stamp}`).catch(
       () => undefined
     )
+    // Clearing the guard is only safe once the new vault is on disk. If the
+    // write fails, restoring it is essential: otherwise the next ordinary save
+    // would happily overwrite the still-unreadable original with `{}` and lose
+    // every password it holds.
+    const secretsBefore = this.secrets
     this.secrets = {}
     this.secretsLoadFailed = false
-    await this.persist()
+    try {
+      await this.persist()
+    } catch (e) {
+      this.secrets = secretsBefore
+      this.secretsLoadFailed = true
+      throw e
+    }
   }
 
   /**
@@ -254,9 +291,19 @@ export class HostStore {
     if (!this.hostsLoadFailed) return
     const stamp = new Date().toISOString().replace(/[:.]/g, '-')
     await copyFile(this.hostsFile, `${this.hostsFile}.unreadable-${stamp}`).catch(() => undefined)
+    const hostsBefore = this.hosts
     this.hosts = []
     this.hostsLoadFailed = false
-    await this.persist()
+    try {
+      await this.persist()
+    } catch (e) {
+      // Same reasoning as resetSecrets(): an in-memory empty list plus a
+      // cleared guard would let the next save overwrite the unreadable file —
+      // and every host in it — with `[]`.
+      this.hosts = hostsBefore
+      this.hostsLoadFailed = true
+      throw e
+    }
   }
 
   async delete(id: string): Promise<Host[]> {
@@ -308,8 +355,14 @@ export class HostStore {
     if (!host || (host.os?.id === os.id && host.os?.pretty === os.pretty)) return false
     // Read from an address the host no longer has (edited meanwhile): not its OS.
     if (at && (host.host !== at.host || (host.port || 22) !== (at.port || 22))) return false
+    const before = host.os
     host.os = os
-    await this.persist()
+    try {
+      await this.persist()
+    } catch (e) {
+      host.os = before
+      throw e
+    }
     return true
   }
 
@@ -318,6 +371,7 @@ export class HostStore {
     await this.ensureLoaded()
     const host = this.hosts.find((h) => h.id === id)
     if (!host) return
+    const before = host.lastUsedAt
     host.lastUsedAt = Date.now()
     try {
       await this.persist()
@@ -326,8 +380,9 @@ export class HostStore {
       // fail the connection that just succeeded — and with persist() now
       // refusing to overwrite an unreadable host list, this would otherwise
       // throw on every successful connect for as long as the file stays bad.
-      // Put the stamp back so the in-memory list matches the disk.
-      host.lastUsedAt = undefined
+      // Put the stamp back so the in-memory list matches the disk. It was not
+      // necessarily undefined before (this host may have been used earlier).
+      host.lastUsedAt = before
       console.error('store: touch failed:', (e as Error).message)
     }
   }
@@ -363,10 +418,26 @@ export class HostStore {
       if (password) newSecrets[h.id as string] = password
       if (passphrase) newSecrets[this.ppKey(h.id as string)] = passphrase
     }
+    // An import replaces *everything*. If the write fails, leave both stores
+    // and both "unreadable" guards exactly as they were — in particular, do not
+    // clear secretsLoadFailed, or the next save would overwrite an unreadable
+    // vault with the (possibly empty) imported set of passwords.
+    const hostsBefore = this.hosts
+    const secretsBefore = this.secrets
+    const hostsUnreadableBefore = this.hostsLoadFailed
+    const secretsUnreadableBefore = this.secretsLoadFailed
     this.hosts = imported
     this.secrets = newSecrets
     this.secretsLoadFailed = false
-    await this.persist()
+    try {
+      await this.persist()
+    } catch (e) {
+      this.hosts = hostsBefore
+      this.secrets = secretsBefore
+      this.hostsLoadFailed = hostsUnreadableBefore
+      this.secretsLoadFailed = secretsUnreadableBefore
+      throw e
+    }
     return { count: imported.length }
   }
 
