@@ -253,16 +253,15 @@ struct HostsView: View {
 
     /// 一张主机卡(带点击、长按菜单、左滑操作、卡片背景):单独成函数,List 里的表达式才不会复杂到编译器类型推断超时。
     /// 点一下 = 连接,长按 = 系统的液态玻璃上下文菜单(大圆角、图标在左、组与组之间有分隔线,和系统应用一致)。
-    /// 窄屏(外屏)带一张浮起的预览卡;宽屏(内屏)不给自定义预览,让系统把被按的这一行本身浮起来,菜单跟在它下面、靠左。
+    /// 内外屏都不给自定义预览:让系统把被按的这一行本身浮起来,菜单跟在它上面 / 下面、靠左(见 `RowMenu`)。
     private func rowControl(_ host: Host, featured: Bool, last: Bool) -> some View {
         // 左右留白(`rowInset`)放在按钮和菜单的外面:长按浮起的只是文字那一块,不带留白,
         // 不然系统在宽屏侧栏里把整行(含留白)往右平移,行尾的圆点就冲出了侧栏。
         Button { onConnect(host) } label: { row(host, featured: featured, last: last) }
-            .modifier(RowMenu(split: splitLayout, font: rowFont,
+            .modifier(RowMenu(trim: menuTrim,
                               onConnect: { onConnect(host) },
                               onEdit: { startEditing(host) },
-                              onDelete: { pendingDelete = host },
-                              host: host))
+                              onDelete: { pendingDelete = host }))
             .padding(.horizontal, rowInset)
     }
 
@@ -277,9 +276,6 @@ struct HostsView: View {
 
     private func hostRow(_ host: Host, featured: Bool, last: Bool) -> some View {
         // 点一下 = 连接;长按 = 弹菜单(系统自带触觉反馈)。
-        // 用 `.contextMenu` 带自定义 `preview:`:长按浮起来的是下面那张统一的圆角卡(每一行形状都一样),
-        // 不是系统从列表单元格里取的形状(最上 / 最下一行变成胶囊、中间行是方的)。
-        // 以前用 `Menu`:内屏的侧栏里菜单一弹出,整栏内容就被盖黑,看起来像「把会话收起来了」。
         rowControl(host, featured: featured, last: last)
         .buttonStyle(.plain)
         .foregroundStyle(.primary)
@@ -405,6 +401,13 @@ struct HostsView: View {
     /// 右边虚线的终点对称。外屏不用(0)。
     private var rowInset: CGFloat { splitLayout ? 16 + cardInset : 0 }
 
+    /// 长按菜单要收掉的边:默认字号时外屏 7pt、内屏 13pt(内屏同样的行高下系统给的空隙比外屏大约 6pt),量过两边文字到菜单都约 42pt、虚线到菜单约 9pt。
+    /// 字号变大时,行内上下留白和文字自己都变高,跟着多收(留白每多 1pt 多收 1pt,文字半高每多 1pt 多收 1pt),文字到菜单的距离不变。
+    private var menuTrim: CGFloat {
+        let base: CGFloat = splitLayout ? 13 : 7
+        return max(0, base + (rowPad - 21) + 0.6 * (rowFont - 19))
+    }
+
     /// 搜索框也是一行命令:`❯ grep ▍输入`,没有圆角底,下面一条虚线;`❯` 和列表行的 `❯` 在同一条竖线上。
     private var searchField: some View {
         HStack(spacing: 10) {
@@ -448,21 +451,15 @@ struct HostsView: View {
 
 /// 主机行的长按菜单:系统上下文菜单。三项分成两组(连接 | 编辑 / 删除),组间有分隔线;图标用主色(不跟随全局绿色强调色)。
 private struct RowMenu: ViewModifier {
-    let split: Bool
-    let font: CGFloat
+    /// 被按那一块顶边、底边各往里收多少 pt(见 `HostsView.menuTrim`)。
+    let trim: CGFloat
     let onConnect: () -> Void
     let onEdit: () -> Void
     let onDelete: () -> Void
-    let host: Host
-
-    /// 内外屏一样:不给自定义预览卡,让系统把被按的这一行本身浮起来,菜单跟在它下面靠左
-    /// (给了预览卡,系统会把菜单对齐到卡片的右边缘 / 摆到右边,不是靠左)。
-    /// 外屏收 7pt;内屏同样的行高下系统给的空隙比外屏大约 6pt,多收 6pt,让内外屏菜单离文字的距离一样(文字到菜单约 42pt、虚线到菜单约 9pt)。
-    private var trim: CGFloat { split ? 13 : 7 }
 
     func body(content: Content) -> some View {
-        // 系统按「被按那一块」的底边摆菜单。被按的一块默认含行下面的留白(约 21pt),菜单就离文字太远:
-        // 内外屏都把这一块的底边往上收 7pt、顶边往下收 7pt(上下对称):量过,菜单离文字、离虚线的距离往上弹、往下弹一样大(文字到菜单约 120 显示像素,虚线到菜单约 22)。
+        // 系统按「被按那一块」的底边摆往下弹的菜单、按顶边摆往上弹的菜单。这一块默认含行里上下的留白,菜单就离文字太远:
+        // 顶、底各往里收 `trim`(上下对称,往上弹、往下弹离文字一样远),菜单就近了。
         content
             .contentShape(.contextMenuPreview, TrimmedRoundedRect(top: trim, bottom: trim, radius: 14))
             .contextMenu { items }

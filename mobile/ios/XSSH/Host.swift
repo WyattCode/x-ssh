@@ -131,9 +131,6 @@ final class HostStore {
     }
     #endif
 
-    /// 先写钥匙串再写列表:凭据存不进去就整个失败,不留一台「没有凭据」的主机。
-    /// 换了登录方式,另一种方式的凭据一并清掉(不在钥匙串里留旧密码 / 旧私钥)。
-    @discardableResult
     /// 还没被用过的颜色里编号最小的;全用过了就挑用得最少的。
     static func freeColorIndex(among hosts: [Host]) -> Int {
         var counts = Array(repeating: 0, count: Host.paletteSize)
@@ -141,6 +138,9 @@ final class HostStore {
         return counts.indices.min { (counts[$0], $0) < (counts[$1], $1) } ?? 0
     }
 
+    /// 先写钥匙串再写列表:凭据存不进去就整个失败,不留一台「没有凭据」的主机。
+    /// 换了登录方式,另一种方式的凭据一并清掉(不在钥匙串里留旧密码 / 旧私钥)。
+    @discardableResult
     func save(_ host: Host, credentials: Credentials) -> Bool {
         var host = host.normalized()
         if host.colorIndex == nil { host.colorIndex = Self.freeColorIndex(among: hosts.filter { $0.id != host.id }) }

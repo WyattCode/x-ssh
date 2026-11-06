@@ -81,6 +81,12 @@ struct HostKeyCard: View {
 
     private static let danger = Color(red: 1.0, green: 0.27, blue: 0.23)
 
+    /// 小字跟着系统字号走(指纹、主机名、`SHA256` 标注),指纹图案本身是图,不缩放。
+    @ScaledMetric(relativeTo: .footnote) private var hostFont: CGFloat = 12
+    @ScaledMetric(relativeTo: .footnote) private var tagFont: CGFloat = 10
+    @ScaledMetric(relativeTo: .footnote) private var fpFont: CGFloat = 11.5
+    @ScaledMetric(relativeTo: .footnote) private var fpFontSmall: CGFloat = 10
+
     private var isChanged: Bool { if case .changed = kind { true } else { false } }
     private var accent: Color { isChanged ? Color.orange : Color.green }
 
@@ -108,7 +114,7 @@ struct HostKeyCard: View {
                     if !isChanged { Text("First connection") }
                     Text(verbatim: host)
                 }
-                .font(.system(size: 12, design: .monospaced)).foregroundStyle(Color.white.opacity(0.55)).lineLimit(1)
+                .font(.system(size: hostFont, design: .monospaced)).foregroundStyle(Color.white.opacity(0.55)).lineLimit(1)
             }
         }
         .accessibilityElement(children: .combine)
@@ -118,14 +124,27 @@ struct HostKeyCard: View {
     @ViewBuilder private var content: some View {
         switch kind {
         case .unknown(let fp):
-            HStack(alignment: .top, spacing: 14) {
-                if let art = RandomArt.lines(fingerprint: fp) { HostKeyArt(lines: art) }
-                fingerprintText(fp, size: 11.5)
+            // 字号很大、一行放不下图案 + 指纹时,改成上下排。
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: 14) {
+                    if let art = RandomArt.lines(fingerprint: fp) { HostKeyArt(lines: art) }
+                    fingerprintText(fp, size: fpFont)
+                }
+                VStack(alignment: .leading, spacing: 12) {
+                    if let art = RandomArt.lines(fingerprint: fp) { HostKeyArt(lines: art) }
+                    fingerprintText(fp, size: fpFont)
+                }
             }
         case .changed(let new, let old):
-            HStack(alignment: .top, spacing: 12) {
-                if let old { keyColumn("Trusted key", old, tint: Color.white.opacity(0.55)) }
-                keyColumn("Presented key", new, tint: Color(red: 1.0, green: 0.55, blue: 0.5))
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: 12) {
+                    if let old { keyColumn("Trusted key", old, tint: Color.white.opacity(0.55)) }
+                    keyColumn("Presented key", new, tint: Color(red: 1.0, green: 0.55, blue: 0.5))
+                }
+                VStack(alignment: .leading, spacing: 16) {
+                    if let old { keyColumn("Trusted key", old, tint: Color.white.opacity(0.55)) }
+                    keyColumn("Presented key", new, tint: Color(red: 1.0, green: 0.55, blue: 0.5))
+                }
             }
         }
     }
@@ -134,14 +153,14 @@ struct HostKeyCard: View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title).font(.caption2).foregroundStyle(Color.white.opacity(0.55))
             if let art = RandomArt.lines(fingerprint: fp) { HostKeyArt(lines: art, tint: tint).padding(.bottom, 8) }
-            fingerprintText(fp, size: 10)
+            fingerprintText(fp, size: fpFontSmall)
         }
     }
 
     private func fingerprintText(_ fp: String, size: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(verbatim: "SHA256")
-                .font(.system(size: 10, design: .monospaced)).foregroundStyle(Color.white.opacity(0.45))
+                .font(.system(size: tagFont, design: .monospaced)).foregroundStyle(Color.white.opacity(0.45))
                 .padding(.bottom, 2)
             ForEach(Array(RandomArt.wrapped(fp).enumerated()), id: \.offset) { _, line in
                 Text(verbatim: line).font(.system(size: size, design: .monospaced))
@@ -172,11 +191,13 @@ struct CardPrimaryButton: View {
     var danger = false
     var compact = false
     let action: () -> Void
+    @ScaledMetric(relativeTo: .body) private var regularFont: CGFloat = 16
+    @ScaledMetric(relativeTo: .body) private var compactFont: CGFloat = 15
 
     var body: some View {
         Button(action: action) {
             Text(title)
-                .font(.system(size: compact ? 15 : 16, weight: .bold))
+                .font(.system(size: compact ? compactFont : regularFont, weight: .bold))
                 .foregroundStyle(danger ? Color.white : Color(red: 0.016, green: 0.13, blue: 0.047))
                 .padding(.horizontal, compact ? 18 : 0)
                 .frame(maxWidth: compact ? nil : .infinity, minHeight: compact ? 40 : 50)
@@ -190,11 +211,12 @@ struct CardPrimaryButton: View {
 struct CardGhostButton: View {
     let title: LocalizedStringKey
     let action: () -> Void
+    @ScaledMetric(relativeTo: .body) private var font: CGFloat = 15
 
     var body: some View {
         Button(action: action) {
             Text(title)
-                .font(.system(size: 15))
+                .font(.system(size: font))
                 .foregroundStyle(Color.white.opacity(0.65))
                 .frame(maxWidth: .infinity, minHeight: 42)
                 .contentShape(Capsule())

@@ -476,7 +476,7 @@ struct TerminalScreen: View {
                         CardIconRing(systemImage: "wifi.exclamationmark", tint: .orange)
                         Text("Connection failed").font(.headline)
                     }
-                    Text(verbatim: message).font(.system(size: 12, design: .monospaced))
+                    Text(verbatim: message).font(.footnote.monospaced())
                         .foregroundStyle(Color.white.opacity(0.62)).textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     VStack(spacing: 6) {
@@ -519,6 +519,8 @@ struct TerminalScreen: View {
             .frame(maxWidth: 420)
             // 暗色渐变卡片 + 细边(和主机列表同一套终端风格),取代系统的毛玻璃。
             .cardChrome(cornerRadius: 26)
+            // 卡片最大跟到「辅助功能 1」档:再大按钮和指纹就塞不进屏幕了。
+            .dynamicTypeSize(...DynamicTypeSize.accessibility1)
             .padding(16)
             .foregroundStyle(.white)
             .environment(\.colorScheme, .dark)
