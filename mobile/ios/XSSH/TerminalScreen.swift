@@ -48,7 +48,10 @@ struct TerminalScreen: View {
     private var metrics: TermMetrics { TermMetrics(fontSize: fontSize) }
 
     var body: some View {
-        if embedded { core } else { navChrome(core) }
+        if embedded {
+            // 内屏关闭会话时整个终端先淡出(`leaving`,动画由 `RootView.close` 编排)。
+            core.opacity(model.leaving ? 0 : 1)
+        } else { navChrome(core) }
     }
 
     @ViewBuilder private var core: some View {

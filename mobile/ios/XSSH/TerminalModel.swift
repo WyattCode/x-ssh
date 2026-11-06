@@ -67,6 +67,8 @@ final class TerminalModel: Identifiable {
     private(set) var hasHardwareKeyboard = false
     /// 快捷键面板(Esc / Tab / Ctrl / 方向键…)。和系统键盘各自独立开关,默认收起 —— 同安卓。
     var showsKeys = false
+    /// 点「断开 / 取消」后、会话页正在淡出的那一小段时间(见 `RootView.close`,内屏用)。
+    var leaving = false
 
     private let backend = Backend()
     private var measured: (cols: Int, rows: Int)?

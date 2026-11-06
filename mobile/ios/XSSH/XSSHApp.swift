@@ -489,6 +489,7 @@ struct RootView: View {
     /// 半折是并排设计、竖屏抽屉本来就是收起的,都不用收;外屏是翻页。
     private func open(_ host: Host) {
         closing = false
+        active?.leaving = false
         let collapse = sizeClass == .regular && drawerOpen && !halfFolded
         // 点的就是正在跑的那台:直接回到它,别断了重连。
         if let current = active, current.host.id == host.id, !current.isEnded {
@@ -517,8 +518,23 @@ struct RootView: View {
         compactColumn = .sidebar
         // 断开 / 取消之后回到主机列表:横屏 / 展开时抽屉是收起的,要滑出来让人重新选。
         if sizeClass == .regular {
-            if !drawerOpen, !halfFolded { setDrawer(true, swapping: { active = nil }) }
-            else { withAnimation(.smooth(duration: 0.25)) { active = nil } }
+            // 内屏:和外屏同一套收场(列表里那一行放手 → 停一下 → 收起),只是没有翻页:
+            //   0ms     会话(右边的终端)淡出;抽屉要是收着,同时滑出来(会话还在,收场完了才清掉,不在抽屉动画里换掉);
+            //   60 / 230ms  列表已经看得见 / 抽屉快滑到位 —— 那一行开始放手;之后的节奏和外屏一样。
+            let leaving = active?.id
+            let listHidden = !drawerOpen && !halfFolded
+            withAnimation(.easeOut(duration: 0.2)) { active?.leaving = true }
+            if listHidden { setDrawer(true) }
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(listHidden ? 230 : 60))
+                guard active?.id == leaving else { return }
+                withAnimation(.smooth(duration: 0.32)) { closing = true }
+                try? await Task.sleep(for: .milliseconds(440))
+                guard active?.id == leaving else { return }
+                withAnimation(HostsView.collapseCurve) { active = nil }
+                try? await Task.sleep(for: .milliseconds(300))
+                if active == nil { closing = false }
+            }
         } else {
             // 外屏:翻页(系统的滑动)照旧;列表里这台那一行的收场放在翻页快到位的时候才开始 —— 那时列表已经看得见了,
             // 用户眼睛正落在那一行上(以前翻回来之后它还「连着」约半秒,然后猛地一变,最不顺的就是这里)。
