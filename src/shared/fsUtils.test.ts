@@ -124,35 +124,47 @@ describe('shellQuoteName', () => {
 describe('buildPackCommand', () => {
   it('builds a tar czf command with quoted names', () => {
     const cmd = buildPackCommand('/home/u', '/tmp/xssh-abc.tar.gz', ['a.txt', 'b.txt'])
-    expect(cmd).toBe(`cd '/home/u' && tar czf '/tmp/xssh-abc.tar.gz' 'a.txt' 'b.txt'`)
+    expect(cmd).toBe(`cd '/home/u' && tar czf '/tmp/xssh-abc.tar.gz' -- 'a.txt' 'b.txt'`)
   })
 
   it('quotes special characters in names and parent', () => {
     const cmd = buildPackCommand('/home/it/here', 't', ["it's"])
-    expect(cmd).toBe(`cd '/home/it/here' && tar czf 't' 'it'\\''s'`)
+    expect(cmd).toBe(`cd '/home/it/here' && tar czf 't' -- 'it'\\''s'`)
+  })
+
+  it('ends option parsing so a name starting with - cannot become a tar flag', () => {
+    // GNU tar would otherwise execute --checkpoint-action=exec=... for a file
+    // that happened to be named that way in a shared directory.
+    const cmd = buildPackCommand('/home/u', '/tmp/a.tar.gz', ['--checkpoint-action=exec=sh -c id'])
+    expect(cmd).toContain(' -- ')
   })
 
   it('does not shell-expand $ or backticks in parent and archive paths', () => {
     // Regression: JSON.stringify() only escaped quotes, leaving $/backticks to be
     // expanded by the remote shell. Single-quote wrapping must prevent that.
     const cmd = buildPackCommand('/home/$USER/$(pwd)', '/tmp/`id`.tar.gz', ['a.txt'])
-    expect(cmd).toBe("cd '/home/$USER/$(pwd)' && tar czf '/tmp/`id`.tar.gz' 'a.txt'")
+    expect(cmd).toBe("cd '/home/$USER/$(pwd)' && tar czf '/tmp/`id`.tar.gz' -- 'a.txt'")
   })
 })
 
 describe('buildExtractCommand', () => {
   it('uses unzip for .zip archives', () => {
-    expect(buildExtractCommand('/home/u', 'bundle.zip')).toBe("cd '/home/u' && unzip -o 'bundle.zip'")
-    expect(buildExtractCommand('/home/u', 'bundle.ZIP')).toBe("cd '/home/u' && unzip -o 'bundle.ZIP'")
+    expect(buildExtractCommand('/home/u', 'bundle.zip')).toBe("cd '/home/u' && unzip -o './bundle.zip'")
+    expect(buildExtractCommand('/home/u', 'bundle.ZIP')).toBe("cd '/home/u' && unzip -o './bundle.ZIP'")
   })
 
   it('uses tar for tgz and tar.gz archives', () => {
-    expect(buildExtractCommand('/home/u', 'a.tar.gz')).toBe("cd '/home/u' && tar xzf 'a.tar.gz'")
-    expect(buildExtractCommand('/home/u', 'a.tgz')).toBe("cd '/home/u' && tar xzf 'a.tgz'")
+    expect(buildExtractCommand('/home/u', 'a.tar.gz')).toBe("cd '/home/u' && tar xzf './a.tar.gz'")
+    expect(buildExtractCommand('/home/u', 'a.tgz')).toBe("cd '/home/u' && tar xzf './a.tgz'")
+  })
+
+  it('prefixes the archive with ./ so a leading - is a file name', () => {
+    expect(buildExtractCommand('/home/u', '-x.tar.gz')).toBe("cd '/home/u' && tar xzf './-x.tar.gz'")
+    expect(buildExtractCommand('/home/u', '-d.zip')).toBe("cd '/home/u' && unzip -o './-d.zip'")
   })
 
   it('does not shell-expand $ or backticks in archive names', () => {
-    expect(buildExtractCommand('/home/u', '$(pwd).zip')).toBe("cd '/home/u' && unzip -o '$(pwd).zip'")
+    expect(buildExtractCommand('/home/u', '$(pwd).zip')).toBe("cd '/home/u' && unzip -o './$(pwd).zip'")
   })
 })
 

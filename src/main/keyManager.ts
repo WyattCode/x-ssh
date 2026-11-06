@@ -3,6 +3,7 @@ import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
+import { utils } from 'ssh2'
 import type { ManagedKey } from '../shared/types'
 import { isPrivateKey, sanitizeKeyName, shouldSkipKeyFile } from '../shared/fsUtils'
 import { parseJson, readDurable, writeDurable } from './durableFile'
@@ -190,11 +191,28 @@ export class KeyManager {
     const safe = sanitizeKeyName(opts.name)
     const id = `${safe}-${randomUUID().slice(0, 8)}`
     const priv = join(dir, id)
-    const type = opts.type || 'ed25519'
-    const args = ['-t', type, '-f', priv, '-N', opts.passphrase ?? '', '-C', `x-ssh-${id}`]
-    if (opts.bits && type.toLowerCase().includes('rsa')) args.push('-b', String(opts.bits))
-    await this.sshKeygen(args)
+    const requested = (opts.type || 'ed25519').toLowerCase()
+    const type: 'rsa' | 'ecdsa' | 'ed25519' =
+      requested === 'rsa' || requested === 'ecdsa' ? requested : 'ed25519'
+    // Generate in-process. The old code ran `ssh-keygen -N <passphrase>`, which
+    // put the passphrase on the command line where /proc/<pid>/cmdline (or WMI
+    // on Windows) exposes it to other local users — defeating the very
+    // protection the passphrase is for.
+    let pair: { private: string; public: string }
+    try {
+      pair = utils.generateKeyPairSync(type, {
+        ...(opts.bits && type === 'rsa' ? { bits: opts.bits } : {}),
+        ...(opts.passphrase ? { passphrase: opts.passphrase } : {}),
+        comment: `x-ssh-${id}`
+      })
+    } catch {
+      throw new Error('keygen-failed')
+    }
+    await writeFile(priv, pair.private, { mode: 0o600 })
     const pub = `${priv}.pub`
+    await writeFile(pub, pair.public.endsWith('\n') ? pair.public : `${pair.public}\n`, {
+      mode: 0o644
+    })
     const pubText = await readFile(pub, 'utf8')
     // Extract type and fingerprint from the public key line; fall back to ssh-keygen -lf.
     let typeOut: string | undefined

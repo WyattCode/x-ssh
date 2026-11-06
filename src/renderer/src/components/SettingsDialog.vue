@@ -933,10 +933,12 @@ function toggleAutoBackup(): void {
   void store.rescheduleBackup()
 }
 async function pickBackupDir(): Promise<void> {
-  const dir = await window.api.pickDirectory()
-  if (dir) {
-    store.autoBackupDir = dir
-    void store.saveSetting('autoBackupDir', dir)
+  // Main owns this setting: it shows the dialog and stores the path itself.
+  // The renderer naming a path would let a compromised UI point a plaintext
+  // credential backup anywhere (including a UNC share).
+  const r = await window.api.data.pickBackupDir()
+  if (r.ok && r.dir) {
+    store.autoBackupDir = r.dir
     void store.rescheduleBackup()
   }
 }

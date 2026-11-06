@@ -222,6 +222,9 @@ async function toggleLog(): Promise<void> {
   if (logOn.value) {
     window.api.ssh.stopLog(props.sessionId)
     logOn.value = false
+    // Stopping is complete here: without this return the tail of the function
+    // started a *new* log, i.e. "stop recording" popped a save dialog.
+    return
   } else {
     const res = await window.api.ssh.startLog(props.sessionId)
     if (res.ok) logOn.value = true
@@ -326,6 +329,13 @@ function openSearch(): void {
 function closeSearch(): void {
   searchBar.open = false
   search?.clearDecorations?.()
+  // findNext() scrolls the viewport, which flips `scrolledUp` on. Leaving it
+  // set meant new output stopped following the prompt after closing search —
+  // it looked like the terminal had frozen.
+  if (followOutput.value) {
+    term?.scrollToBottom()
+    scrolledUp.value = false
+  }
   term?.focus()
 }
 function toggleCase(): void {

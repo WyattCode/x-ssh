@@ -27,8 +27,16 @@ const realFp = createHash('sha256')
 const mapOf = (kh: unknown) =>
   (kh as { map: Record<string, { fps: string[]; firstSeen?: number }> }).map
 
+let activeClients = 0
+
 function makeServer(): Server {
   return new Server({ hostKeys: [hostKey.private] }, (client) => {
+    client.on('ready', () => {
+      activeClients++
+    })
+    client.on('close', () => {
+      activeClients--
+    })
     client.on('authentication', (ctx) => {
       const ok = ctx.method === 'password' && ctx.username === 'u' && ctx.password === 'p'
       ;(ok ? ctx.accept() : ctx.reject(['password'])) as unknown
@@ -148,6 +156,21 @@ describe('multiplexed session teardown', () => {
     mgr.write(b.sessionId!, 'ping\n')
     const alive = await waitFor(() => sends.some((args) => JSON.stringify(args).includes('ECHO:ping')))
     expect(alive, 'peer pane stopped working after its sibling disconnected').toBe(true)
+    mgr.disposeAll()
+  })
+
+  it('ends a plain session’s client when its shell exits, even if the host has a master', async () => {
+    const mgr = new SshManager(sender as never, await hosts())
+    const shared = await mgr.connect(target({ multiplex: true }))
+    const plain = await mgr.connect(target()) // same host, multiplex off
+    expect(shared.ok && plain.ok).toBe(true)
+    expect(await waitFor(() => activeClients === 2)).toBe(true)
+
+    // The remote shell ends by itself; nothing calls disconnect().
+    shells[shells.length - 1].end()
+    // A master exists for this host, but this session does not belong to it:
+    // keeping the client alive here leaked one connection per exit.
+    expect(await waitFor(() => activeClients === 1)).toBe(true)
     mgr.disposeAll()
   })
 

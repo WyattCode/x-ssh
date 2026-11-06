@@ -82,6 +82,8 @@ const api = {
       ipcRenderer.invoke(IPC.dataImportAll),
     backupNow: (): Promise<{ ok: boolean; error?: string }> =>
       ipcRenderer.invoke(IPC.dataBackupNow),
+    pickBackupDir: (): Promise<{ ok: boolean; canceled?: boolean; dir?: string }> =>
+      ipcRenderer.invoke(IPC.backupPickDir),
     rescheduleBackup: (): Promise<{ ok: boolean }> =>
       ipcRenderer.invoke(IPC.dataRescheduleBackup)
   },

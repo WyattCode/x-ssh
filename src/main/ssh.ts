@@ -1463,11 +1463,13 @@ export class SshManager {
               // Drop this pane's own resources first, whichever way we exit.
               this.releaseSessionResources(id)
               const key = this.masterKey(params)
-              // Ending the shared client here would drop every peer. Release
-              // this session's reference instead — but only if the id is still
-              // registered: disconnect() may have released it already, and
-              // releaseMaster is idempotent because of that.
-              if (this.masters.has(key)) {
+              const master = this.masters.get(key)
+              // Ending the shared client here would drop every peer. Only a
+              // session that actually belongs to the master — or one that still
+              // has peers on this client — may keep the client alive. Checking
+              // `masters.has(key)` alone leaked the client of a plain session
+              // that merely happened to share a host with a multiplexed one.
+              if (master && (master.sessions.has(id) || this.peerCount(client, id) > 0)) {
                 this.emit({ sessionId: id, status: 'closed' })
                 this.releaseMaster(key, id)
                 this.sessions.delete(id)
@@ -1969,7 +1971,10 @@ export class SshManager {
     }
     for (const it of items) {
       const abs = join(dir, it.name)
-      const rel = this.posixJoin(base, it.name)
+      // `posixJoin('', name)` yields "/name", which safeLocalJoin() then reads
+      // as a root-relative path and rejects as traversal — the whole sync
+      // failed on its first file. Relative keys must not start with a slash.
+      const rel = base ? this.posixJoin(base, it.name) : it.name
       if (it.isDirectory()) {
         if (!(await this.walkLocalTree(abs, rel, map))) return false
       } else if (it.isFile()) {
@@ -1995,7 +2000,9 @@ export class SshManager {
       return false
     }
     for (const it of list) {
-      const rel = this.posixJoin(base, it.filename)
+      // Same reason as walkLocalTree: the two sides must produce identical,
+      // slash-free relative keys or every entry looks changed.
+      const rel = base ? this.posixJoin(base, it.filename) : it.filename
       if (it.attrs.isDirectory()) {
         if (!(await this.walkRemoteTree(sftp, this.posixJoin(dir, it.filename), rel, map))) return false
       } else {
@@ -2322,6 +2329,15 @@ export class SshManager {
     onDelta: (n: number) => void,
     cleanupOnError?: string
   ): Promise<void> {
+    // A cancel can land while the caller is still stat-ing the file, probing
+    // the remote or creating directories — before any stream exists to abort.
+    // Without this check the transfer ran to completion and "cancel" looked
+    // dead until the file finished.
+    if (this.cancelledJobs.has(jobId)) {
+      readable.destroy()
+      writable.destroy()
+      return Promise.reject(new Error(SshManager.CANCELLED_TEXT))
+    }
     return new Promise<void>((res, rej) => {
       let settled = false
       let set = this.jobAborts.get(jobId)
@@ -2830,9 +2846,17 @@ export class SshManager {
             // either constructor throws — an orphaned stream leaks its fd and
             // later emits 'error' with nobody listening, which is fatal.
             // No cleanup path on failure: the source file is the user's.
+            // `start` alone keeps ssh2's default flags ('w' = O_TRUNC): the
+            // resume would empty the file and then write at the old offset,
+            // leaving `offset` NUL bytes followed by the tail — and because the
+            // result is exactly localSize, the next run treats it as synced and
+            // the corruption becomes permanent. 'r+' keeps the prefix.
+            // `mode` is explicit because ssh2 defaults to 0o666 (bypassing
+            // umask) and fchmods unconditionally, widening an existing 0600
+            // file on overwrite.
             write = offset
-              ? sftp.createWriteStream(item.remote, { start: offset })
-              : sftp.createWriteStream(item.remote)
+              ? sftp.createWriteStream(item.remote, { flags: 'r+', start: offset, mode: 0o644 })
+              : sftp.createWriteStream(item.remote, { mode: 0o644 })
             read = offset
               ? createReadStream(this.longPath(item.local), { start: offset })
               : createReadStream(this.longPath(item.local))

@@ -139,6 +139,7 @@ const splitEl = ref<HTMLElement>()
 
     <TerminalView
       v-if="pane.sshSessionId"
+      :key="pane.sshSessionId"
       :session-id="pane.sshSessionId"
       :visible="tabActive"
       :focused="tabActive && pane.id === tab.activePaneId"
@@ -229,7 +230,13 @@ const splitEl = ref<HTMLElement>()
     class="pane-split pane-node"
     :class="[split.dir, { 'pane-node-root': root }]"
   >
-    <template v-for="(child, i) in split.children" :key="`${path.join('.')}-${i}`">
+    <!-- Key leaves by pane id: an index key makes Vue reuse the *component*
+         after a non-last pane is closed, so the surviving xterm (buffer,
+         scroll state, search box) gets patched onto a different session. -->
+    <template
+      v-for="(child, i) in split.children"
+      :key="child.kind === 'leaf' ? `pane-${child.paneId}` : `split-${path.join('.')}-${i}`"
+    >
       <PaneNode
         :node="child"
         :tab="tab"

@@ -26,6 +26,20 @@ describe('trimEntry', () => {
     expect(out.startsWith(TRUNCATION_MARK)).toBe(true)
   })
 
+  it('uses the whole byte budget for ASCII, not a quarter of it', () => {
+    // The old character budget assumed 4 bytes per character, so plain English
+    // output was cut to 25% of the configured limit.
+    const out = trimEntry('a'.repeat(100_000), 4096)
+    expect(bytes(out)).toBeGreaterThan(4000)
+    expect(bytes(out)).toBeLessThanOrEqual(4096)
+  })
+
+  it('never splits a surrogate pair', () => {
+    const out = trimEntry('😀'.repeat(2000), 100)
+    expect(out).not.toContain('\ufffd')
+    expect(bytes(out)).toBeLessThanOrEqual(100)
+  })
+
   it('respects the byte budget with multi-byte characters', () => {
     // Chinese is 3 bytes per char in UTF-8; a char-based cap would overshoot.
     const s = '中'.repeat(5000)

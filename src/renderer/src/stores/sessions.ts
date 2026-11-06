@@ -929,7 +929,11 @@ export const useSessions = defineStore('sessions', {
               sessionId: pane.sshSessionId,
               autoReconnect: this.autoReconnect
             }) &&
-            pane.params
+            pane.params &&
+            // Already waiting out a backoff (possibly the server's rate-limit
+            // penalty). Cancelling it here reset the floor and attempt count,
+            // so every unlock re-triggered an early retry and fed the penalty.
+            !pane.reconnectTimer
           ) {
             this.cancelReconnect(pane)
             this.scheduleReconnect(pane.id)
@@ -956,7 +960,11 @@ export const useSessions = defineStore('sessions', {
               sessionId: pane.sshSessionId,
               autoReconnect: this.autoReconnect
             }) &&
-            pane.params
+            pane.params &&
+            // Already waiting out a backoff (possibly the server's rate-limit
+            // penalty). Cancelling it here reset the floor and attempt count,
+            // so every unlock re-triggered an early retry and fed the penalty.
+            !pane.reconnectTimer
           ) {
             this.cancelReconnect(pane)
             this.scheduleReconnect(pane.id)
@@ -1056,10 +1064,11 @@ export const useSessions = defineStore('sessions', {
         }
         for (const tab of this.tabs) {
           for (const pane of tab.panes) {
-            // Mark as a background (non-user-initiated) attempt so a restore
-            // failure doesn't spam a toast on launch; retried by auto-reconnect.
-            pane.reconnectAttempt = 1
-            void this.runConnect(pane.id)
+            // Background (non-user-initiated) attempt: no toast on launch, but
+            // a transient failure still enters the retry loop. Pre-setting
+            // reconnectAttempt used to suppress both, leaving the pane stuck on
+            // "reconnecting" with a permanently disabled button.
+            void this.runConnect(pane.id, { quiet: true })
           }
         }
       }
@@ -1072,8 +1081,7 @@ export const useSessions = defineStore('sessions', {
       if (!this.restoreConnect) return
       for (const tab of this.tabs) {
         for (const pane of tab.panes) {
-          pane.reconnectAttempt = 1
-          void this.runConnect(pane.id)
+          void this.runConnect(pane.id, { quiet: true })
         }
       }
     },
@@ -1853,7 +1861,9 @@ export const useSessions = defineStore('sessions', {
       tab.panes = tab.panes.filter((p) => p.id === keep)
       // Open the remaining panes to fill the grid.
       const fillRows = Math.max(1, rows)
-      const fillCols = Math.max(1, cells)
+      // Columns, not the total cell count: using `cells` here put every pane in
+      // the first row and left the second row an empty half of the tab.
+      const fillCols = Math.max(1, cols)
       const fills = [keep]
       while (fills.length < cells) {
         const paneId = uid('pane')
@@ -1892,7 +1902,10 @@ export const useSessions = defineStore('sessions', {
     },
 
     /** Shared connect routine: sets connecting → connected/error on the pane. */
-    async runConnect(paneId: string): Promise<void> {
+    /** Connects (or reconnects) one pane. `quiet` suppresses the toast for a
+     *  background attempt (tab restore on launch) while still letting a
+     *  transient failure enter the retry loop. */
+    async runConnect(paneId: string, opts: { quiet?: boolean } = {}): Promise<void> {
       const found = this.findPane(paneId)
       if (!found || inFlight.has(paneId)) return // ignore overlapping connects
       found.pane.status = 'connecting'
@@ -2002,13 +2015,17 @@ export const useSessions = defineStore('sessions', {
         // A refused host key already explains itself on the pane's card
         // (with the fingerprint); a toast would only repeat it.
         if (!live.pane.reconnectAttempt && !keyCode) {
-          toast(msg, 'error')
+          if (!opts.quiet) toast(msg, 'error')
           // A transient failure (reset / timeout / the server's rate limiting)
           // is worth riding out automatically even for the first, user-initiated
           // attempt — the reconnect loop only existed for established sessions.
+          // A quiet restore attempt also retries on any *uncoded* failure: it
+          // used to pre-set reconnectAttempt=1, which skipped this block
+          // entirely, disabled the Reconnect button and left the pane stuck.
           // The reconnectAttempt guard keeps the loop's own failures scheduling
           // themselves exactly once; a manual reconnect cancels the timer.
-          if (result.transient && this.autoReconnect) {
+          const retryable = result.transient || (opts.quiet && !result.code)
+          if (retryable && this.autoReconnect) {
             live.pane.message = msg + ' — ' + t('app.autoRetrySoon')
             this.scheduleReconnect(paneId, { minDelayMs: result.retryDelayMs, keepError: !!result.retryDelayMs })
           }

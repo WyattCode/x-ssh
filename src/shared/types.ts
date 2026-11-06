@@ -86,6 +86,8 @@ export interface Host {
   os?: HostOs
   /** Runtime-only flag (not persisted): whether an encrypted password exists. */
   hasSavedPassword?: boolean
+  /** A proxy password is stored in the encrypted vault for this host. */
+  hasSavedProxyPassword?: boolean
   /** Runtime-only flag: whether an encrypted key passphrase exists. */
   hasSavedPassphrase?: boolean
 }

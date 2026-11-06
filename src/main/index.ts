@@ -1,9 +1,9 @@
-import { app, shell, BrowserWindow, ipcMain, dialog, nativeImage, nativeTheme, screen, Menu, Notification, Tray, globalShortcut, powerMonitor } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, dialog, nativeImage, nativeTheme, screen, Menu, Notification, Tray, globalShortcut, powerMonitor, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron'
 import { join, dirname, basename, isAbsolute } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { tmpdir, homedir } from 'node:os'
 import { mkdtemp, rm, readFile, stat, readdir, mkdir, unlink, rename, writeFile, access } from 'node:fs/promises'
-import { watchFile, unwatchFile } from 'node:fs'
+import { existsSync, watchFile, unwatchFile } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { IPC, PREFS_ARG } from '../shared/ipc'
 import type { ConnectParams, Host, HostForward, ForwardMode, JumpConfig, KeyErrorCode, LocalEntry, Snippet, ThemePref, UiPrefs, UploadOverwrite } from '../shared/types'
@@ -32,7 +32,7 @@ const knownHosts = new KnownHosts()
 const settings = new SettingsStore()
 const keyManager = new KeyManager(app.getPath('userData'))
 const masterLock = new MasterLock(settings)
-const userVerify = registerUserVerifyIpc({ settings, lang: uiLang })
+const userVerify = registerUserVerifyIpc({ settings, lang: uiLang, isTrusted: isTrustedIpcSender })
 const activeEdits = new Set<string>()
 /** Per-path stop callbacks for in-flight external edits (clear debounce + unwatch + rm). */
 const editCleanups = new Map<string, () => void>()
@@ -79,6 +79,40 @@ let quitting = false
 if (process.platform === 'win32') app.setAppUserModelId('com.x-ssh.app')
 /** The currently-visible main window (single-window app), for tray balloon use. */
 let mainWindow: BrowserWindow | null = null
+
+/** Only the app's own top frame may talk to main. A navigated window (or an
+ *  injected iframe) would otherwise inherit the full preload API, which with
+ *  `sandbox: false` means filesystem and credential access. */
+function isTrustedIpcSender(e: IpcMainInvokeEvent | IpcMainEvent): boolean {
+  const w = mainWindow
+  return !!w && !w.isDestroyed() && e.senderFrame === w.webContents.mainFrame
+}
+
+/** Registers an invoke handler behind the sender check. `any` keeps the dozens
+ *  of existing handlers assignable without rewriting every signature. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function handle(channel: string, fn: (...args: any[]) => unknown): void {
+  ipcMain.handle(channel, (e, ...args) => {
+    if (!isTrustedIpcSender(e)) throw new Error('untrusted-sender')
+    return fn(e, ...args)
+  })
+}
+
+/** Same guard for fire-and-forget channels: a foreign frame gets silence. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function on(channel: string, fn: (...args: any[]) => void): void {
+  ipcMain.on(channel, (e, ...args) => {
+    if (!isTrustedIpcSender(e)) return
+    fn(e, ...args)
+  })
+}
+
+/** The only URLs the window may navigate to: the dev server, or our own bundle. */
+function isAppUrl(url: string): boolean {
+  const dev = process.env['ELECTRON_RENDERER_URL']
+  if (dev) return url.startsWith(dev)
+  return url.startsWith('file://') && url.includes('/out/renderer/')
+}
 /** Cached copy of the `minimizeToTray` setting, kept in sync by the setter. */
 let minimizeToTray = false
 /** The OS's preferred locales, most preferred first, for the "follow system" language. */
@@ -521,7 +555,7 @@ async function buildBackupPayload(): Promise<string> {
       app: 'x-ssh',
       version: 2,
       exportedAt: new Date().toISOString(),
-      hosts: await store.exportJson(true),
+      hosts: await store.exportJson(),
       snippets: (await settings.get<Snippet[]>('snippets')) ?? [],
       snapshots: (await settings.get<unknown[]>('snapshots')) ?? [],
       transferHistory: (await settings.get<unknown[]>('sftpTransferHistory')) ?? [],
@@ -534,21 +568,26 @@ async function buildBackupPayload(): Promise<string> {
 
 export type AutoBackupResult =
   | { ok: true }
-  | { ok: false; reason: 'disabled' | 'no-dir' | 'write' }
+  | { ok: false; reason: 'disabled' | 'no-dir' | 'locked' | 'write' }
 
 export async function writeAutoBackupSync(): Promise<AutoBackupResult> {
   const enabled = (await settings.get<boolean>('autoBackup')) === true
   if (!enabled) return { ok: false, reason: 'disabled' }
   const dir = await settings.get<string>('autoBackupDir')
   if (!dir) return { ok: false, reason: 'no-dir' }
+  // A backup is plaintext by design (it must be restorable on another machine),
+  // so it must never run while the app is locked — that is exactly when nobody
+  // is watching where it lands.
+  if (store.isLocked) return { ok: false, reason: 'locked' }
   try {
     await mkdir(dir, { recursive: true })
     const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
     const target = join(dir, `x-ssh-backup-${stamp}.json`)
     await writeFile(target, await buildBackupPayload(), 'utf8')
     return { ok: true }
-  } catch {
-    return { ok: false, reason: 'write' }
+  } catch (e) {
+    // Distinguish a lock that raced the check above from a real write failure.
+    return { ok: false, reason: (e as Error)?.message === 'app-locked' ? 'locked' : 'write' }
   }
 }
 
@@ -1153,6 +1192,14 @@ function createWindow(saved?: SavedBounds, prefs: UiPrefs = {}): void {
   if (restore?.maximized) win.maximize()
   mainWindow = win
 
+  // Dragging a URL onto the window navigates by default, and the newly loaded
+  // page still gets `window.api` (the preload runs again). Refuse anything that
+  // is not our own bundle, and never attach a <webview>.
+  win.webContents.on('will-navigate', (e, url) => {
+    if (!isAppUrl(url)) e.preventDefault()
+  })
+  win.webContents.on('will-attach-webview', (e) => e.preventDefault())
+
   // Remember the size (debounced) so it restores next launch. Position is
   // deliberately not saved: the window always opens centered.
   let saveTimer: NodeJS.Timeout | null = null
@@ -1277,16 +1324,16 @@ function createWindow(saved?: SavedBounds, prefs: UiPrefs = {}): void {
 
 function registerIpc(): void {
   // ---- Host store ----
-  ipcMain.handle(IPC.hostsList, () => store.list())
-  ipcMain.handle(IPC.hostsSecretsStatus, () => store.secretsStatus())
-  ipcMain.handle(
+  handle(IPC.hostsList, () => store.list())
+  handle(IPC.hostsSecretsStatus, () => store.secretsStatus())
+  handle(
     IPC.hostsSave,
     (_e, host: Host, password?: string, passphrase?: string) =>
       store.save(host, password, passphrase)
   )
-  ipcMain.handle(IPC.hostsDelete, (_e, id: string) => store.delete(id))
-  ipcMain.handle(IPC.hostsStatus, () => store.hostsStatus())
-  ipcMain.handle(IPC.hostsReset, async () => {
+  handle(IPC.hostsDelete, (_e, id: string) => store.delete(id))
+  handle(IPC.hostsStatus, () => store.hostsStatus())
+  handle(IPC.hostsReset, async () => {
     // Explicit recovery from an unreadable hosts.json, mirroring resetSecrets.
     // persist() refuses to overwrite one (the file is still on disk and may be
     // repairable by hand), so without this the app could never save a host
@@ -1299,7 +1346,7 @@ function registerIpc(): void {
       return { ok: false }
     }
   })
-  ipcMain.handle(IPC.hostsResetSecrets, async () => {
+  handle(IPC.hostsResetSecrets, async () => {
     // Explicit recovery from an undecryptable vault. persist() refuses to
     // overwrite one (that would destroy passwords still recoverable on the
     // machine it came from), so without this the app could never store a
@@ -1312,8 +1359,8 @@ function registerIpc(): void {
       return { ok: false }
     }
   })
-  ipcMain.handle(IPC.hostsImportSshConfig, () => importSshConfig())
-  ipcMain.handle(IPC.hostsExportJson, async () => {
+  handle(IPC.hostsImportSshConfig, () => importSshConfig())
+  handle(IPC.hostsExportJson, async () => {
     const res = await dialog.showSaveDialog({
       title: await dl('exportHostsJson'),
       defaultPath: 'x-ssh-hosts.json',
@@ -1328,7 +1375,7 @@ function registerIpc(): void {
       return { ok: false, error: friendlyError((e as Error).message) }
     }
   })
-  ipcMain.handle(IPC.hostsExportSshConfig, async () => {
+  handle(IPC.hostsExportSshConfig, async () => {
     const res = await dialog.showSaveDialog({
       title: await dl('exportSshConfig'),
       defaultPath: 'config',
@@ -1343,7 +1390,7 @@ function registerIpc(): void {
       return { ok: false, error: friendlyError((e as Error).message) }
     }
   })
-  ipcMain.handle(IPC.hostsImportJson, async () => {
+  handle(IPC.hostsImportJson, async () => {
     const res = await dialog.showOpenDialog({
       title: await dl('importHostsJson'),
       properties: ['openFile'],
@@ -1359,7 +1406,7 @@ function registerIpc(): void {
     }
   })
   // ---- Full data backup (hosts + secrets + snippets + snapshots + history) ----
-  ipcMain.handle(IPC.dataExportAll, async () => {
+  handle(IPC.dataExportAll, async () => {
     const res = await dialog.showSaveDialog({
       title: await dl('exportAll'),
       defaultPath: `x-ssh-backup-${new Date().toISOString().slice(0, 10)}.json`,
@@ -1384,7 +1431,7 @@ function registerIpc(): void {
       return { ok: false, error: friendlyError((e as Error).message) }
     }
   })
-  ipcMain.handle(IPC.dataImportAll, async () => {
+  handle(IPC.dataImportAll, async () => {
     const res = await dialog.showOpenDialog({
       title: await dl('importAll'),
       properties: ['openFile'],
@@ -1410,7 +1457,21 @@ function registerIpc(): void {
       return { ok: false, error: friendlyError((e as Error).message) }
     }
   })
-  ipcMain.handle(IPC.dataBackupNow, async () => {
+  // The folder can only be chosen here: the renderer selects it through a native
+  // dialog and main writes the setting, so a compromised renderer cannot point
+  // a plaintext credential backup at a network share.
+  handle(IPC.backupPickDir, async () => {
+    const res = await dialog.showOpenDialog({
+      properties: ['openDirectory', 'createDirectory']
+    })
+    if (res.canceled || !res.filePaths[0]) return { ok: false, canceled: true }
+    const dir = res.filePaths[0]
+    await settings.set('autoBackupDir', dir)
+    return { ok: true, dir }
+  })
+
+  handle(IPC.dataBackupNow, async () => {
+    if (store.isLocked) return { ok: false, error: 'app-locked' }
     // writeAutoBackupSync() answers false both for "nothing configured" and for
     // a failed write; tell them apart here so the renderer can say which it was
     // (and in the user's own language) instead of showing one Chinese string.
@@ -1427,17 +1488,17 @@ function registerIpc(): void {
           : 'backupDisabled'
     return { ok: false, error: await dl(key) }
   })
-  ipcMain.handle(IPC.dataRescheduleBackup, async () => {
+  handle(IPC.dataRescheduleBackup, async () => {
     await scheduleAutoBackup()
     return { ok: true }
   })
 
   // ---- Known hosts (settings page) ----
-  ipcMain.handle(IPC.knownHostsList, async () => {
+  handle(IPC.knownHostsList, async () => {
     await knownHosts.load()
     return knownHosts.list()
   })
-  ipcMain.handle(IPC.knownHostsForget, async (_e, host: string, port: number) => {
+  handle(IPC.knownHostsForget, async (_e, host: string, port: number) => {
     try {
       await knownHosts.load()
       await knownHosts.forget(host, port)
@@ -1448,7 +1509,7 @@ function registerIpc(): void {
   })
 
   // ---- Cross-session history search (live + persisted across restart) ----
-  ipcMain.handle(IPC.historyList, async () => {
+  handle(IPC.historyList, async () => {
     const persisted = ((await settings.get<{ label: string; text: string }[]>(
       'sessionHistory'
     )) ?? []).map((x, i) => ({
@@ -1458,7 +1519,7 @@ function registerIpc(): void {
     }))
     return [...persisted, ...(sshManager?.historyList() ?? [])]
   })
-  ipcMain.handle(IPC.historyExport, async (_e, text: string) => {
+  handle(IPC.historyExport, async (_e, text: string) => {
     const res = await dialog.showSaveDialog({
       title: await dl('exportLog'),
       defaultPath: `x-ssh-log-${new Date().toISOString().slice(0, 10)}.txt`,
@@ -1478,8 +1539,25 @@ function registerIpc(): void {
   // `resolveInside` are what keep a name from walking out of the directory it
   // was meant for — see shared/localPaths.ts for why `join()` alone is not
   // enough.
-  ipcMain.handle(IPC.localHome, () => homedir())
-  ipcMain.handle(
+  /**
+   * Directories the local pane has actually listed, with the entry names it
+   * saw. Mutations are limited to what was on screen — the renderer still names
+   * both the directory and the entry, but a path invented out of thin air is
+   * refused. This is the difference between "delete what the user is looking
+   * at" and "delete anything the user can reach".
+   */
+  const localListed = new Map<string, Set<string>>()
+  function rememberLocalListing(dir: string, names: string[]): void {
+    localListed.delete(dir)
+    localListed.set(dir, new Set(names))
+    if (localListed.size > 64) {
+      const oldest = localListed.keys().next().value
+      if (oldest !== undefined) localListed.delete(oldest)
+    }
+  }
+
+  handle(IPC.localHome, () => homedir())
+  handle(
     IPC.localList,
     async (_e, dir: string): Promise<{ path: string; entries: LocalEntry[] }> => {
       const resolved = resolveDir(dir)
@@ -1491,6 +1569,7 @@ function registerIpc(): void {
         const st = await stat(resolved)
         if (!st.isDirectory()) return { path: resolved, entries: [] }
         const names = await readdir(resolved, { withFileTypes: true })
+        rememberLocalListing(resolved, names.map((d) => d.name))
         const withMeta = await Promise.all(
           names.map(async (d) => {
             try {
@@ -1520,7 +1599,7 @@ function registerIpc(): void {
     }
   )
   // Read a local file's text (for comparing against a remote file).
-  ipcMain.handle(IPC.localReadText, async (_e, p: string) => {
+  handle(IPC.localReadText, async (_e, p: string) => {
     try {
       // A path the user picked via `localPickFile`, or one already inside a
       // listed directory. Normalize, and refuse embedded NULs.
@@ -1537,31 +1616,40 @@ function registerIpc(): void {
     }
   })
   // Let the user pick a local file (for the "compare with local" action).
-  ipcMain.handle(IPC.localPickFile, async () => {
+  handle(IPC.localPickFile, async () => {
     const res = await dialog.showOpenDialog({ properties: ['openFile'] })
     if (res.canceled || !res.filePaths[0]) return { ok: false, canceled: true }
     return { ok: true, path: res.filePaths[0] }
   })
   // ---- Local FS mutations (create / rename / delete) for the local pane ----
-  ipcMain.handle(
+  handle(
     IPC.localCreate,
     async (_e, dir: string, name: string, kind: 'file' | 'folder') => {
-      const target = resolveInside(dir, name)
+      const base = resolveDir(dir)
+      // Only inside a directory this pane has actually listed.
+      if (!base || !localListed.has(base)) return { ok: false, error: 'dir-not-listed' }
+      const target = resolveInside(base, name)
       if (!target) return { ok: false, error: 'invalid-name' }
       try {
+        // 'wx' refuses an existing file: `writeFile(target, '')` silently
+        // truncated whatever happened to share the name.
         if (kind === 'folder') await mkdir(target)
-        else await writeFile(target, '')
+        else await writeFile(target, '', { flag: 'wx' })
         return { ok: true }
       } catch (e) {
         return { ok: false, error: friendlyError((e as Error).message) }
       }
     }
   )
-  ipcMain.handle(
+  handle(
     IPC.localRename,
     async (_e, dir: string, oldName: string, newName: string) => {
-      const from = resolveInside(dir, oldName)
-      const to = resolveInside(dir, newName)
+      const base = resolveDir(dir)
+      if (!base || !localListed.get(base)?.has(String(oldName))) {
+        return { ok: false, error: 'not-listed' }
+      }
+      const from = resolveInside(base, oldName)
+      const to = resolveInside(base, newName)
       if (!from || !to) return { ok: false, error: 'invalid-name' }
       try {
         await rename(from, to)
@@ -1571,12 +1659,16 @@ function registerIpc(): void {
       }
     }
   )
-  ipcMain.handle(
+  handle(
     IPC.localDelete,
     async (_e, dir: string, name: string, isDir: boolean) => {
-      const target = resolveInside(dir, name)
-      // Without this, `name` of "../.." plus recursive removal is a way to wipe
-      // an arbitrary directory from the renderer.
+      const base = resolveDir(dir)
+      // Same rule: the entry has to be one the pane listed. `name` alone was
+      // already a single segment, but `dir` could be any path.
+      if (!base || !localListed.get(base)?.has(String(name))) {
+        return { ok: false, error: 'not-listed' }
+      }
+      const target = resolveInside(base, name)
       if (!target) return { ok: false, error: 'invalid-name' }
       try {
         await rm(target, { recursive: isDir, force: isDir })
@@ -1588,12 +1680,12 @@ function registerIpc(): void {
   )
 
   // ---- Command snippets ----
-  ipcMain.handle(IPC.snippetsList, () => listSnippets())
-  ipcMain.handle(IPC.snippetsSave, (_e, snippet: Snippet) => saveSnippet(snippet))
-  ipcMain.handle(IPC.snippetsDelete, (_e, id: string) => deleteSnippet(id))
+  handle(IPC.snippetsList, () => listSnippets())
+  handle(IPC.snippetsSave, (_e, snippet: Snippet) => saveSnippet(snippet))
+  handle(IPC.snippetsDelete, (_e, id: string) => deleteSnippet(id))
 
   // ---- SSH lifecycle ----
-  ipcMain.handle(IPC.sshConnect, async (_e, params: ConnectParams) => {
+  handle(IPC.sshConnect, async (_e, params: ConnectParams) => {
     if (!sshManager) return { ok: false, error: 'window-not-ready' }
     // Resolve a saved password when connecting to a stored host. When the app
     // is locked, don't auto-fill a saved secret — return a clear 'locked' error
@@ -1637,6 +1729,11 @@ function registerIpc(): void {
         if (params.onConnect === undefined) params.onConnect = h.onConnect
         if (params.onConnectDelayMs === undefined) params.onConnectDelayMs = h.onConnectDelayMs
         if (!params.proxy && h.proxy) params.proxy = h.proxy
+        // list() never returns the stored proxy password (it lives in the
+        // vault), so fetch it here for the same reason as the SSH password.
+        if (params.proxy && !params.proxy.password) {
+          params.proxy.password = await store.getProxyPassword(params.hostId)
+        }
         if (params.multiplex === undefined) params.multiplex = (await settings.get<boolean>('connectionMultiplex')) === true
         const jumpId = params.jumpHostId ?? h.jumpHostId
         if (jumpId) {
@@ -1732,7 +1829,7 @@ function registerIpc(): void {
     }).catch(() => undefined)
     return result
   })
-  ipcMain.handle(IPC.sshDisconnect, (_e, sessionId: string) => {
+  handle(IPC.sshDisconnect, (_e, sessionId: string) => {
     const label = sshManager?.label(sessionId)
     sshManager?.disconnect(sessionId)
     if (label) {
@@ -1746,7 +1843,7 @@ function registerIpc(): void {
       }).catch(() => undefined)
     }
   })
-  ipcMain.handle(
+  handle(
     IPC.sshForgetHostKey,
     async (_e, host: string, port: number) => {
       try {
@@ -1758,7 +1855,7 @@ function registerIpc(): void {
       }
     }
   )
-  ipcMain.handle(
+  handle(
     IPC.sshTrustHostKey,
     async (
       _e,
@@ -1809,7 +1906,7 @@ function registerIpc(): void {
 
   // ---- Session log-to-file ----
   // Start capturing a live session's output to a user-chosen log file.
-  ipcMain.handle(
+  handle(
     IPC.sessionLogStart,
     async (e, sessionId: string) => {
       const res = await dialog.showSaveDialog({
@@ -1825,43 +1922,43 @@ function registerIpc(): void {
       return { ok, canceled: false, path: res.filePath }
     }
   )
-  ipcMain.on(IPC.sessionLogStop, (_e, sessionId: string) => {
+  on(IPC.sessionLogStop, (_e, sessionId: string) => {
     sshManager?.stopLog(sessionId)
   })
 
   // ---- SSH stream (fire-and-forget) ----
-  ipcMain.on(IPC.sshInput, (_e, sessionId: string, data: string) => {
+  on(IPC.sshInput, (_e, sessionId: string, data: string) => {
     sshManager?.write(sessionId, data)
   })
-  ipcMain.on(IPC.sshResize, (_e, sessionId: string, cols: number, rows: number) => {
+  on(IPC.sshResize, (_e, sessionId: string, cols: number, rows: number) => {
     sshManager?.resize(sessionId, cols, rows)
   })
-  ipcMain.on(IPC.sshAttach, (_e, sessionId: string) => {
+  on(IPC.sshAttach, (_e, sessionId: string) => {
     sshManager?.attach(sessionId)
   })
-  ipcMain.handle(IPC.sshTmuxList, async (_e, sessionId: string) => {
+  handle(IPC.sshTmuxList, async (_e, sessionId: string) => {
     if (!sshManager) throw new Error('no-session')
     return sshManager.tmuxListSessions(sessionId)
   })
-  ipcMain.handle(IPC.sshTmuxAttach, (_e, sessionId: string, name: string) => {
+  handle(IPC.sshTmuxAttach, (_e, sessionId: string, name: string) => {
     if (!sshManager) return { ok: false }
     return { ok: sshManager.tmuxAttachOrCreate(sessionId, name) }
   })
-  ipcMain.handle(IPC.sshForwardAdd, (_e, sessionId: string, rule: HostForward) => {
+  handle(IPC.sshForwardAdd, (_e, sessionId: string, rule: HostForward) => {
     if (!sshManager) return { ok: false, error: 'window-not-ready' }
     return sshManager.addForward(sessionId, rule)
   })
-  ipcMain.handle(IPC.sshForwardRemove, (_e, sessionId: string, rule: { mode?: ForwardMode; localPort: number }) => {
+  handle(IPC.sshForwardRemove, (_e, sessionId: string, rule: { mode?: ForwardMode; localPort: number }) => {
     if (!sshManager) return { ok: false, error: 'window-not-ready' }
     return sshManager.removeForward(sessionId, rule)
   })
 
   // ---- SFTP ----
-  ipcMain.handle(IPC.sftpList, (_e, sessionId: string, path?: string) => {
+  handle(IPC.sftpList, (_e, sessionId: string, path?: string) => {
     if (!sshManager) throw new Error('window-not-ready')
     return sshManager.listDir(sessionId, path)
   })
-  ipcMain.handle(
+  handle(
     IPC.sftpDownload,
     async (_e, sessionId: string, remotePath: string, name: string, concurrency?: number) => {
       const res = await dialog.showSaveDialog({ defaultPath: name })
@@ -1887,7 +1984,7 @@ function registerIpc(): void {
       }
     }
   )
-  ipcMain.handle(
+  handle(
     IPC.sftpUpload,
     async (_e, sessionId: string, remoteDir: string, concurrency?: number, overwrite?: UploadOverwrite) => {
       if (!sshManager) return { ok: false, error: 'window-not-ready', count: 0 }
@@ -1911,7 +2008,7 @@ function registerIpc(): void {
       }
     }
   )
-  ipcMain.handle(
+  handle(
     IPC.sftpDownloadMany,
     async (
       _e,
@@ -1945,7 +2042,7 @@ function registerIpc(): void {
     }
   )
   // Reveal a finished transfer's local path in the OS file manager.
-  ipcMain.handle(
+  handle(
     IPC.sftpRevealLocal,
     async (_e, target: string) => {
       try {
@@ -1962,7 +2059,7 @@ function registerIpc(): void {
   )
   // Download into a fixed local directory (no dialog) — used by dragging remote
   // entries onto the drawer's local pane.
-  ipcMain.handle(
+  handle(
     IPC.sftpDownloadTo,
     async (
       _e,
@@ -1990,7 +2087,7 @@ function registerIpc(): void {
       }
     }
   )
-  ipcMain.handle(
+  handle(
     IPC.sftpUploadDir,
     async (_e, sessionId: string, remoteDir: string, concurrency?: number, overwrite?: UploadOverwrite) => {
       if (!sshManager) return { ok: false, error: 'window-not-ready', count: 0 }
@@ -2015,7 +2112,7 @@ function registerIpc(): void {
       }
     }
   )
-  ipcMain.handle(
+  handle(
     IPC.sftpUploadPaths,
     async (_e, sessionId: string, remoteDir: string, paths: string[], concurrency?: number, overwrite?: UploadOverwrite) => {
       if (!sshManager) return { ok: false, error: 'window-not-ready', count: 0 }
@@ -2032,7 +2129,7 @@ function registerIpc(): void {
       }
     }
   )
-  ipcMain.handle(
+  handle(
     IPC.sftpSync,
     async (
       _e,
@@ -2057,7 +2154,7 @@ function registerIpc(): void {
       }
     }
   )
-  ipcMain.handle(
+  handle(
     IPC.sftpWatchStart,
     async (
       _e,
@@ -2077,12 +2174,12 @@ function registerIpc(): void {
       }
     }
   )
-  ipcMain.handle(IPC.sftpWatchStop, (_e, sessionId: string) => {
+  handle(IPC.sftpWatchStop, (_e, sessionId: string) => {
     if (!sshManager) return { ok: false }
     sshManager.stopWatchSyncsForSession(sessionId)
     return { ok: true }
   })
-  ipcMain.handle(
+  handle(
     IPC.sftpDiffDirs,
     async (_e, sessionId: string, localDir: string, remoteDir: string) => {
       if (!sshManager) return { ok: false, error: 'window-not-ready' }
@@ -2094,7 +2191,7 @@ function registerIpc(): void {
       }
     }
   )
-  ipcMain.handle(
+  handle(
     IPC.sftpPackDownload,
     async (
       _e,
@@ -2111,7 +2208,7 @@ function registerIpc(): void {
       return sshManager.packAndDownload(sessionId, items, res.filePaths[0], archiveName)
     }
   )
-  ipcMain.handle(
+  handle(
     IPC.sftpExtract,
     async (_e, sessionId: string, remoteDir: string, archiveFileName: string) => {
       try {
@@ -2122,7 +2219,7 @@ function registerIpc(): void {
       }
     }
   )
-  ipcMain.handle(
+  handle(
     IPC.sftpUploadExtract,
     async (_e, sessionId: string, remoteDir: string, concurrency?: number, overwrite?: UploadOverwrite) => {
       if (!sshManager) return { ok: false, error: 'window-not-ready' }
@@ -2153,7 +2250,7 @@ function registerIpc(): void {
       }
     }
   )
-  ipcMain.handle(IPC.sftpMkdir, async (_e, sessionId: string, path: string) => {
+  handle(IPC.sftpMkdir, async (_e, sessionId: string, path: string) => {
     try {
       await requireSshManager().mkdir(sessionId, path)
       return { ok: true }
@@ -2161,7 +2258,7 @@ function registerIpc(): void {
       return { ok: false, error: friendlyError((e as Error).message) }
     }
   })
-  ipcMain.handle(IPC.sftpCreateFile, async (_e, sessionId: string, path: string) => {
+  handle(IPC.sftpCreateFile, async (_e, sessionId: string, path: string) => {
     try {
       await requireSshManager().createFile(sessionId, path)
       return { ok: true }
@@ -2169,7 +2266,7 @@ function registerIpc(): void {
       return { ok: false, error: friendlyError((e as Error).message) }
     }
   })
-  ipcMain.handle(
+  handle(
     IPC.sftpRename,
     async (_e, sessionId: string, oldPath: string, newPath: string) => {
       try {
@@ -2180,7 +2277,7 @@ function registerIpc(): void {
       }
     }
   )
-  ipcMain.handle(
+  handle(
     IPC.sftpDelete,
     async (_e, sessionId: string, path: string, isDir: boolean) => {
       try {
@@ -2191,7 +2288,7 @@ function registerIpc(): void {
       }
     }
   )
-  ipcMain.handle(
+  handle(
     IPC.sftpChmod,
     async (
       _e,
@@ -2209,26 +2306,26 @@ function registerIpc(): void {
       }
     }
   )
-  ipcMain.on(IPC.sftpCancel, (_e, id: string) => {
+  on(IPC.sftpCancel, (_e, id: string) => {
     sshManager?.cancelTransfer(id)
   })
-  ipcMain.on(IPC.sftpPause, (_e, id: string, paused: boolean) => {
+  on(IPC.sftpPause, (_e, id: string, paused: boolean) => {
     sshManager?.pauseTransfer(id, paused)
   })
-  ipcMain.on(IPC.sftpPauseAll, (_e, paused: boolean) => {
+  on(IPC.sftpPauseAll, (_e, paused: boolean) => {
     sshManager?.pauseAll(paused)
   })
-  ipcMain.on(IPC.sftpSetRate, (_e, id: string, bytesPerSec: number) => {
+  on(IPC.sftpSetRate, (_e, id: string, bytesPerSec: number) => {
     sshManager?.setTransferRate(id, bytesPerSec)
   })
-  ipcMain.handle(IPC.sftpReadText, async (_e, sessionId: string, path: string) => {
+  handle(IPC.sftpReadText, async (_e, sessionId: string, path: string) => {
     try {
       return { ok: true, content: await requireSshManager().readTextFile(sessionId, path) }
     } catch (e) {
       return { ok: false, error: friendlyError((e as Error).message) }
     }
   })
-  ipcMain.handle(IPC.sftpReadBinary, async (_e, sessionId: string, path: string) => {
+  handle(IPC.sftpReadBinary, async (_e, sessionId: string, path: string) => {
     try {
       const base64 = await requireSshManager().readBinaryFile(sessionId, path)
       return { ok: true, base64 }
@@ -2236,7 +2333,7 @@ function registerIpc(): void {
       return { ok: false, error: friendlyError((e as Error).message) }
     }
   })
-  ipcMain.handle(
+  handle(
     IPC.sftpWriteText,
     async (_e, sessionId: string, path: string, content: string) => {
       try {
@@ -2249,7 +2346,7 @@ function registerIpc(): void {
   )
   // Download to a temp file, open in the configured/system editor, and watch
   // for saves to push the file back to the server automatically.
-  ipcMain.handle(
+  handle(
     IPC.sftpEditExternal,
     async (_e, sessionId: string, remotePath: string, name: string) => {
       try {
@@ -2326,7 +2423,7 @@ function registerIpc(): void {
       }
     }
   )
-  ipcMain.handle(IPC.sftpOpenWith, async (_e, sessionId: string, path: string, name: string, program?: string) => {
+  handle(IPC.sftpOpenWith, async (_e, sessionId: string, path: string, name: string, program?: string) => {
     try {
       const remotePath = path
       // `name` becomes a path segment under the temp dir — keep it one segment.
@@ -2337,6 +2434,15 @@ function registerIpc(): void {
       // otherwise this channel is a way to run any binary on the machine.
       // Checked before the download so a refusal costs nothing.
       if (program) {
+        // The allow-list itself lives in settings, which the renderer can write,
+        // so the check alone proves nothing. Refuse the obvious launchers: a
+        // script host would turn any downloaded file into code execution.
+        const base = basename(program).toLowerCase()
+        const SCRIPT_HOST =
+          /^(cmd|powershell|pwsh|wscript|cscript|mshta|bash|sh|zsh|fish|csh|ksh|regsvr32|rundll32)(\.exe)?$/
+        if (SCRIPT_HOST.test(base) || !isAbsolute(program) || !existsSync(program)) {
+          return { ok: false, error: 'program-not-allowed' }
+        }
         const editor = (await settings.get<string>('externalEditor')) || ''
         const openers = (await settings.get<Record<string, string>>('fileOpeners')) || {}
         const allowed = new Set([editor, ...Object.values(openers)].filter(Boolean))
@@ -2369,7 +2475,7 @@ function registerIpc(): void {
   })
 
   // Drag out (dragstart): start the native drag with the (pre)downloaded file.
-  ipcMain.on(
+  on(
     IPC.sftpStartDrag,
     async (e, sessionId: string, items: DragItem[]) => {
       try {
@@ -2391,7 +2497,7 @@ function registerIpc(): void {
   // network-bound) download is ready by the time the drag gesture reaches
   // sftpStartDrag. startDrag must effectively run during the drag gesture, so
   // warming the cache here is what makes Alt+drag reliable for larger files.
-  ipcMain.on(
+  on(
     IPC.sftpPrefetchDrag,
     async (_e, sessionId: string, items: DragItem[]) => {
       try {
@@ -2403,9 +2509,9 @@ function registerIpc(): void {
   )
 
   // ---- Settings ----
-  ipcMain.handle(IPC.settingsGet, (_e, key: string) => settings.get(key))
-  ipcMain.handle(IPC.settingsStatus, () => settings.status())
-  ipcMain.handle(IPC.settingsSet, async (_e, key: string, value: unknown) => {
+  handle(IPC.settingsGet, (_e, key: string) => settings.get(key))
+  handle(IPC.settingsStatus, () => settings.status())
+  handle(IPC.settingsSet, async (_e, key: string, value: unknown) => {
     // The settings map also holds the master-lock record, the connection audit
     // log and the persisted session history. Without this check the renderer
     // could overwrite any of them by key name.
@@ -2423,7 +2529,7 @@ function registerIpc(): void {
       return { ok: false, error: 'settings-write-failed' }
     }
   })
-  ipcMain.handle(IPC.hostsProbe, async (_e, ids?: unknown) => {
+  handle(IPC.hostsProbe, async (_e, ids?: unknown) => {
     const all = await store.list()
     const want = Array.isArray(ids) ? new Set(ids.filter((x): x is string => typeof x === 'string')) : null
     const result = await probeHosts(want ? all.filter((h) => want.has(h.id)) : all)
@@ -2433,7 +2539,7 @@ function registerIpc(): void {
     void detectMissingOs(Object.keys(result).filter((id) => result[id] === 'online' || viaHop.has(id))).catch(() => undefined)
     return result
   })
-  ipcMain.handle(IPC.themeSet, async (_e, pref: unknown) => {
+  handle(IPC.themeSet, async (_e, pref: unknown) => {
     const value: ThemePref = pref === 'light' || pref === 'dark' ? pref : 'system'
     // Persist first: pinning the native theme before the write means a refused
     // or failed write still flips the title bar / scrollbars, and the renderer
@@ -2450,12 +2556,12 @@ function registerIpc(): void {
     applyThemeSource(value)
     return { ok: true as const, dark: nativeTheme.shouldUseDarkColors }
   })
-  ipcMain.handle(IPC.connLogList, async () => (await settings.get<ConnLogEntry[]>('connectionLog')) ?? [])
-  ipcMain.handle(IPC.connLogPush, async (_e, entry: ConnLogEntry) => {
+  handle(IPC.connLogList, async () => (await settings.get<ConnLogEntry[]>('connectionLog')) ?? [])
+  handle(IPC.connLogPush, async (_e, entry: ConnLogEntry) => {
     await pushConnLog(entry)
     return { ok: true }
   })
-  ipcMain.handle(IPC.connLogClear, async () => {
+  handle(IPC.connLogClear, async () => {
     try {
       await settings.set('connectionLog', [])
       return { ok: true }
@@ -2469,8 +2575,8 @@ function registerIpc(): void {
   // ---- App master-lock ----
   // Lock state lives in main; gating saved secrets is enforced in the HostStore
   // (getPassword/getPassphrase/exportJson) and in sshConnect below.
-  ipcMain.handle(IPC.lockStatus, () => masterLock.status())
-  ipcMain.handle(IPC.lockSetPassphrase, async (_e, passphrase: string) => {
+  handle(IPC.lockStatus, () => masterLock.status())
+  handle(IPC.lockSetPassphrase, async (_e, passphrase: string) => {
     try {
       if (!passphrase) return { ok: false, error: 'passphrase-empty' }
       await masterLock.setPassphrase(passphrase)
@@ -2480,17 +2586,17 @@ function registerIpc(): void {
       return { ok: false, error: friendlyError((e as Error).message) }
     }
   })
-  ipcMain.handle(IPC.lockDisable, async (_e, passphrase: string) => {
+  handle(IPC.lockDisable, async (_e, passphrase: string) => {
     const ok = await masterLock.disable(passphrase)
     store.setLocked(masterLock.locked)
     return { ok, ...masterLock.status() }
   })
-  ipcMain.handle(IPC.lockUnlock, async (_e, passphrase: string) => {
+  handle(IPC.lockUnlock, async (_e, passphrase: string) => {
     const ok = await masterLock.unlock(passphrase)
     store.setLocked(masterLock.locked)
     return { ok, ...masterLock.status() }
   })
-  ipcMain.handle(IPC.lockLockNow, () => {
+  handle(IPC.lockLockNow, () => {
     masterLock.lock()
     userVerify.clearSession()
     store.setLocked(masterLock.locked)
@@ -2498,12 +2604,12 @@ function registerIpc(): void {
     // live sessions running; the door is just shut for new discovery.
     return masterLock.status()
   })
-  ipcMain.handle(IPC.lockReset, async (_e, passphrase: string) => {
+  handle(IPC.lockReset, async (_e, passphrase: string) => {
     const ok = await masterLock.reset(passphrase)
     store.setLocked(masterLock.locked)
     return { ok, ...masterLock.status() }
   })
-  ipcMain.handle(IPC.pickExecutable, async () => {
+  handle(IPC.pickExecutable, async () => {
     const res = await dialog.showOpenDialog({
       title: await dl('pickEditor'),
       properties: ['openFile'],
@@ -2514,7 +2620,7 @@ function registerIpc(): void {
     })
     return res.canceled ? undefined : res.filePaths[0]
   })
-  ipcMain.handle(IPC.pickDirectory, async () => {
+  handle(IPC.pickDirectory, async () => {
     const res = await dialog.showOpenDialog({
       title: await dl('pickBackupDir'),
       properties: ['openDirectory', 'createDirectory']
@@ -2526,7 +2632,7 @@ function registerIpc(): void {
   // http/https on purpose: the URL comes from whatever the remote host printed,
   // and handing an arbitrary scheme to the OS would let it launch local
   // protocol handlers (file:, smb:, ms-*:).
-  ipcMain.handle(IPC.openExternal, async (_e, url: string) => {
+  handle(IPC.openExternal, async (_e, url: string) => {
     if (!isWebUrl(url)) return false
     // openExternal REJECTS when the OS has no handler for the URL; an
     // unhandled rejection in main is fatal on current Node defaults.
@@ -2540,12 +2646,12 @@ function registerIpc(): void {
 
   // Native notification (session drop, transfer completion…). The renderer
   // decides when; main just honors the user's toggle.
-  ipcMain.on(IPC.notify, async (_e, title: string, body: string, sound = false) => {
+  on(IPC.notify, async (_e, title: string, body: string, sound = false) => {
     if (await notifyEnabled()) notify(title, body, sound && (await notifySoundEnabled()))
   })
 
   // ---- Dialogs ----
-  ipcMain.handle(IPC.pickKeyFile, async () => {
+  handle(IPC.pickKeyFile, async () => {
     const res = await dialog.showOpenDialog({
       title: await dl('pickPrivateKey'),
       properties: ['openFile', 'showHiddenFiles']
@@ -2560,9 +2666,9 @@ function registerIpc(): void {
     if (msg === 'invalid-key' || msg === 'bad-id' || msg === 'labels-corrupt') return { ok: false, code: msg }
     return { ok: false, error: friendlyError(msg) }
   }
-  ipcMain.handle(IPC.keysList, () => keyManager.list())
-  ipcMain.handle(IPC.keysLabelsStatus, () => keyManager.labelsStatus())
-  ipcMain.handle(
+  handle(IPC.keysList, () => keyManager.list())
+  handle(IPC.keysLabelsStatus, () => keyManager.labelsStatus())
+  handle(
     IPC.keysGenerate,
     async (_e, opts: { name: string; type?: string; passphrase?: string; bits?: number }) => {
       try {
@@ -2572,7 +2678,7 @@ function registerIpc(): void {
       }
     }
   )
-  ipcMain.handle(IPC.keysImport, async () => {
+  handle(IPC.keysImport, async () => {
     const res = await dialog.showOpenDialog({
       title: await dl('importPrivateKey'),
       properties: ['openFile', 'showHiddenFiles']
@@ -2584,7 +2690,7 @@ function registerIpc(): void {
       return keyFail(e)
     }
   })
-  ipcMain.handle(IPC.keysDelete, async (_e, id: string) => {
+  handle(IPC.keysDelete, async (_e, id: string) => {
     try {
       await keyManager.remove(id)
       return { ok: true }
@@ -2592,7 +2698,7 @@ function registerIpc(): void {
       return keyFail(e)
     }
   })
-  ipcMain.handle(IPC.keysPublicKey, async (_e, id: string) => {
+  handle(IPC.keysPublicKey, async (_e, id: string) => {
     try {
       const text = await keyManager.publicKey(id)
       if (!text) return { ok: false, code: 'no-pubkey' }
@@ -2604,7 +2710,7 @@ function registerIpc(): void {
   // Appends a public key to the authorized_keys of several saved hosts. Each is
   // connected with its own saved credentials, the key written via a shell
   // here-doc (safe from quoting), then the one-shot session is torn down.
-  ipcMain.handle(IPC.keysPublish, async (_e, keyId: string, hostIds: string[]) => {
+  handle(IPC.keysPublish, async (_e, keyId: string, hostIds: string[]) => {
     let pub: string
     try {
       pub = (await keyManager.publicKey(keyId)).trim()
@@ -2624,7 +2730,7 @@ function registerIpc(): void {
   // given hosts. Only the key type + base64 are used as the match (the comment
   // may contain arbitrary text that would break shell quoting). A host whose
   // authorized_keys doesn't contain the key is reported ok (nothing to do).
-  ipcMain.handle(IPC.keysRevoke, async (_e, keyId: string, hostIds: string[]) => {
+  handle(IPC.keysRevoke, async (_e, keyId: string, hostIds: string[]) => {
     let pub: string
     try {
       pub = (await keyManager.publicKey(keyId)).trim()
@@ -2648,7 +2754,7 @@ function registerIpc(): void {
   // returns the update info (or a "fresh" flag). Best-effort and offline-safe:
   // any failure (no network, rate limit, no repo) returns ok:false with a
   // friendly message rather than throwing.
-  ipcMain.handle(IPC.appCheckUpdate, async () => {
+  handle(IPC.appCheckUpdate, async () => {
     const current = app.getVersion()
     try {
       const res = await fetch('https://api.github.com/repos/WyattCode/x-ssh/releases/latest', {
@@ -2677,7 +2783,7 @@ function registerIpc(): void {
       return { ok: false, error: friendlyError((e as Error).message) }
     }
   })
-  ipcMain.handle(IPC.appGlobalShortcut, (_e, accelerator: string) => setGlobalShowHide(accelerator))
+  handle(IPC.appGlobalShortcut, (_e, accelerator: string) => setGlobalShowHide(accelerator))
 }
 
 // ---- Global (system-wide) show/hide hotkey ----

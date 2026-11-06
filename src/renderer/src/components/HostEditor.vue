@@ -143,7 +143,9 @@ watch(
       proxyPort: h?.proxy?.port ?? 1080,
       proxyType: h?.proxy?.type ?? 'socks5',
       proxyUser: h?.proxy?.username ?? '',
-      proxyPass: h?.proxy?.password ?? '',
+      // Never populated: the stored proxy password lives in the vault and is
+      // not sent to the renderer. Blank means "keep the saved one".
+      proxyPass: '',
       forwards: (h?.portForwards ?? []).map((f) => ({
         mode: f.mode ?? 'local',
         localPort: f.localPort,
@@ -772,7 +774,7 @@ async function remove(): Promise<void> {
                   </div>
                   <div class="sub-grid">
                     <input v-model="form.proxyUser" class="box grow" :placeholder="t('host.proxyUserPh')" autocomplete="off" />
-                    <input v-model="form.proxyPass" class="box grow" type="password" :placeholder="t('host.proxyPassPh')" autocomplete="off" />
+                    <input v-model="form.proxyPass" class="box grow" type="password" :placeholder="host?.hasSavedProxyPassword ? t('host.proxyPassSaved') : t('host.proxyPassPh')" autocomplete="off" />
                   </div>
                 </template>
               </div>

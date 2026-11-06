@@ -41,7 +41,6 @@ export const RENDERER_SETTABLE_KEYS = new Set([
   'sanitizePaste',
   // Transfers
   'autoBackup',
-  'autoBackupDir',
   'autoBackupEveryHours',
   'downloadQueue',
   'sftpBookmarks',
@@ -75,6 +74,11 @@ export const RENDERER_SETTABLE_KEYS = new Set([
 
 /** Keys main writes but the renderer must never be able to set. */
 export const MAIN_ONLY_KEYS = new Set([
+  // Where an automatic backup (which contains plaintext credentials) is
+  // written. The renderer must not choose it: `settings:set` accepted any path,
+  // including a UNC share, which turned "back up now" into "exfiltrate every
+  // saved password". Set only by backup:pickDir, which owns the dialog.
+  'autoBackupDir',
   'connectionLog',
   'masterLock',
   // Background OS detection's back-off list (main/index.ts detectMissingOs).
