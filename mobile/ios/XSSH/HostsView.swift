@@ -367,7 +367,7 @@ struct HostsView: View {
     }
 
     /// `❯` 占的宽度和它到名字的间距:状态那一行的缩进用同一组数,才和名字的起点对齐。
-    private static let promptGap: CGFloat = 12
+    private static let promptGap: CGFloat = 9.4
 
     @ViewBuilder private var statusLine: some View {
         if activeConnecting {
