@@ -369,8 +369,7 @@ struct RootView: View {
 
     /// 左上角一行:侧栏开关(跟着抽屉左右滑)+ 会话标题。
     private func headerRow(width w: CGFloat) -> some View {
-        // 连上之后(或用户开始用这台终端:敲字 / 按键 / 粘贴 / 滚动),顶部的会话名称和(抽屉收起时的)侧栏开关收起来,
-        // 不挡终端内容;连接中 / 出错 / 已结束时还显示着。抽屉展开时侧栏开关是侧栏标题栏的一部分,一直在。
+        // 连上之后(或用户开始用这台终端:敲字 / 按键 / 粘贴 / 滚动),(抽屉收起时的)侧栏开关收起来(竖条里有「‹」);会话名一直在。抽屉展开时侧栏开关是侧栏标题栏的一部分,一直在。
         let typing = active.map { $0.userActive || $0.state == .connected } ?? false
         let showToggle = drawerOpen || !typing
         return ZStack(alignment: .topLeading) {
@@ -390,11 +389,13 @@ struct RootView: View {
             .animation(.easeOut(duration: 0.25), value: showToggle)
             .accessibilityLabel(Text("Hosts"))
 
-            if let active, !typing {
+            // 会话名一直显示(和外屏一样:左上角是主机名,终端从它下面开始)。侧栏开关收起时名字靠到最左,和终端文字对齐。
+            if let active {
                 Text(verbatim: active.title.isEmpty ? active.host.displayName : active.title)
                     .font(.headline).lineLimit(1)
                     .foregroundStyle(.white)
-                    .offset(x: drawerOpen ? w + 16 : 76, y: 24 + 14)
+                    .offset(x: drawerOpen ? w + 16 : (showToggle ? 76 : 16), y: 24 + 14)
+                    .animation(.easeOut(duration: 0.25), value: showToggle)
                     .transition(.opacity)
             }
         }
