@@ -19,6 +19,8 @@ targets:
     info:
       path: XSSH/Info.plist
       properties:
+        # 只有深色界面:不跟随系统的浅色模式。
+        UIUserInterfaceStyle: Dark
         # 系统启动画面:纯黑底 + 居中的 logo(120pt)。开屏页(SplashView)接着画同样的 logo,所以交接时看不出换了一层。
         UILaunchScreen:
           UIColorName: LaunchBackground

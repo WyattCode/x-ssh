@@ -14,6 +14,7 @@ struct XSSHApp: App {
                     .environment(fold)
                     .environment(gate)
                     .background { FoldTracker(state: fold).ignoresSafeArea() }
+                    .preferredColorScheme(.dark)
             }
         }
     }

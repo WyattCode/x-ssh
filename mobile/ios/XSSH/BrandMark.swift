@@ -55,13 +55,11 @@ struct EmptySessionView: View {
 /// 横向 logo(X-SSH 字标,和桌面端 / 安卓同一份素材)。整个 App 是深色界面,用深色底上的白色版本。
 struct BrandLockup: View {
     var height: CGFloat = 28
-    @Environment(\.colorScheme) private var scheme
     /// 素材 500×112。工具栏只给自定义视图很窄的宽度,`scaledToFit` 会按那个宽度把 logo 缩成一小条,所以宽高都显式给出。
     private static let aspect: CGFloat = 500.0 / 112.0
 
     var body: some View {
-        // 深色界面用白色字标,浅色界面用深色字标(同一份桌面端 / 安卓的素材)。
-        Image(scheme == .dark ? "LogoLockup" : "LogoLockupLight")
+        Image("LogoLockup")
             .resizable()
             .interpolation(.high)
             .frame(width: height * Self.aspect, height: height)
