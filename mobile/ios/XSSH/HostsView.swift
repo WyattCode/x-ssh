@@ -142,7 +142,8 @@ struct HostsView: View {
                 // 内屏(自己排的两栏)没有系统导航栏,logo 自己画在侧栏顶部(右边留给外层画的「侧栏开关」)。
                 if splitLayout {
                     BrandLockup(height: 19)
-                        .padding(.leading, 16).padding(.top, 38)
+                        // 左边和下面的 `$ hosts` 标题对齐(同一个起点),不贴着屏幕圆角。
+                        .padding(.leading, 16 + cardInset).padding(.top, 38)
                         .frame(maxWidth: .infinity, alignment: .topLeading)
                         .frame(height: 57, alignment: .top)   // 上留白 38 + logo 19:框要装得下,不然 logo 溢出压到下面的搜索框
                 }
