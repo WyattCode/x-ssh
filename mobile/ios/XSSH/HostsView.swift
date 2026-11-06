@@ -115,9 +115,9 @@ struct HostsView: View {
                 // 单元格高度已经一下子缩短了(列表做不到平滑改高度):下面的行在那一帧被抵消回原位(`collapseShift`),
                 // 虚线由替身线顶上(`ghostSeparators`);等那一帧画出来,再用同一条曲线把它们一起滑到新位置。
                 Task { @MainActor in
-                    try? await Task.sleep(for: .milliseconds(30))
+                    try? await Task.sleep(for: .milliseconds(20))
                     withAnimation(Self.collapseCurve) { settled = true; ghostMoved = true }
-                    try? await Task.sleep(for: .milliseconds(280))
+                    try? await Task.sleep(for: .milliseconds(250))
                     var t = Transaction(animation: nil); t.disablesAnimations = true
                     withTransaction(t) { ghostDone = true }   // 替身线走到头了:真线在同一个位置,无缝换回来
                 }
@@ -386,7 +386,7 @@ struct HostsView: View {
         .animation(HostsView.collapseCurve, value: featured)
         .animation(.easeOut(duration: 0.2), value: activeConnecting)
         // 断开收场:箭头绿 → 灰、光标淡出、状态行换成「已断开」,各自 0.45s 平滑过渡。
-        .animation(.smooth(duration: 0.36), value: activeClosing)
+        .animation(.smooth(duration: 0.3), value: activeClosing)
         // 读屏:一行 = 主机名;连着的报状态(`❯`、光标、颜色点都只是装饰)。
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(verbatim: host.displayName))
@@ -420,7 +420,7 @@ struct HostsView: View {
             .lineLimit(1)
             .padding(.leading, promptWidth + Self.promptGap)
             // 旧的一行先淡出(0.15s),这一行晚一点点再淡入:两行字不会叠在一起。
-            .transition(.opacity.animation(.easeOut(duration: 0.24).delay(0.12)))
+            .transition(.opacity.animation(.easeInOut(duration: 0.2).delay(0.1)))
         } else if activeConnecting {
             Text(activeNeedsConfirm ? "Waiting for confirmation" : "Connecting…").foregroundStyle(Color.white.opacity(activeNeedsConfirm ? 0.85 : 0.6))
                 .font(.system(size: smallFont, design: .monospaced))
@@ -443,7 +443,7 @@ struct HostsView: View {
             .lineLimit(1)
             // 和上面那行名字的起点对齐(❯ 的宽度 + 间距)。
             .padding(.leading, promptWidth + Self.promptGap)
-            .transition(.opacity.animation(.easeOut(duration: 0.12)))
+            .transition(.opacity.animation(.easeInOut(duration: 0.1)))
         }
     }
 
@@ -461,8 +461,8 @@ struct HostsView: View {
         return (separator ? index >= k : index > k) ? statusSlot : 0
     }
 
-    /// 断开收场的动画曲线:起步快、落地软(easeOutQuint 一类),0.3s —— 快,又不生硬。
-    static let collapseCurve = Animation.timingCurve(0.22, 1, 0.36, 1, duration: 0.24)
+    /// 断开收场的动画曲线:起步轻(不是一下子弹出去)、中间快、落地软,0.22s —— 快,又丝滑。
+    static let collapseCurve = Animation.timingCurve(0.3, 0.05, 0.1, 1, duration: 0.22)
 
     /// 现在是不是在「替身线」阶段(单元格已缩短、下面的行正在滑上去)。
     private var ghostsOn: Bool { activeID == nil && !ghostDone && lastFeatured != nil && !frozenBottoms.isEmpty }
