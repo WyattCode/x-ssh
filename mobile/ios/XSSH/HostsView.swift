@@ -12,6 +12,13 @@ struct HostsView: View {
     var activeConnecting = false
     /// 连着的那台是几点连上的(行里显示已连接时长)。
     var connectedSince: Date?
+    /// 连着的那台正在等用户确认主机密钥(行上写「等待确认」,不是一直「连接中…」)。
+    var activeNeedsConfirm = false
+    /// 「已连接」那行是显示时刻还是时长(跟着会话走,由外层持有)。
+    var showsClock = false
+    var onToggleClock: (() -> Void)?
+    /// 删掉了一台主机(外层据此断开正连着它的会话)。
+    var onDeleted: ((Host) -> Void)?
     /// 详情那一侧的「新建主机」按钮通过它让这里弹出编辑页。
     @Binding var addRequested: Bool
     /// 搜索框开着没有。内屏里搜索 / 新建按钮放在右边会话那一侧的竖条里,状态由外层持有。
@@ -22,8 +29,11 @@ struct HostsView: View {
     /// 收起时侧栏内容滑出去的位移(见 `SidebarHandle`)。
     var slideOffset: CGFloat = 0
 
-    /// 点一下连着那行的「时长」,在时长和连上的时刻之间切换。
-    @State private var showsClock = false
+    /// 随系统字体大小缩放的尺寸(行字号、小字、行内留白、`❯` 宽度)。
+    @ScaledMetric(relativeTo: .body) private var rowFont: CGFloat = 19
+    @ScaledMetric(relativeTo: .caption) private var smallFont: CGFloat = 12
+    @ScaledMetric(relativeTo: .body) private var rowPad: CGFloat = 21
+    private var promptWidth: CGFloat { rowFont * 14 / 19 }
     @State private var editing: Host?
     @State private var isNew = false
     @State private var pendingDelete: Host?
@@ -66,8 +76,9 @@ struct HostsView: View {
             // 聚光灯版式:标题 + 数量 → 每台一行(颜色点 + 名字),连着的那台在原位置变成一张大卡。
             titleRow
             // 连着的那台就在它原来的位置变成大卡,不往上提(主机的顺序一直按添加先后)。
-            ForEach(shown) { host in
-                hostRow(host, featured: host.id == activeID)
+            let rows = shown
+            ForEach(rows) { host in
+                hostRow(host, featured: host.id == activeID, last: host.id == rows.last?.id)
             }
         }
         // 连上一台时,让列表滚到那张卡片(它在视野外也能看到自己选中了哪台)。
@@ -124,7 +135,7 @@ struct HostsView: View {
                     BrandLockup(height: 19)
                         .padding(.leading, 16).padding(.top, 38)
                         .frame(maxWidth: .infinity, alignment: .topLeading)
-                        .frame(height: 47, alignment: .top)
+                        .frame(height: 57, alignment: .top)   // 上留白 38 + logo 19:框要装得下,不然 logo 溢出压到下面的搜索框
                 }
                 if searching { searchField.transition(.move(edge: .top).combined(with: .opacity)) }
             }
@@ -198,7 +209,7 @@ struct HostsView: View {
                                                      set: { if !$0 { pendingDelete = nil } }),
                presenting: pendingDelete) { host in
             Button("Cancel", role: .cancel) {}
-            Button("Delete", role: .destructive) { store.delete(host) }
+            Button("Delete", role: .destructive) { store.delete(host); onDeleted?(host) }
         } message: { host in
             Text("“\(host.displayName)” and its saved password will be removed.")
         }
@@ -211,12 +222,12 @@ struct HostsView: View {
     }
 
     /// 一张主机卡(带点击、长按菜单、左滑操作、卡片背景):单独成函数,List 里的表达式才不会复杂到编译器类型推断超时。
-    private func hostRow(_ host: Host, featured: Bool) -> some View {
+    private func hostRow(_ host: Host, featured: Bool, last: Bool) -> some View {
         // 点一下 = 连接;长按 = 弹菜单(系统自带触觉反馈)。
         // 用 `.contextMenu` 带自定义 `preview:`:长按浮起来的是下面那张统一的圆角卡(每一行形状都一样),
         // 不是系统从列表单元格里取的形状(最上 / 最下一行变成胶囊、中间行是方的)。
         // 以前用 `Menu`:内屏的侧栏里菜单一弹出,整栏内容就被盖黑,看起来像「把会话收起来了」。
-        Button { onConnect(host) } label: { row(host, featured: featured) }
+        Button { onConnect(host) } label: { row(host, featured: featured, last: last) }
             .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 12, style: .continuous))
             .contextMenu {
                 Button("Connect", systemImage: "play") { onConnect(host) }
@@ -231,7 +242,7 @@ struct HostsView: View {
                     Spacer(minLength: 12)
                     Circle().fill(HostColor.pip(host.colorIndex)).frame(width: 9, height: 9)
                 }
-                .font(.system(size: 19, design: .monospaced))
+                .font(.system(size: rowFont, design: .monospaced))
                 .padding(.horizontal, 20).padding(.vertical, 22)
                 .frame(width: 320)
                 .background(Color.appSheetCard)
@@ -256,8 +267,8 @@ struct HostsView: View {
             .id(host.id)
     }
 
-    private func row(_ host: Host, featured: Bool) -> some View {
-        sshRow(host, featured: featured, last: host.id == shown.last?.id)
+    private func row(_ host: Host, featured: Bool, last: Bool) -> some View {
+        sshRow(host, featured: featured, last: last)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
             .padding(.horizontal, cardInset)
@@ -270,8 +281,8 @@ struct HostsView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: Self.promptGap) {
                 Text(verbatim: "❯")
-                    .foregroundStyle(featured ? Color.green : Color.white.opacity(0.28))
-                    .frame(width: Self.promptWidth, alignment: .leading)
+                    .foregroundStyle(featured ? Color.green : Color.white.opacity(0.4))
+                    .frame(width: promptWidth, alignment: .leading)
                 (Text(verbatim: "ssh ").foregroundStyle(Color.white.opacity(0.4))
                     + Text(verbatim: host.displayName).foregroundStyle(Color.white.opacity(0.93)))
                     .lineLimit(1).truncationMode(.tail)
@@ -287,12 +298,12 @@ struct HostsView: View {
                 }
                 .frame(width: 14, height: 14)
             }
-            .font(.system(size: 19, design: .monospaced))
+            .font(.system(size: rowFont, design: .monospaced))
             if let hint = matchHint(host) {
                 Text(verbatim: hint)
-                    .font(.system(size: 12, design: .monospaced)).foregroundStyle(Color.white.opacity(0.4))
+                    .font(.system(size: smallFont, design: .monospaced)).foregroundStyle(Color.white.opacity(0.4))
                     .lineLimit(1).truncationMode(.middle)
-                    .padding(.leading, Self.promptWidth + Self.promptGap)
+                    .padding(.leading, promptWidth + Self.promptGap)
             }
             if featured {
                 statusLine
@@ -304,9 +315,9 @@ struct HostsView: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(verbatim: host.displayName))
         .accessibilityValue(featured ? (activeConnecting ? Text("Connecting…") : Text("Connected")) : Text(verbatim: ""))
-        .padding(.horizontal, 10).padding(.vertical, 21)
+        .padding(.horizontal, 10).padding(.vertical, rowPad)
         .overlay(alignment: .bottom) {
-            if !last { DashedLine().stroke(Color.white.opacity(0.1), style: StrokeStyle(lineWidth: 1, dash: [3, 3])).frame(height: 1) }
+            if !last { DashedLine().stroke(Color.white.opacity(0.16), style: StrokeStyle(lineWidth: 1, dash: [3, 3])).frame(height: 1) }
         }
     }
 
@@ -320,13 +331,12 @@ struct HostsView: View {
     }
 
     /// `❯` 占的宽度和它到名字的间距:状态那一行的缩进用同一组数,才和名字的起点对齐。
-    private static let promptWidth: CGFloat = 14
     private static let promptGap: CGFloat = 12
 
     @ViewBuilder private var statusLine: some View {
         if activeConnecting {
-            Text("Connecting…").foregroundStyle(Color.white.opacity(0.6))
-                .font(.system(size: 12, design: .monospaced))
+            Text(activeNeedsConfirm ? "Waiting for confirmation" : "Connecting…").foregroundStyle(Color.white.opacity(activeNeedsConfirm ? 0.85 : 0.6))
+                .font(.system(size: smallFont, design: .monospaced))
         } else {
             HStack(spacing: 0) {
                 Text(verbatim: "✓ ")
@@ -338,12 +348,12 @@ struct HostsView: View {
                 }
             }
             .contentShape(Rectangle())
-            .highPriorityGesture(TapGesture().onEnded { showsClock.toggle() })
+            .highPriorityGesture(TapGesture().onEnded { onToggleClock?() })
             .foregroundStyle(Color.green.opacity(0.95))
-            .font(.system(size: 12, design: .monospaced))
+            .font(.system(size: smallFont, design: .monospaced))
             .lineLimit(1)
             // 和上面那行名字的起点对齐(❯ 的宽度 + 间距)。
-            .padding(.leading, Self.promptWidth + Self.promptGap)
+            .padding(.leading, promptWidth + Self.promptGap)
         }
     }
 

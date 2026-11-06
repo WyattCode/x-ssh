@@ -33,6 +33,8 @@ final class TerminalModel: Identifiable {
     }
     /// 这次会话连上的时刻(主机列表里连着的那一行显示已连接时长)。
     private(set) var connectedAt: Date?
+    /// 主机列表里「已连接」那行显示连上的时刻(true)还是时长(false):点一下切换,跟着会话走。
+    var showsConnectedClock = false
     private(set) var rows: [ScreenRow] = []
     private(set) var cursor = CursorState(col: 0, row: 0, visible: true)
     private(set) var title = ""

@@ -190,6 +190,14 @@ struct RootView: View {
         }
     }
 
+    /// 正连着的会话在等用户确认主机密钥(新主机 / 密钥变了)。
+    private var activeNeedsConfirm: Bool {
+        switch active?.state {
+        case .needsTrust, .keyChanged: true
+        default: false
+        }
+    }
+
     /// App 启动的时刻。启动后头 3.5 秒里的把手不淡出(开屏盖着,不然用户还没看到它就没了)。
     private static let launchTime = Date()
 
@@ -299,7 +307,9 @@ struct RootView: View {
 
     private var hostsView: some View {
         HostsView(splitLayout: sizeClass == .regular, activeID: active.flatMap { $0.isEnded ? nil : $0.host.id },
-                  activeConnecting: activeConnecting, connectedSince: active?.connectedAt, addRequested: $addHostRequested, searching: $searching, onConnect: open,
+                  activeConnecting: activeConnecting, connectedSince: active?.connectedAt, activeNeedsConfirm: activeNeedsConfirm,
+                  showsClock: active?.showsConnectedClock ?? false, onToggleClock: { active?.showsConnectedClock.toggle() },
+                  onDeleted: { if active?.host.id == $0.id { close() } }, addRequested: $addHostRequested, searching: $searching, onConnect: open,
                   onCollapse: { setDrawer(false) }, slideOffset: 0)
     }
 
