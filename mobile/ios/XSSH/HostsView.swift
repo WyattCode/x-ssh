@@ -37,6 +37,8 @@ struct HostsView: View {
     private var rowPad: CGFloat { min(rowPadBase, 28) }
     @ScaledMetric(relativeTo: .title) private var titleFont: CGFloat = 26
     private var promptWidth: CGFloat { rowFont * 14 / 19 }
+    /// `❯` 的字形比字母的中线低约 1.3pt(量过),整体往上抬一点,和名字的中线对齐;随字号缩放。
+    private var arrowLift: CGFloat { rowFont * 0.07 }
     @State private var editing: Host?
     @State private var isNew = false
     @State private var pendingDelete: Host?
@@ -115,7 +117,7 @@ struct HostsView: View {
                 Button { startAdding() } label: {
                     VStack(spacing: 10) {
                         HStack(spacing: 8) {
-                            Text(verbatim: "❯").foregroundStyle(Color.green)
+                            Text(verbatim: "❯").offset(y: -arrowLift).foregroundStyle(Color.green)
                             Text(verbatim: "ssh --new")
                             BlinkingCursor()
                         }
@@ -130,7 +132,7 @@ struct HostsView: View {
                 // 搜不到:一行 `❯ grep "关键字"` + 一句话,和列表同一套终端风格(不用系统的放大镜图)。
                 VStack(spacing: 10) {
                     HStack(spacing: 8) {
-                        Text(verbatim: "❯").foregroundStyle(Color.green)
+                        Text(verbatim: "❯").offset(y: -arrowLift).foregroundStyle(Color.green)
                         Text(verbatim: "grep").foregroundStyle(Color.white.opacity(0.4))
                         Text(verbatim: "\"\(query)\"").lineLimit(1).truncationMode(.middle)
                     }
@@ -315,6 +317,7 @@ struct HostsView: View {
             // 间距自己控制(HStack 间距为 0):名字和颜色点之间只留 8pt,长名字才不会被提前截断。
             HStack(alignment: .firstTextBaseline, spacing: 0) {
                 Text(verbatim: "❯")
+                    .offset(y: -arrowLift)
                     .foregroundStyle(featured ? Color.green : Color.white.opacity(0.4))
                     .frame(width: promptWidth, alignment: .leading)
                     .padding(.trailing, Self.promptGap)
@@ -410,7 +413,7 @@ struct HostsView: View {
     /// 搜索框也是一行命令:`❯ grep ▍输入`,没有圆角底,下面一条虚线;`❯` 和列表行的 `❯` 在同一条竖线上。
     private var searchField: some View {
         HStack(spacing: 10) {
-            Text(verbatim: "❯").foregroundStyle(Color.green)
+            Text(verbatim: "❯").offset(y: -arrowLift).foregroundStyle(Color.green)
             Text(verbatim: "grep").foregroundStyle(Color.white.opacity(0.4))
             TextField("Search hosts", text: $query)
                 .textInputAutocapitalization(.never).autocorrectionDisabled()
