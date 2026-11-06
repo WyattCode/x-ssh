@@ -309,19 +309,6 @@ struct HostsView: View {
             .contentShape(Rectangle())
     }
 
-    /// 名字里的空格比字母窄 20%:等宽字体下空格和字母一样宽,「Home Lab」这样的名字中间显得太空。
-    /// (等宽字体的字宽约 0.6 倍字号,每个空格后面收回字宽的 20%。)
-    private func nameText(_ name: String) -> Text {
-        let cut = rowFont * 0.6 * 0.2
-        let parts = name.split(separator: " ", omittingEmptySubsequences: false)
-        var out = Text(verbatim: "")
-        for (i, part) in parts.enumerated() {
-            if i > 0 { out = out + Text(verbatim: " ").kerning(-cut) }
-            out = out + Text(verbatim: String(part))
-        }
-        return out
-    }
-
     /// 每台一行:`❯ 名字`(等宽字体,名字一行;不再写 `ssh` —— 每行都有太重复),行尾一个这台的颜色点,行与行之间一条虚线。
     /// 连着的那台:`❯` 变绿、名字后面一个闪烁的光标,下面多一行绿色的「✓ 已连接 · 时长」;连接中是「连接中…」,颜色点的位置转圈。
     /// 名字必须一行(太长截断)。不显示 IP / 端口。
@@ -334,7 +321,7 @@ struct HostsView: View {
                     .foregroundStyle(featured ? Color.green : Color.white.opacity(0.4))
                     .frame(width: promptWidth, alignment: .leading)
                     .padding(.trailing, Self.promptGap)
-                nameText(host.displayName).foregroundStyle(Color.white.opacity(0.93))
+                Text.narrowingSpaces(host.displayName, font: .monospacedSystemFont(ofSize: rowFont, weight: .regular)).foregroundStyle(Color.white.opacity(0.93))
                     .lineLimit(1).truncationMode(.tail)
                 if featured && !activeConnecting { BlinkingCursor().padding(.leading, 8) }
                 Spacer(minLength: 8)
