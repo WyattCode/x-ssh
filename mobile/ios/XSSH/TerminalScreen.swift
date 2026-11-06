@@ -91,7 +91,9 @@ struct TerminalScreen: View {
                 }
             }
             // 内屏(常规宽度)左边紧挨着侧栏的分界线,文字贴着边太挤:多留一些;外屏窄,保持 4pt。
-            .padding(.horizontal, sizeClass == .regular ? 16 : 4)
+            // 外屏:20pt,和主机列表页的对齐线(logo / `$ hosts` / `❯`)同一条竖线,从列表点进会话左边缘不跳;
+            // 内屏:16pt(左边紧挨着侧栏的分界线,文字贴着边太挤)。
+            .padding(.horizontal, sizeClass == .regular ? 16 : 20)
             // 内屏自己排版没有导航栏:终端从会话名下面开始(和外屏导航栏下面的位置一致)。
             .padding(.top, embedded ? embeddedTop : 0)
             .accessibilityElement()
@@ -137,8 +139,7 @@ struct TerminalScreen: View {
                     .fixedSize(horizontal: true, vertical: false)
                     // 系统只给这个项约 64pt 的宽度:短名字(「duo」)要靠左,否则会在这块里居中。
                     .frame(minWidth: 80, alignment: .leading)
-                    // 系统给顶部工具栏项留了约 20pt 的左边距,名字被推得离屏幕边太远:往回收,和终端文字的左边对齐。
-                    .padding(.leading, -16)
+                    // 系统给顶部工具栏项留的约 20pt 左边距,正好和列表页的 logo / 终端文字的左边缘一致,不再往回收。
             }
             // 去掉系统给工具栏项套的玻璃圆泡,否则 logo + 主机名被裁在一个小圆里。
             .sharedBackgroundVisibility(.hidden)
