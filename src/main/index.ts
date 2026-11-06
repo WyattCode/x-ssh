@@ -25,7 +25,7 @@ import { registerUserVerifyIpc, gateKeyConnect, userVerifyBlocksQuiet } from './
 import { capHistory } from './sessionHistory'
 import { displayIdForBounds, pickWindowPlacement } from './windowPlacement'
 import { localX11Target } from './x11'
-import { ensureLocalXServer } from './x11Server'
+import { ensureLocalXServer, findXServer } from './x11Server'
 
 const store = new HostStore()
 const knownHosts = new KnownHosts()
@@ -2736,16 +2736,16 @@ app.whenReady().then(async () => {
   }
   registerIpc()
   // VcXsrv needs ~15 s to bind :6000 on a cold start — much longer than a
-  // remote clipboard read will wait. Boot it now, but only when some saved
-  // host actually asks for X11 forwarding, and never block startup on it.
+  // remote clipboard read will wait. If one is installed, boot it now so the
+  // first paste after ticking "X11 forwarding" already succeeds. Set
+  // XSSH_X11_AUTOSTART=0 to manage the server yourself.
   void (async () => {
     try {
-      const hosts = await store.list()
-      if (!hosts.some((h) => h.x11Forward)) return
+      if (!findXServer()) return
       const t = localX11Target()
       void ensureLocalXServer({ host: t.host, port: t.port, display: t.display })
     } catch {
-      /* A locked or unreadable host store must never delay startup. */
+      /* X server discovery must never delay startup. */
     }
   })()
   // Shrink a settings.json that grew under the old count-only history cap.
