@@ -10,6 +10,8 @@ struct HostsView: View {
     let activeID: UUID?
     /// 正在连着的那台还在「连接中 / 等确认密钥」:行尾显示转圈而不是绿点。
     var activeConnecting = false
+    /// 用户刚点了断开、列表里这台正在「放手」(外屏:翻回列表的时候):箭头、光标、状态行一步步收场(见 `RootView.close`)。
+    var activeClosing = false
     /// 连着的那台是几点连上的(行里显示已连接时长)。
     var connectedSince: Date?
     /// 连着的那台正在等用户确认主机密钥(行上写「等待确认」,不是一直「连接中…」)。
@@ -102,6 +104,8 @@ struct HostsView: View {
         // 触觉:开始连接给一下轻的,连上给一下「成功」。
         .sensoryFeedback(trigger: activeID) { _, new in new != nil ? .impact(weight: .light) : nil }
         .sensoryFeedback(trigger: connectedSince) { _, new in new != nil ? .success : nil }
+        // 断开的那一刻轻轻一下(「放手」)。
+        .sensoryFeedback(trigger: activeClosing) { _, new in new ? .impact(flexibility: .soft, intensity: 0.6) : nil }
         // 紧凑宽度(主页)背景纯黑;展开成两栏时左边这一栏要和右边的会话(终端纯黑)有颜色区分,用深灰。
         .scrollContentBackground(.hidden)
         // 虚线是独立的一行(高 1pt):列表默认的最小行高会把它撑大,行距就乱了。
@@ -318,12 +322,12 @@ struct HostsView: View {
             HStack(alignment: .firstTextBaseline, spacing: 0) {
                 Text(verbatim: "❯")
                     .offset(y: -arrowLift)
-                    .foregroundStyle(featured ? Color.green : Color.white.opacity(0.4))
+                    .foregroundStyle(featured && !activeClosing ? Color.green : Color.white.opacity(0.4))
                     .frame(width: promptWidth, alignment: .leading)
                     .padding(.trailing, Self.promptGap)
                 Text.narrowingSpaces(host.displayName, font: .monospacedSystemFont(ofSize: rowFont, weight: .regular)).foregroundStyle(Color.white.opacity(0.93))
                     .lineLimit(1).truncationMode(.tail)
-                if featured && !activeConnecting { BlinkingCursor().padding(.leading, 8) }
+                if featured && !activeConnecting && !activeClosing { BlinkingCursor().padding(.leading, 8).transition(.opacity) }
                 Spacer(minLength: 8)
                 ZStack {
                     if featured && activeConnecting {
@@ -346,10 +350,12 @@ struct HostsView: View {
             }
             if featured {
                 statusLine
-                    .transition(.opacity.animation(.easeOut(duration: 0.2)))
+                    .transition(.opacity.animation(.easeOut(duration: 0.3)))
             }
         }
         .animation(.easeOut(duration: 0.2), value: activeConnecting)
+        // 断开收场:箭头绿 → 灰、光标淡出、状态行换成「已断开」,各自 0.45s 平滑过渡。
+        .animation(.smooth(duration: 0.45), value: activeClosing)
         // 读屏:一行 = 主机名;连着的报状态(`❯`、光标、颜色点都只是装饰)。
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(verbatim: host.displayName))
@@ -370,7 +376,19 @@ struct HostsView: View {
     private static let promptGap: CGFloat = 9.4
 
     @ViewBuilder private var statusLine: some View {
-        if activeConnecting {
+        if activeClosing {
+            // 断开的那一刻:「✓ 已连接 · 时长」淡成灰色的「✕ 已断开」,停一下,再整行收掉。
+            HStack(spacing: 0) {
+                Text(verbatim: "✕ ")
+                Text("Disconnected")
+            }
+            .foregroundStyle(Color.white.opacity(0.5))
+            .font(.system(size: smallFont, design: .monospaced))
+            .lineLimit(1)
+            .padding(.leading, promptWidth + Self.promptGap)
+            // 旧的一行先淡出(0.15s),这一行晚一点点再淡入:两行字不会叠在一起。
+            .transition(.opacity.animation(.easeOut(duration: 0.3).delay(0.16)))
+        } else if activeConnecting {
             Text(activeNeedsConfirm ? "Waiting for confirmation" : "Connecting…").foregroundStyle(Color.white.opacity(activeNeedsConfirm ? 0.85 : 0.6))
                 .font(.system(size: smallFont, design: .monospaced))
                 // 和「已连接」那行一样缩进到名字的起点。
@@ -392,12 +410,12 @@ struct HostsView: View {
             .lineLimit(1)
             // 和上面那行名字的起点对齐(❯ 的宽度 + 间距)。
             .padding(.leading, promptWidth + Self.promptGap)
+            .transition(.opacity.animation(.easeOut(duration: 0.15)))
         }
     }
 
-    static let cardGap: CGFloat = 6
-    /// 两栏时卡片宽 = 侧栏宽的 92%,左右各留 4%(参考图里卡片和分界线之间就是这么一条窄缝)。
-    /// 按侧栏实际宽度算,拖动改宽后比例不变。列表自带的左右边距已去掉(见 `SplitListMargins`)。
+    /// 内屏两栏时左右各留侧栏宽的 4%(行的起点和虚线的两端都在这条线内,见 `rowInset`)。
+    /// 按侧栏实际宽度算,宽度变了比例不变。列表自带的左右边距已去掉(见 `SplitListMargins`)。
     private var cardInset: CGFloat { splitLayout ? listWidth * 0.04 : 0 }
     /// 内屏侧栏的左右对齐线:logo、`$ hosts`、每行的 `❯`、虚线的起点都在这条线上(和外屏一致:外屏是列表自带的约 20pt 边距),
     /// 右边虚线的终点对称。外屏不用(0)。
@@ -412,9 +430,11 @@ struct HostsView: View {
 
     /// 搜索框也是一行命令:`❯ grep ▍输入`,没有圆角底,下面一条虚线;`❯` 和列表行的 `❯` 在同一条竖线上。
     private var searchField: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 0) {
+            // 箭头占的宽度和列表行一样(`promptWidth` + `promptGap`):`grep` 和下面名字的起点在同一条竖线上。
             Text(verbatim: "❯").offset(y: -arrowLift).foregroundStyle(Color.green)
-            Text(verbatim: "grep").foregroundStyle(Color.white.opacity(0.4))
+                .frame(width: promptWidth, alignment: .leading).padding(.trailing, Self.promptGap)
+            Text(verbatim: "grep").foregroundStyle(Color.white.opacity(0.4)).padding(.trailing, 10)
             TextField("Search hosts", text: $query)
                 .textInputAutocapitalization(.never).autocorrectionDisabled()
                 .focused($searchFocused).submitLabel(.search)
