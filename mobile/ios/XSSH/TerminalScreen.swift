@@ -153,12 +153,12 @@ struct TerminalScreen: View {
                 // 快捷键面板和系统键盘是两颗独立的按钮,各自亮着(蓝)表示开着 —— 同安卓的 ⌘ / ⌨。
                 ToolbarItem(placement: .bottomBar) {
                     Button("Shortcuts", systemImage: "command") { withAnimation(.smooth(duration: 0.25)) { model.showsKeys.toggle() } }
-                        .tint(model.showsKeys ? Color.appAccent : nil)
+                        .tint(model.showsKeys ? Color.accentColor : nil)
                 }
                 .visibilityPriority(.high)
                 ToolbarItem(placement: .bottomBar) {
                     Button("Keyboard", systemImage: "keyboard") { model.wantsKeyboard.toggle() }
-                        .tint(model.wantsKeyboard ? Color.appAccent : nil)
+                        .tint(model.wantsKeyboard ? Color.accentColor : nil)
                 }
                 .visibilityPriority(.high)
                 ToolbarItem(placement: .bottomBar) {
@@ -201,7 +201,7 @@ struct TerminalScreen: View {
         Button(role: role, action: action) {
             Image(systemName: icon)
                 .font(.system(size: 17, weight: .medium))
-                .foregroundStyle(on ? Color.appAccent : (role == .destructive ? Color.red : Color.white))
+                .foregroundStyle(on ? Color.accentColor : (role == .destructive ? Color.red : Color.white))
                 .frame(width: 56, height: 44)
                 .contentShape(Rectangle())
         }
@@ -233,7 +233,7 @@ struct TerminalScreen: View {
                         guard to >= from else { continue }
                         ctx.fill(Path(CGRect(x: CGFloat(from) * m.width, y: CGFloat(row) * m.height,
                                              width: CGFloat(to - from + 1) * m.width, height: m.height)),
-                                 with: .color(Color.appAccent.opacity(0.4)))
+                                 with: .color(Color.accentColor.opacity(0.4)))
                     }
                 }
                 let c = model.cursor

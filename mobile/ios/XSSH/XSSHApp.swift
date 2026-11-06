@@ -15,7 +15,6 @@ struct XSSHApp: App {
                     .environment(gate)
                     .background { FoldTracker(state: fold).ignoresSafeArea() }
                     .preferredColorScheme(.dark)
-                    .tint(.appAccent)
             }
         }
     }
@@ -457,7 +456,7 @@ struct RootView: View {
                     Button(role: item.role, action: item.action) {
                         Image(systemName: item.icon)
                             .font(.system(size: 18, weight: .medium))
-                            .foregroundStyle(item.on ? Color.appAccent : Color.white)
+                            .foregroundStyle(item.on ? Color.accentColor : Color.white)
                             .frame(width: 44, height: 44)
                             .contentShape(Rectangle())
                     }
