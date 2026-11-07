@@ -204,6 +204,13 @@ fun App(devTarget: DevTarget? = null) {
     // 分屏进出的某些路径都会重建)。重建之后 SSH 会话在 SessionRegistry 里还活着,
     // 丢的只是"我刚才在哪一屏" —— 表现就是正敲着命令突然被踢回主机列表。
     var termHostId by rememberSaveable { mutableStateOf<String?>(null) }
+    // 进程被系统杀掉后重新打开:saved state 里还留着上一次的 termHostId,但 SessionRegistry 已经空了。
+    // 内屏 / 平板分支不像手机分支有「会话还活着才接着显示」的守卫,放着不管会自己钻进终端重新拨号
+    // (加锁主机还会平白弹一次指纹框)。只在第一次组合时按一次(这时没有「刚点下去还在连」的情况)。
+    remember {
+        val id = termHostId
+        if (id != null && devTarget == null && SessionRegistry[id] == null) termHostId = null
+    }
     // 折叠屏双终端的右侧会话 id。合上外屏**不清** —— 会话仍在 SessionRegistry,展开后原样配对。
     var termCompanionId by rememberSaveable { mutableStateOf<String?>(null) }
     // 双终端当前收键盘的那一侧。

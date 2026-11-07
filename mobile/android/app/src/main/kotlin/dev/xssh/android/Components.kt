@@ -501,14 +501,16 @@ fun KeyCap(
 @Composable
 fun DashedDivider(modifier: Modifier = Modifier) {
     val color = LocalXssh.current.dash
+    // 每行一条、滚动时每帧重画:虚线样式缓存起来,不要每次绘制都 new。
+    val dashPx = with(androidx.compose.ui.platform.LocalDensity.current) { 3.dp.toPx() }
+    val effect = remember(dashPx) { PathEffect.dashPathEffect(floatArrayOf(dashPx, dashPx)) }
     Canvas(modifier.fillMaxWidth().height(1.dp)) {
-        val dash = 3.dp.toPx()
         drawLine(
             color = color,
             start = Offset(0f, size.height / 2),
             end = Offset(size.width, size.height / 2),
             strokeWidth = 1.dp.toPx(),
-            pathEffect = PathEffect.dashPathEffect(floatArrayOf(dash, dash)),
+            pathEffect = effect,
         )
     }
 }
@@ -595,7 +597,7 @@ fun CapsuleButton(
             .clip(CircleShape)
             .background(if (enabled) background else background.copy(alpha = background.alpha * 0.35f))
             .pointerHoverIcon(PointerIcon.Hand)
-            .clickable(interactionSource = interaction, indication = null, enabled = enabled) {
+            .clickable(interactionSource = interaction, indication = null, enabled = enabled, role = androidx.compose.ui.semantics.Role.Button) {
                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 onClick()
             }

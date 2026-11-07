@@ -3,7 +3,6 @@
 <resources>
     <string name="clipboard_unavailable">无法访问剪贴板</string>
     <string name="edit_address">地址</string>
-    <string name="edit_appearance">外观:%1$s</string>
     <string name="edit_back">返回</string>
     <string name="edit_biometric_unlock">用生物识别解锁</string>
     <string name="edit_copy_public_key">复制公钥</string>
@@ -51,9 +50,6 @@
     <string name="edit_save">保存</string>
     <string name="edit_selected">已选</string>
     <string name="edit_show_password">显示密码</string>
-    <string name="edit_theme_dark">深色</string>
-    <string name="edit_theme_light">浅色</string>
-    <string name="edit_theme_system">跟随系统</string>
     <string name="edit_title_edit">编辑主机</string>
     <string name="edit_title_new">新建主机</string>
     <string name="edit_tmux">连接后进入 tmux</string>
@@ -187,6 +183,13 @@
     <string name="host_private_key">私钥</string>
     <string name="host_running">运行中</string>
     <string name="host_disconnected">已断开</string>
+    <string name="host_gate_close">关闭</string>
+    <string name="duo_recent">最近连接</string>
+    <string name="host_err_disconnected">服务器中断了连接。可能是网络不稳定,或服务器限制了这次登录。</string>
+    <string name="host_err_timeout">连接超时。检查地址和端口对不对,以及手机到服务器的网络通不通。</string>
+    <string name="host_err_refused">服务器拒绝了连接。确认 SSH 服务已开启,端口是否正确。</string>
+    <string name="host_err_unreachable">连不到这个地址。检查网络,或确认服务器在线。</string>
+    <string name="host_err_auth">用户名或密码不对。</string>
     <string name="host_row_connecting">连接中…</string>
     <string name="host_row_confirm">等待确认</string>
     <string name="host_row_failed">连接失败</string>
@@ -194,9 +197,6 @@
     <string name="host_search_placeholder">搜索名称 / 地址 / 用户</string>
     <string name="host_select_on_left">选择左边的主机</string>
     <string name="host_status">状态</string>
-    <string name="host_theme_dark">深色</string>
-    <string name="host_theme_light">浅色</string>
-    <string name="host_theme_system">跟随系统</string>
     <string name="host_unconfirmed">未确认</string>
     <string name="host_unlock">解锁</string>
     <string name="host_unlock_biometric_or_pin">生物识别或锁屏密码</string>
@@ -232,7 +232,6 @@
     <string name="set_terminal_theme">终端配色</string>
     <string name="set_term_theme_system">默认</string>
     <string name="set_title">设置</string>
-    <string name="set_appearance">外观</string>
     <string name="set_more">更多</string>
     <string name="snip_cancel">取消</string>
     <string name="snip_command">命令</string>
@@ -258,7 +257,6 @@
     <string name="snip_tag_no_enter">不回车</string>
     <string name="snip_tag_this_host">仅本机</string>
     <string name="snip_title">命令片段</string>
-    <string name="tab_appearance">外观:%1$s</string>
     <string name="tab_cancel">取消</string>
     <string name="tab_chip_unverified">待确认</string>
     <string name="tab_clear_search">清除搜索</string>
@@ -373,7 +371,6 @@
     <plurals name="files_queue_cleared">
         <item quantity="other">已清空 %1$d 批排队</item>
     </plurals>
-    <string name="theme_persist_failed">主题保存失败,请重试</string>
     <plurals name="files_cancelled_downloaded">
         <item quantity="other">已取消(已下载 %d 个)</item>
     </plurals>

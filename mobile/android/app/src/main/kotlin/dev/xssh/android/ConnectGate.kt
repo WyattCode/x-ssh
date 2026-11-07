@@ -50,6 +50,9 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -99,6 +102,8 @@ fun HostKeyGate(
     tablet: Boolean,
     /** 不为空时:[host] 是经它去连的跳板机,这一页确认的是跳板机的密钥。 */
     jumpFor: Host? = null,
+    /** 嵌在内屏抽屉布局的右栏里:不画自己的「‹」(抽屉就是导航),文字按钮叫「关闭」。 */
+    inDrawer: Boolean = false,
     onTrust: () -> Unit,
     onExit: () -> Unit,
 ) {
@@ -162,7 +167,7 @@ fun HostKeyGate(
             )
         },
     )
-    GatePage(host, content, tablet, onExit)
+    GatePage(host, content, tablet, inDrawer, onExit)
 }
 
 /** 正在连接 / 连接失败。[failure] 为 null 时是连接中,[waited] 是已经等了几秒。 */
@@ -178,6 +183,8 @@ fun ConnectGate(
     onExit: () -> Unit,
     /** 失败原文(应用自己的错误才有):收在卡片里的「详情」下面,默认不展开。 */
     detail: String? = null,
+    /** 嵌在内屏抽屉布局的右栏里:不画自己的「‹」,文字按钮叫「关闭」。 */
+    inDrawer: Boolean = false,
 ) {
     val p = LocalXssh.current
     // Retry / fix both reconnect: remember must be unconditional (Compose).
@@ -215,33 +222,44 @@ fun ConnectGate(
     } else {
         val retryLabel = stringResource(R.string.host_gate_retry)
         val primary = fix ?: retry?.let { retryLabel to it }
+        // 只有「重试」是一次性的(连点 / 回车 + 点按钮会同时发起两次重连)。
+        // 「就地修复」只是打开编辑页,不是重连:点了、取消了,按钮还得能再点。
+        val trigger: (() -> Unit)? = primary?.second?.let { run -> if (fix != null) run else ({ actOnce(run) }) }
+        // 认得出的底层英文错误给一句人话,原文收进「详情」。
+        val friendly = ConnectErrors.friendly(failure)
+        val friendlyText = friendly?.let { stringResource(it.messageRes()) }
         GateContent(
             icon = XIcons.Alert,
             tint = p.danger,
             tile = p.danger.copy(alpha = 0.12f),
             title = stringResource(R.string.host_gate_failed),
             narrow = true,
-            onEnter = primary?.second?.let { run -> { actOnce(run) } },
-            body = { MessageCard(failure, detail) },
+            onEnter = trigger,
+            body = {
+                MessageCard(
+                    friendlyText ?: failure,
+                    if (friendlyText != null) listOfNotNull(failure, detail).joinToString("\n") else detail,
+                )
+            },
             actions = { stacked ->
                 GateButtons(
                     stacked = stacked,
                     primary = primary?.first,
-                    onPrimary = { primary?.second?.let { actOnce(it) } },
+                    onPrimary = { trigger?.invoke() },
                     // 有「填写密码」这类修复时,重试退到第二颗(填完再连就是重试)。
-                    secondary = stringResource(R.string.host_back),
+                    secondary = stringResource(if (inDrawer) R.string.host_gate_close else R.string.host_back),
                     onSecondary = onExit,
                     tertiary = if (fix != null && retry != null) retryLabel to ({ actOnce(retry) }) else null,
                 )
             },
         )
     }
-    GatePage(host, content, tablet, onExit)
+    GatePage(host, content, tablet, inDrawer, onExit)
 }
 
 /** 按设备摆放:平板卡片、折叠屏内屏双栏、其余单栏;附带 ‹ 与键盘。 */
 @Composable
-private fun GatePage(host: Host, content: GateContent, tablet: Boolean, onExit: () -> Unit) {
+private fun GatePage(host: Host, content: GateContent, tablet: Boolean, inDrawer: Boolean, onExit: () -> Unit) {
     val p = LocalXssh.current
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
@@ -321,7 +339,9 @@ private fun GatePage(host: Host, content: GateContent, tablet: Boolean, onExit: 
                 Column(Modifier.widthIn(max = 340.dp).fillMaxWidth()) { content.actions(true) }
             }
         }
-        if (bottomBar) {
+        if (inDrawer) {
+            // 内屏抽屉布局:导航在左边的抽屉里,这一页不再自己画「‹」。
+        } else if (bottomBar) {
             CompositionLocalProvider(LocalBackdrop provides backdrop) {
                 BottomBar(
                     Modifier.align(Alignment.BottomCenter),
@@ -353,6 +373,8 @@ private fun Identity(host: Host, content: GateContent) {
             textAlign = TextAlign.Center,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
+            // 状态变了(连接中 → 失败)读屏要念出来。
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
         )
         Spacer(Modifier.height(4.dp))
         // 三种状态一律「标题是状态、下面是哪台主机」,行数不随状态变(见 ConnectGate 的标题注释)。
@@ -407,7 +429,9 @@ fun FingerprintArtAndWords(value: String, color: Color, artTint: Color = Color(0
     val words = remember(value) { RandomArt.wrapped(value) }
     SelectionContainer {
         BoxWithConstraints(Modifier.fillMaxWidth()) {
-            if (art != null && maxWidth >= 280.dp) {
+            // 按字体缩放折算:字放大后并排放不下(指纹文字不换行,会被截掉),要改成上下排。
+            val fontScale = androidx.compose.ui.platform.LocalDensity.current.fontScale
+            if (art != null && maxWidth.value / fontScale >= 280f) {
                 Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.Top) {
                     HostKeyArt(art, artTint)
                     FingerprintWords(words, color)
@@ -488,11 +512,11 @@ private fun HostKeyArt(lines: List<String>, tint: Color) {
 @Composable
 private fun StatusCard(waited: Int) {
     val p = LocalXssh.current
+    // 不画卡片:左边的主机行已经在转圈写「连接中…」,这里只留一行转圈加已等待的秒数,别再重复一张卡片。
     Row(
         Modifier
             .fillMaxWidth()
-            .cardChrome()
-            .padding(horizontal = 18.dp, vertical = 16.dp),
+            .padding(horizontal = 18.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center,
     ) {
@@ -505,6 +529,14 @@ private fun StatusCard(waited: Int) {
             Text(stringResource(R.string.host_gate_waited, waited), color = p.textDim, fontSize = 13.sp, maxLines = 1)
         }
     }
+}
+
+private fun FriendlyError.messageRes(): Int = when (this) {
+    FriendlyError.Disconnected -> R.string.host_err_disconnected
+    FriendlyError.Timeout -> R.string.host_err_timeout
+    FriendlyError.Refused -> R.string.host_err_refused
+    FriendlyError.Unreachable -> R.string.host_err_unreachable
+    FriendlyError.AuthFailed -> R.string.host_err_auth
 }
 
 /** 失败原因:原话照录(服务端 / 系统的错误文本),放在卡片里,和指纹卡片一个样子。 */

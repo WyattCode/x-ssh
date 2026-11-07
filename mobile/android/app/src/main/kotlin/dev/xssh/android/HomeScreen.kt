@@ -530,6 +530,8 @@ internal fun HostListPane(
     selectionFill: Boolean = true,
     /** 会话区报上来的状态(主机 id → 连接中 / 等确认 / 失败):对应那一行显示转圈和状态字。 */
     hostStatus: Map<String, DuoStatus> = emptyMap(),
+    /** 取某台主机会话的建立时间(毫秒);没有就回退到 [sessions]。内屏抽屉不传 sessions,用它给行显示「运行中 · 时长」。 */
+    startedAtOf: ((String) -> Long?)? = null,
 ) {
     val p = LocalXssh.current
     val scope = rememberCoroutineScope()
@@ -677,9 +679,16 @@ internal fun HostListPane(
                 }
             }
             if (hosts.isEmpty()) {
-                // 只可能是"搜了但没匹配上" —— 一台主机都没有时走的是整屏的 FirstRun。
-                item(key = "none", span = { GridItemSpan(maxLineSpan) }) {
-                    NoMatches(query, Modifier.fillMaxWidth().padding(top = 48.dp).animateItem())
+                if (total == 0) {
+                    // 一台主机都没有(内屏抽屉没有整屏的 FirstRun):一行 `❯ new ▍`,点一下就新建。
+                    item(key = "first", span = { GridItemSpan(maxLineSpan) }) {
+                        NewHostPrompt(onNew, Modifier.fillMaxWidth().padding(top = 40.dp, start = BoxPad).animateItem())
+                    }
+                } else {
+                    // 搜了但没匹配上。
+                    item(key = "none", span = { GridItemSpan(maxLineSpan) }) {
+                        NoMatches(query, Modifier.fillMaxWidth().padding(top = 48.dp).animateItem())
+                    }
                 }
             }
             // 会话区:活着的会话在最上面,点一行 = 接管(和平板侧栏同一个模型)。
@@ -708,6 +717,9 @@ internal fun HostListPane(
                         .animateItem()
                         .onGloballyPositioned { rowBounds[host.id] = it.boundsInRoot() },
                 ) {
+                    // 行离开组合(滚出屏幕 / 被搜索过滤掉 / 删掉)就把它的矩形撤掉:
+                    // 否则那块空白会被当成「点在行里」,展开着的左滑按钮合不上。
+                    androidx.compose.runtime.DisposableEffect(host.id) { onDispose { rowBounds.remove(host.id) } }
                     val open = host.id == openId
                     SwipeActions(
                         open = open,
@@ -740,7 +752,7 @@ internal fun HostListPane(
                             selected = selectionFill && host.id == selectedId,
                             running = host.id in running,
                             status = hostStatus[host.id],
-                            startedAt = sessions.firstOrNull { it.hostId == host.id }?.startedAt,
+                            startedAt = startedAtOf?.invoke(host.id) ?: sessions.firstOrNull { it.hostId == host.id }?.startedAt,
                             // 开着的时候点卡片是"合上",不是连接 —— 和 iOS 一致。
                             onPrimary = { if (openId != null) openId = null else onPrimary(it) },
                             onInfo = null,
@@ -942,25 +954,34 @@ private fun FirstRun(modifier: Modifier, onNew: () -> Unit) {
     ) {
         BrandLockup(BrandTitleHeight)
         Spacer(Modifier.height(24.dp))
-        // 一行提示符 `❯ new ▍`,点一下就新建(iOS 版的空态,和列表同一套终端风格)。
-        // 新建本来就在边缘轨道上,这里是同一个动作的另一个入口,不算重复的按钮 —— 它长得就是一行字。
-        Column(
-            Modifier
-                .clip(RoundedCornerShape(RadiusBox))
-                .clickable(onClick = onNew)
-                .padding(vertical = 8.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Prompt(font, color = p.ok)
-                Spacer(Modifier.width(PromptGap))
-                Text("new", color = p.text, fontFamily = XsshFonts.monoUi, fontSize = font, maxLines = 1)
-                Spacer(Modifier.width(8.dp))
-                BlinkingCursor(height = 20.dp)
-            }
-            Spacer(Modifier.height(10.dp))
-            Text(stringResource(R.string.host_none_yet), color = p.textDim, fontSize = 15.sp)
-        }
+        NewHostPrompt(onNew)
     }
+    }
+}
+
+/**
+ * 一行提示符 `❯ new ▍`,点一下就新建(iOS 版的空态,和列表同一套终端风格)。
+ * 新建本来就在边缘轨道上,这里是同一个动作的另一个入口,不算重复的按钮 —— 它长得就是一行字。
+ */
+@Composable
+private fun NewHostPrompt(onNew: () -> Unit, modifier: Modifier = Modifier) {
+    val p = LocalXssh.current
+    val font = 22.sp
+    Column(
+        modifier
+            .clip(RoundedCornerShape(RadiusBox))
+            .clickable(onClick = onNew)
+            .padding(vertical = 8.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Prompt(font, color = p.ok)
+            Spacer(Modifier.width(PromptGap))
+            Text("new", color = p.text, fontFamily = XsshFonts.monoUi, fontSize = font, maxLines = 1)
+            Spacer(Modifier.width(8.dp))
+            BlinkingCursor(height = 20.dp)
+        }
+        Spacer(Modifier.height(10.dp))
+        Text(stringResource(R.string.host_none_yet), color = p.textDim, fontSize = 15.sp)
     }
 }
 
@@ -1199,6 +1220,11 @@ private fun HostCard(
         label = "hostArrow",
     )
     val spinning = row == RowStatus.Connecting || row == RowStatus.Confirm
+    // 收起动画(220ms)里 row 已经是 Idle,状态字要保持收起前的样子:
+    // 否则从「连接失败 / 取消」收起时会闪出一行灰色的「已断开」(那台其实从没连上过)。
+    val lastRow = remember { arrayOf(RowStatus.Closing) }
+    if (row != RowStatus.Idle) lastRow[0] = row
+    val shownRow = if (row == RowStatus.Idle) lastRow[0] else row
     var lastStartedAt by remember { mutableStateOf<Long?>(null) }
     if (startedAt != null) lastStartedAt = startedAt
     XsshCard(
@@ -1299,7 +1325,7 @@ private fun HostCard(
         ) {
             // 状态字之间交叉淡化:旧的先淡出,新的晚一点淡入,两行字不会叠在一起。
             AnimatedContent(
-                targetState = row,
+                targetState = shownRow,
                 transitionSpec = {
                     androidx.compose.animation.fadeIn(tween(200, delayMillis = 100)) togetherWith
                         androidx.compose.animation.fadeOut(tween(150))

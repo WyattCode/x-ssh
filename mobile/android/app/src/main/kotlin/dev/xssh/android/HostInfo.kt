@@ -397,7 +397,6 @@ fun ReadingPage(
                 )
             }
         }
-        // 外观在最上面:每一页都有,位置一样(见 ThemeGlassItem)。
         if (bottomBar) {
             CompositionLocalProvider(LocalBackdrop provides backdrop) {
                 BottomBar(

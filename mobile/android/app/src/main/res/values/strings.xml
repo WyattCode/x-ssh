@@ -4,7 +4,6 @@
     <string name="app_name" translatable="false">X-SSH</string>
     <string name="clipboard_unavailable">Couldn\'t access the clipboard</string>
     <string name="edit_address">Address</string>
-    <string name="edit_appearance">Appearance: %1$s</string>
     <string name="edit_back">Back</string>
     <string name="edit_biometric_unlock">Unlock with biometrics</string>
     <string name="edit_copy_public_key">Copy public key</string>
@@ -52,9 +51,6 @@
     <string name="edit_save">Save</string>
     <string name="edit_selected">Selected</string>
     <string name="edit_show_password">Show password</string>
-    <string name="edit_theme_dark">Dark</string>
-    <string name="edit_theme_light">Light</string>
-    <string name="edit_theme_system">System default</string>
     <string name="edit_title_edit">Edit host</string>
     <string name="edit_title_new">New host</string>
     <string name="edit_tmux">Open tmux after connecting</string>
@@ -188,6 +184,13 @@
     <string name="host_private_key">Private key</string>
     <string name="host_running">Running</string>
     <string name="host_disconnected">Disconnected</string>
+    <string name="host_gate_close">Close</string>
+    <string name="duo_recent">Recent</string>
+    <string name="host_err_disconnected">The server dropped the connection. The network may be unstable, or the server limited this login.</string>
+    <string name="host_err_timeout">The connection timed out. Check the address and port, and that your phone can reach the server.</string>
+    <string name="host_err_refused">The server refused the connection. Make sure SSH is running and the port is right.</string>
+    <string name="host_err_unreachable">Can\u2019t reach this address. Check your network, or that the server is online.</string>
+    <string name="host_err_auth">The username or password was rejected.</string>
     <string name="host_row_connecting">Connecting…</string>
     <string name="host_row_confirm">Waiting for confirmation</string>
     <string name="host_row_failed">Connection failed</string>
@@ -195,9 +198,6 @@
     <string name="host_search_placeholder">Search name / address / user</string>
     <string name="host_select_on_left">Select a host on the left</string>
     <string name="host_status">Status</string>
-    <string name="host_theme_dark">Dark</string>
-    <string name="host_theme_light">Light</string>
-    <string name="host_theme_system">System</string>
     <string name="host_unconfirmed">Not verified</string>
     <string name="host_unlock">Unlock</string>
     <string name="host_unlock_biometric_or_pin">Biometrics or screen lock</string>
@@ -233,7 +233,6 @@
     <string name="set_terminal_theme">Terminal theme</string>
     <string name="set_term_theme_system">Default</string>
     <string name="set_title">Settings</string>
-    <string name="set_appearance">Appearance</string>
     <string name="set_more">More</string>
     <string name="snip_cancel">Cancel</string>
     <string name="snip_command">Command</string>
@@ -259,7 +258,6 @@
     <string name="snip_tag_no_enter">No Enter</string>
     <string name="snip_tag_this_host">This host</string>
     <string name="snip_title">Snippets</string>
-    <string name="tab_appearance">Appearance: %1$s</string>
     <string name="tab_cancel">Cancel</string>
     <string name="tab_chip_unverified">Unverified</string>
     <string name="tab_clear_search">Clear search</string>
@@ -376,7 +374,6 @@
         <item quantity="one">Cleared %1$d queued transfer</item>
         <item quantity="other">Cleared %1$d queued transfers</item>
     </plurals>
-    <string name="theme_persist_failed">Couldn\'t save the theme. Please try again.</string>
     <plurals name="files_cancelled_downloaded">
         <item quantity="one">Cancelled (%d downloaded)</item>
         <item quantity="other">Cancelled (%d downloaded)</item>

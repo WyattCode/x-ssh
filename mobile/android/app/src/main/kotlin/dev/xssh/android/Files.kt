@@ -177,7 +177,7 @@ private fun FileText.text(): String {
 
 /** 工具栏里的「终端 | 文件」分段开关。 */
 @Composable
-fun PaneSwitch(files: Boolean, onChange: (Boolean) -> Unit) {
+fun PaneSwitch(files: Boolean, compact: Boolean = false, onChange: (Boolean) -> Unit) {
     val p = LocalXssh.current
     Row(
         Modifier
@@ -210,7 +210,7 @@ fun PaneSwitch(files: Boolean, onChange: (Boolean) -> Unit) {
                         if (!on) onChange(value)
                     }
                     .semantics { contentDescription = "$label  Ctrl+Shift+O" }
-                    .padding(horizontal = 12.dp),
+                    .padding(horizontal = if (compact) 11.dp else 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(
@@ -219,13 +219,16 @@ fun PaneSwitch(files: Boolean, onChange: (Boolean) -> Unit) {
                     tint = if (on) p.text else p.textDim,
                     modifier = Modifier.size(16.dp),
                 )
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    label,
-                    color = if (on) p.text else p.textDim,
-                    fontSize = 13.5.sp,
-                    fontWeight = if (on) FontWeight.Medium else FontWeight.Normal,
-                )
+                // 窄的时候(内屏抽屉展开、半折)只留图标,把宽度让给主机名;读屏仍念 label(见上面的 semantics)。
+                if (!compact) {
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        label,
+                        color = if (on) p.text else p.textDim,
+                        fontSize = 13.5.sp,
+                        fontWeight = if (on) FontWeight.Medium else FontWeight.Normal,
+                    )
+                }
             }
         }
     }
@@ -802,7 +805,9 @@ fun FilesPane(
             subtitle = host.subtitle,
             dot = p.ok,
         ) {
-            PaneSwitch(files = true) { if (!it) tablet.onShowTerminal() }
+            // 右栏不够宽(整屏宽度 − 展开的抽屉 334dp < 640dp)时切换条只画图标。
+            val paneWidth = LocalConfiguration.current.screenWidthDp.dp - (if (tablet.sidebarVisible) 334.dp else 0.dp)
+            PaneSwitch(files = true, compact = paneWidth < 640.dp) { if (!it) tablet.onShowTerminal() }
             Spacer(Modifier.width(8.dp))
             var uploadOpen by remember { mutableStateOf(false) }
             Box {

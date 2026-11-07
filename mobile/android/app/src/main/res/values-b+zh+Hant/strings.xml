@@ -3,7 +3,6 @@
 <resources>
     <string name="clipboard_unavailable">無法存取剪貼簿</string>
     <string name="edit_address">位址</string>
-    <string name="edit_appearance">外觀:%1$s</string>
     <string name="edit_back">返回</string>
     <string name="edit_biometric_unlock">以生物辨識解鎖</string>
     <string name="edit_copy_public_key">複製公鑰</string>
@@ -51,9 +50,6 @@
     <string name="edit_save">儲存</string>
     <string name="edit_selected">已選取</string>
     <string name="edit_show_password">顯示密碼</string>
-    <string name="edit_theme_dark">深色</string>
-    <string name="edit_theme_light">淺色</string>
-    <string name="edit_theme_system">跟隨系統</string>
     <string name="edit_title_edit">編輯主機</string>
     <string name="edit_title_new">新增主機</string>
     <string name="edit_tmux">連線後進入 tmux</string>
@@ -187,6 +183,13 @@
     <string name="host_private_key">私鑰</string>
     <string name="host_running">執行中</string>
     <string name="host_disconnected">已斷開</string>
+    <string name="host_gate_close">關閉</string>
+    <string name="duo_recent">最近連線</string>
+    <string name="host_err_disconnected">伺服器中斷了連線。可能是網路不穩,或伺服器限制了這次登入。</string>
+    <string name="host_err_timeout">連線逾時。檢查位址與連接埠是否正確,以及手機到伺服器的網路是否通。</string>
+    <string name="host_err_refused">伺服器拒絕了連線。確認 SSH 服務已開啟,連接埠是否正確。</string>
+    <string name="host_err_unreachable">連不到這個位址。檢查網路,或確認伺服器在線上。</string>
+    <string name="host_err_auth">使用者名稱或密碼不對。</string>
     <string name="host_row_connecting">連線中…</string>
     <string name="host_row_confirm">等待確認</string>
     <string name="host_row_failed">連線失敗</string>
@@ -194,9 +197,6 @@
     <string name="host_search_placeholder">搜尋名稱 / 位址 / 使用者</string>
     <string name="host_select_on_left">選擇左邊的主機</string>
     <string name="host_status">狀態</string>
-    <string name="host_theme_dark">深色</string>
-    <string name="host_theme_light">淺色</string>
-    <string name="host_theme_system">跟隨系統</string>
     <string name="host_unconfirmed">未確認</string>
     <string name="host_unlock">解鎖</string>
     <string name="host_unlock_biometric_or_pin">生物辨識或螢幕鎖定密碼</string>
@@ -232,7 +232,6 @@
     <string name="set_terminal_theme">終端機配色</string>
     <string name="set_term_theme_system">預設</string>
     <string name="set_title">設定</string>
-    <string name="set_appearance">外觀</string>
     <string name="set_more">更多</string>
     <string name="snip_cancel">取消</string>
     <string name="snip_command">指令</string>
@@ -258,7 +257,6 @@
     <string name="snip_tag_no_enter">不按 Enter</string>
     <string name="snip_tag_this_host">僅限本機</string>
     <string name="snip_title">指令片段</string>
-    <string name="tab_appearance">外觀:%1$s</string>
     <string name="tab_cancel">取消</string>
     <string name="tab_chip_unverified">待確認</string>
     <string name="tab_clear_search">清除搜尋</string>
@@ -373,7 +371,6 @@
     <plurals name="files_queue_cleared">
         <item quantity="other">已清空 %1$d 批排隊</item>
     </plurals>
-    <string name="theme_persist_failed">主題儲存失敗,請重試</string>
     <plurals name="files_cancelled_downloaded">
         <item quantity="other">已取消(已下載 %d 個)</item>
     </plurals>

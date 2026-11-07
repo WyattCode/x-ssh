@@ -8,7 +8,7 @@ import androidx.compose.ui.graphics.Color
 /**
  * 终端配色方案:id / 显示名与桌面版 `terminalThemes.ts` 一致。
  *
- * 空 id = 跟随外观(沿用 [DarkPalette] / [LightPalette] 里的 term*);
+ * 空 id = 默认(沿用 [DarkPalette] 里的 term*);
  * 具名方案用桌面同款 RGB,不跟浅色/深色外观走。
  */
 data class TerminalSchemePreset(

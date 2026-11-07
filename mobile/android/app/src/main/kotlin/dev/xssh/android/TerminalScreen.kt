@@ -452,6 +452,7 @@ fun TerminalScreen(
                 fingerprint = pending.fingerprint,
                 changed = pending.changed,
                 tablet = tablet != null,
+                inDrawer = duo != null,
                 jumpFor = if (pending.jump) host else null,
                 // 信任后由上层把指纹写回主机并换一个新的 Host 实例,本屏随之重连。
                 onTrust = {
@@ -492,6 +493,7 @@ fun TerminalScreen(
                     failureKind == FailureKind.CoreMissing
                 ) null else ({ attempt++ }),
                 detail = errorDetail,
+                inDrawer = duo != null,
                 onExit = onExit,
                 // 能就地修的直接给按钮,打开编辑页(平板是浮层)—— 不用先退回去再找编辑入口。
                 fix = (tablet?.onEdit ?: onEditHost)?.let { edit ->
@@ -522,6 +524,7 @@ fun TerminalScreen(
                 tablet = tablet != null,
                 retry = null,
                 fix = null,
+                inDrawer = duo != null,
                 onExit = onExit,
             )
         }
@@ -1503,12 +1506,36 @@ private fun TerminalView(
             }
         }
     } else Modifier
+    // 内屏右下角的竖条会压在终端右缘的长行上:几秒没碰屏幕就淡到 40%,一碰就亮回来(只听不管,终端手势照常)。
+    var railAwake by remember { mutableStateOf(true) }
+    var railPoke by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    if (duo != null) {
+        LaunchedEffect(railPoke) {
+            delay(3500)
+            railAwake = false
+        }
+    }
+    val railAlpha by androidx.compose.animation.core.animateFloatAsState(
+        if (railAwake) 1f else 0.4f,
+        androidx.compose.animation.core.tween(if (railAwake) 120 else 500),
+        label = "duoRailAlpha",
+    )
+    val railSpy = if (duo != null) {
+        Modifier.pointerInput(Unit) {
+            awaitEachGesture {
+                awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                railAwake = true
+                railPoke++
+            }
+        }
+    } else Modifier
     Box(
         Modifier
             .fillMaxSize()
             .background(p.termBg)
             .onGloballyPositioned { outerRoot = it.positionInRoot() }
             .then(focusTap)
+            .then(railSpy)
             .then(keyModifier),
     ) {
         Column(
@@ -1538,7 +1565,7 @@ private fun TerminalView(
         }
         if (duo != null && focused) {
             CompositionLocalProvider(LocalBackdrop provides backdrop) {
-                EdgeRail(Modifier.align(Alignment.BottomEnd), content = duoActions)
+                EdgeRail(Modifier.align(Alignment.BottomEnd).graphicsLayer { alpha = railAlpha }, content = duoActions)
             }
         }
         if (tablet == null && duo == null && focused) {

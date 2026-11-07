@@ -89,7 +89,10 @@ fun TerminalScrollBar(
         Box(
             Modifier
                 .fillMaxSize()
-                .pointerInput(Unit) {
+                // 平时隐藏的时候不接手势:右缘 28dp 里的长按选词、鼠标上报、系统的右缘手势都不该被它吃掉。
+                // 先滚一下它就淡入,淡入着(或正在拖)才能抓。
+                .pointerInput(shown) {
+                    if (!shown) return@pointerInput
                     detectDragGestures(
                         onDragStart = {
                             dragging = true

@@ -1,6 +1,8 @@
 package dev.xssh.android
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -25,6 +27,22 @@ class ConnectErrorsTest {
     fun ordinaryNetworkFailuresAreNot() {
         assertFalse(ConnectErrors.isCoreMissing(RuntimeException("Connection refused")))
         assertFalse(ConnectErrors.isCoreMissing(java.net.SocketTimeoutException("timed out")))
+    }
+
+    @Test
+    fun commonNetworkErrorsGetAFriendlyKind() {
+        assertEquals(FriendlyError.Disconnected, ConnectErrors.friendly("ssh: Disconnected"))
+        assertEquals(FriendlyError.Timeout, ConnectErrors.friendly("connection timed out"))
+        assertEquals(FriendlyError.Refused, ConnectErrors.friendly("Connection refused"))
+        assertEquals(FriendlyError.Unreachable, ConnectErrors.friendly("No route to host"))
+        assertEquals(FriendlyError.AuthFailed, ConnectErrors.friendly("ssh: unable to authenticate, Permission denied"))
+    }
+
+    @Test
+    fun unknownOrLongMessagesStayRaw() {
+        assertNull(ConnectErrors.friendly("something odd"))
+        // 被别的路径包进整段话里的原文不能被盖掉。
+        assertNull(ConnectErrors.friendly("局域网权限没开,所以连不上。原文:Connection refused。请到系统设置里打开「附近的设备」,然后再试一次。"))
     }
 
     @Test
