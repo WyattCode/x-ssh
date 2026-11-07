@@ -20,6 +20,9 @@ export const IPC = {
   dataExportAll: 'data:exportAll',
   dataImportAll: 'data:importAll',
   dataBackupNow: 'data:backupNow', // trigger a scheduled-style backup immediately
+  /** Main-owned: picks the backup folder and stores it itself. The renderer
+   *  never gets to name a path that will receive plaintext credentials. */
+  backupPickDir: 'backup:pickDir',
   dataRescheduleBackup: 'data:rescheduleBackup', // re-read auto-backup prefs & restart timer
 
   // SSH key library (invoke/handle)

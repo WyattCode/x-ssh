@@ -394,6 +394,18 @@ onMounted(async () => {
   window.addEventListener('online', onNetworkOnline)
   window.addEventListener('offline', onNetworkOffline)
   offEvent = window.api.ssh.onEvent((ev) => {
+    // Non-fatal, session-scoped advisories (X11 refused / no local X server)
+    // never touch the connection state machine — just tell the user once.
+    if (ev.notice) {
+      const notices: Record<string, [string, 'info' | 'error']> = {
+        'x11-no-server': ['app.x11NoServer', 'error'],
+        'x11-refused': ['app.x11Refused', 'error'],
+        'x11-starting': ['app.x11Starting', 'info']
+      }
+      const entry = notices[ev.notice]
+      if (entry) toast(t(entry[0]), entry[1])
+      return
+    }
     store.applyEvent(ev.sessionId, ev.status, ev.message)
   })
   // A launch target (CLI `-c user@host` or a x-ssh:// URL) arrives from main:

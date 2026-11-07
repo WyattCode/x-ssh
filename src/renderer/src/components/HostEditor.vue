@@ -59,6 +59,7 @@ const form = reactive({
   terminalTheme: '',
   terminalFontFamily: '',
   agentForward: false,
+  x11Forward: false,
   onConnect: '',
   onConnectDelayMs: 0,
   proxyOn: false,
@@ -134,6 +135,7 @@ watch(
       terminalTheme: h?.terminalTheme ?? '',
       terminalFontFamily: h?.terminalFontFamily ?? '',
       agentForward: !!h?.agentForward,
+      x11Forward: !!h?.x11Forward,
       onConnect: h?.onConnect ?? '',
       onConnectDelayMs: h?.onConnectDelayMs ?? 0,
       proxyOn: !!h?.proxy,
@@ -141,7 +143,9 @@ watch(
       proxyPort: h?.proxy?.port ?? 1080,
       proxyType: h?.proxy?.type ?? 'socks5',
       proxyUser: h?.proxy?.username ?? '',
-      proxyPass: h?.proxy?.password ?? '',
+      // Never populated: the stored proxy password lives in the vault and is
+      // not sent to the renderer. Blank means "keep the saved one".
+      proxyPass: '',
       forwards: (h?.portForwards ?? []).map((f) => ({
         mode: f.mode ?? 'local',
         localPort: f.localPort,
@@ -465,6 +469,7 @@ async function save(): Promise<void> {
     terminalTheme: form.terminalTheme || undefined,
     terminalFontFamily: form.terminalFontFamily.trim() || undefined,
     agentForward: form.agentForward || undefined,
+    x11Forward: form.x11Forward || undefined,
     onConnect: form.onConnect.trim() || undefined,
     onConnectDelayMs: Number(form.onConnectDelayMs) > 0 ? Number(form.onConnectDelayMs) : undefined,
     portForwards: forwards.length ? forwards : undefined,
@@ -769,7 +774,7 @@ async function remove(): Promise<void> {
                   </div>
                   <div class="sub-grid">
                     <input v-model="form.proxyUser" class="box grow" :placeholder="t('host.proxyUserPh')" autocomplete="off" />
-                    <input v-model="form.proxyPass" class="box grow" type="password" :placeholder="t('host.proxyPassPh')" autocomplete="off" />
+                    <input v-model="form.proxyPass" class="box grow" type="password" :placeholder="host?.hasSavedProxyPassword ? t('host.proxyPassSaved') : t('host.proxyPassPh')" autocomplete="off" />
                   </div>
                 </template>
               </div>
@@ -837,6 +842,12 @@ async function remove(): Promise<void> {
                 <span class="r-label wide">{{ t('host.agentForward') }}</span>
                 <input v-model="form.agentForward" type="checkbox" class="switch" />
               </label>
+
+              <label class="row">
+                <span class="r-label wide">{{ t('host.x11Forward') }}</span>
+                <input v-model="form.x11Forward" type="checkbox" class="switch" />
+              </label>
+              <p class="sub-hint">{{ t('host.x11ForwardHint') }}</p>
             </div>
           </section>
         </div>

@@ -117,7 +117,12 @@ async function helloText(lang: () => Promise<UiLang>, nth?: number, total?: numb
 export function registerUserVerifyIpc(opts: {
   settings: SettingsStore
   lang: () => Promise<UiLang>
+  /** Same sender check as every other channel; injected so this module stays
+   *  independent of the window lifecycle. */
+  isTrusted?: (e: import('electron').IpcMainInvokeEvent) => boolean
 }): UserVerify {
+  const guard = (e: import('electron').IpcMainInvokeEvent): boolean =>
+    opts.isTrusted ? opts.isTrusted(e) : true
   const uv = new UserVerify({ settings: opts.settings })
   const status = async () => {
     const supported = uv.supported
@@ -130,12 +135,15 @@ export function registerUserVerifyIpc(opts: {
       sessionUnlocked: uv.isSessionUnlocked()
     }
   }
+  // Read-only: no side effect, so no sender check needed.
   ipcMain.handle(IPC.userVerifyStatus, () => status())
-  ipcMain.handle(IPC.userVerifySetEnabled, async (_e, on: unknown) => {
+  ipcMain.handle(IPC.userVerifySetEnabled, async (e, on: unknown) => {
+    if (!guard(e)) return status()
     await uv.setEnabled(on === true)
     return status()
   })
-  ipcMain.handle(IPC.userVerifyTest, async () => {
+  ipcMain.handle(IPC.userVerifyTest, async (e) => {
+    if (!guard(e)) return { outcome: 'unsupported' as const }
     if (!uv.supported) return { outcome: 'unsupported' as const }
     focusMainWindow()
     let l: UiLang = 'en'

@@ -1,6 +1,6 @@
 {
   "name": "x-ssh",
-  "version": "0.6.7",
+  "version": "0.6.12",
   "description": "A keyboard-first, command-palette-driven SSH client.",
   "main": "./out/main/index.js",
   "author": "X-SSH",
@@ -8,7 +8,7 @@
   "type": "module",
   "scripts": {
     "dev": "electron-vite dev",
-    "build": "electron-vite build",
+    "build": "electron-vite build && node scripts/check-esm-imports.mjs",
     "preview": "electron-vite preview",
     "start": "electron-vite preview",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
@@ -16,8 +16,8 @@
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "lint:i18n": "node scripts/lint-i18n.mjs && node scripts/lint-i18n-mobile.mjs && node scripts/lint-i18n-main.mjs",
     "test": "vitest run",
-    "package": "electron-vite build && electron-builder --dir",
-    "dist": "electron-vite build && electron-builder"
+    "package": "npm run build && electron-builder --dir",
+    "dist": "npm run build && electron-builder"
   },
   "build": {
     "appId": "com.x-ssh.app",
@@ -35,7 +35,9 @@
     "protocols": [
       {
         "name": "X-SSH Connection",
-        "schemes": ["x-ssh"]
+        "schemes": [
+          "x-ssh"
+        ]
       }
     ],
     "win": {

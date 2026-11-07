@@ -64,6 +64,9 @@ export interface Host {
   portForwards?: HostForward[]
   /** Forward the local ssh-agent to the remote (-A) so remote hosts see it. */
   agentForward?: boolean
+  /** Forward the remote X11 display to a local X server (-X). Requires an X
+   *  server (VcXsrv/Xming/XQuartz) listening on the local machine. */
+  x11Forward?: boolean
   /** Optional command(s) to send to the shell right after connecting. May span
    *  multiple lines (one command per line) or reference a script path. */
   onConnect?: string
@@ -83,6 +86,8 @@ export interface Host {
   os?: HostOs
   /** Runtime-only flag (not persisted): whether an encrypted password exists. */
   hasSavedPassword?: boolean
+  /** A proxy password is stored in the encrypted vault for this host. */
+  hasSavedProxyPassword?: boolean
   /** Runtime-only flag: whether an encrypted key passphrase exists. */
   hasSavedPassphrase?: boolean
 }
@@ -275,6 +280,8 @@ export interface ConnectParams {
   proxy?: ProxyConfig
   /** Lifecycle params forwarded from the saved Host on connect. */
   agentForward?: boolean
+  /** Request X11 forwarding on this session's shell (-X). */
+  x11Forward?: boolean
   onConnect?: string
   onConnectDelayMs?: number
   /** Reuse a shared connection to the same host (connection multiplexing). */
@@ -302,6 +309,9 @@ export interface SessionEvent {
   status: SessionStatus
   /** Human-readable message for 'error'/'closed' states. */
   message?: string
+  /** Non-fatal, session-scoped diagnostic shown as a toast (never changes the
+   *  pane status): e.g. X11 forwarding refused or no local X server. */
+  notice?: string
 }
 
 export interface ConnectResult {

@@ -33,15 +33,17 @@ export const TRUNCATION_MARK = '\n…(older output omitted)\n'
  */
 export function trimEntry(text: string, maxBytes = HISTORY_ENTRY_BYTES): string {
   if (Buffer.byteLength(text, 'utf8') <= maxBytes) return text
-  // Slice by characters, then verify bytes: a UTF-8 char is up to 4 bytes, so
-  // start with a generous character budget and shrink until it fits.
-  let chars = Math.floor(maxBytes / 4)
-  let tail = text.slice(-chars)
-  while (Buffer.byteLength(tail, 'utf8') > maxBytes && chars > 0) {
-    chars = Math.floor(chars * 0.9)
-    tail = text.slice(-chars)
-  }
-  return TRUNCATION_MARK + tail
+  const budget = Math.max(0, maxBytes - Buffer.byteLength(TRUNCATION_MARK, 'utf8'))
+  // Assume the best case (1 byte per UTF-16 unit) and walk forward until the
+  // tail fits. The old `maxBytes / 4` guess silently kept a quarter of the
+  // budget for ASCII text — the most common case — so 64 KB became 16 KB.
+  let start = Math.max(0, text.length - budget)
+  while (start < text.length && Buffer.byteLength(text.slice(start), 'utf8') > budget) start++
+  // Never start in the middle of a surrogate pair (an emoji would render as
+  // U+FFFD and the JSON round-trip would keep the replacement char).
+  const unit = text.charCodeAt(start)
+  if (start > 0 && unit >= 0xdc00 && unit <= 0xdfff) start++
+  return TRUNCATION_MARK + text.slice(start)
 }
 
 /**

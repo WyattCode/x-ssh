@@ -1,7 +1,7 @@
 import { readFile, stat, readdir, mkdir, unlink } from 'node:fs/promises'
 import { createReadStream, createWriteStream } from 'node:fs'
 import { basename, dirname, join, resolve, relative, isAbsolute } from 'node:path'
-import { randomUUID, createHash } from 'node:crypto'
+import { randomUUID, createHash, randomBytes } from 'node:crypto'
 import { createServer, createConnection, type Server, Socket } from 'node:net'
 import { Duplex } from 'node:stream'
 import { Client, type ClientChannel, type SFTPWrapper } from 'ssh2'
@@ -31,6 +31,8 @@ import {
   passphraseConnectCode
 } from './friendlyError'
 import { posixJoin, parentOf, clampConcurrency, buildPackCommand, buildExtractCommand, treeDirMode } from '../shared/fsUtils'
+import { isLoopbackHost, localX11Target, parseX11Hello, readLocalX11Cookie, rewriteX11Hello } from './x11'
+import { ensureLocalXServer } from './x11Server'
 
 /** Streams a local file through SHA-256 and resolves its lowercase hex digest. */
 function sha256File(p: string): Promise<string> {
@@ -63,6 +65,8 @@ interface Session {
   forwardServers?: Server[]
   /** Remote (-R) forwards: remote-listen port → handler for an accepted socket. */
   remoteForwards?: Map<number, (socket: Duplex) => void>
+  /** Sockets/channels opened by a forward, destroyed with the session. */
+  forwardSockets?: Set<Duplex>
   /** Port forwards added at runtime (keyed `mode:localPort`), so they can be
    *  tracked and removed; also lets us tell runtime from host-configured rules. */
   runtimeRules?: Map<string, { mode: ForwardMode; localPort: number; remoteHost: string; remotePort: number; servers: Server[] }>
@@ -697,6 +701,8 @@ export class SshManager {
         }
         socket.on('error', () => channel.destroy())
         channel.on('error', () => socket.destroy())
+        this.trackForwardSocket(session, socket)
+        this.trackForwardSocket(session, channel)
         socket.pipe(channel).pipe(socket)
       })
     })
@@ -825,37 +831,69 @@ export class SshManager {
       session.forwardServers = (session.forwardServers ?? []).filter((s) => !toClose.includes(s))
     }
     if (mode === 'remote') {
-      try {
-        session.client.unforwardIn('127.0.0.1', port, () => {})
-      } catch {
-        /* already gone */
-      }
+      const handler = session.remoteForwards?.get(port)
+      if (handler) this.unregisterRemoteForward(session.client, port, handler)
       session.remoteForwards?.delete(port)
     }
     session.runtimeRules?.delete(key)
     return { ok: true }
   }
 
-  /** Remote forward (-R): listen on the server; each inbound connection is
-   *  piped to the local destination. ssh2 reports these via a single client
-   *  'tcp connection' event, keyed by the remote listen port. */
-  private openRemoteForward(session: Session, rule: HostForward): Promise<boolean> {
-    if (!session.remoteForwards) {
-      session.remoteForwards = new Map()
-      session.client.on('tcp connection', (info, accept, reject) => {
-        const handler = session.remoteForwards?.get(info.destPort)
+  /** Remote (-R) handlers attached to each SSH client. A multiplexed master
+   *  serves several sessions, so the 'tcp connection' listener must exist once
+   *  per *client*: one listener per session made every inbound connection hit N
+   *  accept/reject pairs, and a peer's reject() tore down a channel another
+   *  listener had just accepted. */
+  private readonly remoteForwardTables = new WeakMap<
+    Client,
+    Map<number, (socket: Duplex) => void>
+  >()
+
+  private remoteForwardTable(client: Client): Map<number, (socket: Duplex) => void> {
+    let table = this.remoteForwardTables.get(client)
+    if (!table) {
+      table = new Map()
+      this.remoteForwardTables.set(client, table)
+      client.on('tcp connection', (info, accept, reject) => {
+        const live = this.remoteForwardTables.get(client)
+        const handler = live?.get(info.destPort)
         if (!handler) {
           reject()
           return
         }
-        const inSock = accept()
-        handler(inSock)
+        handler(accept())
       })
     }
+    return table
+  }
+
+  /** Unregisters one port if (and only if) this session still owns it, and
+   *  asks the server to stop listening. Safe when the client is already gone. */
+  private unregisterRemoteForward(
+    client: Client,
+    port: number,
+    handler: (socket: Duplex) => void
+  ): void {
+    const table = this.remoteForwardTables.get(client)
+    if (table?.get(port) === handler) table.delete(port)
+    try {
+      client.unforwardIn('127.0.0.1', port, () => {})
+    } catch {
+      /* already gone */
+    }
+  }
+
+  /** Remote forward (-R): listen on the server; each inbound connection is
+   *  piped to the local destination. ssh2 reports these via a single client
+   *  'tcp connection' event, keyed by the remote listen port. */
+  private openRemoteForward(session: Session, rule: HostForward): Promise<boolean> {
+    const table = this.remoteForwardTable(session.client)
+    if (!session.remoteForwards) session.remoteForwards = new Map()
     const destHost = rule.remoteHost || '127.0.0.1'
     const destPort = rule.remotePort
-    session.remoteForwards.set(rule.localPort, (inSock) => {
-      const dest = new Socket()
+    const handler = (inSock: Duplex): void => {
+      this.trackForwardSocket(session, inSock)
+      const dest = this.trackForwardSocket(session, new Socket())
       let settled = false
       // ssh2 imposes no connect timeout: a black-holed local destination would
       // leave the accepted remote channel hanging for the life of the session.
@@ -886,17 +924,29 @@ export class SshManager {
         settled = true
         inSock.pipe(dest).pipe(inSock)
       })
-    })
+    }
+    session.remoteForwards.set(rule.localPort, handler)
+    table.set(rule.localPort, handler)
     return new Promise<boolean>((resolve) => {
       session.client.forwardIn('127.0.0.1', rule.localPort, (err) => {
         if (err) {
           session.remoteForwards?.delete(rule.localPort)
+          if (table.get(rule.localPort) === handler) table.delete(rule.localPort)
           resolve(false)
           return
         }
         resolve(true)
       })
     })
+  }
+
+  /** Remembers a socket opened by a forward so teardown can destroy it, and
+   *  forgets it once the peer closes on its own. */
+  private trackForwardSocket<T extends Duplex>(session: Session, sock: T): T {
+    if (!session.forwardSockets) session.forwardSockets = new Set()
+    session.forwardSockets.add(sock)
+    sock.once('close', () => session.forwardSockets?.delete(sock))
+    return sock
   }
 
   /** Minimal SOCKS5 server for dynamic forwarding (-D). Supports the standard
@@ -967,8 +1017,266 @@ export class SshManager {
   private closeForwards(session: Session): void {
     session.forwardServers?.forEach((s) => s.close())
     session.forwardServers = undefined
-    session.remoteForwards?.clear()
+    session.remoteForwards?.forEach((handler, port) => {
+      this.unregisterRemoteForward(session.client, port, handler)
+    })
     session.remoteForwards = undefined
+    // Pipes already accepted by a forward keep their two sockets alive; closing
+    // the listener alone leaves them running after the session is gone.
+    session.forwardSockets?.forEach((s) => s.destroy())
+    session.forwardSockets = undefined
+  }
+
+  /** Drops everything a session owns apart from the SSH client itself: log
+   *  stream, forwards, suppression timer, sync watchers and sftp. Idempotent —
+   *  a close handler racing disconnect() must not double-free. */
+  private releaseSessionResources(sessionId: string): void {
+    const s = this.sessions.get(sessionId)
+    if (!s) return
+    if (s.suppressTimer) {
+      clearTimeout(s.suppressTimer)
+      s.suppressTimer = undefined
+    }
+    this.closeForwards(s)
+    this.stopLog(sessionId)
+    this.stopWatchSyncsForSession(sessionId)
+    s.sftp?.end()
+    s.sftp = undefined
+  }
+
+  /** Live sessions still sharing an SSH client (optionally excluding one). */
+  private peerCount(client: Client, exceptId?: string): number {
+    let n = 0
+    for (const [sid, s] of this.sessions) {
+      if (sid !== exceptId && s.client === client) n++
+    }
+    return n
+  }
+
+  /** Per-client X11 state. A multiplexed master serves several shells, so the
+   *  'x11' listener and the pseudo cookie must be shared, not per-session. */
+  private x11Attached = new WeakSet<Client>()
+  private x11Cookies = new WeakMap<Client, Buffer>()
+  private x11Sockets = new WeakMap<Client, Set<Socket>>()
+  /** Notices already shown, keyed by *type*. A single slot per client let an
+   *  `x11-starting` info swallow the terminal `x11-no-server` error forever, so
+   *  a user whose X server never came up only ever saw "starting". */
+  private x11Warned = new WeakMap<Client, Set<string>>()
+
+  /** Registers the client-side half of `ssh -X` once per SSH connection and
+   *  returns the request options to put on each shell that wants forwarding. */
+  private x11Options(client: Client, sessionId: string): { single: boolean; cookie: string } {
+    let pseudo = this.x11Cookies.get(client)
+    if (!pseudo) {
+      pseudo = randomBytes(16)
+      this.x11Cookies.set(client, pseudo)
+    }
+    if (!this.x11Attached.has(client)) {
+      this.x11Attached.add(client)
+      this.x11Sockets.set(client, new Set())
+      client.on('x11', (_details, accept, reject) => {
+        let accepted = false
+        const safeAccept = (): Duplex => {
+          accepted = true
+          return accept()
+        }
+        void this.pipeX11(client, sessionId, safeAccept, reject).catch(() => {
+          // A failed cookie read must not leak an unhandled rejection. Only
+          // reject the channel when accept() was never called — rejecting an
+          // already-accepted channel would corrupt the SSH connection.
+          if (!accepted) reject()
+        })
+      })
+      client.on('close', () => {
+        this.x11Sockets.get(client)?.forEach((s) => s.destroy())
+        this.x11Sockets.delete(client)
+      })
+    }
+    // ssh2 converts a Buffer cookie to hex on the wire; we pass hex ourselves
+    // so the exact bytes are also available to rewriteX11Hello as `expected`.
+    return { single: false, cookie: pseudo.toString('hex') }
+  }
+
+  /** Pipes one forwarded X11 connection to the local X server, swapping the
+   *  pseudo cookie in the setup hello for the machine's real one. */
+  private async pipeX11(
+    client: Client,
+    sessionId: string,
+    accept: () => Duplex,
+    reject: () => void
+  ): Promise<void> {
+    const target = localX11Target()
+    const warn = (notice: string): void => {
+      const seen = this.x11Warned.get(client)
+      if (seen?.has(notice)) return
+      const next = seen ?? new Set<string>()
+      next.add(notice)
+      this.x11Warned.set(client, next)
+      // On a multiplexed master the session that registered the listener
+      // may already be closed; route the toast to a live peer instead.
+      let to = sessionId
+      if (!this.sessions.has(sessionId)) {
+        for (const [sid, s] of this.sessions) {
+          if (s.client === client) {
+            to = sid
+            break
+          }
+        }
+      }
+      this.emit({ sessionId: to, status: 'connected', notice })
+    }
+    // Warm-up normally happens at app startup; this is the fallback for a
+    // server installed later or one that was quit while X-SSH was open.
+    // A cold VcXsrv boot needs ~15 s, so never hold a clipboard read that
+    // long: give it a short grace period, then report once while the boot
+    // keeps running in the background (the next paste will succeed).
+    // Only a loopback DISPLAY can be served by a server we spawn. For a remote
+    // DISPLAY (`otherhost:0`) probing locally was pointless: it waited out the
+    // whole boot timeout and then connected to the wrong machine with a cookie
+    // this host had just invented.
+    const localOnly = isLoopbackHost(target.host)
+    let state: 'ready' | 'started' | 'missing' | 'failed' | 'pending' = 'ready'
+    if (localOnly) {
+      let graceTimer: ReturnType<typeof setTimeout> | undefined
+      state = await Promise.race([
+        ensureLocalXServer({
+          // Always probe loopback here: the server we can start is local even
+          // when $DISPLAY names another host.
+          host: '127.0.0.1',
+          port: target.port,
+          display: target.display
+        }),
+        new Promise<'pending'>((r) => {
+          graceTimer = setTimeout(() => r('pending'), 1200)
+          graceTimer.unref?.()
+        })
+      ])
+      if (graceTimer) clearTimeout(graceTimer)
+      if (state === 'pending') {
+        // The server is *booting*, not absent. Say so: telling the user to
+        // install VcXsrv while it is already starting sends them chasing a
+        // problem that does not exist.
+        warn('x11-starting')
+        reject()
+        return
+      }
+      if (state !== 'ready' && state !== 'started') {
+        warn('x11-no-server')
+        reject()
+        return
+      }
+    }
+    const localCookie = localOnly ? await readLocalX11Cookie(target.display) : undefined
+    const expected = this.x11Cookies.get(client)
+    const local = createConnection({ host: target.host, port: target.port })
+    this.x11Sockets.get(client)?.add(local)
+    const sockets = this.x11Sockets.get(client)
+    let settled = false
+    let channel: Duplex | undefined
+    // A *connect* timer, deliberately not socket.setTimeout(): an idle but
+    // healthy X11 session (a GUI window, a clipboard owner) must stay open.
+    let connectTimer: ReturnType<typeof setTimeout>
+
+    const fail = (notice: string): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(connectTimer)
+      local.destroy()
+      sockets?.delete(local)
+      reject()
+      channel?.destroy()
+      // Once per connection, not once per X client (Claude Code reconnects to
+      // DISPLAY on every paste, which would otherwise flood the UI).
+      warn(notice)
+    }
+    connectTimer = setTimeout(() => fail('x11-no-server'), 5000)
+    connectTimer.unref?.()
+
+    local.on('error', () => {
+      if (settled) channel?.destroy()
+      else fail('x11-no-server')
+    })
+    local.on('close', () => sockets?.delete(local))
+    local.on('connect', () => {
+      if (settled) return
+      settled = true
+      clearTimeout(connectTimer)
+      const chan = accept()
+      channel = chan
+      let head: Buffer[] = []
+      let headLen = 0
+      let forwarded = false
+      // A process that accepts TCP but never speaks X11 (a dying server, another
+      // service parked on 6000) otherwise hangs the remote X client forever:
+      // the connect timer is cleared by now, and an idle *healthy* session must
+      // not have one. Bound only the first byte the server sends.
+      let responseTimer: ReturnType<typeof setTimeout> | undefined
+      const stopResponseTimer = (): void => {
+        if (!responseTimer) return
+        clearTimeout(responseTimer)
+        responseTimer = undefined
+      }
+      responseTimer = setTimeout(() => {
+        if (forwarded) return
+        stopResponseTimer()
+        local.destroy()
+        sockets?.delete(local)
+        // Already accepted: reject() here would corrupt the SSH connection, so
+        // tear the channel down instead.
+        chan.destroy()
+        warn('x11-no-server')
+      }, 10_000)
+      responseTimer.unref?.()
+      const flush = (buf: Buffer, hello: Buffer | null): void => {
+        forwarded = true
+        stopResponseTimer()
+        head = []
+        headLen = 0
+        if (hello) {
+          local.write(hello)
+          if (buf.length > hello.length) local.write(buf.subarray(hello.length))
+        } else {
+          local.write(buf)
+        }
+      }
+
+      chan.on('data', (chunk: Buffer) => {
+        if (forwarded) {
+          local.write(chunk)
+          return
+        }
+        head.push(chunk)
+        headLen += chunk.length
+        if (headLen < 12) return // header still incomplete
+        const buf = Buffer.concat(head, headLen)
+        const h = parseX11Hello(buf)
+        if (!h) {
+          // Not X11 (or absurd lengths) — forward verbatim rather than stall.
+          flush(buf, null)
+          return
+        }
+        if (buf.length < h.needed) return // wait for the whole hello
+        const rewritten = rewriteX11Hello(buf.subarray(0, h.needed), localCookie, expected)
+        flush(buf, rewritten)
+      })
+      chan.on('close', () => {
+        stopResponseTimer()
+        local.end()
+      })
+      chan.on('error', () => {
+        stopResponseTimer()
+        local.destroy()
+      })
+      local.on('data', (d: Buffer) => chan.write(d))
+      local.on('close', () => chan.end())
+    })
+  }
+
+  /** A shell with X11 forwarding requested can be refused outright by sshd
+   *  (`X11Forwarding no`, SELinux, missing xauth). Retrying the same shell
+   *  without X11 keeps the session usable — exactly what OpenSSH does. */
+  private x11Refusal(err: Error | undefined): boolean {
+    return !!err && /x11/i.test(err.message)
   }
 
   async connect(params: ConnectParams): Promise<ConnectResult> {
@@ -1122,10 +1430,20 @@ export class SshManager {
           client.on('close', () => this.teardownMaster(this.masterKey(params)))
           client.on('error', () => this.teardownMaster(this.masterKey(params)))
         }
-        client.shell(
-          { term: 'xterm-256color', cols: params.cols ?? 80, rows: params.rows ?? 24 },
-          (err, stream) => {
+        const x11 = params.x11Forward ? this.x11Options(client, id) : undefined
+        const openShell = (withX11: boolean): void => {
+          client.shell(
+            { term: 'xterm-256color', cols: params.cols ?? 80, rows: params.rows ?? 24 },
+            withX11 && x11 ? { x11 } : {},
+            (err, stream) => {
             if (err) {
+              // sshd without X11Forwarding refuses the whole shell request.
+              // Drop X11 and try once more so the terminal still opens.
+              if (withX11 && this.x11Refusal(err)) {
+                this.emit({ sessionId: id, status: 'connected', notice: 'x11-refused' })
+                openShell(false)
+                return
+              }
               const message = friendlyError(err.message)
               this.emit({ sessionId: id, status: 'error', message })
               client.end()
@@ -1142,18 +1460,25 @@ export class SshManager {
               // actual status is emitted once, from client 'close', based on it.
               const sess = this.sessions.get(id)
               if (sess) sess.shellExit = true
-              // If this session opened the shared multiplex link and peers are
-              // using it, ending the client would drop them too — release a ref
-              // instead and let the master live for its other sessions.
-              if (params.multiplex && sess && this.masters.has(this.masterKey(params))) {
-                const m = this.masters.get(this.masterKey(params))!
-                if (m.refs > 1) {
-                  this.closeForwards(sess)
-                  this.emit({ sessionId: id, status: 'closed' })
-                  this.releaseMaster(this.masterKey(params), id)
-                  this.sessions.delete(id)
-                  return
-                }
+              // Drop this pane's own resources first, whichever way we exit.
+              this.releaseSessionResources(id)
+              const key = this.masterKey(params)
+              const master = this.masters.get(key)
+              // Ending the shared client here would drop every peer. Only a
+              // session that actually belongs to the master — or one that still
+              // has peers on this client — may keep the client alive. Checking
+              // `masters.has(key)` alone leaked the client of a plain session
+              // that merely happened to share a host with a multiplexed one.
+              if (master && (master.sessions.has(id) || this.peerCount(client, id) > 0)) {
+                this.emit({ sessionId: id, status: 'closed' })
+                this.releaseMaster(key, id)
+                this.sessions.delete(id)
+                return
+              }
+              if (this.peerCount(client, id) > 0) {
+                this.emit({ sessionId: id, status: 'closed' })
+                this.sessions.delete(id)
+                return
               }
               client.end()
             })
@@ -1212,7 +1537,9 @@ export class SshManager {
               settle({ ok: true, sessionId: id, code: forwardCode, error: forwardError })
             })()
           }
-        )
+          )
+        }
+        openShell(!!x11)
       })
 
       client.on('error', (err) => {
@@ -1224,8 +1551,8 @@ export class SshManager {
             ? 'host_key_unknown'
             : 'host_key_changed'
           : friendlyError(raw)
+        this.releaseSessionResources(id)
         this.emit({ sessionId: id, status: 'error', message })
-        this.stopLog(id)
         if (jumpClient) jumpClient.end()
         this.sessions.delete(id)
         settle({
@@ -1255,7 +1582,10 @@ export class SshManager {
           else this.emit({ sessionId: id, status: 'error', message: 'connection-lost' })
         }
         if (jumpClient) jumpClient.end()
-        this.stopLog(id)
+        // A dropped link is not an explicit disconnect: forwards, the log
+        // stream and sync timers still belong to this session and used to leak
+        // (a lingering listener kept its local port busy for the next connect).
+        this.releaseSessionResources(id)
         this.sessions.delete(id)
       })
 
@@ -1282,10 +1612,18 @@ export class SshManager {
         resolve(r)
       }
       this.emit({ sessionId: id, status: 'connecting' })
+      const x11 = params.x11Forward ? this.x11Options(client, id) : undefined
+      const openShell = (withX11: boolean): void => {
       client.shell(
         { term: 'xterm-256color', cols: params.cols ?? 80, rows: params.rows ?? 24 },
+        withX11 && x11 ? { x11 } : {},
         (err, stream) => {
           if (err) {
+            if (withX11 && this.x11Refusal(err)) {
+              this.emit({ sessionId: id, status: 'connected', notice: 'x11-refused' })
+              openShell(false)
+              return
+            }
             const message = friendlyError(err.message)
             this.emit({ sessionId: id, status: 'error', message })
             this.releaseMaster(key, id)
@@ -1300,7 +1638,7 @@ export class SshManager {
             const sess = this.sessions.get(id)
             if (sess) {
               sess.shellExit = true
-              this.closeForwards(sess)
+              this.releaseSessionResources(id)
               this.emit({ sessionId: id, status: 'closed' })
             }
             this.releaseMaster(key, id)
@@ -1336,6 +1674,8 @@ export class SshManager {
           })()
         }
       )
+      }
+      openShell(!!x11)
     })
   }
 
@@ -1344,7 +1684,11 @@ export class SshManager {
   private releaseMaster(key: string, id: string): void {
     const m = this.masters.get(key)
     if (!m) return
-    m.sessions.delete(id)
+    // Removing the id *is* the refcount guard. disconnect() releases a session
+    // and then ends its stream; the shell 'close' that follows arrives with the
+    // id already gone and used to decrement a second time, killing the master
+    // (and every peer pane) while they were still in use.
+    if (!m.sessions.delete(id)) return
     m.refs--
     if (m.refs <= 0) this.destroyMaster(key)
   }
@@ -1357,8 +1701,7 @@ export class SshManager {
       const s = this.sessions.get(sid)
       if (s) {
         this.emit({ sessionId: sid, status: 'error', message: 'connection-lost' })
-        this.stopLog(sid)
-        this.closeForwards(s)
+        this.releaseSessionResources(sid)
         s.stream?.end()
         this.sessions.delete(sid)
       }
@@ -1378,8 +1721,7 @@ export class SshManager {
       const s = this.sessions.get(sid)
       if (s) {
         this.emit({ sessionId: sid, status: 'closed' })
-        this.stopLog(sid)
-        this.closeForwards(s)
+        this.releaseSessionResources(sid)
         s.stream?.end()
         this.sessions.delete(sid)
       }
@@ -1390,7 +1732,13 @@ export class SshManager {
   }
 
   write(sessionId: string, data: string): void {
-    this.sessions.get(sessionId)?.stream?.write(data)
+    const stream = this.sessions.get(sessionId)?.stream
+    // ssh2's Channel._write never calls its callback once the channel is no
+    // longer open, which leaves the Writable queue stalled forever. Dropping
+    // input for a dead session is correct: the UI has already been told it
+    // closed, and Node cannot report the loss any other way at this layer.
+    if (!stream || stream.destroyed || !stream.writable) return
+    stream.write(data)
   }
 
   resize(sessionId: string, cols: number, rows: number): void {
@@ -1623,7 +1971,10 @@ export class SshManager {
     }
     for (const it of items) {
       const abs = join(dir, it.name)
-      const rel = this.posixJoin(base, it.name)
+      // `posixJoin('', name)` yields "/name", which safeLocalJoin() then reads
+      // as a root-relative path and rejects as traversal — the whole sync
+      // failed on its first file. Relative keys must not start with a slash.
+      const rel = base ? this.posixJoin(base, it.name) : it.name
       if (it.isDirectory()) {
         if (!(await this.walkLocalTree(abs, rel, map))) return false
       } else if (it.isFile()) {
@@ -1649,7 +2000,9 @@ export class SshManager {
       return false
     }
     for (const it of list) {
-      const rel = this.posixJoin(base, it.filename)
+      // Same reason as walkLocalTree: the two sides must produce identical,
+      // slash-free relative keys or every entry looks changed.
+      const rel = base ? this.posixJoin(base, it.filename) : it.filename
       if (it.attrs.isDirectory()) {
         if (!(await this.walkRemoteTree(sftp, this.posixJoin(dir, it.filename), rel, map))) return false
       } else {
@@ -1976,6 +2329,15 @@ export class SshManager {
     onDelta: (n: number) => void,
     cleanupOnError?: string
   ): Promise<void> {
+    // A cancel can land while the caller is still stat-ing the file, probing
+    // the remote or creating directories — before any stream exists to abort.
+    // Without this check the transfer ran to completion and "cancel" looked
+    // dead until the file finished.
+    if (this.cancelledJobs.has(jobId)) {
+      readable.destroy()
+      writable.destroy()
+      return Promise.reject(new Error(SshManager.CANCELLED_TEXT))
+    }
     return new Promise<void>((res, rej) => {
       let settled = false
       let set = this.jobAborts.get(jobId)
@@ -2484,9 +2846,17 @@ export class SshManager {
             // either constructor throws — an orphaned stream leaks its fd and
             // later emits 'error' with nobody listening, which is fatal.
             // No cleanup path on failure: the source file is the user's.
+            // `start` alone keeps ssh2's default flags ('w' = O_TRUNC): the
+            // resume would empty the file and then write at the old offset,
+            // leaving `offset` NUL bytes followed by the tail — and because the
+            // result is exactly localSize, the next run treats it as synced and
+            // the corruption becomes permanent. 'r+' keeps the prefix.
+            // `mode` is explicit because ssh2 defaults to 0o666 (bypassing
+            // umask) and fchmods unconditionally, widening an existing 0600
+            // file on overwrite.
             write = offset
-              ? sftp.createWriteStream(item.remote, { start: offset })
-              : sftp.createWriteStream(item.remote)
+              ? sftp.createWriteStream(item.remote, { flags: 'r+', start: offset, mode: 0o644 })
+              : sftp.createWriteStream(item.remote, { mode: 0o644 })
             read = offset
               ? createReadStream(this.longPath(item.local), { start: offset })
               : createReadStream(this.longPath(item.local))
@@ -2927,11 +3297,7 @@ export class SshManager {
         break
       }
     }
-    if (session.suppressTimer) clearTimeout(session.suppressTimer)
-    this.closeForwards(session)
-    this.stopLog(sessionId)
-    this.stopWatchSyncsForSession(sessionId)
-    session.sftp?.end()
+    this.releaseSessionResources(sessionId)
     session.stream?.end()
     if (masterKey) {
       this.releaseMaster(masterKey, sessionId)
@@ -3012,24 +3378,41 @@ export class SshManager {
   }
 
   /** Keys this manager refused, by host:port: the only ones the user can then
-   *  trust (ssh:trustHostKey) — a renderer can't plant an arbitrary key. */
-  private readonly rejectedKeys = new Map<string, string>()
+   *  trust (ssh:trustHostKey) — a renderer can't plant an arbitrary key.
+   *  A set, not a single slot: two panes opened to the same new host at once
+   *  each reject their own key, and the second one used to overwrite the first
+   *  so only one of the two "Trust" cards could ever succeed. */
+  private readonly rejectedKeys = new Map<string, Set<string>>()
+  private static readonly MAX_REJECTED_PER_HOST = 8
 
   private noteRejected(host: string, port: number | undefined, fp: string): void {
-    this.rejectedKeys.set(`${host}:${port || 22}`, String(fp).toLowerCase())
+    const k = `${host}:${port || 22}`
+    const set = this.rejectedKeys.get(k) ?? new Set<string>()
+    const value = String(fp).toLowerCase()
+    set.add(value)
+    // Bounded: a misbehaving server must not grow this without limit.
+    if (set.size > SshManager.MAX_REJECTED_PER_HOST) {
+      const oldest = set.values().next().value
+      if (oldest !== undefined && oldest !== value) set.delete(oldest)
+    }
+    this.rejectedKeys.set(k, set)
   }
 
-  /** True (and forgotten) when `fp` is the key last refused for host:port. */
+  /** True (and forgotten) when `fp` was refused for host:port. Consuming one
+   *  key leaves the others available to their own panes. */
   takeRejectedKey(host: string, port: number | undefined, fp: string): boolean {
     const k = `${host}:${port || 22}`
-    if (this.rejectedKeys.get(k) !== String(fp).toLowerCase()) return false
-    this.rejectedKeys.delete(k)
+    const set = this.rejectedKeys.get(k)
+    const value = String(fp).toLowerCase()
+    if (!set?.has(value)) return false
+    set.delete(value)
+    if (!set.size) this.rejectedKeys.delete(k)
     return true
   }
 
-  /** True when `fp` is the key last refused for host:port (does not consume). */
+  /** True when `fp` was refused for host:port (does not consume). */
   matchesRejectedKey(host: string, port: number | undefined, fp: string): boolean {
-    return this.rejectedKeys.get(`${host}:${port || 22}`) === String(fp).toLowerCase()
+    return this.rejectedKeys.get(`${host}:${port || 22}`)?.has(String(fp).toLowerCase()) === true
   }
 
   /** Background, read-only: logs in without a terminal, runs one command on an

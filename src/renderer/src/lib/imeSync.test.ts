@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { createImeMirror } from './imeSync'
+import { createImeMirror, IME_MAX_UNDO } from './imeSync'
 
 /**
  * Drives a mirror the way TerminalView does, and replays everything it sends
@@ -292,6 +292,31 @@ describe('createImeMirror', () => {
     const h = harness()
     h.commit('你好', '你好')
     expect(h.mirror.sync('你好')).toBe('')
+  })
+
+  it('bounds the backspace burst when a long draft is rewritten', () => {
+    const h = harness()
+    const draft = '字'.repeat(2000)
+    h.commit(draft, draft)
+    // Rewriting the very first character would naively be 1999 DELs — the
+    // "it breaks once the dictation gets long" failure.
+    const fixed = '词' + draft.slice(1)
+    h.commit(fixed, fixed, 'input')
+    const out = h.sent[1]
+    const dels = out.split('\x7f').length - 1
+    expect(dels).toBeLessThanOrEqual(IME_MAX_UNDO)
+    expect(out.length).toBeLessThanOrEqual(IME_MAX_UNDO + fixed.length)
+  })
+
+  it('sends a long dictation one chunk at a time', () => {
+    const h = harness()
+    let value = ''
+    for (let i = 0; i < 200; i++) {
+      value += '字'
+      h.commit(value, '字', 'input')
+    }
+    for (const out of h.sent) expect(out.length).toBeLessThanOrEqual(2)
+    expect(h.remote()).toBe(value)
   })
 
   it('passes control sequences through unchanged', () => {

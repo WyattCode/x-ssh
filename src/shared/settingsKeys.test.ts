@@ -41,11 +41,17 @@ describe('renderer-settable settings keys', () => {
       'transferConcurrency',
       'sftpWidth',
       'snapshots',
-      'autoBackupDir',
       'minimizeToTray'
     ]) {
       expect(isRendererSettableKey(key), key).toBe(true)
     }
+  })
+
+  it('refuses to let the renderer choose where a plaintext backup goes', () => {
+    // A backup contains every saved password in the clear; accepting a
+    // renderer-supplied path (including a UNC share) turned "back up now" into
+    // credential exfiltration. Main owns this key and picks the folder itself.
+    expect(isRendererSettableKey('autoBackupDir')).toBe(false)
   })
 
   it('refuses the master-lock record', () => {
