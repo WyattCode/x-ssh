@@ -3,7 +3,12 @@ import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { utils } from 'ssh2'
+// Default import, not `import { utils }`: this file is bundled as ESM and ssh2
+// is CommonJS. Node's named-export detection (cjs-module-lexer) finds `Client`
+// but not `utils`, so a named import compiles fine and then throws at startup
+// with "Named export 'utils' not found". The default export is module.exports,
+// which always has it.
+import ssh2 from 'ssh2'
 import type { ManagedKey } from '../shared/types'
 import { isPrivateKey, sanitizeKeyName, shouldSkipKeyFile } from '../shared/fsUtils'
 import { parseJson, readDurable, writeDurable } from './durableFile'
@@ -200,7 +205,7 @@ export class KeyManager {
     // protection the passphrase is for.
     let pair: { private: string; public: string }
     try {
-      pair = utils.generateKeyPairSync(type, {
+      pair = ssh2.utils.generateKeyPairSync(type, {
         ...(opts.bits && type === 'rsa' ? { bits: opts.bits } : {}),
         ...(opts.passphrase ? { passphrase: opts.passphrase } : {}),
         comment: `x-ssh-${id}`
