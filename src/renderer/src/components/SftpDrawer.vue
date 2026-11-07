@@ -146,6 +146,19 @@ function localEnter(entry: LocalEntry): void {
 function localGoUp(): void {
   void refreshLocal(localParent(localPath.value))
 }
+/** The remote pane has had a home button all along; the local one had to walk
+ *  up from wherever it opened. */
+function localGoHome(): void {
+  void window.api.local
+    .home()
+    .then((h) => {
+      localPath.value = h
+      void refreshLocal()
+    })
+    .catch(() => {
+      localError.value = tt('sfp.localErr')
+    })
+}
 function localDragStart(e: DragEvent, entry: LocalEntry): void {
   // If the dragged row is part of a multi-selection, carry them all so the
   // remote pane can accept them all as upload targets.
@@ -1795,9 +1808,12 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
             @keydown.esc.prevent="pathEditing = false"
             @blur="commitPathEdit"
           />
-          <div v-else class="crumbs" :title="tt('sfp.editPath')" @dblclick="startPathEdit">
+          <!-- Hovering the path should tell you the path, not repeat what the
+               pencil button already says. Long paths keep their last segment
+               visible instead of being clipped without an ellipsis. -->
+          <div v-else class="crumbs" :title="path" @dblclick="startPathEdit">
             <template v-for="(c, i) in crumbs" :key="c.full">
-              <button class="crumb" :class="{ last: i === crumbs.length - 1 }" @click="load(c.full)">{{ c.label }}</button>
+              <button class="crumb" :class="{ last: i === crumbs.length - 1 }" :title="c.full" @click="load(c.full)">{{ c.label }}</button>
               <Icon v-if="i < crumbs.length - 1" name="chevron-right" :size="12" class="sep" />
             </template>
           </div>
@@ -1970,10 +1986,15 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
               <span class="ph-sub local-path" :title="localPath">{{ localPath }}</span>
             </div>
             <button class="ib sm" :title="tt('sfp.upLevel')" :disabled="localLoading" @click="localGoUp"><Icon name="arrow-up" :size="14" /></button>
+            <button class="ib sm" :title="tt('sfp.home')" :disabled="localLoading" @click="localGoHome"><Icon name="home" :size="14" /></button>
           </template>
           <template v-else>
-            <span class="pb-title">{{ tt('sfp.localTitle') }}</span>
+            <!-- An icon instead of the word: this bar is already tight, and
+                 adding the home button pushed the path (and the last toolbar
+                 button) out of the pane. -->
+            <span class="pb-ic" :title="tt('sfp.localTitle')"><Icon name="monitor" :size="14" /></span>
             <button class="ib sm" :title="tt('sfp.upLevel')" :disabled="localLoading" @click="localGoUp"><Icon name="arrow-up" :size="14" /></button>
+            <button class="ib sm" :title="tt('sfp.home')" :disabled="localLoading" @click="localGoHome"><Icon name="home" :size="14" /></button>
             <span class="local-path" :title="localPath">{{ localPath }}</span>
           </template>
           <label class="pattern" :class="{ bad: !!localPatternErr }" :title="localPatternErr || ''">
@@ -2388,6 +2409,9 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
   display: flex;
   align-items: center;
   overflow: hidden;
+  /* Deep paths overflow at the right edge; anchoring to the end keeps the
+     current directory visible instead of clipping it. */
+  justify-content: flex-end;
 }
 .crumb {
   flex: 0 1 auto;
@@ -2408,9 +2432,16 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
   color: var(--text);
 }
 .crumb.last {
-  flex-shrink: 0;
+  /* It may shrink, but never vanish: the current directory is the one thing
+     the bar is for. The ellipsis comes from .crumb. */
+  flex: 0 1 auto;
+  min-width: 56px;
   color: var(--text);
   font-weight: 600;
+}
+/* Older segments give up their width first, so the tail stays readable. */
+.crumb:not(.last) {
+  flex-shrink: 99;
 }
 .crumbs .sep {
   flex: none;
@@ -2642,6 +2673,12 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
   font-size: 13px;
   font-weight: 600;
 }
+.pb-ic {
+  flex: none;
+  display: flex;
+  align-items: center;
+  color: var(--text-dim);
+}
 .up-btn {
   margin-left: 6px;
 }
@@ -2704,7 +2741,9 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
 }
 .local-path {
   flex: 1;
-  min-width: 0;
+  /* Keep a readable slice visible in a narrow drawer instead of collapsing to
+     zero width (the home button made the bar overflow). */
+  min-width: 56px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

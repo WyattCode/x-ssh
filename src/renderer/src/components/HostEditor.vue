@@ -70,8 +70,25 @@ const form = reactive({
   proxyPass: '',
   forwards: [] as ForwardRow[]
 })
+/** The stored proxy password is not sent to the renderer, so "blank" means
+ *  "keep it". This flag is the only way to say "remove it" instead. */
+const proxyPassCleared = ref(false)
 const password = ref('')
 const passphrase = ref('')
+
+/** Toggling the clear flag must also drop whatever was typed over it. */
+function toggleProxyPassCleared(): void {
+  proxyPassCleared.value = !proxyPassCleared.value
+  form.proxyPass = ''
+}
+// Typing a new password cancels a pending clear, so Save never discards what
+// the user just entered.
+watch(
+  () => form.proxyPass,
+  (v) => {
+    if (v) proxyPassCleared.value = false
+  }
+)
 /** Guards against a second save (Enter / Save) while hosts.save is in flight. */
 const saving = ref(false)
 /** Which 更多选项 rows are open (each opens in place under its row). */
@@ -96,7 +113,11 @@ function formSnapshot(): string {
   return JSON.stringify({
     f: form,
     password: password.value,
-    passphrase: passphrase.value
+    passphrase: passphrase.value,
+    // Otherwise "clear the saved proxy password" counts as no change and Esc
+    // discards it without the "unsaved changes" prompt, despite the hint
+    // saying it takes effect on save.
+    proxyPassCleared: proxyPassCleared.value
   })
 }
 let cleanSnapshot = ''
@@ -155,6 +176,7 @@ watch(
     })
     password.value = ''
     passphrase.value = ''
+    proxyPassCleared.value = false
     Object.assign(sections, { keys: false, proxy: false, forwards: false, onConnect: false, appearance: false })
     nextTick(() => labelEl.value?.focus())
     // Baseline for the unsaved-changes guard: capture after the form is
@@ -479,7 +501,13 @@ async function save(): Promise<void> {
           port: Number(form.proxyPort) || (form.proxyType === 'socks5' ? 1080 : 8080),
           type: form.proxyType,
           ...(form.proxyUser ? { username: form.proxyUser.trim() } : {}),
-          ...(form.proxyUser && form.proxyPass ? { password: form.proxyPass } : {})
+          // Three states, so "keep the saved one" and "remove it" are
+          // distinguishable: absent = keep, '' = delete, text = replace.
+          ...(proxyPassCleared
+            ? { password: '' }
+            : form.proxyPass
+              ? { password: form.proxyPass }
+              : {})
         }
       : undefined,
     // Not edited here, but part of the saved profile: without these an edit
@@ -513,6 +541,7 @@ async function save(): Promise<void> {
   } finally {
     saving.value = false
   }
+  proxyPassCleared.value = false
   emit('close')
 }
 
@@ -623,6 +652,7 @@ async function remove(): Promise<void> {
                   v-model="password"
                   class="r-input"
                   type="password"
+                  autocomplete="off"
                   :placeholder="host?.hasSavedPassword ? t('host.passwordSaved') : t('host.passwordAsk')"
                 />
               </label>
@@ -660,6 +690,7 @@ async function remove(): Promise<void> {
                     v-model="passphrase"
                     class="r-input"
                     type="password"
+                    autocomplete="off"
                     :placeholder="host?.hasSavedPassphrase ? t('host.passphraseSaved') : t('host.passphraseAsk')"
                   />
                 </label>
@@ -746,7 +777,6 @@ async function remove(): Promise<void> {
                   <Icon name="chevron-down" :size="14" class="caret" />
                 </div>
               </div>
-              <p v-if="jumpBlocked" class="sub-hint jump-hint">{{ t('host.jumpBlocked', { label: jumpBlockerLabel }) }}</p>
               <p v-if="jumpGone || jumpBlocked" class="sub-hint jump-hint">
                 {{ jumpGone ? t('host.jumpGone') : t('host.jumpBlocked', { name: jumpBlockerLabel }) }}
               </p>
@@ -774,7 +804,33 @@ async function remove(): Promise<void> {
                   </div>
                   <div class="sub-grid">
                     <input v-model="form.proxyUser" class="box grow" :placeholder="t('host.proxyUserPh')" autocomplete="off" />
-                    <input v-model="form.proxyPass" class="box grow" type="password" :placeholder="host?.hasSavedProxyPassword ? t('host.proxyPassSaved') : t('host.proxyPassPh')" autocomplete="off" />
+                    <input
+                      v-model="form.proxyPass"
+                      class="box grow"
+                      type="password"
+                      :placeholder="
+                        proxyPassCleared
+                          ? t('host.proxyPassClearedMark')
+                          : host?.hasSavedProxyPassword
+                            ? t('host.proxyPassSaved')
+                            : t('host.proxyPassPh')
+                      "
+                      autocomplete="off"
+                    />
+                    <!-- Only when something is actually stored: on a new host
+                         there is nothing to clear, and offering it would let a
+                         stray click throw away the password being typed. -->
+                    <button
+                      v-if="host?.hasSavedProxyPassword"
+                      type="button"
+                      class="btn sm"
+                      :class="{ on: proxyPassCleared }"
+                      :title="proxyPassCleared ? t('host.proxyPassUndo') : t('host.proxyPassClear')"
+                      :aria-pressed="proxyPassCleared"
+                      @click="toggleProxyPassCleared"
+                    >
+                      {{ proxyPassCleared ? t('host.proxyPassUndo') : t('host.proxyPassClear') }}
+                    </button>
                   </div>
                 </template>
               </div>
@@ -847,7 +903,7 @@ async function remove(): Promise<void> {
                 <span class="r-label wide">{{ t('host.x11Forward') }}</span>
                 <input v-model="form.x11Forward" type="checkbox" class="switch" />
               </label>
-              <p class="sub-hint">{{ t('host.x11ForwardHint') }}</p>
+              <p class="sub-hint jump-hint">{{ t('host.x11ForwardHint') }}</p>
             </div>
           </section>
         </div>
@@ -856,9 +912,10 @@ async function remove(): Promise<void> {
           <button v-if="host" type="button" class="btn btn-danger" @click="remove">{{ t('host.delete') }}</button>
           <span class="spacer" />
           <button type="button" class="btn" @click="void requestClose()">{{ t('host.cancel') }}</button>
-          <button type="button" class="btn btn-primary" :disabled="!canSave() || saving" :title="canSave() ? undefined : t('host.saveDisabled')" @click="save">{{ saving ? t('ed.saving') : t('host.save') }}</button>
-
-          <button type="button" class="btn btn-primary" :disabled="!canSave()" :title="canSave() ? undefined : saveBlockReason()" @click="save">{{ t('host.save') }}</button>
+          <!-- One save button. A merge left a second copy here, so the footer
+               showed two primary buttons and users could not tell which one
+               actually saved. This one explains why it is disabled. -->
+          <button type="button" class="btn btn-primary" :disabled="!canSave() || saving" :title="canSave() ? undefined : saveBlockReason()" @click="save">{{ saving ? t('ed.saving') : t('host.save') }}</button>
         </footer>
 
         <!-- Generate a key: a small sheet over the panel. -->
@@ -878,15 +935,15 @@ async function remove(): Promise<void> {
               </div>
               <label class="row">
                 <span class="r-label">{{ t('host.passphrase') }}</span>
-                <input v-model="keyModal.passphrase" class="r-input" type="password" :placeholder="t('host.passphraseAsk')" :disabled="keyModal.busy" @keydown.enter.stop="generateKey($event)" />
+                <input v-model="keyModal.passphrase" class="r-input" type="password" autocomplete="off" :placeholder="t('host.passphraseAsk')" :disabled="keyModal.busy" @keydown.enter.stop="generateKey($event)" />
               </label>
             </div>
             <p v-if="keyModal.error" class="err">{{ keyModal.error }}</p>
+            <!-- Cancel + Save only: a merge had duplicated this row, giving the
+                 small sheet four buttons. -->
             <div class="key-actions">
-              <button type="button" class="btn" @click="closeKeySheet">{{ t('host.cancel') }}</button>
-              <button type="button" class="btn btn-primary" :disabled="keyBusy" @click="generateKey">{{ t('host.save') }}</button>
               <button type="button" class="btn" :disabled="keyModal.busy" @click="closeKeySheet">{{ t('host.cancel') }}</button>
-              <button type="button" class="btn btn-primary" :disabled="keyModal.busy" @click="generateKey">{{ keyModal.busy ? t('host.keyGenerating') : t('host.save') }}</button>
+              <button type="button" class="btn btn-primary" :disabled="keyBusy || keyModal.busy" @click="generateKey">{{ keyModal.busy ? t('host.keyGenerating') : t('host.save') }}</button>
             </div>
           </div>
         </div>
@@ -1243,6 +1300,13 @@ input[type='number']::-webkit-inner-spin-button {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+/* The proxy row's inline action. This file had no `.btn.sm`, so the button
+   rendered at the default 32px next to 28px inputs and looked out of place. */
+.btn.sm {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
 }
 .grow {
   flex: 1;

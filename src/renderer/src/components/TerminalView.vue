@@ -302,10 +302,29 @@ function runMenu(action: () => void): void {
 // ---- In-terminal search ----
 const searchBar = reactive({ open: false, query: '', caseSensitive: false })
 const searchEl = ref<HTMLInputElement>()
+/** Match position reported by the addon: 1 of N, or 0 of 0 when nothing matches. */
+const searchHits = reactive({ index: 0, count: 0 })
+
+/** Highlight colours for matches. The addon only fires `onDidChangeResults`
+ *  when `decorations` is present, so this is also what makes the counter work. */
+const SEARCH_DECORATIONS = {
+  matchBackground: 'rgba(110, 168, 254, 0.22)',
+  matchBorder: 'rgba(110, 168, 254, 0.55)',
+  matchOverviewRuler: 'rgba(110, 168, 254, 0.65)',
+  activeMatchBackground: 'rgba(255, 176, 32, 0.55)',
+  activeMatchBorder: 'rgba(255, 176, 32, 0.95)',
+  activeMatchColorOverviewRuler: 'rgba(255, 176, 32, 0.95)'
+} as const
 
 function runSearch(forward: boolean): void {
-  if (!search || !searchBar.query) return
-  const opts = { caseSensitive: searchBar.caseSensitive }
+  if (!search || !searchBar.query) {
+    // Clearing the box must also clear the highlights and the count.
+    search?.clearDecorations?.()
+    searchHits.index = 0
+    searchHits.count = 0
+    return
+  }
+  const opts = { caseSensitive: searchBar.caseSensitive, decorations: SEARCH_DECORATIONS }
   if (forward) search.findNext(searchBar.query, opts)
   else search.findPrevious(searchBar.query, opts)
 }
@@ -329,6 +348,8 @@ function openSearch(): void {
 function closeSearch(): void {
   searchBar.open = false
   search?.clearDecorations?.()
+  searchHits.index = 0
+  searchHits.count = 0
   // findNext() scrolls the viewport, which flips `scrolledUp` on. Leaving it
   // set meant new output stopped following the prompt after closing search —
   // it looked like the terminal had frozen.
@@ -411,6 +432,12 @@ onMounted(() => {
   term.loadAddon(fit)
   search = new SearchAddon()
   term.loadAddon(search)
+  // Without this the bar gave no signal at all: "no match" and "match outside
+  // the viewport" looked identical, so a typo seemed like a broken search.
+  search.onDidChangeResults((e) => {
+    searchHits.index = e.resultIndex
+    searchHits.count = e.resultCount
+  })
   // Plain http(s) text in the output takes the same route.
   term.loadAddon(new WebLinksAddon((_e, uri) => openLink(uri)))
   term.open(el.value)
@@ -663,6 +690,12 @@ onMounted(() => {
         if (out) send(out)
         return
       }
+      // A deletion removes text the mirror itself sent: keep it erasable, or
+      // the next dictation correction is appended as a duplicate.
+      if (kind.startsWith('delete')) {
+        ime.adopt(ta.value, false)
+        return
+      }
       // Anything else lands text xterm already sent or that isn't typing at
       // all: a native paste (xterm sends it, empties the textarea, then the
       // browser inserts it anyway), a drop, an undo, a keystroke's own
@@ -852,6 +885,7 @@ onBeforeUnmount(() => {
         ref="searchEl"
         v-model="searchBar.query"
         class="sb-input"
+        :class="{ 'no-match': searchBar.query && searchHits.count === 0 }"
         :placeholder="t('term.searchPlaceholder')"
         spellcheck="false"
         @keydown.enter.exact="onSearchEnter($event, true)"
@@ -859,6 +893,13 @@ onBeforeUnmount(() => {
         @keydown.esc="onSearchEsc($event)"
         @input="runSearch(true)"
       />
+      <span v-if="searchBar.query" class="sb-count" :class="{ none: searchHits.count === 0 }" role="status" aria-live="polite">
+        {{
+          searchHits.count
+            ? `${searchHits.index >= 0 ? searchHits.index + 1 : '?'}/${searchHits.count}`
+            : '0/0'
+        }}
+      </span>
       <button class="sb-btn case" :class="{ on: searchBar.caseSensitive }" :title="t('term.caseTip')" @click="toggleCase">Aa</button>
       <button class="sb-btn" :title="t('term.prevTip')" @click="runSearch(false)"><Icon name="chevron-up" :size="15" /></button>
       <button class="sb-btn" :title="t('term.nextTip')" @click="runSearch(true)"><Icon name="chevron-down" :size="15" /></button>
@@ -916,6 +957,8 @@ onBeforeUnmount(() => {
   position: absolute;
   top: 10px;
   right: 16px;
+  /* Never wider than the pane: at ~355px it was clipped on any split. */
+  max-width: calc(100% - 32px);
   z-index: 60;
   display: flex;
   align-items: center;
@@ -927,7 +970,9 @@ onBeforeUnmount(() => {
   box-shadow: var(--shadow);
 }
 .sb-input {
+  flex: 1 1 auto;
   width: 180px;
+  min-width: 60px;
   height: 26px;
   padding: 0 8px;
   background: var(--bg);
@@ -938,6 +983,22 @@ onBeforeUnmount(() => {
 }
 .sb-input:focus {
   border-color: var(--accent);
+}
+/* A query that matches nothing gets the same red as a failed action. */
+.sb-input.no-match {
+  border-color: var(--danger);
+}
+.sb-count {
+  min-width: 48px;
+  padding: 0 2px;
+  text-align: center;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+  user-select: none;
+}
+.sb-count.none {
+  color: var(--danger);
 }
 .sb-btn {
   display: flex;

@@ -74,6 +74,25 @@ describe('proxy password storage', () => {
     expect(await store.getProxyPassword('h1')).toBe('proxy-secret')
   })
 
+  it('removes the password when a save sends an empty one', async () => {
+    const store = new HostStore()
+    await store.save(host())
+    const [saved] = await store.list()
+    // The editor's "Clear" action sends '' — not "absent" — to mean delete.
+    await store.save({ ...saved, proxy: { ...saved.proxy!, password: '' } })
+    expect(await store.getProxyPassword('h1')).toBeUndefined()
+    const [after] = await store.list()
+    expect(after.hasSavedProxyPassword).toBe(false)
+  })
+
+  it('drops the password when the host stops using a proxy', async () => {
+    const store = new HostStore()
+    await store.save(host())
+    const [saved] = await store.list()
+    await store.save({ ...saved, proxy: undefined })
+    expect(await store.getProxyPassword('h1')).toBeUndefined()
+  })
+
   it('moves a plaintext password from an older hosts.json into the vault', async () => {
     await mkdir(dir, { recursive: true })
     await writeFile(join(dir, 'hosts.json'), JSON.stringify([host()], null, 2))

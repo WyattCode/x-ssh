@@ -63,6 +63,23 @@ const hostKeyRejected = computed(
     pane.value?.errorCode === 'host_key_unknown' ||
     pane.value?.errorCode === 'host_key_changed'
 )
+/** The machine the failure card should name. A rejected key can belong to the
+ *  jump hop, not the target — the fingerprint block already says so, and naming
+ *  the target here would point at the wrong host exactly when the user has to
+ *  decide whether to trust a key. */
+const failHost = computed(
+  () => (hostKeyRejected.value && pane.value?.hostKeyHost) || pane.value?.params.host || ''
+)
+const failPort = computed(
+  () => (hostKeyRejected.value && pane.value?.hostKeyPort) || pane.value?.params.port || 22
+)
+const failUser = computed(
+  () =>
+    (hostKeyRejected.value && pane.value?.params.jump?.username) ||
+    pane.value?.params.username ||
+    ''
+)
+
 /** The trust write is in flight: keep the button disabled and say so. */
 const trusting = computed(() => isTrustingPane(pane.value?.id ?? ''))
 
@@ -154,6 +171,12 @@ const splitEl = ref<HTMLElement>()
     <div v-else-if="pane.status === 'error'" class="idle">
       <div class="idle-card">
         <div class="idle-title">{{ tab.title }}</div>
+        <!-- Which machine failed. The "closed" card always showed this; the
+             failure card did not, so two tabs with the same title were
+             indistinguishable at exactly the moment it mattered. -->
+        <div class="idle-sub" :title="`${failUser}@${failHost}:${failPort}`">
+          {{ failUser }}@{{ failHost }}<template v-if="failPort !== 22">:{{ failPort }}</template>
+        </div>
         <div class="idle-status" :class="{ warn: hostKeyRejected }">
           {{ hostKeyRejected ? (pane.errorCode === 'host_key_unknown' ? t('app.keyUntrusted') : t('app.keyChanged')) : t('app.connectFail') }}
         </div>
