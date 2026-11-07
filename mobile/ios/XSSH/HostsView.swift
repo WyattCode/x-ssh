@@ -152,7 +152,7 @@ struct HostsView: View {
                     VStack(spacing: 10) {
                         HStack(spacing: 8) {
                             Text(verbatim: "❯").offset(y: -arrowLift).foregroundStyle(Color.green)
-                            Text(verbatim: "ssh --new")
+                            Text(verbatim: "new")
                             BlinkingCursor()
                         }
                         .font(.system(size: 22, design: .monospaced))
@@ -395,7 +395,7 @@ struct HostsView: View {
         // 读屏:一行 = 主机名;连着的报状态(`❯`、光标、颜色点都只是装饰)。
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(verbatim: host.displayName))
-        .accessibilityValue(featured ? (activeConnecting ? Text("Connecting…") : Text("Connected")) : Text(verbatim: ""))
+        .accessibilityValue(featured ? (activeClosing ? (connectedSince == nil ? Text("Cancelled") : Text("Disconnected")) : (activeConnecting ? Text("Connecting…") : Text("Connected"))) : Text(verbatim: ""))
         .padding(.horizontal, 0).padding(.vertical, rowPad)   // 每行的 `❯` 和标题的 `$`、logo、虚线起点同一条竖线
         // 内容贴着单元格顶边(不居中):状态行收起时单元格高度是一下子变的、内容是慢慢缩的,居中的话名字会先被顶上去再落回来。
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
