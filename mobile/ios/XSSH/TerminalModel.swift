@@ -67,6 +67,8 @@ final class TerminalModel: Identifiable {
     private(set) var hasHardwareKeyboard = false
     /// 快捷键面板(Esc / Tab / Ctrl / 方向键…)。和系统键盘各自独立开关,默认收起 —— 同安卓。
     var showsKeys = false
+    /// 点「断开 / 取消」后、会话页正在淡出的那一小段时间(见 `RootView.close`,内屏用)。
+    var leaving = false
 
     private let backend = Backend()
     private var measured: (cols: Int, rows: Int)?
@@ -179,7 +181,8 @@ final class TerminalModel: Identifiable {
     }
 
     private func connectFinished(_ result: Result<Void, Error>) {
-        guard state == .connecting else { return }
+        // 用户已经取消 / 断开:迟到的结果不再改状态(否则列表里那一行会在收场动画中途提前松手)。
+        guard state == .connecting, !userDisconnected else { return }
         switch result {
         case .success:
             state = .connected
@@ -235,16 +238,24 @@ final class TerminalModel: Identifiable {
 
     /// 取消连接 / 主动断开:会话和轮询都收掉。连接还在进行时,Backend 会在连上后立刻断开。
     func disconnect() {
+        userDisconnected = true
         startTask?.cancel()
         resizeTask?.cancel()
         backend.shutdown()
     }
+
+    /// 已经被用户断开 / 取消过:连接和轮询都收掉了,这个模型不能再拿来「回到它」,再点同一台必须新连一条。
+    /// (它的 `state` 还是 `.connected`,所以不能靠 `isEnded` 判断 —— 列表里「连着的那台」靠 `isEnded` 决定,
+    /// 收场动画要它保持到收完。)
+    private(set) var userDisconnected = false
 
     func setForeground(_ active: Bool) { backend.setPaused(!active) }
 
     // MARK: 输出
 
     private func apply(_ output: Backend.Output) {
+        // 同上:断开之后迟到的 `.closed`(正在跑的那一拍轮询发出的)不能把状态改成「已结束」。
+        if userDisconnected { return }
         switch output {
         case .frame(let rows, let cursor, let view):
             self.rows = rows
