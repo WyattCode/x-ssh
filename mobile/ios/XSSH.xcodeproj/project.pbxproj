@@ -280,7 +280,7 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = dev.xssh.ios.tests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.wyatt.xssh.tests;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/XSSH.app/XSSH";
@@ -356,7 +356,7 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = dev.xssh.ios.tests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.wyatt.xssh.tests;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/XSSH.app/XSSH";
@@ -383,7 +383,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = dev.xssh.ios;
+				PRODUCT_BUNDLE_IDENTIFIER = com.wyatt.xssh;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = 1;
 			};
@@ -409,7 +409,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = dev.xssh.ios;
+				PRODUCT_BUNDLE_IDENTIFIER = com.wyatt.xssh;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = 1;
 			};
