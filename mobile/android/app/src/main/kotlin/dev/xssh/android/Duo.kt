@@ -142,9 +142,10 @@ fun DuoApp(
 
     // 半折(竖直折痕半开):列表和会话各占一半,抽屉不收。
     val halfFolded = adaptive.bookFold?.halfOpen == true
-    // 半折时抽屉钉死在左半屏(折痕把窗口一分为二,终端跨着折痕没法看),所以界面上一律按 [shown] 摆;
-    // [drawerOpen] 只记用户在平摊状态下的选择,半折结束后原样恢复。
-    val shown = drawerOpen || halfFolded
+    // 半折:进入半折时抽屉自动展开(折痕把窗口一分为二,终端跨着折痕没法看),
+    // 但左上角的侧栏开关、「‹」都照常在,用户想收起来也可以自己收。
+    val shown = drawerOpen
+    LaunchedEffect(halfFolded) { if (halfFolded) drawerOpen = true }
 
     LaunchedEffect(drawerOpen) { poke() }
 
@@ -376,8 +377,7 @@ fun DuoApp(
 
             // 左上角圆形侧栏开关:抽屉展开时贴在抽屉右上角,收起时回到屏幕左上;
             // 收起了又连着会话时让位(竖条里有「‹」)。
-            // 半折时抽屉是钉死的,开关没有意义,不画。
-            val showToggle = !halfFolded && (drawerOpen || termHost == null)
+            val showToggle = drawerOpen || termHost == null
             val toggleX by animateDpAsState(
                 if (shown) drawerW - 16.dp - 48.dp else 16.dp,
                 drawerSpring(),

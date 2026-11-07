@@ -49,6 +49,7 @@ import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -85,6 +86,8 @@ private class GateContent(
     val onEnter: (() -> Unit)?,
     val body: @Composable ColumnScope.() -> Unit,
     val actions: @Composable (stacked: Boolean) -> Unit,
+    /** 内容只有一句话(正在连接 / 连接失败):整列收窄到按钮的宽度,卡片和按钮同宽;指纹页要放指纹,保持宽。 */
+    val narrow: Boolean = false,
 )
 
 /** 首次连接 / 密钥变了:让用户比对指纹,决定信不信。 */
@@ -196,6 +199,7 @@ fun ConnectGate(
             // 标题写状态,不写主机名:三种状态(确认身份 / 正在连接 / 连接失败)的行数、落点
             // 完全一样,连不上时只换图标、标题字和卡片内容,整页不会跳一行。
             title = stringResource(R.string.host_gate_connecting),
+            narrow = true,
             onEnter = null,
             body = { StatusCard(waited) },
             actions = { stacked ->
@@ -216,6 +220,7 @@ fun ConnectGate(
             tint = p.danger,
             tile = p.danger.copy(alpha = 0.12f),
             title = stringResource(R.string.host_gate_failed),
+            narrow = true,
             onEnter = primary?.second?.let { run -> { actOnce(run) } },
             body = { MessageCard(failure, detail) },
             actions = { stacked ->
@@ -284,96 +289,36 @@ private fun GatePage(host: Host, content: GateContent, tablet: Boolean, onExit: 
         return
     }
 
-    val adaptive = LocalAdaptive.current
     val bottomBar = LocalChrome.current == Chrome.BottomBar
     val backdrop = rememberLayerBackdrop()
     val insets = stableSafeDrawing()
     val startInset = insets.asPaddingValues().calculateStartPadding(LocalLayoutDirection.current)
-    BoxWithConstraints(Modifier.fillMaxSize().background(p.groupedBg).then(keys)) {
-        val twoPane = adaptive.splits(maxWidth)
-        if (twoPane) {
-            val left = adaptive.listPaneWidth(maxWidth).coerceAtMost(maxWidth - 280.dp)
-            val creaseWidth = maxOf(1.dp, adaptive.bookFold?.sizeDp ?: 0.dp)
-            // 和主机页、编辑页同一条规矩:右栏让开了轨道,左栏就收到同样宽(见 creaseGapFor)。
-            val rightContent = ((maxWidth - left - creaseWidth) - Gutter * 2 - railSide())
-                .coerceAtMost(PageMaxWidth)
-            val leftEnd = creaseGapFor(left, startInset + Gutter, rightContent)
-            Row(
-                Modifier
-                    .fillMaxSize()
-                    .layerBackdrop(backdrop)
-                    .background(p.groupedBg)
-                    .windowInsetsPadding(insets.only(WindowInsetsSides.Vertical)),
-            ) {
-                // 左栏止于折痕前 32dp,右栏从折痕后 32dp 起(同主机页、编辑页)。
-                Column(
-                    Modifier
-                        .width(left)
-                        .fillMaxHeight()
-                        .padding(start = startInset + Gutter, end = leftEnd, top = Gutter),
-                ) {
-                    Identity(host, content)
-                }
-                Spacer(Modifier.width(creaseWidth))
-                Column(
-                    Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                        .bounce()
-                        .verticalScroll(rememberScrollState())
-                        .padding(
-                            start = Gutter * 2,
-                            end = railSide(),
-                            top = Gutter,
-                            bottom = if (bottomBar) BarClearance else RailClearance,
-                        ),
-                ) {
-                    Column(Modifier.widthIn(max = PageMaxWidth)) {
-                        content.body(this)
-                        Spacer(Modifier.height(24.dp))
-                        content.actions(true)
-                    }
-                }
-            }
-        } else {
-            // 「确认 / 取消」也钉在页底(同主机详情页):这是要按的东西,指纹是要看的东西。
-            var actionsHeight by remember { mutableStateOf(0.dp) }
+    // 版式 A:整页一条居中的轴(图标 → 标题 → 主机 → 卡片 → 按钮),折叠屏内屏、外屏、直板机都是它。
+    // 以前内屏在这一页里又自己分左右两栏:这一页本来就只占右边一块,于是标题挤在左上、卡片和按钮
+    // 挤在右上,中间一大片空,整页没有重心。两侧留白取「盒子线」和「轨道」里大的那个,左右对称。
+    val side = maxOf(startInset + Gutter, railSide())
+    Box(Modifier.fillMaxSize().background(p.groupedBg).then(keys)) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .layerBackdrop(backdrop)
+                .windowInsetsPadding(insets.only(WindowInsetsSides.Vertical))
+                .padding(start = side, end = side, top = Gutter, bottom = if (bottomBar) BarClearance else Gutter),
+            contentAlignment = Alignment.Center,
+        ) {
             Column(
                 Modifier
-                    .fillMaxSize()
-                    .layerBackdrop(backdrop)
-                    .background(p.groupedBg)
-                    .windowInsetsPadding(insets.only(WindowInsetsSides.Vertical + WindowInsetsSides.End))
+                    .widthIn(max = if (content.narrow) 340.dp else 440.dp)
+                    .fillMaxWidth()
                     .bounce()
-                    .verticalScroll(rememberScrollState())
-                    // 版心:左边盒子线,右边让开轨道。
-                    .padding(
-                        start = startInset + Gutter,
-                        end = railSide(),
-                        top = Gutter,
-                        bottom = actionsHeight + Gutter,
-                    ),
+                    .verticalScroll(rememberScrollState()),
+                horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Column(Modifier.widthIn(max = PageMaxWidth)) {
-                    Identity(host, content)
-                    Spacer(Modifier.height(24.dp))
-                    content.body(this)
-                }
-            }
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .windowInsetsPadding(insets.only(WindowInsetsSides.Vertical + WindowInsetsSides.End)),
-            ) {
-                PinnedActions(
-                    onHeight = { actionsHeight = it },
-                    start = startInset + Gutter,
-                    // 直板机:「确认 / 取消」叠在底栏上面。
-                    bottom = if (bottomBar) BarClearance else Gutter,
-                    background = p.groupedBg,
-                ) {
-                    Column(Modifier.widthIn(max = PageMaxWidth)) { content.actions(true) }
-                }
+                Identity(host, content)
+                Spacer(Modifier.height(24.dp))
+                content.body(this)
+                Spacer(Modifier.height(24.dp))
+                Column(Modifier.widthIn(max = 340.dp).fillMaxWidth()) { content.actions(true) }
             }
         }
         if (bottomBar) {
@@ -393,43 +338,36 @@ private fun GatePage(host: Host, content: GateContent, tablet: Boolean, onExit: 
         }
     }
 }
-
-/** 图标块 + 大标题 + 这是哪台主机(+ 需要注意的一句)。 */
+/** 图标块 + 大标题 + 这是哪台主机(+ 需要注意的一句),整块居中。 */
 @Composable
 private fun Identity(host: Host, content: GateContent) {
     val p = LocalXssh.current
-    // iOS 版状态卡片的抬头:左边一枚带光晕的细圆环图标,右边「标题 / 哪台主机 / 地址」。
-    // 圆环落在盒子线上(和卡片、按钮同一条左边)。
-    Column {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            IconRing(content.icon, content.tint, size = 52.dp)
-            Spacer(Modifier.width(16.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    content.title,
-                    color = p.text,
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Spacer(Modifier.height(4.dp))
-                // 三种状态一律「标题是状态、下面是哪台主机」,行数不随状态变(见 ConnectGate 的标题注释)。
-                // 没起名字时 label 就是地址,再写一行 user@地址:端口 是重复的:只留后者。
-                if (host.name.isNotBlank() && host.name != host.address) {
-                    Text(host.label, color = p.text, fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Spacer(Modifier.height(1.dp))
-                }
-                Text(host.subtitle, color = p.textDim, fontSize = 12.5.sp, fontFamily = XsshFonts.monoUi, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
+    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+        IconRing(content.icon, content.tint, size = 64.dp)
+        Spacer(Modifier.height(18.dp))
+        Text(
+            content.title,
+            color = p.text,
+            fontSize = 24.sp,
+            fontWeight = FontWeight.SemiBold,
+            textAlign = TextAlign.Center,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Spacer(Modifier.height(4.dp))
+        // 三种状态一律「标题是状态、下面是哪台主机」,行数不随状态变(见 ConnectGate 的标题注释)。
+        // 没起名字时 label 就是地址,再写一行 user@地址:端口 是重复的:只留后者。
+        if (host.name.isNotBlank() && host.name != host.address) {
+            Text(host.label, color = p.text, fontSize = 15.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Spacer(Modifier.height(1.dp))
         }
+        Text(host.subtitle, color = p.textDim, fontSize = 12.5.sp, fontFamily = XsshFonts.monoUi, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
         content.note?.let {
             Spacer(Modifier.height(16.dp))
-            Text(it, color = content.noteColor, fontSize = 14.sp)
+            Text(it, color = content.noteColor, fontSize = 14.sp, textAlign = TextAlign.Center)
         }
     }
 }
-
 /**
  * 指纹卡片:算法写在标签里,摘要固定 11 个字符一组、两组一行、大号等宽字 ——
  * 人要逐段比对,断点得在每台设备上都落在同一个位置(见 [fingerprintRows])。
@@ -556,13 +494,13 @@ private fun StatusCard(waited: Int) {
             .cardChrome()
             .padding(horizontal = 18.dp, vertical = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
     ) {
         CircularProgressIndicator(Modifier.size(18.dp), color = p.accent, strokeWidth = 2.dp, trackColor = p.bgElev2)
         Spacer(Modifier.width(12.dp))
         Text(stringResource(R.string.host_gate_establishing), color = p.text, fontSize = 15.sp)
         // 等久了才报秒数:前两秒一闪而过,数字只会显得慌。取值靠右,和详情页的「标签—取值」一个规矩。
         if (waited >= 3) {
-            Spacer(Modifier.weight(1f))
             Spacer(Modifier.width(12.dp))
             Text(stringResource(R.string.host_gate_waited, waited), color = p.textDim, fontSize = 13.sp, maxLines = 1)
         }
@@ -587,6 +525,8 @@ private fun MessageCard(message: String, detail: String? = null) {
                 color = p.text.copy(alpha = 0.72f),
                 fontSize = 13.5.sp,
                 fontFamily = XsshFonts.monoUi,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
             )
         }
         if (detail != null) {
