@@ -1813,7 +1813,7 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
                visible instead of being clipped without an ellipsis. -->
           <div v-else class="crumbs" :title="path" @dblclick="startPathEdit">
             <template v-for="(c, i) in crumbs" :key="c.full">
-              <button class="crumb" :class="{ last: i === crumbs.length - 1 }" @click="load(c.full)">{{ c.label }}</button>
+              <button class="crumb" :class="{ last: i === crumbs.length - 1 }" :title="c.full" @click="load(c.full)">{{ c.label }}</button>
               <Icon v-if="i < crumbs.length - 1" name="chevron-right" :size="12" class="sep" />
             </template>
           </div>
@@ -1989,7 +1989,10 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
             <button class="ib sm" :title="tt('sfp.home')" :disabled="localLoading" @click="localGoHome"><Icon name="home" :size="14" /></button>
           </template>
           <template v-else>
-            <span class="pb-title">{{ tt('sfp.localTitle') }}</span>
+            <!-- An icon instead of the word: this bar is already tight, and
+                 adding the home button pushed the path (and the last toolbar
+                 button) out of the pane. -->
+            <span class="pb-ic" :title="tt('sfp.localTitle')"><Icon name="monitor" :size="14" /></span>
             <button class="ib sm" :title="tt('sfp.upLevel')" :disabled="localLoading" @click="localGoUp"><Icon name="arrow-up" :size="14" /></button>
             <button class="ib sm" :title="tt('sfp.home')" :disabled="localLoading" @click="localGoHome"><Icon name="home" :size="14" /></button>
             <span class="local-path" :title="localPath">{{ localPath }}</span>
@@ -2406,6 +2409,9 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
   display: flex;
   align-items: center;
   overflow: hidden;
+  /* Deep paths overflow at the right edge; anchoring to the end keeps the
+     current directory visible instead of clipping it. */
+  justify-content: flex-end;
 }
 .crumb {
   flex: 0 1 auto;
@@ -2432,6 +2438,10 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
   min-width: 56px;
   color: var(--text);
   font-weight: 600;
+}
+/* Older segments give up their width first, so the tail stays readable. */
+.crumb:not(.last) {
+  flex-shrink: 99;
 }
 .crumbs .sep {
   flex: none;
@@ -2663,6 +2673,12 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
   font-size: 13px;
   font-weight: 600;
 }
+.pb-ic {
+  flex: none;
+  display: flex;
+  align-items: center;
+  color: var(--text-dim);
+}
 .up-btn {
   margin-left: 6px;
 }
@@ -2725,7 +2741,9 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
 }
 .local-path {
   flex: 1;
-  min-width: 0;
+  /* Keep a readable slice visible in a narrow drawer instead of collapsing to
+     zero width (the home button made the bar overflow). */
+  min-width: 56px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

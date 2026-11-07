@@ -1644,7 +1644,7 @@ function onLockPassEnter(e: KeyboardEvent): void {
                 <template v-if="store.lockEnabled">
                   <label class="row">
                     <div class="r-text"><span class="r-title">{{ t('lock.current') }}</span></div>
-                    <input v-model="currentPass" type="password" class="box text-in" autocomplete="current-password" :placeholder="t('lock.placeholder')" @keydown.enter="onLockPassEnter" />
+                    <input v-model="currentPass" type="password" class="box text-in" autocomplete="off" :placeholder="t('lock.placeholder')" @keydown.enter="onLockPassEnter" />
                   </label>
                   <div class="row actions-row">
                     <button v-if="store.lockLocked" class="btn sm btn-primary" :disabled="lockBusy" @click="unlockNow">{{ t('lock.unlock') }}</button>
@@ -1656,7 +1656,7 @@ function onLockPassEnter(e: KeyboardEvent): void {
                 </template>
                 <label v-else class="row">
                   <div class="r-text"><span class="r-title">{{ t('lock.new') }}</span></div>
-                  <input v-model="lockNewPass" type="password" class="box text-in" autocomplete="new-password" :placeholder="t('lock.placeholder')" @keydown.enter="onLockPassEnter" />
+                  <input v-model="lockNewPass" type="password" class="box text-in" autocomplete="off" :placeholder="t('lock.placeholder')" @keydown.enter="onLockPassEnter" />
                   <button class="btn sm btn-primary" :disabled="lockBusy" @click="saveMasterLock">{{ t('lock.save') }}</button>
                 </label>
               </div>

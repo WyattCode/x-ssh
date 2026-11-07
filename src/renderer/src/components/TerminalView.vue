@@ -305,13 +305,26 @@ const searchEl = ref<HTMLInputElement>()
 /** Match position reported by the addon: 1 of N, or 0 of 0 when nothing matches. */
 const searchHits = reactive({ index: 0, count: 0 })
 
+/** Highlight colours for matches. The addon only fires `onDidChangeResults`
+ *  when `decorations` is present, so this is also what makes the counter work. */
+const SEARCH_DECORATIONS = {
+  matchBackground: 'rgba(110, 168, 254, 0.22)',
+  matchBorder: 'rgba(110, 168, 254, 0.55)',
+  matchOverviewRuler: 'rgba(110, 168, 254, 0.65)',
+  activeMatchBackground: 'rgba(255, 176, 32, 0.55)',
+  activeMatchBorder: 'rgba(255, 176, 32, 0.95)',
+  activeMatchColorOverviewRuler: 'rgba(255, 176, 32, 0.95)'
+} as const
+
 function runSearch(forward: boolean): void {
   if (!search || !searchBar.query) {
+    // Clearing the box must also clear the highlights and the count.
+    search?.clearDecorations?.()
     searchHits.index = 0
     searchHits.count = 0
     return
   }
-  const opts = { caseSensitive: searchBar.caseSensitive }
+  const opts = { caseSensitive: searchBar.caseSensitive, decorations: SEARCH_DECORATIONS }
   if (forward) search.findNext(searchBar.query, opts)
   else search.findPrevious(searchBar.query, opts)
 }
@@ -335,6 +348,8 @@ function openSearch(): void {
 function closeSearch(): void {
   searchBar.open = false
   search?.clearDecorations?.()
+  searchHits.index = 0
+  searchHits.count = 0
   // findNext() scrolls the viewport, which flips `scrolledUp` on. Leaving it
   // set meant new output stopped following the prompt after closing search —
   // it looked like the terminal had frozen.
@@ -878,8 +893,12 @@ onBeforeUnmount(() => {
         @keydown.esc="onSearchEsc($event)"
         @input="runSearch(true)"
       />
-      <span v-if="searchBar.query" class="sb-count" :class="{ none: searchHits.count === 0 }">
-        {{ searchHits.count ? `${searchHits.index + 1}/${searchHits.count}` : '0/0' }}
+      <span v-if="searchBar.query" class="sb-count" :class="{ none: searchHits.count === 0 }" role="status" aria-live="polite">
+        {{
+          searchHits.count
+            ? `${searchHits.index >= 0 ? searchHits.index + 1 : '?'}/${searchHits.count}`
+            : '0/0'
+        }}
       </span>
       <button class="sb-btn case" :class="{ on: searchBar.caseSensitive }" :title="t('term.caseTip')" @click="toggleCase">Aa</button>
       <button class="sb-btn" :title="t('term.prevTip')" @click="runSearch(false)"><Icon name="chevron-up" :size="15" /></button>
@@ -938,6 +957,8 @@ onBeforeUnmount(() => {
   position: absolute;
   top: 10px;
   right: 16px;
+  /* Never wider than the pane: at ~355px it was clipped on any split. */
+  max-width: calc(100% - 32px);
   z-index: 60;
   display: flex;
   align-items: center;
@@ -949,7 +970,9 @@ onBeforeUnmount(() => {
   box-shadow: var(--shadow);
 }
 .sb-input {
+  flex: 1 1 auto;
   width: 180px;
+  min-width: 60px;
   height: 26px;
   padding: 0 8px;
   background: var(--bg);
@@ -966,7 +989,7 @@ onBeforeUnmount(() => {
   border-color: var(--danger);
 }
 .sb-count {
-  min-width: 40px;
+  min-width: 48px;
   padding: 0 2px;
   text-align: center;
   font-size: 11.5px;

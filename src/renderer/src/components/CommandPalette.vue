@@ -530,6 +530,7 @@ function onKey(e: KeyboardEvent): void {
           v-model="password"
           type="password"
           class="search"
+          autocomplete="off"
           :placeholder="t('pal.pwPlaceholder')"
         />
         <label v-if="pending.params.hostId" class="pw-remember">

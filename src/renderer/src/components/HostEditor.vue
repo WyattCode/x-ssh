@@ -75,6 +75,20 @@ const form = reactive({
 const proxyPassCleared = ref(false)
 const password = ref('')
 const passphrase = ref('')
+
+/** Toggling the clear flag must also drop whatever was typed over it. */
+function toggleProxyPassCleared(): void {
+  proxyPassCleared.value = !proxyPassCleared.value
+  form.proxyPass = ''
+}
+// Typing a new password cancels a pending clear, so Save never discards what
+// the user just entered.
+watch(
+  () => form.proxyPass,
+  (v) => {
+    if (v) proxyPassCleared.value = false
+  }
+)
 /** Guards against a second save (Enter / Save) while hosts.save is in flight. */
 const saving = ref(false)
 /** Which 更多选项 rows are open (each opens in place under its row). */
@@ -99,7 +113,11 @@ function formSnapshot(): string {
   return JSON.stringify({
     f: form,
     password: password.value,
-    passphrase: passphrase.value
+    passphrase: passphrase.value,
+    // Otherwise "clear the saved proxy password" counts as no change and Esc
+    // discards it without the "unsaved changes" prompt, despite the hint
+    // saying it takes effect on save.
+    proxyPassCleared: proxyPassCleared.value
   })
 }
 let cleanSnapshot = ''
@@ -634,6 +652,7 @@ async function remove(): Promise<void> {
                   v-model="password"
                   class="r-input"
                   type="password"
+                  autocomplete="off"
                   :placeholder="host?.hasSavedPassword ? t('host.passwordSaved') : t('host.passwordAsk')"
                 />
               </label>
@@ -671,6 +690,7 @@ async function remove(): Promise<void> {
                     v-model="passphrase"
                     class="r-input"
                     type="password"
+                    autocomplete="off"
                     :placeholder="host?.hasSavedPassphrase ? t('host.passphraseSaved') : t('host.passphraseAsk')"
                   />
                 </label>
@@ -797,14 +817,19 @@ async function remove(): Promise<void> {
                       "
                       autocomplete="off"
                     />
+                    <!-- Only when something is actually stored: on a new host
+                         there is nothing to clear, and offering it would let a
+                         stray click throw away the password being typed. -->
                     <button
-                      v-if="host?.hasSavedProxyPassword || form.proxyPass"
+                      v-if="host?.hasSavedProxyPassword"
                       type="button"
                       class="btn sm"
-                      :title="t('host.proxyPassClear')"
-                      @click="proxyPassCleared = true; form.proxyPass = ''"
+                      :class="{ on: proxyPassCleared }"
+                      :title="proxyPassCleared ? t('host.proxyPassUndo') : t('host.proxyPassClear')"
+                      :aria-pressed="proxyPassCleared"
+                      @click="toggleProxyPassCleared"
                     >
-                      {{ t('host.proxyPassClear') }}
+                      {{ proxyPassCleared ? t('host.proxyPassUndo') : t('host.proxyPassClear') }}
                     </button>
                   </div>
                 </template>
@@ -910,7 +935,7 @@ async function remove(): Promise<void> {
               </div>
               <label class="row">
                 <span class="r-label">{{ t('host.passphrase') }}</span>
-                <input v-model="keyModal.passphrase" class="r-input" type="password" :placeholder="t('host.passphraseAsk')" :disabled="keyModal.busy" @keydown.enter.stop="generateKey($event)" />
+                <input v-model="keyModal.passphrase" class="r-input" type="password" autocomplete="off" :placeholder="t('host.passphraseAsk')" :disabled="keyModal.busy" @keydown.enter.stop="generateKey($event)" />
               </label>
             </div>
             <p v-if="keyModal.error" class="err">{{ keyModal.error }}</p>
@@ -1275,6 +1300,13 @@ input[type='number']::-webkit-inner-spin-button {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+/* The proxy row's inline action. This file had no `.btn.sm`, so the button
+   rendered at the default 32px next to 28px inputs and looked out of place. */
+.btn.sm {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
 }
 .grow {
   flex: 1;
