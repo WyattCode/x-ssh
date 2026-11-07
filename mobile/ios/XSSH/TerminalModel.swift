@@ -237,10 +237,16 @@ final class TerminalModel: Identifiable {
 
     /// 取消连接 / 主动断开:会话和轮询都收掉。连接还在进行时,Backend 会在连上后立刻断开。
     func disconnect() {
+        userDisconnected = true
         startTask?.cancel()
         resizeTask?.cancel()
         backend.shutdown()
     }
+
+    /// 已经被用户断开 / 取消过:连接和轮询都收掉了,这个模型不能再拿来「回到它」,再点同一台必须新连一条。
+    /// (它的 `state` 还是 `.connected`,所以不能靠 `isEnded` 判断 —— 列表里「连着的那台」靠 `isEnded` 决定,
+    /// 收场动画要它保持到收完。)
+    private(set) var userDisconnected = false
 
     func setForeground(_ active: Bool) { backend.setPaused(!active) }
 

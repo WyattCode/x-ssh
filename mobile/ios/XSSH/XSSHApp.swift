@@ -498,8 +498,9 @@ struct RootView: View {
         closing = false
         active?.leaving = false
         let collapse = sizeClass == .regular && drawerOpen && !halfFolded
-        // 点的就是正在跑的那台:直接回到它,别断了重连。
-        if let current = active, current.host.id == host.id, !current.isEnded {
+        // 点的就是正在跑的那台:直接回到它,别断了重连。已经被用户断开的不算(退出后收场动画的那一小段里它还在 `active` 里,
+        // 这时再点同一台,以前会「回到」一条已经断掉的会话,连不上也退不出;现在新连一条)。
+        if let current = active, current.host.id == host.id, !current.isEnded, !current.userDisconnected {
             compactColumn = .detail
             if collapse { setDrawer(false) }
             return
