@@ -20,6 +20,9 @@
  */
 
 const DEL = '\x7f'
+/** Cap on the tracked line. A line longer than this is recorded by its tail;
+ *  the worst case is one full resend on a catch-up, never a duplicate. */
+const MAX_TRACKED = 8192
 const CONTROL = /[\x00-\x1f\x7f]/
 
 /** Printable text only — no C0 controls, DEL or escape sequences. */
@@ -82,7 +85,13 @@ export function createImeMirror(): ImeMirror {
           synced = ''
           lastSent = ''
         } else if (data === DEL) synced = synced.slice(0, -1)
-        else if (data === '\x15') synced = '' // Ctrl+U
+        else if (data === '\x15' || data === '\x03') {
+          // Ctrl+U clears the line; Ctrl+C cancels it (readline discards the
+          // buffer). Either way the remote line is empty afterwards, and
+          // keeping the old text made the next catch-up resend a whole line.
+          synced = ''
+          lastSent = ''
+        }
         // xterm already sent it. Returning `data` here sent every arrow key,
         // Tab and Ctrl+C to the shell twice — the same duplication as text,
         // just less visible.
@@ -90,7 +99,7 @@ export function createImeMirror(): ImeMirror {
       }
       // xterm already sent this text. Recording it is the whole job — sending
       // it again is the duplicate this module exists to prevent.
-      synced += data
+      synced = (synced + data).slice(-MAX_TRACKED)
       lastSent = data
       return ''
     },
@@ -100,7 +109,13 @@ export function createImeMirror(): ImeMirror {
       // A composition normally produces an onData AND an input/compositionend
       // event for the same text. If xterm already emitted it, the catch-up must
       // do nothing — this is the duplicate path that survived the previous fix.
-      if (lastSent && (lastSent === settled || settled.endsWith(lastSent) || lastSent.endsWith(settled))) {
+      // `endsWith` on both sides was too eager: a one-character commit (a
+      // punctuation mark) made the next, genuinely unsent sentence look like a
+      // repeat. Exact match, or a suffix of at least two characters.
+      if (
+        lastSent &&
+        (lastSent === settled || (lastSent.length >= 2 && settled.endsWith(lastSent)))
+      ) {
         lastSent = ''
         return ''
       }

@@ -130,6 +130,42 @@ describe('createImeMirror', () => {
     expect(h.remote()).toBe('新')
   })
 
+  it('forgets the line after Ctrl+C, so the next commit is not resent in full', () => {
+    const h = harness()
+    h.value = '输到一半'
+    h.xterm('输到一半')
+    h.xterm('\x03', { eventType: 'keydown' }) // readline discards the buffer
+    h.value = '新命令'
+    h.xterm('新命令')
+    h.value = '新命令补'
+    h.sync('新命令补')
+    // With the line forgotten, the catch-up only adds the new tail.
+    expect(h.wire).not.toContain('新命令补')
+  })
+
+  it('does not swallow a sentence because the last payload ended the same way', () => {
+    const h = harness()
+    h.value = '。'
+    h.xterm('。')
+    // xterm emitted nothing for this one; it merely shares the punctuation.
+    h.value = '第二句。'
+    h.sync('第二句。')
+    expect(h.remote()).toBe('。第二句。')
+  })
+
+  it('keeps the tracked line bounded during a very long line', () => {
+    const h = harness()
+    const chunk = '字'.repeat(1000)
+    for (let i = 0; i < 20; i++) {
+      h.value = chunk
+      h.xterm(chunk)
+    }
+    // 20k characters typed into one line; the record must not grow forever.
+    h.value = '尾巴'
+    h.sync('尾巴')
+    expect(h.remote().endsWith('尾巴')).toBe(true)
+  })
+
   it('passes control sequences through unchanged', () => {
     const h = harness()
     h.xterm('\x1b[A', { eventType: 'keydown' })
