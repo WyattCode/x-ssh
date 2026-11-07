@@ -21,9 +21,6 @@ targets:
       properties:
         # 只有深色界面:不跟随系统的浅色模式。
         UIUserInterfaceStyle: Dark
-        # 出口合规:应用用自带的标准加密算法(SSH,Rust 核心里),不是只用系统自带的加密,所以如实声明"使用非豁免加密"。
-        # 这样 App Store Connect 不用每个构建都再弹一次问卷;如果 Apple 给了合规编号,再加 ITSEncryptionExportComplianceCode。
-        ITSAppUsesNonExemptEncryption: true
         # 系统启动画面:纯黑底 + 居中的 logo(120pt)。开屏页(SplashView)接着画同样的 logo,所以交接时看不出换了一层。
         UILaunchScreen:
           UIColorName: LaunchBackground
