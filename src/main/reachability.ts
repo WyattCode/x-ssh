@@ -67,12 +67,18 @@ function sshPortOpen(host: string, port: number): Promise<SshProbeOutcome> {
   return new Promise((resolve) => {
     const sock = new Socket()
     let done = false
+    /** The port has sent bytes: it is alive no matter what happens next. */
+    let sawBanner = false
     const finish = (outcome: SshProbeOutcome): void => {
       if (done) return
       done = true
       clearTimeout(timer)
       sock.destroy()
-      resolve(outcome)
+      // A server that answers and then resets (rate limiting, a stateful
+      // firewall, a tarpit) must not be reported as offline. The old code
+      // decided 'open' only from the write callback, which a RST never
+      // delivers — so a host that had clearly answered was shown as down.
+      resolve(sawBanner && outcome === 'down' ? 'open' : outcome)
     }
     // Whole budget, handshake included: sshd sends its banner right away.
     const timer = setTimeout(() => finish('down'), 4000)
@@ -83,6 +89,7 @@ function sshPortOpen(host: string, port: number): Promise<SshProbeOutcome> {
     sock.once('data', (d: Buffer) => {
       // Either an SSH banner or a plain-text refusal ("Not allowed at this
       // time"): both mean the SSH port is alive and talking.
+      sawBanner = true
       if (d.toString('latin1').startsWith('SSH-')) {
         sock.end('SSH-2.0-XSSH_probe\r\n', () => finish('open'))
       } else finish('open')

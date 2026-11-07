@@ -14,6 +14,7 @@ import {
 } from '../lib/transferFormat'
 import { sftpErrorText } from '../lib/sftpError'
 import { globMatch } from '../lib/glob'
+import { toPlain } from '../lib/plain'
 import { isImeKey } from '../lib/ime'
 import { pruneSelection } from '../lib/selectionPrune'
 import { useFocusTrap } from '../composables/focusTrap'
@@ -391,7 +392,11 @@ function fmtLocalTime(ms?: number): string {
 const showResume = ref(false)
 async function resumePending(): Promise<void> {
   if (!props.sessionId) return
-  const ops = [...store.transferQueue]
+  // Spread only unwraps the OUTER array: each element is still a Pinia proxy,
+  // and so are its `localPaths`. Electron's structured clone rejects proxies,
+  // so the resume button did nothing at all (the promise rejected in the
+  // renderer, before main ever saw the call).
+  const ops = toPlain([...store.transferQueue])
   const keep: TransferOp[] = []
   let failed = 0
   let lastErr = ''
@@ -418,7 +423,8 @@ async function resumePending(): Promise<void> {
 }
 async function resumeDownloads(): Promise<void> {
   if (!props.sessionId) return
-  const ops = [...store.downloadQueue]
+  // Same as resumePending: the elements (and their `items`) are proxies.
+  const ops = toPlain([...store.downloadQueue])
   const keep: DownloadQueueOp[] = []
   let failed = 0
   // A reconnect gives the pane a new session id, so ops map through hostId to
@@ -1626,7 +1632,9 @@ async function retryHistory(h: TransferHistoryItem): Promise<void> {
   // (mirrors resumeDownloads; partials resume inside downloadJob).
   const r = await window.api.sftp.downloadTo(
     props.sessionId,
-    buildRetryItems(h),
+    // A multi-file history entry hands back the reactive `items` array, which
+    // cannot cross IPC — the retry silently rejected with no toast.
+    toPlain(buildRetryItems(h)),
     h.localDir,
     store.transferConcurrency,
     true

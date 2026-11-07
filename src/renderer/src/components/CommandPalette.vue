@@ -288,7 +288,7 @@ async function importSshConfig(): Promise<void> {
   const res = await window.api.hosts.importSshConfig()
   if (!res.ok) {
     toast(
-      res.error === 'missing-config' ? t('set.sec.importSshMissing') : (res.error ?? t('set.sec.importFail')),
+      res.error === 'ssh-config-missing' ? t('set.sec.importSshMissing') : (res.error ?? t('set.sec.importFail')),
       'error'
     )
     return
