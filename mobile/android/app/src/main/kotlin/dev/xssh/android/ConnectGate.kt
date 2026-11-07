@@ -185,6 +185,10 @@ fun ConnectGate(
     detail: String? = null,
     /** 嵌在内屏抽屉布局的右栏里:不画自己的「‹」,文字按钮叫「关闭」。 */
     inDrawer: Boolean = false,
+    /** 底层的原始错误文本(只在没被本地化文案包住时才有):认得出的才换成人话,别的文案不能被盖掉。 */
+    rawError: String? = null,
+    /** 打开这台主机的编辑页:地址 / 端口不对这类错误,让用户直接去改。 */
+    onEdit: (() -> Unit)? = null,
 ) {
     val p = LocalXssh.current
     // Retry / fix both reconnect: remember must be unconditional (Compose).
@@ -226,7 +230,7 @@ fun ConnectGate(
         // 「就地修复」只是打开编辑页,不是重连:点了、取消了,按钮还得能再点。
         val trigger: (() -> Unit)? = primary?.second?.let { run -> if (fix != null) run else ({ actOnce(run) }) }
         // 认得出的底层英文错误给一句人话,原文收进「详情」。
-        val friendly = ConnectErrors.friendly(failure)
+        val friendly = rawError?.let { ConnectErrors.friendly(it) }
         val friendlyText = friendly?.let { stringResource(it.messageRes()) }
         GateContent(
             icon = XIcons.Alert,
@@ -238,7 +242,7 @@ fun ConnectGate(
             body = {
                 MessageCard(
                     friendlyText ?: failure,
-                    if (friendlyText != null) listOfNotNull(failure, detail).joinToString("\n") else detail,
+                    if (friendlyText != null) listOfNotNull(rawError, detail).joinToString("\n") else detail,
                 )
             },
             actions = { stacked ->
@@ -250,6 +254,8 @@ fun ConnectGate(
                     secondary = stringResource(if (inDrawer) R.string.host_gate_close else R.string.host_back),
                     onSecondary = onExit,
                     tertiary = if (fix != null && retry != null) retryLabel to ({ actOnce(retry) }) else null,
+                    // 没有就地修复时(网络类错误)给一个「编辑主机」:检查地址和端口,得有地方改。
+                    edit = if (fix == null) onEdit?.let { stringResource(R.string.tab_edit_host) to it } else null,
                 )
             },
         )
@@ -262,7 +268,8 @@ fun ConnectGate(
 private fun GatePage(host: Host, content: GateContent, tablet: Boolean, inDrawer: Boolean, onExit: () -> Unit) {
     val p = LocalXssh.current
     val focus = remember { FocusRequester() }
-    LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+    // 内屏抽屉里左边可能正有搜索框在打字:状态页(连接中 → 失败)出现时不能把焦点抢走。
+    LaunchedEffect(Unit) { if (!inDrawer) runCatching { focus.requestFocus() } }
     val keys = Modifier
         .focusRequester(focus)
         .focusable()
@@ -311,32 +318,58 @@ private fun GatePage(host: Host, content: GateContent, tablet: Boolean, inDrawer
     val backdrop = rememberLayerBackdrop()
     val insets = stableSafeDrawing()
     val startInset = insets.asPaddingValues().calculateStartPadding(LocalLayoutDirection.current)
-    // 版式 A:整页一条居中的轴(图标 → 标题 → 主机 → 卡片 → 按钮),折叠屏内屏、外屏、直板机都是它。
-    // 以前内屏在这一页里又自己分左右两栏:这一页本来就只占右边一块,于是标题挤在左上、卡片和按钮
-    // 挤在右上,中间一大片空,整页没有重心。两侧留白取「盒子线」和「轨道」里大的那个,左右对称。
-    val side = maxOf(startInset + Gutter, railSide())
+    // 版式:整页一条居中的轴(图标 → 标题 → 主机 → 卡片),操作按钮**钉在页底**、正文在上面滚。
+    //
+    // 两个教训:
+    // - 按钮不能跟着正文一起滚。外屏上指纹卡片比一屏还高,「信任并连接」被切掉一半,得先往上滚才点得到
+    //   (原来就是钉在页底的,改成居中单栏时被我丢了)。
+    // - 左右不要各留一整条轨道宽度(88dp)。右下角的「‹」只占一个角,横向让出去,外屏的版心就只剩 250dp,
+    //   指纹图案缩在左上、右边一大片空。改成只在底部让出一行高度给它。
+    val side = startInset + Gutter
+    val bottomReserve = when {
+        inDrawer -> Gutter                      // 内屏抽屉布局:没有自己的「‹」
+        bottomBar -> BarClearance               // 直板机:底栏
+        else -> Gutter + 56.dp + 4.dp           // 折叠屏外屏:右下角那颗「‹」的一行
+    }
+    val columnMax = if (content.narrow) 340.dp else 440.dp
+    var actionsHeight by remember { mutableStateOf(0.dp) }
     Box(Modifier.fillMaxSize().background(p.groupedBg).then(keys)) {
         Box(
             Modifier
                 .fillMaxSize()
                 .layerBackdrop(backdrop)
-                .windowInsetsPadding(insets.only(WindowInsetsSides.Vertical))
-                .padding(start = side, end = side, top = Gutter, bottom = if (bottomBar) BarClearance else Gutter),
+                .windowInsetsPadding(insets.only(WindowInsetsSides.Vertical + WindowInsetsSides.End))
+                .padding(start = side, end = Gutter, top = Gutter, bottom = actionsHeight + bottomReserve),
             contentAlignment = Alignment.Center,
         ) {
             Column(
                 Modifier
-                    .widthIn(max = if (content.narrow) 340.dp else 440.dp)
+                    .widthIn(max = columnMax)
                     .fillMaxWidth()
                     .bounce()
                     .verticalScroll(rememberScrollState()),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Identity(host, content)
-                Spacer(Modifier.height(24.dp))
+                Spacer(Modifier.height(20.dp))
                 content.body(this)
-                Spacer(Modifier.height(24.dp))
-                Column(Modifier.widthIn(max = 340.dp).fillMaxWidth()) { content.actions(true) }
+            }
+        }
+        Box(
+            Modifier
+                .fillMaxSize()
+                .windowInsetsPadding(insets.only(WindowInsetsSides.Vertical + WindowInsetsSides.End)),
+        ) {
+            PinnedActions(
+                onHeight = { actionsHeight = it },
+                start = side,
+                end = Gutter,
+                bottom = bottomReserve,
+                background = p.groupedBg,
+            ) {
+                Column(Modifier.widthIn(max = columnMax).fillMaxWidth().align(Alignment.CenterHorizontally)) {
+                    content.actions(true)
+                }
             }
         }
         if (inDrawer) {
@@ -363,8 +396,8 @@ private fun GatePage(host: Host, content: GateContent, tablet: Boolean, inDrawer
 private fun Identity(host: Host, content: GateContent) {
     val p = LocalXssh.current
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-        IconRing(content.icon, content.tint, size = 64.dp)
-        Spacer(Modifier.height(18.dp))
+        IconRing(content.icon, content.tint, size = 56.dp)
+        Spacer(Modifier.height(14.dp))
         Text(
             content.title,
             color = p.text,
@@ -513,6 +546,7 @@ private fun HostKeyArt(lines: List<String>, tint: Color) {
 private fun StatusCard(waited: Int) {
     val p = LocalXssh.current
     // 不画卡片:左边的主机行已经在转圈写「连接中…」,这里只留一行转圈加已等待的秒数,别再重复一张卡片。
+    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -528,6 +562,11 @@ private fun StatusCard(waited: Int) {
             Spacer(Modifier.width(12.dp))
             Text(stringResource(R.string.host_gate_waited, waited), color = p.textDim, fontSize = 13.sp, maxLines = 1)
         }
+    }
+    // 等得久了(Rust 那边每一步有上限,约 15 秒)告诉用户还在试、可以取消:等待要可预期。
+    if (waited >= 8) {
+        Text(stringResource(R.string.host_gate_still_trying), color = p.textDim, fontSize = 13.sp, textAlign = TextAlign.Center)
+    }
     }
 }
 
@@ -597,18 +636,21 @@ private fun GateButtons(
     secondary: String,
     onSecondary: () -> Unit,
     tertiary: Pair<String, () -> Unit>? = null,
+    edit: Pair<String, () -> Unit>? = null,
 ) {
     // iOS 版状态卡片的按钮:胶囊形的实心主按钮 + 无底色的文字按钮(取消 / 返回)。
     if (stacked) {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             if (primary != null) CapsuleButton(primary, Modifier.fillMaxWidth(), kind = primaryKind) { onPrimary() }
             tertiary?.let { (label, run) -> CapsuleButton(label, Modifier.fillMaxWidth(), kind = ButtonKind.Ghost) { run() } }
+            edit?.let { (label, run) -> CapsuleButton(label, Modifier.fillMaxWidth(), kind = ButtonKind.Ghost) { run() } }
             CapsuleButton(secondary, Modifier.fillMaxWidth(), kind = ButtonKind.Ghost) { onSecondary() }
         }
     } else {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(GapItem)) {
             CapsuleButton(secondary, Modifier.weight(1f), kind = ButtonKind.Ghost) { onSecondary() }
             tertiary?.let { (label, run) -> CapsuleButton(label, Modifier.weight(1f), kind = ButtonKind.Ghost) { run() } }
+            edit?.let { (label, run) -> CapsuleButton(label, Modifier.weight(1f), kind = ButtonKind.Ghost) { run() } }
             if (primary != null) CapsuleButton(primary, Modifier.weight(1f), kind = primaryKind) { onPrimary() }
         }
     }

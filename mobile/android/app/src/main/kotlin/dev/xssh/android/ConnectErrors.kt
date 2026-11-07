@@ -21,7 +21,8 @@ object ConnectErrors {
         if (message.length > 120 || '\n' in message || message.any { it.code > 127 }) return null
         val m = message.lowercase()
         return when {
-            "authentication failed" in m || "permission denied" in m || "auth fail" in m -> FriendlyError.AuthFailed
+            "authentication failed" in m || "permission denied" in m || "auth fail" in m ||
+                "too many authentication" in m || "unable to authenticate" in m -> FriendlyError.AuthFailed
             "timed out" in m || "timeout" in m -> FriendlyError.Timeout
             "refused" in m -> FriendlyError.Refused
             "unreachable" in m || "no route" in m || "host is down" in m ||

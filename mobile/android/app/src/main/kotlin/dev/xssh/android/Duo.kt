@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
@@ -70,6 +71,12 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.mutableIntStateOf
 import kotlin.math.roundToInt
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import kotlinx.coroutines.flow.collectLatest
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 
@@ -140,19 +147,36 @@ fun DuoApp(
     val shellScope = androidx.compose.runtime.rememberCoroutineScope()
     // 把手:有「该让用户看到它」的事(碰会话区、抽屉开合)就显示,两秒没人动就淡出。
     var handleShown by remember { mutableStateOf(true) }
-    var pokeToken by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    // 最后一次碰屏的时间只在 snapshotFlow 里读:每碰一下不会让整个 DuoApp 重组(只有「亮 / 淡」翻转时才重组)。
+    var lastPoke by remember { mutableLongStateOf(0L) }
     fun poke() {
         handleShown = true
-        pokeToken++
+        lastPoke = System.nanoTime()
     }
-    LaunchedEffect(pokeToken) {
-        kotlinx.coroutines.delay(2000)
-        handleShown = false
+    LaunchedEffect(Unit) {
+        snapshotFlow { lastPoke }.collectLatest {
+            kotlinx.coroutines.delay(2000)
+            handleShown = false
+        }
     }
     val shellBackdrop = rememberLayerBackdrop()
 
-    val filtered = remember(hosts, query) {
-        if (query.isBlank()) hosts else hosts.filter {
+    // 抽屉展开期间冻结主机顺序:连上时 lastUsed 变了会重排,点中的那一行会在眼前跳到最上面。
+    // 收起之后(或主机增删之后)再按最新顺序。
+    val orderRef = remember { arrayOf<List<String>?>(null) }
+    run {
+        val ids = hosts.map { it.id }
+        val frozen = orderRef[0]
+        if (!drawerOpen || frozen == null || frozen.toSet() != ids.toSet()) orderRef[0] = ids
+    }
+    val ordered = if (drawerOpen) {
+        val order = orderRef[0].orEmpty()
+        hosts.sortedBy { order.indexOf(it.id) }
+    } else {
+        hosts
+    }
+    val filtered = remember(ordered, query) {
+        if (query.isBlank()) ordered else ordered.filter {
             it.label.contains(query, ignoreCase = true) ||
                 it.address.contains(query, ignoreCase = true) ||
                 it.username.contains(query, ignoreCase = true)
@@ -184,8 +208,11 @@ fun DuoApp(
 
     // 收起抽屉的统一出口:顺手收掉搜索和软键盘(否则键盘还在、字会打进屏幕外的输入框)。
     fun collapseDrawer() {
-        focusManager.clearFocus()
-        keyboard?.hide()
+        // 只有正在搜索才清焦点 / 收键盘:无条件清会把终端刚拿到的键盘焦点(实体键盘)也清掉。
+        if (searching) {
+            focusManager.clearFocus()
+            keyboard?.hide()
+        }
         searching = false
         if (query.isNotEmpty()) query = ""
         drawerOpen = false
@@ -210,7 +237,14 @@ fun DuoApp(
     val rowStatus = remember(gate) { gate?.let { mapOf(it.first to it.second) } ?: emptyMap() }
 
     fun connect(host: Host) {
-        if (gate?.let { it.first == host.id && it.second == DuoStatus.Failed } == true) retryNonce++
+        // 点的是当前这台、而它已经失败(或会话被对端断掉了,右栏还停在旧的 Live):等于重试。
+        val g = gate
+        if (g != null && g.first == host.id && termHost?.id == host.id &&
+            (g.second == DuoStatus.Failed || (g.second == DuoStatus.Live && !running.containsKey(host.id)))
+        ) {
+            retryNonce++
+            gate = host.id to DuoStatus.Connecting
+        }
         onSelect(host.id)
         onOpenTerminal(host)
         filesOpen = false
@@ -330,7 +364,7 @@ fun DuoApp(
                                 }
                             }
                         }
-                        else -> DuoEmpty(hosts = hosts, onConnect = ::connect, onNew = { sheet = SheetTarget.New })
+                        else -> DuoEmpty(hosts = hosts, running = running.keys, onConnect = ::connect, onNew = { sheet = SheetTarget.New })
                     }
                 }
             }
@@ -341,6 +375,8 @@ fun DuoApp(
                     .offset { IntOffset(baseXState.value.roundToPx() + slide.value.roundToInt(), 0) }
                     .width(drawerW)
                     .fillMaxHeight()
+                    // 收起时抽屉只是移到屏外:读屏 / Tab 键不该再走进屏外的主机行和搜索框。
+                    .then(if (!shown) Modifier.clearAndSetSemantics { } else Modifier)
                     // 拖得越远,侧栏内容越淡(最多淡掉 40%)。
                     .graphicsLayer { alpha = 1f - minOf(1f, kotlin.math.abs(slide.value) / drawerWpx.coerceAtLeast(1f)) * 0.4f }
                     // 比右边纯黑的终端亮一档(iOS 的 appSidebar #171717);底色铺在安全区内边距之前。
@@ -428,10 +464,6 @@ fun DuoApp(
                             GlassItem(XIcons.Plus, stringResource(R.string.host_new_host)) { sheet = SheetTarget.New }
                         }
                     }
-                } else {
-                    Box(Modifier.padding(bottom = 20.dp)) {
-                        GlassButton(XIcons.Plus, stringResource(R.string.host_new_host)) { sheet = SheetTarget.New }
-                    }
                 }
             }
 
@@ -452,7 +484,8 @@ fun DuoApp(
 
             // 左上角圆形侧栏开关:抽屉展开时贴在抽屉右上角,收起时回到屏幕左上;
             // 收起了又连着会话时让位(竖条里有「‹」)。
-            val showToggle = drawerOpen || termHost == null
+            // 连接中 / 失败 / 要确认时右栏没有竖条里的「‹」,抽屉收着的话这颗开关是回列表的唯一入口,要留着。
+            val showToggle = drawerOpen || termHost == null || gate?.second.let { it != null && it != DuoStatus.Live }
             val toggleXState = animateDpAsState(
                 if (shown) drawerW - 16.dp - 48.dp else 16.dp,
                 drawerSpring(),
@@ -514,7 +547,7 @@ fun DuoApp(
  * 一台主机都没有就是「新建主机」,有主机就列最近连过的几台,抽屉收起时也能直接点。
  */
 @Composable
-private fun DuoEmpty(hosts: List<Host>, onConnect: (Host) -> Unit, onNew: () -> Unit) {
+private fun DuoEmpty(hosts: List<Host>, running: Set<String>, onConnect: (Host) -> Unit, onNew: () -> Unit) {
     val p = LocalXssh.current
     Column(
         Modifier.fillMaxSize().background(p.bg),
@@ -557,7 +590,8 @@ private fun DuoEmpty(hosts: List<Host>, onConnect: (Host) -> Unit, onNew: () -> 
                             .fillMaxWidth()
                             .clip(androidx.compose.foundation.shape.RoundedCornerShape(10.dp))
                             .clickable { onConnect(host) }
-                            .padding(horizontal = 12.dp, vertical = 11.dp),
+                            .heightIn(min = 48.dp)
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text("❯", color = p.text.copy(alpha = 0.4f), fontFamily = XsshFonts.monoUi, fontSize = 15.sp)
@@ -569,7 +603,12 @@ private fun DuoEmpty(hosts: List<Host>, onConnect: (Host) -> Unit, onNew: () -> 
                             fontSize = 15.sp,
                             maxLines = 1,
                             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false),
                         )
+                        if (host.id in running) {
+                            androidx.compose.foundation.layout.Spacer(Modifier.width(10.dp))
+                            Text("✓", color = p.ok, fontFamily = XsshFonts.monoUi, fontSize = 13.sp)
+                        }
                     }
                 }
             }
@@ -611,11 +650,13 @@ private fun DuoHandle(
     DisposableEffect(Unit) {
         onDispose { scope.launch { slide.animateTo(0f, drawerSpring()) } }
     }
+    val handleLabel = stringResource(R.string.duo_toggle_hosts)
     Box(modifier.fillMaxHeight(), contentAlignment = Alignment.CenterStart) {
         Box(
             Modifier
                 .width(20.dp)
                 .height(160.dp)
+                .semantics { contentDescription = handleLabel }
                 .pointerInput(drawerWpx) {
                     val tracker = androidx.compose.ui.input.pointer.util.VelocityTracker()
                     var finger = 0f
@@ -666,10 +707,12 @@ private fun DuoHandle(
 @Composable
 private fun DuoEdgeHandle(visible: Boolean, onReveal: () -> Unit) {
     val alpha by androidx.compose.animation.core.animateFloatAsState(
-        if (visible) 1f else 0f,
+        // 淡出后留一点余光(不是全透明):收起的抽屉靠它找回来,2 秒后完全看不见等于没有入口。
+        if (visible) 1f else 0.5f,
         androidx.compose.animation.core.tween(if (visible) 150 else 700),
         label = "duoEdgeAlpha",
     )
+    val edgeLabel = stringResource(R.string.duo_toggle_hosts)
     Box(
         Modifier
             .fillMaxHeight()
@@ -678,8 +721,9 @@ private fun DuoEdgeHandle(visible: Boolean, onReveal: () -> Unit) {
     ) {
         Box(
             Modifier
-                .width(24.dp)
+                .width(40.dp)
                 .height(140.dp)
+                .semantics { contentDescription = edgeLabel }
                 // 屏幕最左边缘本来是系统的"返回"手势区,不排除的话往右拖会被系统拿去退出应用。
                 .systemGestureExclusion()
                 .pointerInput(Unit) { detectTapGestures { onReveal() } }

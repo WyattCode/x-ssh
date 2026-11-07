@@ -1,5 +1,7 @@
 package dev.xssh.android
 
+import androidx.compose.foundation.gestures.detectTapGestures
+import kotlinx.coroutines.flow.collectLatest
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 
@@ -223,6 +225,9 @@ fun TerminalScreen(
     var errorKind by remember(host, jumpHost) { mutableStateOf(FailureKind.Other) }
     // 错误页「详情」里的原文(只有应用自己的错误才有:原文是类名,不适合直接摆在最前面)。
     var errorDetail by remember(host, jumpHost) { mutableStateOf<String?>(null) }
+    // 底层原始错误(只有走「其他错误」分支、且没被跳板机 / 本地化文案包住时才有):
+    // 失败页只对它做「认成人话」,应用自己的文案不会被盖掉。
+    var errorRaw by remember(host, jumpHost) { mutableStateOf<String?>(null) }
     var pendingKey by remember(host, jumpHost) { mutableStateOf<PendingKey?>(null) }
     var attempt by remember(host, jumpHost) { mutableStateOf(0) }
     // 这一屏里已经解锁过的凭据(本机, 跳板机)。确认完主机密钥重连时直接用,不再弹指纹:
@@ -252,6 +257,7 @@ fun TerminalScreen(
         error = null
         errorKind = FailureKind.Other
         errorDetail = null
+        errorRaw = null
         pendingKey = null
         if (jumpGone) {
             error = { it.getString(R.string.term_err_jump_gone) }
@@ -407,6 +413,7 @@ fun TerminalScreen(
                     else -> {
                         val message = failure.message?.ifBlank { null } ?: failure.toString()
                         val jumpText = readyJump?.let { jumpFailure(message, it, host) }
+                        errorRaw = if (jumpText == null) message else null
                         error = { c -> jumpText?.format(c) ?: LocalNetwork.hintFor(c, direct, message) }
                     }
                 }
@@ -494,6 +501,8 @@ fun TerminalScreen(
                 ) null else ({ attempt++ }),
                 detail = errorDetail,
                 inDrawer = duo != null,
+                rawError = errorRaw,
+                onEdit = tablet?.onEdit ?: onEditHost,
                 onExit = onExit,
                 // 能就地修的直接给按钮,打开编辑页(平板是浮层)—— 不用先退回去再找编辑入口。
                 fix = (tablet?.onEdit ?: onEditHost)?.let { edit ->
@@ -618,6 +627,7 @@ private fun TerminalView(
     if (halt != null) {
         val keyHost = if (halt.jump) jumpHost ?: host else host
         HostKeyGate(
+            inDrawer = duo != null,
             host = keyHost,
             fingerprint = halt.fingerprint,
             changed = halt.changed,
@@ -1209,10 +1219,24 @@ private fun TerminalView(
         }
     }
 
+    var railAwake by remember { mutableStateOf(true) }
+    // 最后一次碰屏的时间只在 snapshotFlow 里读:每碰一下不会让整个终端页重组。
+    var railPoke by remember { androidx.compose.runtime.mutableLongStateOf(0L) }
+    if (duo != null) {
+        LaunchedEffect(Unit) {
+            androidx.compose.runtime.snapshotFlow { railPoke }.collectLatest {
+                delay(3500)
+                railAwake = false
+            }
+        }
+    }
     // 折叠屏内屏(抽屉布局):右下角一枚竖向玻璃竖条(iPhone Duo 内屏同款),
     // 从上到下:‹ 回主机列表(抽屉收起时才有)/ ↓ 回到底部(翻历史时)/ 文件 / ⌘ 快捷键 / ⌨ 键盘 / 粘贴 / ✕ 断开(红)。
     val duoActions: @Composable () -> Unit = {
         if (duo != null) {
+          // 变暗(40%)的竖条:第一下触摸只负责唤醒,不落到按钮上 —— 半透明的竖条压在终端右缘的长行上,
+          // 想点字、定位光标时手一偏就会碰到最下面红色的「✕」把会话断掉。
+          Box {
             CompositionLocalProvider(LocalGlassSize provides 46.dp) {
                 GlassGroup {
                     GlassReveal(!duo.drawerOpen) {
@@ -1243,6 +1267,19 @@ private fun TerminalView(
                     }
                 }
             }
+            if (!railAwake) {
+                Box(
+                    Modifier
+                        .matchParentSize()
+                        .pointerInput(Unit) {
+                            detectTapGestures {
+                                railAwake = true
+                                railPoke = System.nanoTime()
+                            }
+                        },
+                )
+            }
+          }
         }
     }
 
@@ -1507,14 +1544,6 @@ private fun TerminalView(
         }
     } else Modifier
     // 内屏右下角的竖条会压在终端右缘的长行上:几秒没碰屏幕就淡到 40%,一碰就亮回来(只听不管,终端手势照常)。
-    var railAwake by remember { mutableStateOf(true) }
-    var railPoke by remember { androidx.compose.runtime.mutableIntStateOf(0) }
-    if (duo != null) {
-        LaunchedEffect(railPoke) {
-            delay(3500)
-            railAwake = false
-        }
-    }
     val railAlpha by androidx.compose.animation.core.animateFloatAsState(
         if (railAwake) 1f else 0.4f,
         androidx.compose.animation.core.tween(if (railAwake) 120 else 500),
@@ -1525,7 +1554,7 @@ private fun TerminalView(
             awaitEachGesture {
                 awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                 railAwake = true
-                railPoke++
+                railPoke = System.nanoTime()
             }
         }
     } else Modifier

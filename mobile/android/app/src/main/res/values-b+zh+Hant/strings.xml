@@ -189,7 +189,8 @@
     <string name="host_err_timeout">連線逾時。檢查位址與連接埠是否正確,以及手機到伺服器的網路是否通。</string>
     <string name="host_err_refused">伺服器拒絕了連線。確認 SSH 服務已開啟,連接埠是否正確。</string>
     <string name="host_err_unreachable">連不到這個位址。檢查網路,或確認伺服器在線上。</string>
-    <string name="host_err_auth">使用者名稱或密碼不對。</string>
+    <string name="host_err_auth">認證沒通過。檢查使用者名稱,以及密碼或金鑰對不對。</string>
+    <string name="host_gate_still_trying">仍在嘗試,可以取消。</string>
     <string name="host_row_connecting">連線中…</string>
     <string name="host_row_confirm">等待確認</string>
     <string name="host_row_failed">連線失敗</string>

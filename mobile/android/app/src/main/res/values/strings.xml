@@ -190,7 +190,8 @@
     <string name="host_err_timeout">The connection timed out. Check the address and port, and that your phone can reach the server.</string>
     <string name="host_err_refused">The server refused the connection. Make sure SSH is running and the port is right.</string>
     <string name="host_err_unreachable">Can\u2019t reach this address. Check your network, or that the server is online.</string>
-    <string name="host_err_auth">The username or password was rejected.</string>
+    <string name="host_err_auth">Authentication failed. Check the username, and the password or key.</string>
+    <string name="host_gate_still_trying">Still trying. You can cancel.</string>
     <string name="host_row_connecting">Connecting…</string>
     <string name="host_row_confirm">Waiting for confirmation</string>
     <string name="host_row_failed">Connection failed</string>

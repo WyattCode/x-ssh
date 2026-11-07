@@ -189,7 +189,8 @@
     <string name="host_err_timeout">连接超时。检查地址和端口对不对,以及手机到服务器的网络通不通。</string>
     <string name="host_err_refused">服务器拒绝了连接。确认 SSH 服务已开启,端口是否正确。</string>
     <string name="host_err_unreachable">连不到这个地址。检查网络,或确认服务器在线。</string>
-    <string name="host_err_auth">用户名或密码不对。</string>
+    <string name="host_err_auth">认证没通过。检查用户名,以及密码或私钥对不对。</string>
+    <string name="host_gate_still_trying">仍在尝试,可以取消。</string>
     <string name="host_row_connecting">连接中…</string>
     <string name="host_row_confirm">等待确认</string>
     <string name="host_row_failed">连接失败</string>

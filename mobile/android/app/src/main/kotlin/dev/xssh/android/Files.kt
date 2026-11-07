@@ -791,9 +791,11 @@ fun FilesPane(
         )
     } else {
     val tablet = chrome as FilesChrome.Tablet
+    var paneWidthPx by remember { mutableIntStateOf(0) }
     Column(
         Modifier
             .fillMaxSize()
+            .onSizeChanged { paneWidthPx = it.width }
             .focusRequester(paneFocus)
             .focusable()
             .onKeyEvent(onKey),
@@ -805,9 +807,9 @@ fun FilesPane(
             subtitle = host.subtitle,
             dot = p.ok,
         ) {
-            // 右栏不够宽(整屏宽度 − 展开的抽屉 334dp < 640dp)时切换条只画图标。
-            val paneWidth = LocalConfiguration.current.screenWidthDp.dp - (if (tablet.sidebarVisible) 334.dp else 0.dp)
-            PaneSwitch(files = true, compact = paneWidth < 640.dp) { if (!it) tablet.onShowTerminal() }
+            // 右栏实际不够宽(< 640dp)时切换条只画图标:用量到的宽度,不再用「屏宽 − 334dp」去估
+            // (半折、分屏、平板侧栏宽度不同,估的会错)。
+            PaneSwitch(files = true, compact = paneWidthPx > 0 && with(density) { paneWidthPx.toDp() } < 640.dp) { if (!it) tablet.onShowTerminal() }
             Spacer(Modifier.width(8.dp))
             var uploadOpen by remember { mutableStateOf(false) }
             Box {

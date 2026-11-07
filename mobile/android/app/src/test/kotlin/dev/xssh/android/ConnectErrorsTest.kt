@@ -36,6 +36,7 @@ class ConnectErrorsTest {
         assertEquals(FriendlyError.Refused, ConnectErrors.friendly("Connection refused"))
         assertEquals(FriendlyError.Unreachable, ConnectErrors.friendly("No route to host"))
         assertEquals(FriendlyError.AuthFailed, ConnectErrors.friendly("ssh: unable to authenticate, Permission denied"))
+        assertEquals(FriendlyError.AuthFailed, ConnectErrors.friendly("Too many authentication failures"))
     }
 
     @Test
