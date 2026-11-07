@@ -30,7 +30,7 @@ import {
   penaltyRetryDelayMs,
   passphraseConnectCode
 } from './friendlyError'
-import { posixJoin, parentOf, clampConcurrency, buildPackCommand, buildExtractCommand, treeDirMode } from '../shared/fsUtils'
+import { posixJoin, parentOf, clampConcurrency, buildPackCommand, buildExtractCommand, treeDirMode, resumeOffset, uploadStreamOptions } from '../shared/fsUtils'
 import { isLoopbackHost, localX11Target, parseX11Hello, readLocalX11Cookie, rewriteX11Hello } from './x11'
 import { ensureLocalXServer } from './x11Server'
 
@@ -2839,24 +2839,18 @@ export class SshManager {
                   emit(item.name)
                   continue
                 }
-                if (remoteSize > 0 && remoteSize < localSize) offset = remoteSize
+                offset = resumeOffset(remoteSize, localSize)
               }
             }
             // Build both streams before piping, and destroy them here if
             // either constructor throws — an orphaned stream leaks its fd and
             // later emits 'error' with nobody listening, which is fatal.
             // No cleanup path on failure: the source file is the user's.
-            // `start` alone keeps ssh2's default flags ('w' = O_TRUNC): the
-            // resume would empty the file and then write at the old offset,
-            // leaving `offset` NUL bytes followed by the tail — and because the
-            // result is exactly localSize, the next run treats it as synced and
-            // the corruption becomes permanent. 'r+' keeps the prefix.
-            // `mode` is explicit because ssh2 defaults to 0o666 (bypassing
-            // umask) and fchmods unconditionally, widening an existing 0600
-            // file on overwrite.
-            write = offset
-              ? sftp.createWriteStream(item.remote, { flags: 'r+', start: offset, mode: 0o644 })
-              : sftp.createWriteStream(item.remote, { mode: 0o644 })
+            // Both the offset decision and the stream flags are pure functions
+            // in fsUtils, unit-tested in uploadPlan.test.ts: passing `start`
+            // with ssh2's default 'w' truncated the file, and the resulting
+            // size equalled the local one, so the corruption looked synced.
+            write = sftp.createWriteStream(item.remote, uploadStreamOptions(offset))
             read = offset
               ? createReadStream(this.longPath(item.local), { start: offset })
               : createReadStream(this.longPath(item.local))

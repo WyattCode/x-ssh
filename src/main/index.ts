@@ -13,6 +13,7 @@ import { resolveLang, type LangPref, type UiLang } from '../shared/lang'
 import { resolveDir, resolveInside } from '../shared/localPaths'
 import { SshManager } from './ssh'
 import { probeHosts } from './reachability'
+import { isTrustedFrame } from './ipcGuard'
 import { OS_PROBE_COMMAND, parseOsProbe } from '../shared/hostOs'
 import { HostStore } from './store'
 import { KnownHosts, KnownHostsCorruptError } from './knownHosts'
@@ -85,7 +86,10 @@ let mainWindow: BrowserWindow | null = null
  *  `sandbox: false` means filesystem and credential access. */
 function isTrustedIpcSender(e: IpcMainInvokeEvent | IpcMainEvent): boolean {
   const w = mainWindow
-  return !!w && !w.isDestroyed() && e.senderFrame === w.webContents.mainFrame
+  if (!w || w.isDestroyed()) return false
+  // The comparison itself is pure and unit-tested (ipcGuard.test.ts): identity,
+  // not URL, so a same-origin iframe cannot get through.
+  return isTrustedFrame(e.senderFrame, w.webContents.mainFrame)
 }
 
 /** Registers an invoke handler behind the sender check. `any` keeps the dozens

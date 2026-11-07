@@ -203,14 +203,20 @@ export class UserVerify {
     if (cached && this.now() - cached.at < AVAILABILITY_TTL_MS) return cached.value
 
     let value: 'available' | 'unavailable' = 'unavailable'
+    // Only a probe that actually ran is cached. A timeout — or a machine where
+    // PowerShell is blocked by policy — says nothing about whether Hello works,
+    // yet the old code cached that as "unavailable" for a minute, which silently
+    // disabled the key gate right when it was needed.
+    let conclusive = false
     try {
       const r = await this.runPowerShell(buildAvailabilityScript(), {}, AVAILABILITY_TIMEOUT_MS)
       // parseAvailability 的 'failed' 在这里统一降级为 unavailable
       value = parseAvailabilityOutput(r.stdout) === 'available' ? 'available' : 'unavailable'
+      conclusive = true
     } catch {
       value = 'unavailable'
     }
-    this.availabilityCache = { value, at: this.now() }
+    if (conclusive) this.availabilityCache = { value, at: this.now() }
     return value
   }
 
