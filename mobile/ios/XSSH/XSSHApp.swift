@@ -552,6 +552,8 @@ struct RootView: View {
             //   0ms     会话(右边的终端)淡出;抽屉要是收着,同时滑出来(会话还在,收场完了才清掉,不在抽屉动画里换掉);
             //   60 / 230ms  列表已经看得见 / 抽屉快滑到位 —— 那一行开始放手;之后的节奏和外屏一样。
             let listHidden = !drawerOpen
+            // 软键盘跟着收(以前要等收场放完、会话清掉之后才落下,抽屉滑出来时它还罩在屏幕下半)。
+            active?.wantsKeyboard = false
             withAnimation(.easeOut(duration: 0.2)) { active?.leaving = true }
             if listHidden { setDrawer(true) }
             closeTask = Task { @MainActor in await sendOff(leaving, lead: listHidden ? 230 : 60) }

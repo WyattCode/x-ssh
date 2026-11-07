@@ -181,7 +181,8 @@ final class TerminalModel: Identifiable {
     }
 
     private func connectFinished(_ result: Result<Void, Error>) {
-        guard state == .connecting else { return }
+        // 用户已经取消 / 断开:迟到的结果不再改状态(否则列表里那一行会在收场动画中途提前松手)。
+        guard state == .connecting, !userDisconnected else { return }
         switch result {
         case .success:
             state = .connected
@@ -253,6 +254,8 @@ final class TerminalModel: Identifiable {
     // MARK: 输出
 
     private func apply(_ output: Backend.Output) {
+        // 同上:断开之后迟到的 `.closed`(正在跑的那一拍轮询发出的)不能把状态改成「已结束」。
+        if userDisconnected { return }
         switch output {
         case .frame(let rows, let cursor, let view):
             self.rows = rows
