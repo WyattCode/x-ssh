@@ -2,21 +2,22 @@
  * Tracks what the remote input line holds while an IME (notably voice input)
  * types into xterm's hidden textarea.
  *
- * The fact the previous design got wrong: **`term.onData` IS xterm's send
- * path.** When it fires, the payload has already been written to the SSH
- * channel. Mirroring that payload back — as a diff, as a resend, in any form —
- * puts it on the wire twice, which is exactly the duplicated dictation users
- * saw (`默认把API key默认把API key`). A "reconcile the textarea against a mirror"
- * model cannot work, because xterm empties the textarea after every commit:
- * the textarea is a drop box for the *next* commit, not a view of the line.
+ * `term.onData` is xterm's way of saying "the user produced these bytes — send
+ * them". It does NOT write to the SSH channel itself; the caller does. An
+ * earlier revision of this file assumed the opposite and returned '' for every
+ * payload, which silently swallowed *all* keyboard input (English included).
  *
- * So `input()` never re-sends plain text; it only records it. `sync()` is the
- * safety net for text xterm did NOT emit (some voice IMEs write straight into
- * the textarea), and it sends only the part the remote does not already have.
+ * The duplication users saw with voice input had a different cause: the
+ * composition-end safety net re-sent text that `onData` had already handed to
+ * the caller. So:
+ *   - `input()` always returns what must go on the wire (i.e. `data`), and only
+ *     records it;
+ *   - `sync()` sends text xterm never emitted (some voice IMEs write straight
+ *     into the textarea) and refuses anything already accounted for.
  *
  * Control keys are the one thing the textarea cannot express: `\r` starts a new
- * line, `DEL` removes a character, Ctrl+U clears it. They update the record
- * without changing what goes on the wire.
+ * line, `DEL` removes a character, Ctrl+U clears it. They update the record and
+ * still go out unchanged.
  */
 
 const DEL = '\x7f'
@@ -41,8 +42,8 @@ export interface ImeInputContext {
 }
 
 export interface ImeMirror {
-  /** What should additionally reach the remote for one xterm `onData` payload.
-   *  Empty for plain text: xterm already sent it. */
+  /** What must reach the remote for one xterm `onData` payload. Always the
+   *  payload itself — `onData` is the request to send, not a report of a send. */
   input(data: string, ctx: ImeInputContext): string
   /**
    * The part of `settled` the remote does not have yet, for commits xterm
@@ -92,26 +93,25 @@ export function createImeMirror(): ImeMirror {
           synced = ''
           lastSent = ''
         }
-        // xterm already sent it. Returning `data` here sent every arrow key,
-        // Tab and Ctrl+C to the shell twice — the same duplication as text,
-        // just less visible.
-        return ''
+        // Still has to go out: returning '' here swallowed every arrow key,
+        // Tab and Ctrl+C.
+        return data
       }
-      // xterm already sent this text. Recording it is the whole job — sending
-      // it again is the duplicate this module exists to prevent.
+      // Record it and send it. `onData` asks the caller to write these bytes —
+      // returning '' (as one revision did) lost every keystroke.
       synced = (synced + data).slice(-MAX_TRACKED)
       lastSent = data
-      return ''
+      return data
     },
 
     sync(settled) {
       if (!settled) return ''
-      // A composition normally produces an onData AND an input/compositionend
-      // event for the same text. If xterm already emitted it, the catch-up must
-      // do nothing — this is the duplicate path that survived the previous fix.
-      // `endsWith` on both sides was too eager: a one-character commit (a
-      // punctuation mark) made the next, genuinely unsent sentence look like a
-      // repeat. Exact match, or a suffix of at least two characters.
+      // The most reliable check: this text is already at the end of the line we
+      // have sent. Voice IMEs commit a whole sentence through `onData` and then
+      // fire compositionend for the very same text — that second pass is the
+      // duplicate users reported.
+      if (synced.endsWith(settled)) return ''
+      // Same commit, reported twice (onData, then input/compositionend).
       if (
         lastSent &&
         (lastSent === settled || (lastSent.length >= 2 && settled.endsWith(lastSent)))
@@ -123,7 +123,7 @@ export function createImeMirror(): ImeMirror {
       // Otherwise it is new text typed into a freshly-cleared box: send it all.
       const missing = settled.startsWith(synced) ? settled.slice(synced.length) : settled
       if (!missing) return ''
-      synced += missing
+      synced = (synced + missing).slice(-MAX_TRACKED)
       return missing
     },
 
