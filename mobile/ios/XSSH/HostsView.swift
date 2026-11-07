@@ -48,6 +48,8 @@ struct HostsView: View {
     /// 从原来的位置一直滑到新位置,真线让位,落定的瞬间无缝换回来 —— 眼睛看到的是同一根线连续地走。
     @State private var ghostMoved = false
     @State private var ghostDone = true
+    @State private var collapseTask: Task<Void, Never>?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// 连着那台还在的时候,每一行位置的快照(`rowRects`):单元格缩短之后 `rowRects` 已经变了,替身线要从缩短之前的位置出发。
     @State private var rowRects: [UUID: CGRect] = [:]
     @State private var frozenRects: [UUID: CGRect] = [:]
@@ -110,14 +112,17 @@ struct HostsView: View {
         }
         // 连上一台时,让列表滚到那张卡片(它在视野外也能看到自己选中了哪台)。
         .onChange(of: activeID) { old, id in
+            collapseTask?.cancel()
             if let id { lastFeatured = id; settled = false; ghostDone = false; ghostMoved = false }
             else if old != nil {
                 // 单元格高度已经一下子缩短了(列表做不到平滑改高度):下面的行在那一帧被抵消回原位(`collapseShift`),
                 // 虚线由替身线顶上(`ghostSeparators`);等那一帧画出来,再用同一条曲线把它们一起滑到新位置。
-                Task { @MainActor in
+                collapseTask = Task { @MainActor in
                     try? await Task.sleep(for: .milliseconds(20))
-                    withAnimation(Self.collapseCurve) { settled = true; ghostMoved = true }
+                    guard !Task.isCancelled else { return }
+                    withAnimation(reduceMotion ? nil : Self.collapseCurve) { settled = true; ghostMoved = true }
                     try? await Task.sleep(for: .milliseconds(250))
+                    guard !Task.isCancelled else { return }
                     var t = Transaction(animation: nil); t.disablesAnimations = true
                     withTransaction(t) { ghostDone = true }   // 替身线走到头了:真线在同一个位置,无缝换回来
                 }
@@ -377,7 +382,7 @@ struct HostsView: View {
             }
             // 状态行一直在布局里,收起 = 高度和透明度一起平滑变到 0(不是直接从布局里拿掉):
             // 拿掉的话列表单元格的高度瞬间缩短,名字被猛地顶上去,箭头走另一条动画、慢半拍追上来,看起来「闪跳一下」。
-            statusLine(showing: featured || host.id == lastFeatured)
+            statusLine(showing: featured || (host.id == lastFeatured && !ghostDone))
                 .opacity(featured ? 1 : 0)
                 .frame(height: featured ? smallFont * 1.3 : 0, alignment: .top)
                 .clipped()
@@ -493,7 +498,7 @@ struct HostsView: View {
                     .frame(width: max(0, r.width - rowInset * 2), height: 1)
                     .offset(x: r.minX + rowInset, y: r.maxY - (ghostMoved ? statusSlot : 0))
                     .transition(.identity)   // 插入时不淡入:和真线同一帧换手,虚线一帧都不能断
-                    .animation(Self.collapseCurve, value: ghostMoved)
+                    .animation(reduceMotion ? nil : Self.collapseCurve, value: ghostMoved)
             }
             .allowsHitTesting(false)
         }
@@ -1045,11 +1050,12 @@ private struct SeparatorSwap: ViewModifier {
 private struct CollapseShift: ViewModifier {
     let y: CGFloat
     let settled: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func body(content: Content) -> some View {
         content
             .offset(y: y)
-            .animation(settled ? HostsView.collapseCurve : nil, value: y)
+            .animation(settled && !reduceMotion ? HostsView.collapseCurve : nil, value: y)
     }
 }
 
