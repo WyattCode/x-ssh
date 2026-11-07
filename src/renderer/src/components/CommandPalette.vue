@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, toRaw, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useFocusTrap } from '../composables/focusTrap'
 const trapEl = ref<HTMLElement>()
 useFocusTrap(trapEl, () => store.paletteOpen)
 import { useSessions } from '../stores/sessions'
 import { fuzzyScore, fuzzyMatch } from '../lib/fuzzy'
+import { toPlain } from '../lib/plain'
 import { paletteHostScore } from '../lib/paletteHostScore'
 import { parseTarget } from '../lib/target'
 import { isImeKey } from '../lib/ime'
@@ -399,7 +400,7 @@ async function submitPassword(): Promise<void> {
       const h = store.hosts.find((x) => x.id === params.hostId)
       if (h) {
         try {
-          store.hosts = await window.api.hosts.save({ ...toRaw(h) }, password.value)
+          store.hosts = await window.api.hosts.save(toPlain(h), password.value)
         } catch {
           // Remembering it is a convenience; connect anyway and say why it
           // wasn't saved instead of dropping the connect on the floor.

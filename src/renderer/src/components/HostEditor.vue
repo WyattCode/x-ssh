@@ -9,6 +9,7 @@ import { useConfirm } from '../composables/confirm'
 import { isImeKey } from '../lib/ime'
 import { keyErrorMessage } from '../lib/keyError'
 import { jumpSelectBlocked, jumpSelectOptions, jumpUsedBy } from '../lib/jumpCandidates'
+import { toPlain } from '../lib/plain'
 import Icon from './Icon.vue'
 import OsIcon from './OsIcon.vue'
 import { PRESETS } from '../lib/terminalThemes'
@@ -525,7 +526,11 @@ async function save(): Promise<void> {
   const pp = form.auth === 'key' && passphrase.value ? passphrase.value : undefined
   saving.value = true
   try {
-    store.hosts = await window.api.hosts.save(host, pw, pp)
+    // `props.host.os` is a Pinia proxy. Passing it straight to `invoke` throws
+    // "An object could not be cloned" before the main process ever runs, which
+    // surfaced as a bare "保存失败" and wrote nothing to disk. Everything that
+    // crosses IPC goes through toPlain.
+    store.hosts = await window.api.hosts.save(toPlain(host), pw, pp)
   } catch (e) {
     // Main rejects when the hosts file cannot be written (disk full, unreadable
     // file) — and now also when a typed password could not be written to the
@@ -533,6 +538,9 @@ async function save(): Promise<void> {
     // a password that had in fact been stored, while the real problem was the
     // vault (no OS encryption / unreadable secrets.bin).
     const msg = (e as Error)?.message ?? ''
+    // Keep the raw reason in the console: "保存失败" alone is unactionable, and
+    // IPC/clone errors carry no user-facing wording of their own.
+    console.error('host save failed:', msg)
     toast(
       msg.includes('secrets-') ? t('ed.saveFailSecret') : t('ed.saveFail'),
       'error'
