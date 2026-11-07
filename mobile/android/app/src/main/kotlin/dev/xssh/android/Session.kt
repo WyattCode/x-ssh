@@ -42,6 +42,8 @@ data class Snapshot(
     val modes: uniffi.xssh_ffi.InputModes,
     /** 选区在视口里的范围(核心记在网格坐标上,新输出滚上来时跟着内容走)。 */
     val selection: uniffi.xssh_ffi.ViewSelection?,
+    /** 回滚历史一共有多少行(界面画滚动条:滑块大小 = 视口 / (视口 + 历史))。 */
+    val historyLen: Int = 0,
 )
 
 /** 一条活动会话:SSH 连接 + 通道 + 终端状态机。所有方法都必须在 IO 线程调用。 */
@@ -140,7 +142,14 @@ class LiveTerminal(
     fun snapshot(): Snapshot? {
         if (closed) return null
         return runCatching {
-            Snapshot(term.rows(), term.cursor(), term.scrollOffset().toInt(), term.inputModes(), term.viewSelection())
+            Snapshot(
+                term.rows(),
+                term.cursor(),
+                term.scrollOffset().toInt(),
+                term.inputModes(),
+                term.viewSelection(),
+                term.historyLen().toInt(),
+            )
         }.getOrNull()
     }
 

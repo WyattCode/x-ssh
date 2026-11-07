@@ -45,6 +45,18 @@ object XIcons {
         moveTo(16.5f, 16f); arcTo(2f, 2f, 0f, true, true, 12.5f, 16f); arcTo(2f, 2f, 0f, true, true, 16.5f, 16f)
     }
 
+    /** 复制:两张叠着的纸(选词菜单)。 */
+    val Copy = icon("copy") {
+        moveTo(9f, 9f); lineTo(19f, 9f); lineTo(19f, 19f); lineTo(9f, 19f); close()
+        moveTo(15f, 9f); lineTo(15f, 5f); lineTo(5f, 5f); lineTo(5f, 15f); lineTo(9f, 15f)
+    }
+
+    /** 粘贴:带夹子的剪贴板(选词菜单)。 */
+    val Paste = icon("paste") {
+        moveTo(8f, 5f); lineTo(6f, 5f); lineTo(6f, 20f); lineTo(18f, 20f); lineTo(18f, 5f); lineTo(16f, 5f)
+        moveTo(9f, 3.5f); lineTo(15f, 3.5f); lineTo(15f, 6.5f); lineTo(9f, 6.5f); close()
+    }
+
     /** 会话快照:两层叠板(工作区布局的「存一份」)。 */
     val Layers = icon("layers") {
         moveTo(12f, 3.5f); lineTo(20f, 8f); lineTo(12f, 12.5f); lineTo(4f, 8f); close()

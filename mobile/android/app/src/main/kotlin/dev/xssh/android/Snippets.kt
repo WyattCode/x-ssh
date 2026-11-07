@@ -153,9 +153,7 @@ class SnippetStore(context: Context) {
      * 存盘。**返回到底写没写进去** —— 用 commit 而不是 apply:
      * apply 是丢给后台线程的,写失败(磁盘满、存储被卸载)也一声不响,
      * 调用方于是照样关掉编辑页、内存里留着一条其实没存下来的片段。
-     */
-    fun save(list: List<Snippet>): Boolean {
-     * 存盘。用 commit 而不是 apply,好让调用方知道写没写进去。
+     *
      * 空表且磁盘上仍有受保护数据时拒绝覆盖(坏 JSON 被当成「没有片段」后再保存会抹掉唯一副本)。
      */
     fun save(list: List<Snippet>): Boolean {

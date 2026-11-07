@@ -207,9 +207,15 @@ private class Bounce(private val limit: Float) : NestedScrollConnection {
 
 /** 给一个竖向滚动容器加上 iOS 的橡皮筋回弹(见 [Bounce])。挂在容器本身上。 */
 @Composable
-fun Modifier.bounce(): Modifier {
+fun Modifier.bounce(offsetOut: androidx.compose.runtime.MutableFloatState? = null): Modifier {
     val density = LocalDensity.current
     val bounce = remember(density) { Bounce(with(density) { 160.dp.toPx() }) }
+    // 把当前回弹位移(px,往上拉为负)同步给外面:顶栏要知道"内容正在从它底下穿过"(橡皮筋拉出去也算)。
+    if (offsetOut != null) {
+        androidx.compose.runtime.LaunchedEffect(bounce) {
+            androidx.compose.runtime.snapshotFlow { bounce.shown }.collect { offsetOut.floatValue = it }
+        }
+    }
     return this
         // 裁在容器自己的范围里:往上拉时内容不能盖到状态栏上去(滚动时本来就是这样裁的)。
         .clipToBounds()

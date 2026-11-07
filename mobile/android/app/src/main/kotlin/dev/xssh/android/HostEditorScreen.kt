@@ -105,23 +105,18 @@ fun HostEditorScreen(
     val error = draft.error
     val scope = rememberCoroutineScope()
     var keyMessage by remember { mutableStateOf<String?>(null) }
-    // ✓ / Ctrl+S / 口令格的 onDone 都能触发保存;buildHostForSave 要跑几百毫秒,
-    // 期间再点一次会存两遍、跳两次页。用这个开关把重复的调用挡在外面。
+    // ✓ / Ctrl+S / 口令格的 onDone 都能触发保存;buildHostForSave 要跑几百毫秒(验口令、走密钥库,
+    // 还可能停在生物识别解锁上),期间再点一次会存两遍、跳两次页、弹两次生物识别。
+    // 用这个开关把重复的调用挡在外面。
     var saving by remember { mutableStateOf(false) }
     val importKey = rememberKeyImporter(draft) { keyMessage = it }
-    // 保存可能停在生物识别解锁上;没有这道闸,再点一次 ✓ / Ctrl+S 会再起一个协程。
-    var saving by remember { mutableStateOf(false) }
 
     val context = LocalContext.current
-    // 保存要验口令 / 走密钥库,几百毫秒里按钮还能再按一次(Ctrl+S 也一样)——
-    // 不挡住的话会存两遍、弹两次生物识别。
-    var saving by remember { mutableStateOf(false) }
 
     fun save() {
         if (saving) return
         // 用私钥登录时要验一次口令(解私钥要几百毫秒)、加锁开关要用密钥库并可能弹一次
         // 解锁,都放到 IO 之外由 buildHostForSave 自己安排;这里只管收结果。
-        if (saving) return
         val activity = hostActivity(context)
         if (activity == null) {
             draft.error = UiText(R.string.edit_err_no_page)
@@ -129,9 +124,6 @@ fun HostEditorScreen(
         }
         saving = true
         scope.launch {
-            saving = true
-
-
             try {
                 val host = buildHostForSave(activity, draft)
                 host?.let(onSave)
@@ -142,7 +134,7 @@ fun HostEditorScreen(
     }
 
     val target: @Composable () -> Unit = {
-        FormGroup {
+        FormGroup(title = stringResource(R.string.host_group_connection)) {
             FormField(stringResource(R.string.edit_name), name, { name = it }, placeholder = stringResource(R.string.edit_name_placeholder))
             FormDivider()
             FormField(
@@ -263,19 +255,13 @@ fun HostEditorScreen(
         ) {
           // 表单铺满到右边缘,‹ ✓ 悬浮在底部(轨道或底栏)。键盘弹起时按钮跟着升到键盘上方,正好压在
           // "正在输入的那一行"上 —— 输入框聚焦时多滚一截按钮的高度,落到按钮上面。
-          CompositionLocalProvider(LocalFieldClearance provides if (bottomBar) BarClearance else RailClearance) {
+          CompositionLocalProvider(LocalFieldClearance provides 24.dp) {
             Column(
                 // 标题线(见 Components 的版心说明):盒子线 + TitlePad。
-                Modifier.padding(start = startInset + Gutter + TitlePad, end = railSide(), top = Gutter),
+                // 顶上让出玻璃 ✕ 标题 ✓ 那一排(见下面的顶栏)。
+                Modifier.padding(start = startInset + Gutter + TitlePad, end = Gutter, top = Gutter + 56.dp + EditorBarPad * 2),
             ) {
-                Text(
-                    stringResource(if (initial == null) R.string.edit_title_new else R.string.edit_title_edit),
-                    Modifier.offset(x = -TitleOptical),
-                    color = p.text,
-                    fontSize = 34.sp,
-                    fontWeight = FontWeight.Bold,
-                )
-                // 标题下面只在出错时说话(比如地址没填),平时不放操作说明。
+                // 标题搬进了顶栏;这里只在出错时说话(比如地址没填),平时不放操作说明。
                 error?.let {
                     Spacer(Modifier.height(2.dp))
                     Text(it.text(), color = p.danger, fontSize = 12.5.sp)
@@ -289,7 +275,7 @@ fun HostEditorScreen(
                 // 没有折痕的平板上按 38% 兜底时两页切在不同位置,从主机页点进来两栏会跳一下。
                 val left = adaptive.listPaneWidth(window).coerceAtMost(window - 280.dp)
                 // 和主机页同一条规矩:右栏让开了轨道,左栏就收到同样宽,别一边长一边短(见 creaseGapFor)。
-                val rightContent = ((window - left) - Gutter * 2 - railSide())
+                val rightContent = ((window - left) - Gutter * 2 - Gutter)
                     .coerceAtMost(PageMaxWidth + Gutter * 3)
                 val leftEnd = creaseGapFor(left, startInset + Gutter, rightContent)
                 Row(Modifier.fillMaxWidth()) {
@@ -302,7 +288,7 @@ fun HostEditorScreen(
                         Column(
                             Modifier
                                 .widthIn(max = PageMaxWidth + Gutter * 3)
-                                .padding(start = Gutter * 2, end = railSide()),
+                                .padding(start = Gutter * 2, end = Gutter),
                             verticalArrangement = Arrangement.spacedBy(20.dp),
                         ) {
                             credentials()
@@ -316,10 +302,12 @@ fun HostEditorScreen(
                         // 一行里标签在左、取值在右,行太宽的话视线要横跨半块屏幕 —— 所以限宽。
                         // 但**不能居中**:多出来的宽度左右一分,盒子就不在盒子线上了。
                         // 限宽之后靠左,盒子永远在 16dp、盒内文字永远在 32dp(版心)。
+                        // 用户要求表单框比整行再短 10% 左右:在原来的盒子线里再收到 90%,整体居中(顶栏标题也居中)。
+                        .align(Alignment.CenterHorizontally)
                         .padding(start = startInset)
                         .widthIn(max = PageMaxWidth + Gutter * 2)
-                        .fillMaxWidth()
-                        .padding(start = Gutter, end = railSide()),
+                        .padding(start = Gutter, end = Gutter)
+                        .fillMaxWidth(EditorFormWidth),
                     verticalArrangement = Arrangement.spacedBy(20.dp),
                 ) {
                     target()
@@ -328,31 +316,32 @@ fun HostEditorScreen(
                 }
             }
             // 最后一组要能滚到底部悬浮的按钮上面。
-            Spacer(Modifier.height(if (bottomBar) BarClearance else RailClearance))
+            Spacer(Modifier.height(32.dp))
           }
         }
 
-        if (bottomBar) {
-            CompositionLocalProvider(LocalBackdrop provides backdrop) {
-                BottomBar(
-                    Modifier.align(Alignment.BottomCenter),
-                    start = { GlassButton(XIcons.Back, stringResource(R.string.edit_back)) { onBack() } },
-                    end = {
-                        GlassGroup { ThemeGlassItem() }
-                        GlassButton(XIcons.Check, stringResource(R.string.edit_save)) { save() }
-                    },
+        // iPhone Duo 的表单页:顶上一排 —— 左 ✕(玻璃圆)、中间标题、右 ✓(玻璃圆,绿色),表单从它底下滚过去。
+        CompositionLocalProvider(LocalBackdrop provides backdrop) {
+            Row(
+                Modifier
+                    .align(Alignment.TopStart)
+                    .fillMaxWidth()
+                    .windowInsetsPadding(stableSafeDrawing().only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
+                    .padding(horizontal = Gutter, vertical = EditorBarPad),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                GlassButton(XIcons.Close, stringResource(R.string.edit_back)) { onBack() }
+                Text(
+                    stringResource(if (initial == null) R.string.edit_title_new else R.string.edit_title_edit),
+                    Modifier.weight(1f),
+                    color = p.text,
+                    fontSize = 17.sp,
+                    fontFamily = XsshFonts.monoTitle,
+                    fontWeight = FontWeight.SemiBold,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
                 )
-            }
-        } else {
-            // 和主机页的 ⌕ ＋ 落在同一对位置上:点 ＋ 进来,按钮原地换成 ‹ ✓,一像素不动。
-            CompositionLocalProvider(LocalBackdrop provides backdrop) {
-                EdgeRail(Modifier.align(Alignment.BottomEnd)) {
-                    // 外观在最上面(每一页都有,位置一样);‹ ✓ 的落点一像素不动。
-                    GlassGroup { ThemeGlassItem() }
-                    GlassButton(XIcons.Back, stringResource(R.string.edit_back)) { onBack() }
-                    // 和 ‹ 同一种样式:无色玻璃、正文色图标。
-                    GlassButton(XIcons.Check, stringResource(R.string.edit_save)) { save() }
-                }
+                GlassButton(XIcons.Check, stringResource(R.string.edit_save), tint = p.accent) { save() }
             }
         }
     }
@@ -388,7 +377,7 @@ class HostDraft(private val initial: Host?) {
     /** 跳板机(另一台主机的 id,空 = 直连)。 */
     var jumpHostId by mutableStateOf(initial?.jumpHostId ?: "")
     /** 保存在主机上的端口转发规则。 */
-    var portForwards by mutableStateOf(initial?.portForwards ?: emptyList())
+    var portForwards: List<HostForward> by mutableStateOf(initial?.portForwards ?: emptyList())
 
     /** 正在编辑的这台的 id;新建时为 null(选跳板机时要把自己排除掉)。 */
     val id: String? get() = initial?.id
@@ -433,7 +422,7 @@ class HostDraft(private val initial: Host?) {
             lockSecrets != originalLocked ||
             tmux != (initial?.tmux ?: false) ||
             jumpHostId != (initial?.jumpHostId ?: "") ||
-            portForwards != (initial?.portForwards ?: emptyList())
+            portForwards != (initial?.portForwards ?: emptyList<HostForward>())
 
     /**
      * 这台主机磁盘上有一条加锁的密码密文。
@@ -799,12 +788,9 @@ fun CredentialFields(
     val keyUnusable = stringResource(R.string.edit_err_key_unusable)
     val passwordLabel = stringResource(R.string.edit_password)
     val privateKeyLabel = stringResource(R.string.edit_private_key)
-    FormGroup {
-        Row(
-            Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(horizontal = BoxPad),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(stringResource(R.string.edit_login_method), color = p.text, fontSize = 16.sp, modifier = Modifier.weight(1f))
+    FormGroup(title = stringResource(R.string.edit_login_method)) {
+        // 整行宽的滑动分段(标题已经是上面的 `# 登录方式`,不再重复一行标签)。
+        Box(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 10.dp)) {
             Segmented(
                 options = listOf(passwordLabel, privateKeyLabel),
                 selected = if (draft.auth == AuthKind.KEY) 1 else 0,
@@ -895,15 +881,11 @@ fun CredentialFields(
                 scope.launch {
                     val line = withContext(Dispatchers.IO) { draft.publicKey() }
                     if (line != null) {
-                        copyText(context, line)
-                        onMessage(publicKeyCopied)
-                    } else {
-                        onMessage(publicKeyFailed)
                         if (copyText(context, line)) onMessage(publicKeyCopied)
                         else onMessage(clipboardFailed)
-                        // Mirror generateKey: inspectKey fail / bad passphrase used
-                        // to look like a no-op tap.
-                        onMessage(keyUnusable)
+                    } else {
+                        // 和生成密钥一样:私钥读不出来(坏口令等)时要说一句,否则点了像没反应。
+                        onMessage(publicKeyFailed)
                     }
                 }
             }
@@ -948,3 +930,9 @@ fun CredentialFields(
         }
     }
 }
+
+/** 编辑页顶栏(玻璃 ✕ 标题 ✓)上下各留的空。 */
+private val EditorBarPad = 8.dp
+
+/** 手机单栏下表单框占可用宽度的比例(用户要求比整行短 10% 左右)。 */
+private const val EditorFormWidth = 0.95f

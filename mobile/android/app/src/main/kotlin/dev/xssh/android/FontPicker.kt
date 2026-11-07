@@ -4,6 +4,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.foundation.focusable
 import android.view.KeyEvent as AndroidKeyEvent
 import android.widget.Toast
@@ -292,39 +293,69 @@ fun SettingsContent(onFontPicked: (() -> Unit)? = null) {
         }
     }
     Spacer(Modifier.height(24.dp))
-    Text(
-        stringResource(R.string.set_terminal_theme),
-        color = p.textDim,
-        fontSize = 13.sp,
-        modifier = Modifier.padding(start = TitlePad, bottom = 7.dp),
-    )
+    FormTitle(stringResource(R.string.set_terminal_theme))
     SchemeList()
     Spacer(Modifier.height(24.dp))
-    Text(
-        stringResource(R.string.set_terminal_font),
-        color = p.textDim,
-        fontSize = 13.sp,
-        modifier = Modifier.padding(start = TitlePad, bottom = 7.dp),
-    )
+    FormTitle(stringResource(R.string.set_terminal_font))
     FontList(onPicked = onFontPicked)
 }
 
 /** 手机 / 折叠屏:整页推进来(外壳和主机详情页同一个)。 */
 @Composable
-fun SettingsScreen(onBack: () -> Unit) {
+fun SettingsScreen(
+    onBack: () -> Unit,
+    /** 从「会话快照」恢复后要连的那台主机;不给就不显示快照这一行(平板的快照在侧栏里)。 */
+    onOpenHost: ((Host) -> Unit)? = null,
+) {
     val p = LocalXssh.current
+    var snapshotsOpen by remember { androidx.compose.runtime.mutableStateOf(false) }
     ReadingPage(onBack) {
         Column(Modifier.widthIn(max = PageMaxWidth)) {
-            // 大标题和主机页、编辑页同号字(34sp),三页推来推去看着是同一套。
+            // 大标题 `$ settings`:和主机页的 `$ hosts` 同一套(等宽半粗 26,字距收一点)。
             Text(
-                stringResource(R.string.set_title),
+                "\$ " + stringResource(R.string.set_title).lowercase(),
                 color = p.text,
-                fontSize = 34.sp,
-                fontWeight = FontWeight.Bold,
+                fontSize = 26.sp,
+                fontFamily = XsshFonts.monoTitle,
+                fontWeight = FontWeight.SemiBold,
+                letterSpacing = (-0.4).sp,
                 modifier = Modifier.padding(start = TitlePad - TitleOptical, bottom = 18.dp),
             )
             SettingsContent()
+            // 会话合照(快照)入口:暂时用不上,先隐藏。
+            // if (onOpenHost != null) {
+            //     Spacer(Modifier.height(24.dp))
+            //     FormGroup(title = stringResource(R.string.set_more)) {
+            //         Row(
+            //             Modifier
+            //                 .fillMaxWidth()
+            //                 .heightIn(min = 52.dp)
+            //                 .clickable { snapshotsOpen = true }
+            //                 .padding(horizontal = BoxPad),
+            //             verticalAlignment = Alignment.CenterVertically,
+            //         ) {
+            //             Text(stringResource(R.string.snap_menu), color = p.text, fontSize = 15.sp, fontFamily = XsshFonts.monoUi, modifier = Modifier.weight(1f))
+            //             Text("›", color = p.textDim, fontSize = 20.sp)
+            //         }
+            //     }
+            // }
         }
+    }
+    if (snapshotsOpen && onOpenHost != null) {
+        val hosts = LocalHosts.current
+        val running = SessionRegistry.sessions.collectAsState().value
+        val liveEntries = remember(running) { running.values.sortedByDescending { it.lastOutputAt }.map { it.hostId to it.label } }
+        SnapshotSheet(
+            tablet = false,
+            liveEntries = liveEntries,
+            activeHostId = running.values.sortedByDescending { it.lastOutputAt }.firstOrNull()?.hostId,
+            knownHostIds = hosts.map { it.id }.toSet(),
+            onRestore = { _, focus ->
+                snapshotsOpen = false
+                hosts.firstOrNull { it.id == focus }?.let(onOpenHost)
+            },
+            onDismiss = { snapshotsOpen = false },
+        )
     }
 }
 

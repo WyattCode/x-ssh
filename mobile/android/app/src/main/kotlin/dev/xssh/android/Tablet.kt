@@ -212,7 +212,7 @@ class ImeBuffer {
 /** 搜索框里当作列表导航的键(没在组词时)。 */
 private val SearchNavKeys = setOf(Key.Escape, Key.DirectionUp, Key.DirectionDown, Key.Enter, Key.NumPadEnter)
 
-private sealed interface SheetTarget {
+internal sealed interface SheetTarget {
     data object New : SheetTarget
     data class Edit(val host: Host) : SheetTarget
 }
@@ -676,7 +676,6 @@ private fun Sidebar(
     menuFor: (Host) -> List<MenuAction>,
 ) {
     val p = LocalXssh.current
-    val theme = LocalThemeControl.current
     Column(
         modifier
             .background(p.cardBg)
@@ -687,7 +686,6 @@ private fun Sidebar(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) { BrandLockup(BrandToolbarHeight) }
-            ToolbarIcon(theme.mode.icon, stringResource(R.string.tab_appearance, theme.mode.label)) { theme.onChange(theme.mode.next()) }
             ToolbarIcon(XIcons.Settings, stringResource(R.string.set_title)) { onFonts() }
             ToolbarIcon(XIcons.Plus, stringResource(R.string.tab_new_host) + "  Ctrl+N") { onNew() }
         }
@@ -1033,11 +1031,6 @@ fun TabletToolbar(
                 XIcons.Sidebar,
                 stringResource(if (sidebarVisible) R.string.tab_hide_sidebar else R.string.tab_show_sidebar) + "  Ctrl+Shift+S",
             ) { onToggleSidebar() }
-            // 外观按钮平时在侧边栏标题行;侧边栏收起来时挪到这里 —— 任何时候都能换深浅色。
-            val theme = LocalThemeControl.current
-            GlassRevealRow(!sidebarVisible) {
-                ToolbarIcon(theme.mode.icon, stringResource(R.string.tab_appearance, theme.mode.label)) { theme.onChange(theme.mode.next()) }
-            }
             Spacer(Modifier.width(6.dp))
             if (dot != null) {
                 StatusDot(dot)
@@ -1295,7 +1288,7 @@ private fun TabletWelcome(sidebarVisible: Boolean, onToggleSidebar: () -> Unit, 
  * 改过内容再点外面 / 按 Esc,先确认是否放弃,不悄悄丢掉。
  */
 @Composable
-private fun HostSheet(
+internal fun HostSheet(
     initial: Host?,
     onCancel: () -> Unit,
     onSave: (Host) -> Unit,

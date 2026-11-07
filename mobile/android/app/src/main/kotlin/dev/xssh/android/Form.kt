@@ -29,6 +29,10 @@ import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.ui.draw.shadow
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -49,6 +53,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.onInterceptKeyBeforeSoftKeyboard
 import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.focus.FocusRequester
@@ -88,15 +93,7 @@ fun FormGroup(
 ) {
     val p = LocalXssh.current
     Column(modifier.fillMaxWidth()) {
-        if (title != null) {
-            Text(
-                title,
-                color = p.textDim,
-                fontSize = 13.sp,
-                // 标题线(见 Components 里的版心说明)。
-                modifier = Modifier.padding(start = TitlePad, bottom = 7.dp),
-            )
-        }
+        if (title != null) FormTitle(title)
         Column(
             Modifier
                 .fillMaxWidth()
@@ -113,6 +110,25 @@ fun FormGroup(
                 modifier = Modifier.padding(start = TitlePad, end = BoxPad, top = 7.dp),
             )
         }
+    }
+}
+
+/**
+ * 组标题:前一个绿色的 `# `(iOS 版表单的小节标题),等宽字,像配置文件里的注释行。
+ * 写在面板外面,落在标题线上(见 Components 里的版心说明)。
+ */
+@Composable
+fun FormTitle(title: String, modifier: Modifier = Modifier) {
+    val p = LocalXssh.current
+    Row(modifier.padding(start = TitlePad, bottom = 7.dp)) {
+        Text(
+            "# ",
+            color = p.ok,
+            fontSize = 13.sp,
+            fontFamily = XsshFonts.monoUi,
+            modifier = Modifier.clearAndSetSemantics { },
+        )
+        Text(title, color = p.textDim, fontSize = 13.sp, fontFamily = XsshFonts.monoUi, fontWeight = FontWeight.Medium)
     }
 }
 
@@ -240,16 +256,16 @@ fun FormField(
             .padding(horizontal = BoxPad),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // 标签用主文字色、取值右对齐 —— iOS 设置页的写法。
-        Text(label, color = p.text, fontSize = 16.sp)
+        // 标签用主文字色、取值右对齐 —— iOS 设置页的写法;整张表单是等宽字(iOS 版 Form 的 `.monospaced`)。
+        Text(label, color = p.text, fontSize = 15.sp, fontFamily = XsshFonts.monoUi)
         Spacer(Modifier.width(GapItem))
         Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
             if (value.isEmpty() && placeholder.isNotEmpty()) {
                 Text(
                     placeholder,
                     color = p.textFaint,
-                    fontSize = 16.sp,
-                    fontFamily = if (mono) XsshFonts.monoUi else FontFamily.Default,
+                    fontSize = 15.sp,
+                    fontFamily = XsshFonts.monoUi,
                     textAlign = TextAlign.End,
                 )
             }
@@ -278,8 +294,8 @@ fun FormField(
                 singleLine = true,
                 textStyle = TextStyle(
                     color = p.text,
-                    fontSize = 16.sp,
-                    fontFamily = if (mono) XsshFonts.monoUi else FontFamily.Default,
+                    fontSize = 15.sp,
+                    fontFamily = XsshFonts.monoUi,
                     textAlign = TextAlign.End,
                 ),
                 visualTransformation =
@@ -350,42 +366,68 @@ fun FormField(
 }
 
 /**
- * 分段选择(几选一):浅灰轨道里一块白色(深色下是灰色)滑块标出当前项 —— iOS 的 segmented control。
- * 一眼看出是"几选一",而不是两颗都能按的按钮。
+ * 分段选择(几选一),终端风格:
+ * 整行宽的深色轨道(细边),一颗绿色描边的胶囊在里面**滑动**到当前项(弹簧,不是闪一下换色);
+ * 选中项绿字加粗,没选中的是淡灰字。每格 46dp 高,好点。
+ * 外观(跟随系统 / 浅色 / 深色)和登录方式(密码 / 私钥)共用。[fill] 留给旧调用,现在恒为整行宽。
  */
 @Composable
-fun Segmented(options: List<String>, selected: Int, onSelect: (Int) -> Unit) {
+fun Segmented(options: List<String>, selected: Int, onSelect: (Int) -> Unit, fill: Boolean = true) {
     val p = LocalXssh.current
-    Row(
+    val n = options.size.coerceAtLeast(1)
+    val index = selected.coerceIn(0, n - 1)
+    androidx.compose.foundation.layout.BoxWithConstraints(
         Modifier
-            .clip(RoundedCornerShape(9.dp))
-            .background(p.bgElev2)
-            .padding(2.dp),
+            .fillMaxWidth()
+            .height(46.dp)
+            .clip(CircleShape)
+            .background(p.text.copy(alpha = 0.06f))
+            .border(1.dp, p.text.copy(alpha = 0.10f), CircleShape)
+            .padding(3.dp),
     ) {
-        options.forEachIndexed { index, label ->
-            val on = index == selected
-            Box(
-                Modifier
-                    // 触控目标至少 48dp:分段开关是高频操作,32dp 容易点偏到相邻项。
-                    // 只扩触摸热区,轨道的视觉高度不变。
-                    .minimumInteractiveComponentSize()
-                    .clip(RoundedCornerShape(7.dp))
-                    .background(if (on) p.switchThumb else Color.Transparent)
-                    .clickable(role = Role.Tab) { onSelect(index) }
-                    .padding(horizontal = 16.dp, vertical = 7.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    label,
-                    color = p.text,
-                    fontSize = 14.sp,
-                    fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
+        val seg = maxWidth / n
+        val thumbX by androidx.compose.animation.core.animateDpAsState(
+            seg * index,
+            androidx.compose.animation.core.spring(dampingRatio = 0.78f, stiffness = 520f),
+            label = "segThumb",
+        )
+        // 滑块:绿色淡底 + 绿色细边,和轨道一样的胶囊。
+        Box(
+            Modifier
+                .offset(x = thumbX)
+                .width(seg)
+                .fillMaxHeight()
+                .clip(CircleShape)
+                .background(p.accent.copy(alpha = 0.16f))
+                .border(1.dp, p.accent.copy(alpha = 0.55f), CircleShape),
+        )
+        Row(Modifier.fillMaxSize()) {
+            options.forEachIndexed { i, label ->
+                val on = i == index
+                val textColor by androidx.compose.animation.animateColorAsState(
+                    if (on) p.accent else p.text.copy(alpha = 0.6f),
+                    label = "segText",
                 )
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .clip(CircleShape)
+                        .clickable(role = Role.Tab) { onSelect(i) },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        label,
+                        color = textColor,
+                        fontSize = 15.sp,
+                        fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
+                        maxLines = 1,
+                    )
+                }
             }
         }
     }
 }
-
 /** 只读/可点的一行(删除之类)。[danger] 为真时整行用危险色。 */
 @Composable
 fun FormAction(label: String, danger: Boolean = false, onClick: () -> Unit) {

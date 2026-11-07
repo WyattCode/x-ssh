@@ -1,6 +1,15 @@
 package dev.xssh.android
 
 import kotlinx.coroutines.flow.first
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.runtime.produceState
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.runtime.snapshotFlow
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.togetherWith
@@ -36,6 +45,15 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.runtime.derivedStateOf
+import com.kyant.backdrop.effects.blur
+import com.kyant.backdrop.effects.vibrancy
+import com.kyant.backdrop.drawBackdrop
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.TransformOrigin
@@ -142,7 +160,6 @@ fun HomeScreen(
     val p = LocalXssh.current
     // 哪些主机后台还连着 —— 卡片上要看得出来,不然用户不知道有会话在跑。
     val running by SessionRegistry.sessions.collectAsState()
-    var snapshotsOpen by remember { mutableStateOf(false) }
     // 会话区:活着的会话排在主机区上面(和平板侧栏同一套两段模型),按最后输出新→旧。
     // 不查主机表:会话自己带着建连那一刻的 Host,主机被删了(dev 跳转根本没存过也一样)行还在。
     val sessions = remember(running) {
@@ -189,8 +206,13 @@ fun HomeScreen(
 
     // 折叠屏:按钮在右侧轨道;直板机:按钮全在底栏(见 Chrome)。两种都不在顶上占地方。
     val bottomBar = LocalChrome.current == Chrome.BottomBar
-    // 这一页的轨道比别的页多一颗(外观、字体、搜索三颗一个胶囊,再加 ＋)。
-    val clearance = if (bottomBar) BarClearance else RailClearance + 56.dp
+    // 主机页的玻璃轨道现在只有一枚胶囊(搜索 + 新建,2 × 56dp),离底 16 再留 16 的缝 —— 约 160dp。
+    // 原来按"外观、字体、搜索 + ＋"四颗算成 270dp:左滑露出按钮的那行只要在屏幕下半截,
+    // 「别被轨道压住」的自动上滚就会触发,整张列表莫名往上跳(越靠下的行跳得越高)。
+    val clearance = if (bottomBar) BarClearance else HomeRailSize * 2 + Gutter * 3
+    val statusTop = with(LocalDensity.current) { stableSafeDrawing().getTop(this).toDp() }
+    // 列表的橡皮筋位移(往上拉为负),顶栏据此判断内容是不是正钻到它底下。
+    val bounceOffset = remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
 
     // 实体键盘(平板键盘套):Ctrl+N 新建、Ctrl+F 搜索、↑↓ 换主机、回车连接、Esc 收起搜索。
     // 键盘事件只发给有焦点的节点,所以这一页自己拿一个焦点(不是输入框,不会弹软键盘)。
@@ -280,6 +302,9 @@ fun HomeScreen(
                     modifier = Modifier
                         .width(listWidth)
                         .fillMaxHeight()
+                        // 左栏比右边纯黑的详情亮一档(iOS 版的侧栏做法);底色要铺在安全区内边距之前,
+                        // 状态栏和导航条后面也是这一档。
+                        .background(p.sidebar)
                         .windowInsetsPadding(
                             stableSafeDrawing().only(
                                 WindowInsetsSides.Vertical + WindowInsetsSides.Start,
@@ -292,6 +317,7 @@ fun HomeScreen(
                     // 双栏:详情就在右边,卡片上不再放 ⓘ。
                     onInfo = null,
                     onNew = onNew,
+                    onSettings = onFonts,
                     onEdit = onEdit,
                     onDelete = onDelete,
                     query = query,
@@ -346,13 +372,16 @@ fun HomeScreen(
                 }
             }
         } else if (hosts.isEmpty()) {
-            FirstRun(Modifier.fillMaxSize().windowInsetsPadding(stableSafeDrawing()))
+            FirstRun(Modifier.fillMaxSize().windowInsetsPadding(stableSafeDrawing()), onNew = onNew)
         } else {
             HostListPane(
                 grid = grid,
                 // 内容通到边缘,从右边缘玻璃层底下穿过去(规范:scroll views extend
                 // beneath floating glass)。底部多留一段,最后一张卡片能滚出轨道之外。
-                modifier = Modifier.fillMaxSize().layerBackdrop(backdrop).windowInsetsPadding(stableSafeDrawing()),
+                // 顶部不再让出状态栏:列表通到屏幕顶,从顶栏的毛玻璃底下滚过去(iOS 导航栏同款);
+                // 开头的空位由 topPad 补(=状态栏高度),静止时位置和以前一样。
+                modifier = Modifier.fillMaxSize().layerBackdrop(backdrop)
+                    .windowInsetsPadding(stableSafeDrawing().only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom)),
                 hosts = filtered,
                 total = hosts.size,
                 // 单栏没有"当前选中"这个概念,别画高亮。
@@ -360,6 +389,7 @@ fun HomeScreen(
                 onPrimary = onConnect,
                 onInfo = onInfo,
                 onNew = onNew,
+                onSettings = onFonts,
                 onEdit = onEdit,
                 onDelete = onDelete,
                 query = query,
@@ -374,32 +404,42 @@ fun HomeScreen(
                 // 在 860dp 高的屏幕上缩在左上角,七成空着。
                 columns = 1,
                 large = true,
-                // 单栏:右边让开轨道(卡片右端的 ⓘ 不被玻璃压住)。
-                creaseGap = railSide(),
+                // 单栏:右边让开玻璃胶囊。胶囊宽 58dp + 离边 16dp = 74dp,再留 8dp 的缝;行内右缩进 BoxPad 已占 16dp,
+                // 所以这里是 66dp(原来是整条轨道 88dp,色点离右边比 iPhone Duo 远了一截)。
+                // 玻璃胶囊浮在列表上面(列表在它下面滚),和 iPhone Duo 一样,色点贴着右边;左右对称各 6dp。
+                // 现在:色点不能压到右侧玻璃菜单下面,离菜单左缘留 10px(≈3.6dp):
+                // 菜单左缘离屏幕右边 Gutter + 56dp;色点右缘离列表右边 = creaseGap + BoxPad。
+                creaseGap = if (LocalChrome.current == Chrome.Rail) Gutter + HomeRailSize + 6.6.dp - BoxPad else railSide(),   // 3.6 → 6.6dp:圆点再往左一丢丢(离菜单约 18px)
                 underRail = true,
-                topPad = 0.dp,
+                topPad = statusTop,
                 bottomClearance = clearance,
+                fixedLogo = true,
+                bounceOut = bounceOffset,
+            )
+            // 顶栏:字标固定在上面;列表一滚,背后出现模糊的深色毛玻璃 + 底边一条细线(iOS 导航栏的滚动边缘效果)。
+            HomeTopBar(
+                Modifier.align(Alignment.TopStart),
+                grid = grid,
+                bounceOffset = bounceOffset,
+                backdrop = backdrop,
+                statusTop = statusTop,
+                onSettings = onFonts,
             )
         }
 
         // 外观、字体、搜索都是"怎么看"的操作,装进同一枚胶囊。
         // 外观点一下切到下一个模式(跟随系统 → 浅色 → 深色 → …),不弹窗;字体要挑,推一页出来。
-        val viewActions: @Composable () -> Unit = {
-            GlassGroup {
-                ThemeGlassItem()
-                GlassItem(XIcons.Settings, stringResource(R.string.set_title)) { onFonts() }
-                GlassItem(XIcons.Layers, stringResource(R.string.snap_menu)) { snapshotsOpen = true }
-                // 一台主机都没有时不摆搜索 —— 没东西可搜。
-                if (hosts.isNotEmpty()) {
-                    GlassItem(XIcons.Search, stringResource(R.string.host_search_hosts)) {
-                        searching = !searching
-                        if (!searching) query = ""
-                    }
-                }
+        // 和 iPhone Duo 的主机页一样,玻璃胶囊里只有两颗:搜索、新建。
+        // 外观 / 设置 / 快照原来也挤在这里,现在收到列表末尾的三行(见 FooterRows),界面四周只剩两颗按钮。
+        val searchItem: @Composable () -> Unit = {
+            GlassItem(XIcons.Search, stringResource(R.string.host_search_hosts)) {
+                searching = !searching
+                if (!searching) query = ""
             }
         }
-        // 主操作:无色玻璃、正文色图标(参考图里"+"就是这样)。
-        val newHost: @Composable () -> Unit = { GlassButton(XIcons.Plus, stringResource(R.string.host_new_host)) { onNew() } }
+        val newLabel = stringResource(R.string.host_new_host)
+        // 主操作:无色玻璃、正文色图标。
+        val newHost: @Composable () -> Unit = { GlassButton(XIcons.Plus, newLabel) { onNew() } }
 
         if (bottomBar) {
             // 直板机:底栏。左边外观 / 字体 / 搜索,右边 ＋ —— 安卓底部操作栏的排法(动作在左、主按钮在右)。
@@ -417,7 +457,8 @@ fun HomeScreen(
                     } else {
                         WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom
                     },
-                    start = { viewActions() },
+                    // 一台主机都没有时不摆搜索 —— 没东西可搜。
+                    start = { if (hosts.isNotEmpty()) GlassGroup { searchItem() } },
                     end = { newHost() },
                 )
             }
@@ -425,32 +466,28 @@ fun HomeScreen(
             // 折叠屏:chrome 全在右侧这条轨道里,界面四角不散落按钮;列表从玻璃底下滚过去。
             // 胶囊从底部往上长,搜索在下(和编辑页的 ‹、终端页的键盘同一个位置),外观在上。
             CompositionLocalProvider(LocalBackdrop provides backdrop) {
-                EdgeRail(Modifier.align(Alignment.BottomEnd)) {
-                    viewActions()
-                    newHost()
+                // 主机页的这枚竖胶囊比别的页小 20%(56 → 45dp),腾出高度给列表。
+                CompositionLocalProvider(LocalGlassSize provides HomeRailSize) {
+                    EdgeRail(Modifier.align(Alignment.BottomEnd)) {
+                        if (hosts.isNotEmpty()) {
+                            // 一枚竖胶囊:搜索在上、新建在下(iPhone Duo 外屏同款)。
+                            GlassGroup {
+                                searchItem()
+                                GlassItem(XIcons.Plus, newLabel) { onNew() }
+                            }
+                        } else {
+                            newHost()
+                        }
+                    }
                 }
             }
         }
 
-        if (snapshotsOpen) {
-            val liveEntries = remember(sessions) { sessions.map { it.hostId to it.label } }
-            SnapshotSheet(
-                tablet = false,
-                liveEntries = liveEntries,
-                activeHostId = sessions.firstOrNull()?.hostId,
-                knownHostIds = hosts.map { it.id }.toSet(),
-                onRestore = { _, focus ->
-                    snapshotsOpen = false
-                    hosts.firstOrNull { it.id == focus }?.let(onConnect)
-                },
-                onDismiss = { snapshotsOpen = false },
-            )
-        }
     }
 }
 
 @Composable
-private fun HostListPane(
+internal fun HostListPane(
     grid: LazyGridState,
     modifier: Modifier,
     hosts: List<Host>,
@@ -460,6 +497,8 @@ private fun HostListPane(
     /** 卡片右端的 ⓘ(单栏才有):看这台主机的详情。 */
     onInfo: ((Host) -> Unit)?,
     onNew: () -> Unit,
+    /** 点左上角的字标进设置(设计方案 A:外观 / 字体 / 配色 / 快照都在设置里)。 */
+    onSettings: () -> Unit,
     onEdit: (Host) -> Unit,
     onDelete: (Host) -> Unit,
     query: String,
@@ -478,6 +517,10 @@ private fun HostListPane(
     creaseGap: Dp,
     /** 列表底部是否压着按钮(轨道或底栏):左滑露出的按钮不能落在它们底下。 */
     underRail: Boolean,
+    /** 单栏:字标不在列表里,钉在顶栏上(见 HomeTopBar,和 iOS 导航栏一样);这里只留出它的位置。 */
+    fixedLogo: Boolean = false,
+    /** 橡皮筋回弹的当前位移(px)输出给顶栏用。 */
+    bounceOut: androidx.compose.runtime.MutableFloatState? = null,
     /** 标题上面额外留的高度(现在各形态顶上都没有按钮,都是 0)。 */
     topPad: Dp,
     /** 列表底部给按钮留的高度:折叠屏是整条轨道,直板机是底栏。 */
@@ -486,11 +529,16 @@ private fun HostListPane(
     val p = LocalXssh.current
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
+    // 活着的会话在主机行上就地显示(绿色 `❯` + 光标 + 「✓ 运行中 · 时长」,设计方案 A / iPhone Duo),
+    // 不再另起一个「会话」区重复列一遍。只有**主机已经被删掉**的会话(会话自己带着建连那一刻的 Host)
+    // 在列表里没有对应的行,才单独列在上面,免得变成点不到的孤儿。
+    val knownHosts = LocalHosts.current
+    val orphans = remember(sessions, knownHosts) { sessions.filter { s -> knownHosts.none { it.id == s.hostId } } }
     // 会话区只在没搜索时出现:搜索找的是"我要连哪台",活会话是"我正在干什么",两回事别搅在一起。
-    val showSessions = sessions.isNotEmpty() && query.isBlank()
+    val showSessions = orphans.isNotEmpty() && query.isBlank()
     // 卡片前面排了几项非主机条目(标题 + 会话区标题 + 会话行 + 主机区标题),
     // "把它滚进视野"的算式要用(原来固定 +1,加了会话区就会算错行)。
-    val hostsPrelude = 1 + if (showSessions) sessions.size + 2 else 0
+    val hostsPrelude = 1 + if (showSessions) orphans.size + 2 else 0
     // 同一时刻只开一张:开一张,别的自动合上。
     var openId by remember { mutableStateOf<String?>(null) }
     var autoScrolling by remember { mutableStateOf(false) }
@@ -548,33 +596,67 @@ private fun HostListPane(
         }
     }
 
-    Box(modifier) {
+    // 打开着左滑按钮时,点按钮所在那一行以外的任何地方(别的行、标题、空白)都把它合上。
+    // 在 Initial 阶段只"看"不"吃":这一下照常传给被点的东西(点别的行 = 合上 + 不连接,见 onPrimary)。
+    var listOrigin by remember { mutableStateOf(Offset.Zero) }
+    val rowBounds = remember { mutableMapOf<String, androidx.compose.ui.geometry.Rect>() }
+    Box(
+        modifier
+            .onGloballyPositioned { listOrigin = it.positionInRoot() }
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false, pass = androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+                    // 落在任何一行里(自己那行、别的行)都不在这里处理:自己那行和别的行的点击会走 onPrimary
+                    // —— 它看到还开着就只合上、不连接。只有落在行以外(标题、logo、空白)才在按下时合上。
+                    // (试过等抬起再合上:adb / 快速轻点时抬起事件会漏掉,合不上。)
+                    val at = down.position + listOrigin
+                    if (openId != null && rowBounds.values.none { it.contains(at) }) openId = null
+                }
+            },
+    ) {
         LazyVerticalGrid(
             columns = if (columns > 0) GridCells.Fixed(columns) else GridCells.Adaptive(264.dp),
             state = grid,
-            modifier = Modifier.fillMaxSize().bounce(),
+            modifier = Modifier.fillMaxSize().bounce(bounceOut),
             // 底部留出轨道的高度,最后一张卡片能滚到它上面去。
-            contentPadding = PaddingValues(start = Gutter, end = creaseGap, top = topPad, bottom = bottomClearance),
+            // 左边只留 6dp:行首的 `❯` 加上行内缩进 BoxPad 正好落在离屏幕边 22dp 的地方,
+            // 和 iPhone Duo 一样(原来是 Gutter 16 + 16 = 32,整张列表比参考往里缩了一截)。
+            contentPadding = PaddingValues(start = 6.dp, end = creaseGap, top = topPad, bottom = bottomClearance),
             horizontalArrangement = Arrangement.spacedBy(GapItem),
-            // 一台主机一张卡片,卡片之间留缝。
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            // 行是"裸行",行与行之间靠一条虚线(行自己带在下面),不再用缝隔开。
+            verticalArrangement = Arrangement.spacedBy(0.dp),
         ) {
             // 标题和搜索框也是列表的一项(iOS 的大标题就是这样):整页一起滚、一起回弹,
             // 在标题上往下拖也有反应,而不是只有卡片那一截能动。
             item(key = "header", span = { GridItemSpan(maxLineSpan) }) {
                 Column {
-                    PaneTitle(
+                    // 字标在上、`$ hosts` + 数量在下 —— iPhone Duo 主机页的标题区:
+                    // 字标靠左上,和标题、每行的 `❯` 在同一条竖线上。
+                    // (列表的 contentPadding 已经让开了 Gutter,所以这里只补盒内缩进 BoxPad:
+                    // 原来补的是 RowInset = Gutter + BoxPad,标题比行首的 `❯` 右出了一个 Gutter。)
+                    val settingsLabel = stringResource(R.string.set_title)
+                    Column(
                         Modifier
                             .fillMaxWidth()
-                            .padding(start = TitlePad, top = Gutter, bottom = 2.dp),
-                        "X-SSH",
-                        brand = true,
-                        subtitle = if (total == 0) {
-                            stringResource(R.string.host_none_yet)
+                            .padding(start = BoxPad - TitleOptical, top = Gutter, bottom = 10.dp),
+                    ) {
+                        // 点字标进设置:主页的玻璃胶囊里只留搜索和新建(和 iPhone Duo 一样)。
+                        // 字标素材换成了不变形的版本(宽高比 3.9,原来被压成 4.46),
+                        // 高度 19 → 22dp,让宽度还是约 85dp(和 iPhone Duo 的 84pt 一样)。
+                        if (fixedLogo) {
+                            Spacer(Modifier.height(25.dp + 26.dp))   // 字标(25dp)+ 它和标题的间距(26dp),字标本身在顶栏里
                         } else {
-                            pluralStringResource(R.plurals.host_count, total, total)
-                        },
-                    )
+                            BrandLockup(
+                                25.dp,
+                                Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .clickable(onClick = onSettings)
+                                    .semantics { contentDescription = settingsLabel },
+                            )
+                            Spacer(Modifier.height(26.dp))
+                        }
+                        HostsTitle(total)
+                    }
                     // 搜索平时不占地方,点轨道上的放大镜才展开出来。
                     AnimatedVisibility(searching, enter = Motion.revealIn, exit = Motion.revealOut) {
                         SearchField(
@@ -592,7 +674,7 @@ private fun HostListPane(
             if (hosts.isEmpty()) {
                 // 只可能是"搜了但没匹配上" —— 一台主机都没有时走的是整屏的 FirstRun。
                 item(key = "none", span = { GridItemSpan(maxLineSpan) }) {
-                    NoMatches(Modifier.fillMaxWidth().padding(top = 48.dp).animateItem())
+                    NoMatches(query, Modifier.fillMaxWidth().padding(top = 48.dp).animateItem())
                 }
             }
             // 会话区:活着的会话在最上面,点一行 = 接管(和平板侧栏同一个模型)。
@@ -600,22 +682,27 @@ private fun HostListPane(
                 item(key = "sec-sessions", span = { GridItemSpan(maxLineSpan) }) {
                     SectionHeader(stringResource(R.string.tab_sessions))
                 }
-                items(sessions, key = { "s:" + it.hostId }) { session ->
-                    Box(Modifier.animateItem()) {
+                itemsIndexed(orphans, key = { _, it -> "s:" + it.hostId }) { index, session ->
+                    Column(Modifier.animateItem()) {
                         SessionRow(
                             session = session,
                             large = large,
                             onOpen = { onOpenSession(session.host) },
                         )
+                        if (index != orphans.lastIndex) DashedDivider(Modifier.padding(horizontal = BoxPad))
                     }
                 }
                 item(key = "sec-hosts", span = { GridItemSpan(maxLineSpan) }) {
                     SectionHeader(stringResource(R.string.tab_hosts))
                 }
             }
-            itemsIndexed(hosts, key = { _, it -> it.id }) { _, host ->
+            itemsIndexed(hosts, key = { _, it -> it.id }) { index, host ->
                 // 删掉一张之后,下面的卡片滑上来补位 —— animateItem 要挂在每一项的最外层。
-                Box(Modifier.animateItem()) {
+                Column(
+                    Modifier
+                        .animateItem()
+                        .onGloballyPositioned { rowBounds[host.id] = it.boundsInRoot() },
+                ) {
                     val open = host.id == openId
                     SwipeActions(
                         open = open,
@@ -630,6 +717,13 @@ private fun HostListPane(
                             openId = null
                             onEdit(host)
                         },
+                        // 详情(单栏才有):原来是行尾的 ⓘ,iPhone Duo 的行里没有这种按钮,改成左滑露出的第三格。
+                        onInfo = onInfo?.let { info ->
+                            {
+                                openId = null
+                                info(host)
+                            }
+                        },
                         onDelete = {
                             openId = null
                             onDelete(host)
@@ -640,9 +734,10 @@ private fun HostListPane(
                             large = large,
                             selected = host.id == selectedId,
                             running = host.id in running,
+                            startedAt = sessions.firstOrNull { it.hostId == host.id }?.startedAt,
                             // 开着的时候点卡片是"合上",不是连接 —— 和 iOS 一致。
                             onPrimary = { if (openId != null) openId = null else onPrimary(it) },
-                            onInfo = onInfo?.let { info -> { if (openId != null) openId = null else info(it) } },
+                            onInfo = null,
                             // 长按也能打开,给不知道要左滑的人一条路(不再弹那个菜单)。
                             onLongPress = {
                                 openId = host.id
@@ -650,52 +745,172 @@ private fun HostListPane(
                             },
                         )
                     }
+                    // 虚线在滑动层外面:左滑时只有行本身收窄,线不动。
+                    if (index != hosts.lastIndex) DashedDivider(Modifier.padding(horizontal = BoxPad))
                 }
             }
         }
     }
 }
 
-/** iOS 的搜索框:浅填充的胶囊,左边放大镜、右边清除,没有描边。 */
+/** 列表行、标题、搜索框的文字起点:盒子线(Gutter)+ 盒内缩进(BoxPad)= 32dp。 */
+private val RowInset = Gutter + BoxPad
+
+/**
+ * 行名字的字号:和 iPhone Duo 一样是 19(原来单栏 17、双栏 16,整张列表比参考小一圈)。
+ * `❯` 的宽度按它算(iOS 版是 14/19)。
+ */
+@Suppress("UNUSED_PARAMETER")
+private fun rowFontSize(large: Boolean) = 16.sp   // 19 → 17:等宽字换成 0.6em 的 Droid Sans Mono 后每个字宽了约 25%,字号收一点才和 iOS 的版面比例一致
+
+/**
+ * 名字里的空格收窄 30%(iOS 版 `Text.narrowingSpaces`):等宽字的空格太宽,「AI TOP ATOM 0」
+ * 读起来是一个个孤立的字;收窄之后才像一个名字。等宽字的字宽约 0.6em,所以每个空格后面收回
+ * 字号 × 0.6 × 0.3 × 1.4(1.4 是 iOS 那边量出来的"眼睛看到的空隙"系数)。
+ */
+private fun narrowSpaces(text: String, font: TextUnit): AnnotatedString = buildAnnotatedString {
+    // 空格缩到 58% 宽(iOS:字宽 0.6em 的空格收回 0.6×0.3×1.4=0.252em)。
+    // 用字号 span 而不是负字距:带负字距 span 的文字在 maxLines=1 + 省略号下被提前截断(名字只显示 10 个字符就 …)。
+    val small = (font.value * 0.58f).sp
+    for (ch in text) {
+        if (ch == ' ') withStyle(SpanStyle(fontSize = small)) { append(ch) } else append(ch)
+    }
+}
+
+/** `❯` 占的宽度和它到名字的间距;状态行的缩进用同一组数,才和名字的起点对齐。 */
+@Composable
+private fun promptWidth(font: TextUnit): Dp = with(LocalDensity.current) { (font.value * 14f / 19f).sp.toDp() }
+
+private val PromptGap = 9.dp
+
+/** `❯`:装饰符号,读屏跳过。[color] 默认是 40% 的正文色,连着的那台传绿色。 */
+@Composable
+private fun Prompt(font: TextUnit, color: Color? = null, modifier: Modifier = Modifier) {
+    val p = LocalXssh.current
+    Text(
+        "❯",
+        color = color ?: p.text.copy(alpha = 0.4f),
+        fontFamily = XsshFonts.monoUi,
+        fontSize = font,
+        maxLines = 1,
+        // 往上抬一点:iOS 版抬 0.07 倍字号;0.16 倍太高了,取 0.08 ≈ 1.3dp。
+        modifier = modifier.offset(y = -(font.value * 0.08f).dp).width(promptWidth(font)).clearAndSetSemantics { },
+    )
+}
+
+/** 标题 `$ hosts` + 数量(iOS 版:等宽半粗 26,字距收一点,数量是旁边的灰色小字)。 */
+@Composable
+private fun HostsTitle(total: Int) {
+    val p = LocalXssh.current
+    val description = if (total == 0) {
+        stringResource(R.string.host_none_yet)
+    } else {
+        pluralStringResource(R.plurals.host_count, total, total)
+    }
+    Row(Modifier.semantics(mergeDescendants = true) { contentDescription = description }) {
+        Text(
+            "\$ hosts",
+            color = p.text,
+            fontFamily = XsshFonts.monoTitle,
+            // 26 → 23sp(用户要求再小一点点)。
+            fontSize = 24.sp,
+            fontWeight = FontWeight.SemiBold,
+            letterSpacing = (-0.4).sp,
+            maxLines = 1,
+            modifier = Modifier.alignByBaseline(),
+        )
+        if (total > 0) {
+            Spacer(Modifier.width(8.dp))
+            Text(
+                total.toString(),
+                color = p.text.copy(alpha = 0.45f),
+                fontSize = 13.sp,
+                modifier = Modifier.alignByBaseline(),
+            )
+        }
+    }
+}
+
+/**
+ * 连着的那台名字后面的光标:一个绿色的块,闪几下(约 5 秒)就常亮 —— 不无限循环,省电。
+ * 系统关了动画(动画时长缩放 = 0,即"减弱动态效果")就不闪,常亮。读屏跳过。
+ */
+@Composable
+private fun BlinkingCursor(modifier: Modifier = Modifier, height: Dp = 15.dp) {
+    val p = LocalXssh.current
+    val context = LocalContext.current
+    val still = remember {
+        android.provider.Settings.Global.getFloat(
+            context.contentResolver,
+            android.provider.Settings.Global.ANIMATOR_DURATION_SCALE,
+            1f,
+        ) == 0f
+    }
+    var bright by remember { mutableStateOf(true) }
+    LaunchedEffect(Unit) {
+        if (still) return@LaunchedEffect
+        repeat(8) {
+            delay(600)
+            bright = !bright
+        }
+        bright = true
+    }
+    val alpha by animateFloatAsState(if (bright) 1f else 0.15f, tween(500), label = "cursor")
+    Box(
+        modifier
+            .size(8.dp, height)
+            .graphicsLayer { this.alpha = alpha }
+            .clip(RoundedCornerShape(1.dp))
+            .background(p.ok)
+            .clearAndSetSemantics { },
+    )
+}
+
+/**
+ * 搜索框也是一行命令:`❯ grep ▍输入`,没有圆角底,下面一条虚线;`❯` 和列表行的 `❯` 在同一条竖线上。
+ */
 @Composable
 private fun SearchField(modifier: Modifier, query: String, onQuery: (String) -> Unit, onClose: () -> Unit) {
     val p = LocalXssh.current
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
     val closeLabel = stringResource(R.string.host_close_search)
-    Row(
-        modifier
-            .fillMaxWidth()
-            .height(TouchMin)
-            .clip(RoundedCornerShape(TouchMin / 2))
-            .background(p.bgElev2)
-            .padding(start = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(XIcons.Search, null, tint = p.textDim, modifier = Modifier.size(19.dp))
-        Spacer(Modifier.width(8.dp))
-        Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
-            if (query.isEmpty()) {
-                Text(stringResource(R.string.host_search_placeholder), color = p.textFaint, fontSize = 16.sp)
-            }
-            BasicTextField(
-                value = query,
-                onValueChange = onQuery,
-                singleLine = true,
-                textStyle = TextStyle(color = p.text, fontSize = 16.sp),
-                cursorBrush = SolidColor(p.accent),
-                modifier = Modifier.fillMaxWidth().focusRequester(focus),
-            )
-        }
-        Box(
+    val font = 17.sp
+    val mono = TextStyle(color = p.text, fontSize = font, fontFamily = XsshFonts.monoUi)
+    Column(modifier.fillMaxWidth()) {
+        Row(
             Modifier
-                .size(TouchMin)
-                .clickable(onClick = onClose)
-                .semantics { contentDescription = closeLabel },
-            contentAlignment = Alignment.Center,
+                .fillMaxWidth()
+                .height(TouchMin)
+                .padding(start = BoxPad),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(XIcons.Close, null, tint = p.textDim, modifier = Modifier.size(17.dp))
+            Prompt(font, color = p.ok)
+            Spacer(Modifier.width(PromptGap))
+            Text("grep", color = p.text.copy(alpha = 0.4f), style = mono, maxLines = 1)
+            Spacer(Modifier.width(10.dp))
+            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                if (query.isEmpty()) {
+                    Text(
+                        stringResource(R.string.host_search_placeholder),
+                        color = p.textFaint,
+                        style = mono,
+                        maxLines = 1,
+                    )
+                }
+                BasicTextField(
+                    value = query,
+                    onValueChange = onQuery,
+                    singleLine = true,
+                    textStyle = mono,
+                    cursorBrush = SolidColor(p.ok),
+                    modifier = Modifier.fillMaxWidth().focusRequester(focus),
+                )
+            }
+            // 右边的 ✕ 去掉了(用户要求):收起搜索靠右下角玻璃胶囊里的搜索钮再点一下。
+            Spacer(Modifier.width(BoxPad))
         }
+        DashedDivider(Modifier.padding(horizontal = BoxPad))
     }
 }
 
@@ -706,8 +921,9 @@ private fun SearchField(modifier: Modifier, query: String, onQuery: (String) -> 
  * 也不放按钮:新建就在右边缘轨道上,这里再来一个就是重复。
  */
 @Composable
-private fun FirstRun(modifier: Modifier) {
+private fun FirstRun(modifier: Modifier, onNew: () -> Unit) {
     val p = LocalXssh.current
+    val font = 22.sp
     // 内容不满一屏也包在滚动容器里:往下拖有回弹,不会像卡死一样纹丝不动。
     BoxWithConstraints(modifier) {
     Column(
@@ -718,22 +934,57 @@ private fun FirstRun(modifier: Modifier) {
             .padding(horizontal = Gutter + BoxPad),
         verticalArrangement = Arrangement.Center,
     ) {
-        BrandTitleLine(BrandTitleHeight, titleSize = 34.sp)
-        Spacer(Modifier.height(10.dp))
-        Text(stringResource(R.string.host_none_yet), color = p.textDim, fontSize = 15.sp)
+        BrandLockup(BrandTitleHeight)
+        Spacer(Modifier.height(24.dp))
+        // 一行提示符 `❯ new ▍`,点一下就新建(iOS 版的空态,和列表同一套终端风格)。
+        // 新建本来就在边缘轨道上,这里是同一个动作的另一个入口,不算重复的按钮 —— 它长得就是一行字。
+        Column(
+            Modifier
+                .clip(RoundedCornerShape(RadiusBox))
+                .clickable(onClick = onNew)
+                .padding(vertical = 8.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Prompt(font, color = p.ok)
+                Spacer(Modifier.width(PromptGap))
+                Text("new", color = p.text, fontFamily = XsshFonts.monoUi, fontSize = font, maxLines = 1)
+                Spacer(Modifier.width(8.dp))
+                BlinkingCursor(height = 20.dp)
+            }
+            Spacer(Modifier.height(10.dp))
+            Text(stringResource(R.string.host_none_yet), color = p.textDim, fontSize = 15.sp)
+        }
     }
     }
 }
 
 @Composable
-private fun NoMatches(modifier: Modifier) {
+private fun NoMatches(query: String, modifier: Modifier) {
     val p = LocalXssh.current
+    val font = 17.sp
     Column(
         modifier.padding(32.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text(stringResource(R.string.host_no_matches), color = p.textDim, fontSize = 16.sp)
+        // `❯ grep "关键字"` + 一句话,和列表同一套终端风格。
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Prompt(font, color = p.ok)
+            Spacer(Modifier.width(PromptGap))
+            Text("grep", color = p.text.copy(alpha = 0.4f), fontFamily = XsshFonts.monoUi, fontSize = font, maxLines = 1)
+            Spacer(Modifier.width(8.dp))
+            Text(
+                "\"$query\"",
+                color = p.text,
+                fontFamily = XsshFonts.monoUi,
+                fontSize = font,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+        }
+        Spacer(Modifier.height(10.dp))
+        Text(stringResource(R.string.host_no_matches), color = p.textDim, fontSize = 14.sp)
     }
 }
 
@@ -801,13 +1052,18 @@ private fun SessionPreview(session: TerminalSession, modifier: Modifier = Modifi
 /** 分组标题(会话 / 主机):和平板侧栏同一套字号,左缘落在标题线上。 */
 @Composable
 private fun SectionHeader(text: String) {
-    Text(
-        text,
-        color = LocalXssh.current.textDim,
-        fontSize = 13.sp,
-        fontWeight = FontWeight.Medium,
-        modifier = Modifier.padding(start = TitlePad, top = 10.dp, bottom = 2.dp),
-    )
+    val p = LocalXssh.current
+    // 绿色的 `# ` 前缀:和 iOS 版表单的小节标题同一个记号。
+    Row(Modifier.padding(start = BoxPad - TitleOptical, top = 14.dp, bottom = 4.dp)) {
+        Text(
+            "# ",
+            color = p.ok,
+            fontFamily = XsshFonts.monoUi,
+            fontSize = 13.sp,
+            modifier = Modifier.clearAndSetSemantics { },
+        )
+        Text(text, color = p.textDim, fontFamily = XsshFonts.monoUi, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+    }
 }
 
 /**
@@ -836,6 +1092,7 @@ private fun SessionRow(session: TerminalSession, large: Boolean, onOpen: () -> U
         modifier = Modifier.fillMaxWidth(),
         onClick = onOpen,
         paddingVertical = if (large) 12.dp else 10.dp,
+        bare = true,
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             StatusDot(if (link > 0) p.warn else p.ok)
@@ -844,6 +1101,7 @@ private fun SessionRow(session: TerminalSession, large: Boolean, onOpen: () -> U
                 Text(
                     host.label,
                     color = p.text,
+                    fontFamily = XsshFonts.monoUi,
                     fontSize = if (large) 17.sp else 16.sp,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
@@ -876,67 +1134,53 @@ private fun HostCard(
     large: Boolean,
     selected: Boolean,
     running: Boolean,
+    /** 连着的这条会话是几点建立的(毫秒);状态行据此显示已连接时长。 */
+    startedAt: Long?,
     onPrimary: (Host) -> Unit,
     onInfo: ((Host) -> Unit)?,
     onLongPress: () -> Unit,
 ) {
     val p = LocalXssh.current
+    val font = rowFontSize(large)
     XsshCard(
         modifier = Modifier.fillMaxWidth(),
         highlight = selected,
+        bare = true,
         onClick = { onPrimary(host) },
         onLongClick = onLongPress,
-        paddingVertical = if (large) 14.dp else 12.dp,
+        // 行内上下留白 14(原来 21):行高缩 20% 左右 —— 空闲行约 70→56dp,连着的那行(多一行状态)约 94→75dp。
+        // 14 → 16.5:名字字号收到 17sp 后一行约 50dp,再加 10% ≈ 55dp。
+        paddingVertical = 18.5.dp,
     ) {
-        // 左边一枚图标块(iOS 设置页那种圆角方块),一眼认出"这是一台主机";连着的时候变绿。
-        // 右边:名称 + 标签,地址独占一行。行尾不放 ⋮ —— 编辑/删除走左滑。
+        // iOS 版的主机行:`❯ 名字`(等宽,一行,太长截断),行尾一个这台的颜色点;不显示 IP / 端口。
+        // 连着的那台:`❯` 变绿、名字后面一个闪几下的光标,下面多一行绿色的「✓ 运行中」。
+        // 编辑/删除走左滑。
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier
-                    .size(if (large) 44.dp else 40.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(if (running) p.ok.copy(alpha = 0.18f) else p.bgElev2),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    XIcons.Terminal,
-                    contentDescription = null,
-                    tint = if (running) p.ok else p.textDim,
-                    modifier = Modifier.size(if (large) 24.dp else 22.dp),
-                )
-            }
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        host.label,
-                        color = p.text,
-                        fontSize = if (large) 17.sp else 16.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false),
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    if (running) {
-                        Chip(stringResource(R.string.host_running), p.ok)
-                        Spacer(Modifier.width(6.dp))
-                    }
-                    // 只标需要注意的状态;"密码登录""已信任"这类常态不贴标签。
-                    if (host.keyFingerprint.isBlank()) {
-                        Chip(stringResource(R.string.host_key_pending), p.warn)
-                    }
-                }
-                Spacer(Modifier.height(if (large) 4.dp else 3.dp))
+            Prompt(font, color = if (running) p.ok else null)
+            Spacer(Modifier.width(PromptGap))
+            // 名字 + 光标占掉中间所有空位(名字自己 fill = false:短名字不撑满,光标紧跟在名字后面;
+            // 长名字被截断,但行尾的标签和色点永远留得下)。
+            Row(Modifier.weight(1f).padding(end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    host.subtitle,
-                    color = p.textDim,
+                    narrowSpaces(host.label, font),
+                    color = p.text.copy(alpha = 0.93f),
                     fontFamily = XsshFonts.monoUi,
-                    fontSize = if (large) 14.sp else 13.sp,
+                    fontSize = font,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
                 )
+                if (running) {
+                    Spacer(Modifier.width(8.dp))
+                    BlinkingCursor()
+                }
             }
+            // 只标需要注意的状态;"密码登录""已信任"这类常态不贴标签。
+            if (host.keyFingerprint.isBlank()) {
+                Chip(stringResource(R.string.host_key_pending), p.warn)
+                Spacer(Modifier.width(8.dp))
+            }
+            StatusDot(hostPip(host))
             if (onInfo != null) {
                 val infoLabel = stringResource(R.string.host_info)
                 // ⓘ(iOS 无线局域网列表的做法):点卡片 = 连接,点 ⓘ = 看这台主机的信息。
@@ -955,12 +1199,50 @@ private fun HostCard(
                 }
             }
         }
+        // 连着的那台多一行绿色状态「✓ 运行中 · 12:03」,缩进到名字的起点(iOS 版的「已连接 · 时长」)。
+        if (running) {
+            val label = stringResource(R.string.host_running)
+            val elapsed = startedAt?.let { runningClock(it) }
+            Text(
+                "✓ " + label + (elapsed?.let { " · $it" } ?: ""),
+                color = p.ok.copy(alpha = 0.95f),
+                fontFamily = XsshFonts.monoUi,
+                fontSize = 12.sp,
+                maxLines = 1,
+                modifier = Modifier.padding(top = 3.dp, start = promptWidth(font) + PromptGap),
+            )
+        }
     }
 }
 
-/** 左滑露出的按钮:一个"编辑"、一个"删除",各 72dp,彼此之间、和卡片之间各留 8dp。 */
-private val ActionTile = 72.dp
-private val ActionGap = 8.dp
+/**
+ * 已连接时长 `m:ss`(满一小时是 `h:mm:ss`),每秒走一格。
+ * 只有连着的主机行才会调用,所以一屏最多几个计时器;读到的是「现在」,不记状态。
+ */
+@Composable
+internal fun runningClock(startedAt: Long): String {
+    val now by produceState(System.currentTimeMillis(), startedAt) {
+        while (true) {
+            delay(1000)
+            value = System.currentTimeMillis()
+        }
+    }
+    return formatElapsed(now - startedAt)
+}
+
+/** 毫秒 → `m:ss` / `h:mm:ss`(负数当 0)。单独成函数,方便单测。 */
+internal fun formatElapsed(millis: Long): String {
+    val total = (millis.coerceAtLeast(0) / 1000)
+    val h = total / 3600
+    val m = (total % 3600) / 60
+    val s = total % 60
+    return if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%d:%02d".format(m, s)
+}
+
+/** 左滑露出的按钮:一个"编辑"、一个"删除",只有图标(iOS 版的做法),各 60dp,彼此之间、和卡片之间各留 8dp。 */
+private val ActionTile = 54.dp   // 每格占的宽度(圆本身是 SwipeTileSize)
+private val SwipeTileSize = 46.dp  // 左滑按钮的直径:正圆,比原来 60dp 的方块小一圈
+private val ActionGap = 4.dp
 private val RevealWidth = ActionTile * 2 + ActionGap * 2
 
 /**
@@ -984,6 +1266,8 @@ private fun SwipeActions(
     onDragStart: () -> Unit,
     onOpenChange: (Boolean) -> Unit,
     onEdit: () -> Unit,
+    /** 详情(单栏才有):有就多露出一格 ⓘ。 */
+    onInfo: (() -> Unit)? = null,
     onDelete: () -> Unit,
     content: @Composable () -> Unit,
 ) {
@@ -991,7 +1275,9 @@ private fun SwipeActions(
     val haptic = LocalHapticFeedback.current
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
-    val reveal = with(density) { RevealWidth.toPx() }
+    // 露出的宽度:每格 ActionTile + 一条 ActionGap(两格是 136dp,三格是 204dp)。
+    val tiles = if (onInfo != null) 3 else 2
+    val reveal = with(density) { (ActionTile * tiles + ActionGap * tiles).toPx() }
     val offset = remember { Animatable(0f) }
     var confirming by remember { mutableStateOf(false) }
     // 确认删除只生效一次:连点两下 / 列表还没刷新时再点一下,不能删两次。
@@ -1023,6 +1309,7 @@ private fun SwipeActions(
     }
 
     val progress = (-offset.value / reveal).coerceIn(0f, 1f)
+    val infoLabel = stringResource(R.string.host_info)
     val editLabel = stringResource(R.string.host_edit)
     val deleteLabel = stringResource(R.string.host_delete)
     // 确认那一下要说清楚"删了它,还有几台主机连不上"(它被当作跳板机时)。
@@ -1073,9 +1360,13 @@ private fun SwipeActions(
                     deleteOnce()
                 }
             } else {
-                SwipeTile(editLabel, p.accent, p.accentSoft, Modifier.width(ActionTile)) { onEdit() }
+                if (onInfo != null) {
+                    SwipeTile(infoLabel, p.text, p.bgElev2, Modifier.width(ActionTile), icon = XIcons.Info) { onInfo() }
+                    Spacer(Modifier.width(ActionGap))
+                }
+                SwipeTile(editLabel, p.accent, p.accentSoft, Modifier.width(ActionTile), icon = XIcons.Pencil) { onEdit() }
                 Spacer(Modifier.width(ActionGap))
-                SwipeTile(deleteLabel, p.danger, p.danger.copy(alpha = 0.16f), Modifier.width(ActionTile)) {
+                SwipeTile(deleteLabel, p.danger, p.danger.copy(alpha = 0.16f), Modifier.width(ActionTile), icon = XIcons.Trash) {
                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     confirming = true
                 }
@@ -1091,7 +1382,10 @@ private fun SwipeActions(
                 // 收窄的话,左缘和名字原地不动,右边让出的位置正好放按钮。
                 .layout { measurable, constraints ->
                     val full = constraints.maxWidth
-                    val width = (full + offset.value.roundToInt()).coerceIn(0, full)
+                    // 按钮露出来时,卡片比"让出的宽度"多留 6dp:色点往右挪一点点,离第一颗圆钮不那么远。
+                    // (卡片右边是 BoxPad 的空白,多出来的 6dp 只是压在这块空白上,看不见。)
+                    val nudge = (6.dp.toPx() * (-offset.value / reveal).coerceIn(0f, 1f)).roundToInt()
+                    val width = (full + offset.value.roundToInt() + nudge).coerceIn(0, full)
                     val placeable = measurable.measure(constraints.copy(minWidth = width, maxWidth = width))
                     layout(full, placeable.height) { placeable.place(0, 0) }
                 }
@@ -1134,16 +1428,31 @@ private fun SwipeActions(
 
 /** 左滑露出的一格按钮。形状和卡片同一圆角(12dp),高度跟卡片一样。 */
 @Composable
-private fun SwipeTile(label: String, fg: Color, bg: Color, modifier: Modifier, onClick: () -> Unit) {
-    Box(
-        modifier
-            .fillMaxHeight()
-            .clip(RoundedCornerShape(RadiusBox))
-            .background(bg)
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(label, color = fg, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+private fun SwipeTile(
+    label: String,
+    fg: Color,
+    bg: Color,
+    modifier: Modifier,
+    /** 有图标就只画图标(读屏仍念 [label]);没有就写字(「确认删除」要把话说清楚)。 */
+    icon: androidx.compose.ui.graphics.vector.ImageVector? = null,
+    onClick: () -> Unit,
+) {
+    // 全圆角:图标格是 46dp 的正圆,「确认删除」是同高的胶囊;在整行高度里垂直居中(原来是和卡片同高的圆角方块)。
+    Box(modifier.fillMaxHeight(), contentAlignment = Alignment.Center) {
+        Box(
+            (if (icon != null) Modifier.size(SwipeTileSize) else Modifier.fillMaxWidth().height(SwipeTileSize))
+                .clip(CircleShape)
+                .background(bg)
+                .clickable(onClick = onClick)
+                .semantics { contentDescription = label },
+            contentAlignment = Alignment.Center,
+        ) {
+            if (icon != null) {
+                Icon(icon, contentDescription = null, tint = fg, modifier = Modifier.size(20.dp))
+            } else {
+                Text(label, color = fg, fontSize = 14.sp, fontWeight = FontWeight.Medium, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+            }
+        }
     }
 }
 
@@ -1246,9 +1555,11 @@ private fun PaneTitle(
             title,
             modifier = Modifier.offset(x = -TitleOptical),
             color = p.text,
-            // 参考图的大标题:34sp、粗体,紧跟一行灰色小字。
-            fontSize = 34.sp,
-            fontWeight = FontWeight.Bold,
+            // 和左栏的 `$ hosts` 同一套:等宽半粗 26sp、字距收一点,紧跟一行灰色小字。
+            fontSize = 26.sp,
+            fontFamily = XsshFonts.monoTitle,
+            fontWeight = FontWeight.SemiBold,
+            letterSpacing = (-0.4).sp,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
@@ -1261,5 +1572,85 @@ private fun PaneTitle(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
+    }
+}
+
+/** 主机页右侧竖胶囊里每颗按钮的直径(别的页是 56dp,这里小 20%)。 */
+private val HomeRailSize = 45.dp
+
+/** 单栏主机页顶栏里字标那一块的高度(状态栏之下):字标 25dp 在里面垂直居中,位置和原来在列表里时一致。 */
+private val HomeBarBody = 57.dp
+
+/**
+ * 顶栏(iOS 导航栏的复刻):字标固定在左上;列表往上滚、内容钻到顶栏下面时,
+ * 栏的背景才淡入 —— 背后列表内容的模糊(毛玻璃)+ 一层深色 + 底边 1px 细线。静止时完全透明,什么都看不见。
+ */
+@Composable
+private fun HomeTopBar(
+    modifier: Modifier,
+    grid: LazyGridState,
+    bounceOffset: androidx.compose.runtime.MutableFloatState,
+    backdrop: com.kyant.backdrop.Backdrop,
+    statusTop: Dp,
+    onSettings: () -> Unit,
+) {
+    val p = LocalXssh.current
+    val density = LocalDensity.current
+    val ramp = with(density) { 24.dp.toPx() }
+    // 0 = 静止在顶上;往上滚 24dp 内渐变到 1;滚过标题(第一项已滚出)就是 1。
+    val progress by remember(grid) {
+        derivedStateOf {
+            if (grid.firstVisibleItemIndex > 0) 1f
+            else maxOf(
+                grid.firstVisibleItemScrollOffset / ramp,
+                // 滚不动的列表被橡皮筋往上拉出去,内容同样钻到了顶栏底下,栏也要出来。
+                -bounceOffset.floatValue / ramp,
+            ).coerceIn(0f, 1f)
+        }
+    }
+    val settingsLabel = stringResource(R.string.set_title)
+    Box(modifier.fillMaxWidth().height(statusTop + HomeBarBody)) {
+        Box(
+            Modifier
+                .matchParentSize()
+                .graphicsLayer { alpha = progress }
+                .drawBackdrop(
+                    backdrop = backdrop,
+                    shape = { androidx.compose.ui.graphics.RectangleShape },
+                    // 只模糊,不加 vibrancy(它会把背后的字提得更亮更饱和,虚影反而抢眼)。
+                    effects = { blur(40.dp.toPx()) },
+                    // 不要库默认的高光 / 投影:它们会在栏的四周画出一圈亮边,iOS 的栏只有底边一条细线。
+                    highlight = null,
+                    shadow = null,
+                    // 玻璃板本身要比纯黑底亮一档(iOS 里这一条是一块淡灰的玻璃,logo 浮在它上面):
+                    // 不叠黑,叠一层淡淡的白(和玻璃按钮的"亮度层"同一个思路),黑底上就是 #111 左右的灰。
+                    onDrawSurface = {
+                        drawRect(Color.Black.copy(alpha = 0.45f))   // 先压暗背后的虚影
+                        drawRect(Color.White.copy(alpha = 0.075f))  // 再叠一层淡白:玻璃板比纯黑底亮一档
+                    },
+                ),
+        )
+        Box(
+            Modifier
+                .align(Alignment.BottomStart)
+                .fillMaxWidth()
+                .height(0.8.dp)
+                .graphicsLayer { alpha = progress }
+                .background(Color.White.copy(alpha = 0.16f)),
+        )
+        Box(
+            Modifier
+                .padding(top = statusTop, start = 6.dp + BoxPad - TitleOptical)
+                .height(HomeBarBody),
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            BrandLockup(
+                25.dp,
+                Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .clickable(onClick = onSettings)
+                    .semantics { contentDescription = settingsLabel },
+            )
+        }
     }
 }

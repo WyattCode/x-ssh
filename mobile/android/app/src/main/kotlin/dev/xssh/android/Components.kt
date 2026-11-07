@@ -1,6 +1,9 @@
 package dev.xssh.android
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.drawscope.Stroke
 import android.os.Build
 import android.hardware.display.DisplayManager
 import androidx.compose.runtime.DisposableEffect
@@ -258,6 +261,11 @@ fun XsshCard(
     onClick: (() -> Unit)? = null,
     onLongClick: (() -> Unit)? = null,
     paddingVertical: Dp = 14.dp,
+    /**
+     * 不画实底的"裸行"(iOS 版主机列表的样子:`❯ 名字` + 行间虚线,没有卡片框)。
+     * 平时透明,选中时才亮起 [XsshPalette.rowSel],按下仍有浅填充 —— 手指盖住的地方要有反馈。
+     */
+    bare: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val p = LocalXssh.current
@@ -268,11 +276,16 @@ fun XsshCard(
     // 试过收件箱那种通栏行 + 细线:一台主机时整屏只有两行字飘着,外屏尤其单薄,
     // 深浅两种主题下都看不出"这是一个可以点的东西"。
     // 选中时换成亮一档的中性灰;按下时再压一层浅填充 —— 手指盖住的地方要有反馈。
-    val base = if (highlight) p.rowSel.compositeOver(p.cardBg) else p.cardBg
+    val base = when {
+        highlight -> p.rowSel.compositeOver(if (bare) p.sidebar else p.cardBg)
+        bare -> Color.Transparent
+        else -> p.cardBg
+    }
     Column(
         modifier
             .clip(RoundedCornerShape(RadiusBox))
-            .background(if (pressed) p.bgElev2.compositeOver(base) else base)
+            // 裸行(主机列表)按住 / 长按时不再压灰底:iPhone Duo 的行是纯文字加虚线,按下不变色。
+            .background(if (pressed && !bare) p.bgElev2.compositeOver(base) else base)
             .then(
                 if (onClick == null) {
                     Modifier
@@ -481,6 +494,124 @@ fun KeyCap(
     }
 }
 
+/**
+ * 行与行之间的虚线:1dp、3 实 3 空(iOS 版主机列表的分隔线)。
+ * 左右缘由调用方的 padding 决定,和行里 `❯` 的起点对齐。
+ */
+@Composable
+fun DashedDivider(modifier: Modifier = Modifier) {
+    val color = LocalXssh.current.dash
+    Canvas(modifier.fillMaxWidth().height(1.dp)) {
+        val dash = 3.dp.toPx()
+        drawLine(
+            color = color,
+            start = Offset(0f, size.height / 2),
+            end = Offset(size.width, size.height / 2),
+            strokeWidth = 1.dp.toPx(),
+            pathEffect = PathEffect.dashPathEffect(floatArrayOf(dash, dash)),
+        )
+    }
+}
+
+/**
+ * 状态卡片 / 面板的底:暗色渐变 + 1dp 细边(iOS 版 `cardChrome`,和主机列表同一套终端风格),
+ * 取代平铺的灰块。深色是 #171717 → #111111 加 12% 白边;浅色是白 → #F5F5F7 加 8% 黑边。
+ */
+@Composable
+fun Modifier.cardChrome(radius: Dp = 16.dp): Modifier {
+    val p = LocalXssh.current
+    val shape = RoundedCornerShape(radius)
+    val top = if (p.dark) Color(0xFF171717) else Color(0xFFFFFFFF)
+    val bottom = if (p.dark) Color(0xFF111111) else Color(0xFFF5F5F7)
+    val line = if (p.dark) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.08f)
+    return this
+        .clip(shape)
+        .background(Brush.verticalGradient(listOf(top, bottom)))
+        .border(1.dp, line, shape)
+}
+
+/** 标题前的细圆环图标(钥匙 / 警告 / 断网),带一点同色的光晕(iOS 版 `CardIconRing`)。 */
+@Composable
+fun IconRing(icon: ImageVector, tint: Color, modifier: Modifier = Modifier, size: Dp = 46.dp) {
+    Box(
+        modifier
+            .size(size)
+            .drawBehind {
+                val half = this.size.minDimension / 2
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        listOf(tint.copy(alpha = 0.28f), Color.Transparent),
+                        center = center,
+                        radius = half * 1.9f,
+                    ),
+                    radius = half * 1.9f,
+                )
+                drawCircle(
+                    color = tint,
+                    radius = half - 0.75.dp.toPx(),
+                    style = Stroke(width = 1.5.dp.toPx()),
+                )
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(size * 0.43f))
+    }
+}
+
+/**
+ * 胶囊按钮(iOS 版状态卡片里的按钮):主按钮是实心强调色(危险时红底白字)、50dp 高、粗体;
+ * [ButtonKind.Ghost] 是无底色的文字按钮(取消 / 返回)、44dp 高、65% 的正文色。
+ */
+@Composable
+fun CapsuleButton(
+    label: String,
+    modifier: Modifier = Modifier,
+    kind: ButtonKind = ButtonKind.Primary,
+    enabled: Boolean = true,
+    /** 只对 [ButtonKind.Ghost] 有效:改文字色(删除 / 断开用危险色,但不画成实心红块)。 */
+    color: Color? = null,
+    onClick: () -> Unit,
+) {
+    val p = LocalXssh.current
+    val haptic = LocalHapticFeedback.current
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val scale by animateFloatAsState(if (pressed && enabled) 0.97f else 1f, label = "capsulePress")
+    val solid = kind != ButtonKind.Ghost
+    val background = when (kind) {
+        ButtonKind.Primary -> p.accent
+        ButtonKind.Danger -> p.danger
+        ButtonKind.Ghost -> if (pressed) p.bgElev2 else Color.Transparent
+    }
+    val foreground = when (kind) {
+        ButtonKind.Primary -> p.onAccent
+        ButtonKind.Danger -> Color.White
+        ButtonKind.Ghost -> color ?: p.text.copy(alpha = 0.65f)
+    }
+    Box(
+        modifier
+            .scale(scale)
+            .heightIn(min = if (solid) 50.dp else 44.dp)
+            .clip(CircleShape)
+            .background(if (enabled) background else background.copy(alpha = background.alpha * 0.35f))
+            .pointerHoverIcon(PointerIcon.Hand)
+            .clickable(interactionSource = interaction, indication = null, enabled = enabled) {
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                onClick()
+            }
+            .padding(horizontal = 20.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = label,
+            color = if (enabled) foreground else foreground.copy(alpha = 0.4f),
+            fontSize = if (solid) 16.sp else 15.sp,
+            fontWeight = if (solid) FontWeight.Bold else FontWeight.Normal,
+            textAlign = TextAlign.Center,
+        )
+    }
+}
+
 @Composable
 fun StatusDot(color: Color) {
     Box(
@@ -602,6 +733,48 @@ private fun Modifier.liquidGlass(
             .clip(shape)
             .background(p.bgElev2)
             .border(0.8.dp, p.glassBorder, shape)
+    }
+}
+
+/**
+ * 一枚横着的玻璃胶囊,里面放几个 [GlassMenuButton](终端里长按选词之后弹出的「复制 / 粘贴」)。
+ * 和轨道上的按钮是同一种材质(模糊 + 折射 + 高光 + 投影,见 [liquidGlass]),所以必须放在
+ * `layerBackdrop` 那层内容的**外面**,背后的终端文字才会透过来。
+ */
+@Composable
+fun GlassCapsuleRow(
+    modifier: Modifier = Modifier,
+    height: androidx.compose.ui.unit.Dp = 46.dp,
+    content: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit,
+) {
+    Row(
+        modifier
+            .height(height)
+            .liquidGlass(CircleShape, press = { 0f })
+            .clip(CircleShape)
+            .padding(horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        content = content,
+    )
+}
+
+/** 玻璃胶囊里的一项:图标 + 文字,按下时从按下的位置亮起(和轨道上的 [GlassItem] 同一个手感)。 */
+@Composable
+fun GlassMenuButton(label: String, icon: ImageVector, tint: Color? = null, onClick: () -> Unit) {
+    val p = LocalXssh.current
+    val press = rememberPress()
+    Row(
+        Modifier
+            .height(38.dp)
+            .clip(CircleShape)
+            .glassTap(press, label, onClick)
+            .drawBehind { pressGlow(press, p.dark) }
+            .padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, contentDescription = null, tint = tint ?: p.text, modifier = Modifier.size(17.dp))
+        Spacer(Modifier.width(7.dp))
+        Text(label, color = tint ?: p.text, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1)
     }
 }
 
@@ -771,31 +944,6 @@ fun GlassGroup(content: @Composable () -> Unit) {
         ) { content() }
     }
 }
-
-/**
- * 外观(跟随系统 → 浅色 → 深色)。**每一页的轨道 / 底栏里都有它** ——
- * 用户在终端里看着输出想换个深浅色,不该先退回主机页。
- */
-@Composable
-fun ThemeGlassItem() {
-    val theme = LocalThemeControl.current
-    GlassItem(theme.mode.icon, themeModeDescription(theme.mode)) { theme.onChange(theme.mode.next()) }
-}
-
-/** 外观按钮的读屏文字:「外观:浅色」。平板工具栏上的外观按钮也该用它。 */
-@Composable
-fun themeModeDescription(mode: ThemeMode): String =
-    stringResource(R.string.edit_appearance, themeModeName(mode))
-
-/** 外观模式的名字(当前语言)。 */
-@Composable
-fun themeModeName(mode: ThemeMode): String = stringResource(
-    when (mode) {
-        ThemeMode.Light -> R.string.edit_theme_light
-        ThemeMode.Dark -> R.string.edit_theme_dark
-        ThemeMode.System -> R.string.edit_theme_system
-    },
-)
 
 /**
  * 会来会去的按钮(「回到底部」、连上才有的「文件」)统一的出现 / 消失动效。

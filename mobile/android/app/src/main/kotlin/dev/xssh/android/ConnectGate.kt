@@ -3,6 +3,7 @@ package dev.xssh.android
 import android.view.KeyEvent as AndroidKeyEvent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -24,6 +25,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -124,7 +127,6 @@ fun HostKeyGate(
         },
         noteColor = if (changed) p.danger else p.textDim,
         onEnter = if (changed) null else ({ trustOnce() }),
-        onEnter = if (changed) null else trustOnce,
         body = {
             if (changed) {
                 // 可能已信任多把:全部列出来,方便对照"是不是轮换还是中间人"。
@@ -135,10 +137,11 @@ fun HostKeyGate(
                         else stringResource(R.string.host_gate_last_recorded) + " (${index + 1})",
                         fp,
                         p.textDim,
+                        artTint = p.textDim,
                     )
                 }
                 Spacer(Modifier.height(GapItem))
-                FingerprintCard(stringResource(R.string.host_gate_received_now), fingerprint, p.danger)
+                FingerprintCard(stringResource(R.string.host_gate_received_now), fingerprint, p.danger, artTint = Color(0xFFFF8C80))
             } else {
                 FingerprintCard(stringResource(R.string.host_gate_server_fingerprint), fingerprint, p.text)
             }
@@ -151,7 +154,6 @@ fun HostKeyGate(
                 ),
                 primaryKind = if (changed) ButtonKind.Danger else ButtonKind.Primary,
                 onPrimary = { trustOnce() },
-                onPrimary = trustOnce,
                 secondary = stringResource(R.string.host_cancel),
                 onSecondary = onExit,
             )
@@ -171,6 +173,8 @@ fun ConnectGate(
     /** 能就地修的问题(没存密码、没导入私钥、口令不对):主按钮换成它。 */
     fix: Pair<String, () -> Unit>?,
     onExit: () -> Unit,
+    /** 失败原文(应用自己的错误才有):收在卡片里的「详情」下面,默认不展开。 */
+    detail: String? = null,
 ) {
     val p = LocalXssh.current
     // Retry / fix both reconnect: remember must be unconditional (Compose).
@@ -213,8 +217,7 @@ fun ConnectGate(
             tile = p.danger.copy(alpha = 0.12f),
             title = stringResource(R.string.host_gate_failed),
             onEnter = primary?.second?.let { run -> { actOnce(run) } },
-            onEnter = primary?.second?.let { action -> { actOnce(action) } },
-            body = { MessageCard(failure) },
+            body = { MessageCard(failure, detail) },
             actions = { stacked ->
                 GateButtons(
                     stacked = stacked,
@@ -224,7 +227,6 @@ fun ConnectGate(
                     secondary = stringResource(R.string.host_back),
                     onSecondary = onExit,
                     tertiary = if (fix != null && retry != null) retryLabel to ({ actOnce(retry) }) else null,
-                    tertiary = if (fix != null && retry != null) retryLabel to { actOnce(retry) } else null,
                 )
             },
         )
@@ -378,14 +380,13 @@ private fun GatePage(host: Host, content: GateContent, tablet: Boolean, onExit: 
             CompositionLocalProvider(LocalBackdrop provides backdrop) {
                 BottomBar(
                     Modifier.align(Alignment.BottomCenter),
+                    // 只留返回:外观切换在这一页没有用处,多一颗按钮只会分散注意力。
                     start = { GlassButton(XIcons.Back, stringResource(R.string.host_back)) { onExit() } },
-                    end = { GlassGroup { ThemeGlassItem() } },
                 )
             }
         } else {
             CompositionLocalProvider(LocalBackdrop provides backdrop) {
                 EdgeRail(Modifier.align(Alignment.BottomEnd)) {
-                    GlassGroup { ThemeGlassItem() }
                     GlassButton(XIcons.Back, stringResource(R.string.host_back)) { onExit() }
                 }
             }
@@ -397,37 +398,34 @@ private fun GatePage(host: Host, content: GateContent, tablet: Boolean, onExit: 
 @Composable
 private fun Identity(host: Host, content: GateContent) {
     val p = LocalXssh.current
-    // 图标块是"盒子",落在盒子线上;下面的文字走标题线(见 Components 的版心说明)。
+    // iOS 版状态卡片的抬头:左边一枚带光晕的细圆环图标,右边「标题 / 哪台主机 / 地址」。
+    // 圆环落在盒子线上(和卡片、按钮同一条左边)。
     Column {
-        Box(
-            Modifier
-                .size(56.dp)
-                .clip(RoundedCornerShape(16.dp))
-                .background(content.tile),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(content.icon, contentDescription = null, tint = content.tint, modifier = Modifier.size(30.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconRing(content.icon, content.tint, size = 52.dp)
+            Spacer(Modifier.width(16.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    content.title,
+                    color = p.text,
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.height(4.dp))
+                // 三种状态一律「标题是状态、下面是哪台主机」,行数不随状态变(见 ConnectGate 的标题注释)。
+                // 没起名字时 label 就是地址,再写一行 user@地址:端口 是重复的:只留后者。
+                if (host.name.isNotBlank() && host.name != host.address) {
+                    Text(host.label, color = p.text, fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Spacer(Modifier.height(1.dp))
+                }
+                Text(host.subtitle, color = p.textDim, fontSize = 12.5.sp, fontFamily = XsshFonts.monoUi, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
         }
-        Spacer(Modifier.height(18.dp))
-        Column(Modifier.padding(start = TitlePad)) {
-        Text(
-            content.title,
-            Modifier.offset(x = -TitleOptical),
-            color = p.text,
-            fontSize = 28.sp,
-            fontWeight = FontWeight.Bold,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Spacer(Modifier.height(8.dp))
-        // 三种状态一律「标题是状态、下面是哪台主机」,行数不随状态变(见 ConnectGate 的标题注释)。
-        Text(host.label, color = p.text, fontSize = 16.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Spacer(Modifier.height(2.dp))
-        Text(host.subtitle, color = p.textDim, fontSize = 13.sp, fontFamily = XsshFonts.monoUi, maxLines = 1, overflow = TextOverflow.Ellipsis)
         content.note?.let {
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(16.dp))
             Text(it, color = content.noteColor, fontSize = 14.sp)
-        }
         }
     }
 }
@@ -437,14 +435,13 @@ private fun Identity(host: Host, content: GateContent) {
  * 人要逐段比对,断点得在每台设备上都落在同一个位置(见 [fingerprintRows])。
  */
 @Composable
-private fun FingerprintCard(label: String, value: String, color: Color) {
+private fun FingerprintCard(label: String, value: String, color: Color, artTint: Color = Color(0xFF80E3A1)) {
     val p = LocalXssh.current
-    val (algorithm, rows) = fingerprintRows(value)
+    val algorithm = fingerprintRows(value).first
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(if (p.dark) p.bgElev2 else p.cardBg)
+            .cardChrome()
             .padding(horizontal = 18.dp, vertical = 16.dp),
     ) {
         Text(
@@ -452,19 +449,93 @@ private fun FingerprintCard(label: String, value: String, color: Color) {
             color = p.textDim,
             fontSize = 12.5.sp,
         )
-        Spacer(Modifier.height(10.dp))
-        if (rows.isEmpty()) Text(stringResource(R.string.host_gate_none), color = color, fontSize = 17.sp, fontFamily = XsshFonts.monoUi)
-        rows.forEach { row ->
+        Spacer(Modifier.height(12.dp))
+        if (value.isBlank()) {
+            Text(stringResource(R.string.host_gate_none), color = color, fontSize = 17.sp, fontFamily = XsshFonts.monoUi)
+        } else {
+            FingerprintArtAndWords(value, color, artTint)
+        }
+    }
+}
+
+/**
+ * 指纹图案 + 分行指纹(iOS 版:图案在左、指纹每 12 个字符一行共四行;窄了就上下排)。
+ * 指纹文字可以选中复制:逐段比对之前常要先拿去和服务器那头对一下。
+ * 确认页和主机详情页共用这一块,两处看到的一模一样。
+ */
+@Composable
+fun FingerprintArtAndWords(value: String, color: Color, artTint: Color = Color(0xFF80E3A1)) {
+    val art = remember(value) { RandomArt.lines(value) }
+    val words = remember(value) { RandomArt.wrapped(value) }
+    SelectionContainer {
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            if (art != null && maxWidth >= 280.dp) {
+                Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.Top) {
+                    HostKeyArt(art, artTint)
+                    FingerprintWords(words, color)
+                }
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    art?.let { HostKeyArt(it, artTint) }
+                    FingerprintWords(words, color)
+                }
+            }
+        }
+    }
+}
+
+/** 指纹文字:每行 12 个字符的等宽字,逐行比对。 */
+@Composable
+private fun FingerprintWords(lines: List<String>, color: Color) {
+    Column {
+        lines.forEach { line ->
             Text(
-                row,
+                line,
                 color = color,
-                fontSize = 17.sp,
-                fontFamily = XsshFonts.monoUi,
-                letterSpacing = 0.6.sp,
+                fontSize = 15.sp,
+                fontFamily = XsshFonts.mono,
+                letterSpacing = 0.4.sp,
                 softWrap = false,
-                modifier = Modifier.padding(vertical = 2.dp),
+                modifier = Modifier.padding(vertical = 1.5.dp),
             )
         }
+    }
+}
+
+/**
+ * 一把密钥的指纹图案:黑底细框的小方块,底边嵌一个 `[SHA256]` 标签(iOS 版 `HostKeyArt`)。
+ * 只是装饰、读屏跳过 —— 指纹文字才是要念的东西。
+ */
+@Composable
+private fun HostKeyArt(lines: List<String>, tint: Color) {
+    val p = LocalXssh.current
+    val shape = RoundedCornerShape(4.dp)
+    Box(Modifier.padding(bottom = 7.dp).clearAndSetSemantics { }) {
+        Text(
+            lines.joinToString("\n"),
+            color = tint,
+            fontFamily = XsshFonts.mono,
+            fontSize = 10.5.sp,
+            lineHeight = 11.sp,
+            softWrap = false,
+            modifier = Modifier
+                .clip(shape)
+                .background(Color.Black)
+                .border(1.dp, Color.White.copy(alpha = 0.25f), shape)
+                .padding(horizontal = 7.dp, vertical = 6.dp),
+        )
+        Text(
+            "[SHA256]",
+            color = if (p.dark) Color.White.copy(alpha = 0.55f) else p.textDim,
+            fontFamily = XsshFonts.mono,
+            fontSize = 9.sp,
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .offset(x = 8.dp, y = 7.dp)
+                // 标签底色要和卡片底(渐变的下沿)一致,才像是"嵌"在边框上。
+                .background(if (p.dark) Color(0xFF111111) else Color(0xFFF5F5F7))
+                .padding(horizontal = 4.dp),
+        )
     }
 }
 
@@ -482,8 +553,7 @@ private fun StatusCard(waited: Int) {
     Row(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(if (p.dark) p.bgElev2 else p.cardBg)
+            .cardChrome()
             .padding(horizontal = 18.dp, vertical = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -501,18 +571,45 @@ private fun StatusCard(waited: Int) {
 
 /** 失败原因:原话照录(服务端 / 系统的错误文本),放在卡片里,和指纹卡片一个样子。 */
 @Composable
-private fun MessageCard(message: String) {
+private fun MessageCard(message: String, detail: String? = null) {
     val p = LocalXssh.current
-    Text(
-        message,
-        color = p.text,
-        fontSize = 15.sp,
-        modifier = Modifier
+    var expanded by remember { mutableStateOf(false) }
+    // 等宽小字、可选中复制(iOS 版:错误原文是要拿去搜的东西)。
+    Column(
+        Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(if (p.dark) p.bgElev2 else p.cardBg)
+            .cardChrome()
             .padding(horizontal = 18.dp, vertical = 16.dp),
-    )
+    ) {
+        SelectionContainer {
+            Text(
+                message,
+                color = p.text.copy(alpha = 0.72f),
+                fontSize = 13.5.sp,
+                fontFamily = XsshFonts.monoUi,
+            )
+        }
+        if (detail != null) {
+            Spacer(Modifier.height(12.dp))
+            // 「详情」:点一下展开原文(类名 + 原始消息),报问题时能原样复制。
+            Text(
+                (if (expanded) "▾ " else "▸ ") + stringResource(R.string.host_gate_details),
+                color = p.textDim,
+                fontSize = 13.sp,
+                fontFamily = XsshFonts.monoUi,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .clickable { expanded = !expanded }
+                    .padding(vertical = 4.dp),
+            )
+            if (expanded) {
+                Spacer(Modifier.height(6.dp))
+                SelectionContainer {
+                    Text(detail, color = p.textFaint, fontSize = 12.sp, fontFamily = XsshFonts.mono)
+                }
+            }
+        }
+    }
 }
 
 /**
@@ -529,17 +626,18 @@ private fun GateButtons(
     onSecondary: () -> Unit,
     tertiary: Pair<String, () -> Unit>? = null,
 ) {
+    // iOS 版状态卡片的按钮:胶囊形的实心主按钮 + 无底色的文字按钮(取消 / 返回)。
     if (stacked) {
-        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(GapItem)) {
-            if (primary != null) XsshButton(primary, Modifier.fillMaxWidth(), kind = primaryKind) { onPrimary() }
-            tertiary?.let { (label, run) -> XsshButton(label, Modifier.fillMaxWidth(), kind = ButtonKind.Ghost) { run() } }
-            XsshButton(secondary, Modifier.fillMaxWidth(), kind = ButtonKind.Ghost) { onSecondary() }
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (primary != null) CapsuleButton(primary, Modifier.fillMaxWidth(), kind = primaryKind) { onPrimary() }
+            tertiary?.let { (label, run) -> CapsuleButton(label, Modifier.fillMaxWidth(), kind = ButtonKind.Ghost) { run() } }
+            CapsuleButton(secondary, Modifier.fillMaxWidth(), kind = ButtonKind.Ghost) { onSecondary() }
         }
     } else {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(GapItem)) {
-            XsshButton(secondary, Modifier.weight(1f), kind = ButtonKind.Ghost) { onSecondary() }
-            tertiary?.let { (label, run) -> XsshButton(label, Modifier.weight(1f), kind = ButtonKind.Ghost) { run() } }
-            if (primary != null) XsshButton(primary, Modifier.weight(1f), kind = primaryKind) { onPrimary() }
+            CapsuleButton(secondary, Modifier.weight(1f), kind = ButtonKind.Ghost) { onSecondary() }
+            tertiary?.let { (label, run) -> CapsuleButton(label, Modifier.weight(1f), kind = ButtonKind.Ghost) { run() } }
+            if (primary != null) CapsuleButton(primary, Modifier.weight(1f), kind = primaryKind) { onPrimary() }
         }
     }
 }

@@ -69,6 +69,8 @@ data class TerminalFrame(
     val modes: InputModes = DefaultInputModes,
     /** 选区在视口里的部分;null = 没选,或选区整个在视口外。 */
     val selection: uniffi.xssh_ffi.ViewSelection? = null,
+    /** 回滚历史的总行数:界面据此画滚动条(0 = 没有历史,不画)。 */
+    val historyLen: Int = 0,
     /**
      * 断线后正在自动重连的第几次(从 1 起);0 = 没在重连。
      * 重连期间 [alive] 仍为真:会话还在,只是底下那条连接在换 —— 界面说「重连中」,不说「已断开」。
@@ -146,6 +148,9 @@ class TerminalSession(
      */
     private val _linkState = MutableStateFlow(0)
     val linkState: StateFlow<Int> = _linkState
+
+    /** 这条会话建立的时刻(毫秒)。首页主机行的「运行中 · 时长」用它。 */
+    val startedAt: Long = System.currentTimeMillis()
 
     /**
      * 最后一次屏幕有变化的时刻(毫秒)。首页会话行的"几分钟前"用它。
@@ -313,6 +318,7 @@ class TerminalSession(
             scrollOffset = s.scrollOffset,
             modes = s.modes,
             selection = s.selection,
+            historyLen = s.historyLen,
         )
     }
 

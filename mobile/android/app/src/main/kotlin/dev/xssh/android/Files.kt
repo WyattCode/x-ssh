@@ -29,6 +29,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -180,10 +181,12 @@ fun PaneSwitch(files: Boolean, onChange: (Boolean) -> Unit) {
     val p = LocalXssh.current
     Row(
         Modifier
-            .height(34.dp)
-            .clip(RoundedCornerShape(9.dp))
-            .background(p.bgElev2)
-            .padding(2.dp),
+            .height(36.dp)
+            // 安静的深色胶囊(方案 A):底是深灰,选中块只亮一档,不用刺眼的亮灰。
+            .clip(CircleShape)
+            .background(p.bgElev)
+            .border(0.5.dp, p.border, CircleShape)
+            .padding(3.dp),
     ) {
         listOf(false to stringResource(R.string.files_terminal), true to stringResource(R.string.files_files)).forEach { (value, label) ->
             val on = value == files
@@ -192,10 +195,10 @@ fun PaneSwitch(files: Boolean, onChange: (Boolean) -> Unit) {
             Row(
                 Modifier
                     .fillMaxHeight()
-                    .clip(RoundedCornerShape(7.dp))
+                    .clip(CircleShape)
                     .background(
                         when {
-                            on -> p.switchThumb
+                            on -> p.rowSel
                             hovered -> p.bgElev2
                             else -> Color.Transparent
                         },
@@ -221,7 +224,7 @@ fun PaneSwitch(files: Boolean, onChange: (Boolean) -> Unit) {
                     label,
                     color = if (on) p.text else p.textDim,
                     fontSize = 13.5.sp,
-                    fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
+                    fontWeight = if (on) FontWeight.Medium else FontWeight.Normal,
                 )
             }
         }
@@ -1217,7 +1220,6 @@ private fun PhoneFiles(
                     },
                     start = { GlassButton(XIcons.Back, stringResource(R.string.files_back)) { onBack() } },
                     end = {
-                        GlassGroup { ThemeGlassItem() }
                         railActions()
                     },
                 )
@@ -1230,8 +1232,6 @@ private fun PhoneFiles(
                 // 一路点 ‹ 往回退,退出文件页的那一下之后,下一下就落在 ✕ 上 —— 实测把会话断掉了。
                 // 现在连点 ‹ 落到终端页的是 ⌘(开关快捷键栏),无害。
                 EdgeRail(Modifier.align(Alignment.BottomEnd).padding(bottom = barsDp)) {
-                    // 外观在最上面(每一页都有,位置一样)。
-                    GlassGroup { ThemeGlassItem() }
                     GlassButton(XIcons.Back, stringResource(R.string.files_back)) { onBack() }
                     railActions()
                 }
@@ -1897,12 +1897,8 @@ private fun NameDialog(
     val focus = remember { FocusRequester() }
     val name = field.text.trim()
     val valid = name.isNotEmpty() && (isPath || ('/' !in name && name != "." && name != ".."))
-    // Enter + 按钮连点会在 dialog=null 重组前触发两次 onConfirm(双改名/双建目录)。
-    var done by remember { mutableStateOf(false) }
-    fun submit() {
-        if (!valid || done) return
-        done = true
-    // 回车和按钮都会调 submit():对话框还没关掉时连按两下会建两个文件夹 / 改两次名。
+    // 回车和按钮都会调 submit():对话框还没关掉(dialog=null 重组前)时连按两下会
+    // 触发两次 onConfirm,建两个文件夹 / 改两次名。
     var submitted by remember { mutableStateOf(false) }
     fun submit() {
         if (!valid || submitted) return
@@ -2001,7 +1997,9 @@ private fun NameDialog(
 @OptIn(ExperimentalFoundationApi::class)
 private fun Modifier.remoteDragOut(uri: android.net.Uri?, label: String, onNeedCache: () -> Unit): Modifier {
     if (uri != null) {
-        return this.dragAndDropSource {
+        // 具名传 block:这个版本的 Compose 里 dragAndDropSource 还有一个 (Offset) -> … 的重载,
+        // 裸 lambda 会被判成有歧义。
+        return this.dragAndDropSource(block = {
             awaitPointerEventScope {
                 while (true) {
                     val down = awaitFirstDown(requireUnconsumed = false)
@@ -2029,7 +2027,7 @@ private fun Modifier.remoteDragOut(uri: android.net.Uri?, label: String, onNeedC
                     }
                 }
             }
-        }
+        })
     }
     return this.pointerInput(label) {
         awaitPointerEventScope {

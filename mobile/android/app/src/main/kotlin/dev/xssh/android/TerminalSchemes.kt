@@ -119,9 +119,10 @@ object TerminalSchemes {
             ResolvedTerminalScheme(
                 id = "",
                 background = Color(0xFF000000),
-                foreground = Color(0xFFF2F2F7),
-                cursor = Color(0xFF0A84FF),
-                selection = Color(0xFF0A84FF).copy(alpha = 0.32f),
+                // 和 iPhone Duo 版终端同一组默认色:文字 #E6E6E6、光标白、选区用强调色(绿)。
+                foreground = Color(0xFFE6E6E6),
+                cursor = Color(0xFFFFFFFF),
+                selection = Color(0xFF30D158).copy(alpha = 0.32f),
                 term16 = systemDark16,
             )
         } else {
@@ -129,8 +130,8 @@ object TerminalSchemes {
                 id = "",
                 background = Color(0xFFFFFFFF),
                 foreground = Color(0xFF1C1C1E),
-                cursor = Color(0xFF007AFF),
-                selection = Color(0xFF007AFF).copy(alpha = 0.32f),
+                cursor = Color(0xFF1E7E34),
+                selection = Color(0xFF1E7E34).copy(alpha = 0.32f),
                 term16 = systemLight16,
             )
         }

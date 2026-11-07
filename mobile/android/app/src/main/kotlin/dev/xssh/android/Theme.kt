@@ -26,6 +26,7 @@ import androidx.core.view.WindowCompat
  * 设计令牌。浅色 / 深色两套,跟随系统。
  *
  * 取值参照 iOS 的系统色(label / secondaryLabel / separator / systemGroupedBackground …),
+ * 强调色、侧栏 / 弹层的灰度台阶、行间虚线、主机色点则来自 iOS SwiftUI 版的终端风格(`Theme.swift`、`HostsView.swift`),
  * 参考图就是那套视觉:浅色是白底,表单是浅灰分组底上的白色分组块;深色是纯黑底上的深灰分组块。
  */
 data class XsshPalette(
@@ -74,6 +75,17 @@ data class XsshPalette(
     val glassBorder: Color,
     /** Liquid Glass 的投影。 */
     val glassShadow: Color,
+    /**
+     * 两栏时左边主机列表那一栏的底:深色 #171717,比右边纯黑的详情 / 终端亮一档,整栏通高,一眼分得开。
+     * (取值照 iOS 版 `Color.appSidebar`。)
+     */
+    val sidebar: Color,
+    /** 弹层(新建 / 编辑主机)的底:浮在黑底上要比黑亮一档(#1C1C1C)。 */
+    val sheet: Color,
+    /** 弹层里的卡片 / 表单行:再亮一档(#2B2B2B),和弹层的底拉开层次。 */
+    val sheetCard: Color,
+    /** 行与行之间的虚线(1dp、3 实 3 空)。深色是 16% 的白。 */
+    val dash: Color,
     val termBg: Color,
     val termFg: Color,
     val termCursor: Color,
@@ -94,9 +106,11 @@ val DarkPalette = XsshPalette(
     text = Color(0xFFFFFFFF),
     textDim = Color(0x99EBEBF5),
     textFaint = Color(0x4DEBEBF5),
-    accent = Color(0xFF0A84FF),
-    onAccent = Color(0xFFFFFFFF),
-    accentSoft = Color(0x330A84FF),
+    // 绿色强调色:iOS 版的终端风格(`❯`、光标、主按钮、`# ` 都是这个绿)。主按钮上的字用深绿,
+    // 不用白 —— 白字在 #30D158 上对比度只有 2:1 左右。
+    accent = Color(0xFF30D158),
+    onAccent = Color(0xFF04210C),
+    accentSoft = Color(0x3330D158),
     cardBg = Color(0xFF161618),
     rowSel = Color(0xFF2C2C2E),
     danger = Color(0xFFFF453A),
@@ -109,10 +123,15 @@ val DarkPalette = XsshPalette(
     glassTint = Color(0x5C121214),
     glassBorder = Color(0x24FFFFFF),
     glassShadow = Color(0x66000000),
+    sidebar = Color(0xFF171717),
+    sheet = Color(0xFF1C1C1C),
+    sheetCard = Color(0xFF2B2B2B),
+    dash = Color(0x29FFFFFF),
     termBg = Color(0xFF000000),
     termFg = Color(0xFFF2F2F7),
-    termCursor = Color(0xFF0A84FF),
-    termSelection = Color(0xFF0A84FF).copy(alpha = 0.32f),
+    // 光标白色、选区用强调色:和 iOS 版一致(原来光标是蓝的,换成绿会和绿色 `❯` 混在一起)。
+    termCursor = Color(0xFFFFFFFF),
+    termSelection = Color(0xFF30D158).copy(alpha = 0.32f),
     // 与 Rust 核心的默认 16 色一致(深色底上对比度够的一组)。
     term16 = listOf(
         0x000000, 0xCD3131, 0x0DBC79, 0xE5E510, 0x2472C8, 0xBC3FBC, 0x11A8CD, 0xE5E5E5,
@@ -120,81 +139,33 @@ val DarkPalette = XsshPalette(
     ),
 )
 
-val LightPalette = XsshPalette(
-    dark = false,
-    bg = Color(0xFFFFFFFF),
-    // 浅色下表单页也用白底,分组块用浅灰填充。
-    // 试过 iOS 设置页那种"偏紫的浅灰底 + 白色分组块":和白底的主机页一进一出,
-    // 用户看了直接说配色不好看。白底灰块更干净,两页也统一。
-    groupedBg = Color(0xFFFFFFFF),
-    bgElev = Color(0xFFF2F2F7),
-    bgElev2 = Color(0x1F767680),
-    // 分隔线要轻:原来 29% 的黑、1dp 粗,把分组块切成几段。
-    border = Color(0x2E3C3C43),
-    borderStrong = Color(0xFFC7C7CC),
-    text = Color(0xFF000000),
-    textDim = Color(0x993C3C43),
-    // 第三级文字比 iOS 的 30% 再深一点 —— 手机上 30% 的占位字、说明字在白底上几乎看不见。
-    textFaint = Color(0x663C3C43),
-    accent = Color(0xFF007AFF),
-    onAccent = Color(0xFFFFFFFF),
-    accentSoft = Color(0x26007AFF),
-    cardBg = Color(0xFFF2F2F7),
-    rowSel = Color(0xFFE3E3E8),
-    danger = Color(0xFFFF3B30),
-    switchThumb = Color(0xFFFFFFFF),
-    keyFace = Color(0xFFFFFFFF),
-    keyFacePressed = Color(0xFFD1D1D6),
-    barBg = Color(0xFFD5D7DD),
-    ok = Color(0xFF34C759),
-    warn = Color(0xFFFF9500),
-    // 浅色玻璃:白色亮度层 + 投影;轮廓靠 Liquid Glass 的边缘折射和高光勾出来。
-    glassTint = Color(0x94FFFFFF),
-    glassBorder = Color(0x1A000000),
-    glassShadow = Color(0x24000000),
-    termBg = Color(0xFFFFFFFF),
-    termFg = Color(0xFF1C1C1E),
-    termCursor = Color(0xFF007AFF),
-    termSelection = Color(0xFF007AFF).copy(alpha = 0.32f),
-    // 白底终端配色:"白色"文字在白底上看不见,换成中灰;黄色压暗。
-    term16 = listOf(
-        0x000000, 0xCD3131, 0x00A000, 0x949800, 0x0451A5, 0xBC05BC, 0x0598BC, 0x555555,
-        0x666666, 0xCD3131, 0x14A814, 0xB5BA00, 0x0451A5, 0xBC05BC, 0x0598BC, 0x777777,
-    ),
-)
-
 val LocalXssh = staticCompositionLocalOf { DarkPalette }
 
-/** 外观模式。 */
-enum class ThemeMode(@StringRes val labelRes: Int) {
-    Light(R.string.host_theme_light),
-    Dark(R.string.host_theme_dark),
-    System(R.string.host_theme_system),
-    ;
+/**
+ * 主机行末的色点:12 种沉稳的色相,和 iOS 版 `HostColor` 同一组(取值是那边 0..1 的 RGB 换算成十六进制),
+ * 一眼认出哪台是哪台。
+ */
+val HostPips: List<Color> = listOf(
+    Color(0xFF708CFF), // 蓝
+    Color(0xFF4FBAA3), // 青绿
+    Color(0xFFB58CF0), // 紫
+    Color(0xFFE08A5C), // 橙
+    Color(0xFFE8738F), // 粉
+    Color(0xFF9EC266), // 草绿
+    Color(0xFF5CBDE6), // 天蓝
+    Color(0xFFE6C257), // 黄
+    Color(0xFFCC73CC), // 洋红
+    Color(0xFF8CA8A8), // 灰青
+    Color(0xFFDB8075), // 珊瑚
+    Color(0xFF8585EB), // 靛
+)
 
-    /** 给用户看的名字;只能在组合里读(非组合代码用 `context.getString(labelRes)`)。 */
-    val label: String
-        @Composable get() = stringResource(labelRes)
-
-    /** 点一下切到下一个(不弹窗)。 */
-    fun next(): ThemeMode = when (this) {
-        System -> Light
-        Light -> Dark
-        Dark -> System
-    }
-
-    val icon: androidx.compose.ui.graphics.vector.ImageVector
-        get() = when (this) {
-            Light -> XIcons.Sun
-            Dark -> XIcons.Moon
-            System -> XIcons.Auto
-        }
-}
-
-/** 当前外观模式和切换它的入口(主机页轨道上的主题按钮用)。 */
-data class ThemeControl(val mode: ThemeMode, val onChange: (ThemeMode) -> Unit)
-
-val LocalThemeControl = staticCompositionLocalOf { ThemeControl(ThemeMode.System) {} }
+/**
+ * 这台主机的色点:用记录里存的编号(新建时挑没被别的主机用过的,见 [assignColors])。
+ * 还没有编号的老数据先按 id 取模凑合 —— 下一次落盘时 [assignColors] 会补上编号。
+ */
+fun hostPip(host: Host): Color =
+    HostPips[host.colorIndex.takeIf { it in HostPips.indices } ?: ((host.id.hashCode() and Int.MAX_VALUE) % HostPips.size)]
 
 private fun darkScheme(p: XsshPalette) = darkColorScheme(
     primary = p.accent,
@@ -206,23 +177,6 @@ private fun darkScheme(p: XsshPalette) = darkColorScheme(
     surface = p.bgElev,
     onSurface = p.text,
     surfaceVariant = p.bgElev,
-    onSurfaceVariant = p.textDim,
-    outline = p.borderStrong,
-    outlineVariant = p.border,
-    error = p.danger,
-    onError = p.onAccent,
-)
-
-private fun lightScheme(p: XsshPalette) = lightColorScheme(
-    primary = p.accent,
-    onPrimary = p.onAccent,
-    secondary = p.accent,
-    onSecondary = p.onAccent,
-    background = p.bg,
-    onBackground = p.text,
-    surface = p.bgElev,
-    onSurface = p.text,
-    surfaceVariant = p.groupedBg,
     onSurfaceVariant = p.textDim,
     outline = p.borderStrong,
     outlineVariant = p.border,
@@ -247,34 +201,28 @@ private fun Context.findActivity(): Activity? {
  * 之间的空隙。行高改为跟随字号,并裁掉首行上方与末行下方的多余行距。
  */
 /**
- * [mode] 是用户在主题按钮里选的:浅色、深色,或跟随系统。
- * manifest 里 configChanges 含 uiMode,系统切深浅色时不重建 Activity,这里直接重组。
+ * 只有深色:产品定位就是终端风格的深色界面,不再提供浅色和跟随系统。
  */
 @Composable
-fun XsshTheme(mode: ThemeMode = ThemeMode.System, content: @Composable () -> Unit) {
-    val dark = when (mode) {
-        ThemeMode.Light -> false
-        ThemeMode.Dark -> true
-        ThemeMode.System -> isSystemInDarkTheme()
-    }
-    val base = if (dark) DarkPalette else LightPalette
+fun XsshTheme(content: @Composable () -> Unit) {
+    val base = DarkPalette
     // 设置里选的终端配色叠在 term* 上;UI 铬色仍跟外观走。
     val palette = base.withTerminalScheme(TerminalSchemeChoice.currentId)
 
-    // 状态栏、导航条的图标颜色跟着主题翻:浅色底上要深色图标,否则时间和电量都看不见。
+    // 状态栏、导航条:深色底上一律用浅色图标。
     val view = LocalView.current
     if (!view.isInEditMode) {
         SideEffect {
             val window = view.context.findActivity()?.window ?: return@SideEffect
             WindowCompat.getInsetsController(window, view).apply {
-                isAppearanceLightStatusBars = !palette.dark
-                isAppearanceLightNavigationBars = !palette.dark
+                isAppearanceLightStatusBars = false
+                isAppearanceLightNavigationBars = false
             }
         }
     }
 
     CompositionLocalProvider(LocalXssh provides palette) {
-        MaterialTheme(colorScheme = if (palette.dark) darkScheme(palette) else lightScheme(palette)) {
+        MaterialTheme(colorScheme = darkScheme(palette)) {
             // 必须放在 MaterialTheme **里面**:它自己会 ProvideTextStyle(bodyLarge),
             // 在外面提供会被它盖掉(第一次就是这么改错的)。
             val base = MaterialTheme.typography.bodyLarge.copy(

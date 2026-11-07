@@ -745,6 +745,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_xssh_ffi_checksum_method_term_feed(
     ): Int
+    external fun uniffi_xssh_ffi_checksum_method_term_history_len(
+    ): Int
     external fun uniffi_xssh_ffi_checksum_method_term_input_modes(
     ): Int
     external fun uniffi_xssh_ffi_checksum_method_term_lines(
@@ -870,6 +872,8 @@ internal object UniffiLib {
     ): RustBuffer.ByValue
     external fun uniffi_xssh_ffi_fn_method_term_feed(`ptr`: Long,`data`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
+    external fun uniffi_xssh_ffi_fn_method_term_history_len(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Int
     external fun uniffi_xssh_ffi_fn_method_term_input_modes(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_xssh_ffi_fn_method_term_lines(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -1108,6 +1112,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_xssh_ffi_checksum_method_term_feed() and 0xFFFF) != 23350) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_xssh_ffi_checksum_method_term_history_len() and 0xFFFF) != 54760) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_xssh_ffi_checksum_method_term_input_modes() and 0xFFFF) != 49043) {
@@ -2883,6 +2890,11 @@ public interface TermInterface {
     fun `feed`(`data`: kotlin.ByteArray)
     
     /**
+     * 回滚历史一共有多少行(界面画滚动条:滑块大小 = 视口 / (视口 + 历史),位置由 `scroll_offset` 算)。
+     */
+    fun `historyLen`(): kotlin.UInt
+    
+    /**
      * 输入模式(应用光标、括号粘贴、鼠标上报……)。
      */
     fun `inputModes`(): InputModes
@@ -3131,6 +3143,22 @@ open class Term: Disposable, AutoCloseable, TermInterface
 }
     }
     
+    
+
+    
+    /**
+     * 回滚历史一共有多少行(界面画滚动条:滑块大小 = 视口 / (视口 + 历史),位置由 `scroll_offset` 算)。
+     */override fun `historyLen`(): kotlin.UInt {
+            return FfiConverterUInt.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_xssh_ffi_fn_method_term_history_len(
+        it,
+        _status)
+}
+    }
+    )
+    }
     
 
     

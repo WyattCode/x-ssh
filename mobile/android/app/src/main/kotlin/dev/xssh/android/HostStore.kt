@@ -76,6 +76,11 @@ data class Host(
     /** 置顶:永远排在列表最前(组内仍按最近使用)。老数据没有这个字段,默认不置顶。 */
     val pinned: Boolean = false,
     /**
+     * 主机行末色点的编号([HostPips] 的下标),新建时挑一个还没被别的主机用的(见 [assignColors])。
+     * -1 = 还没分配(老数据):显示时先按 id 取模凑合,下一次落盘时补上。
+     */
+    val colorIndex: Int = -1,
+    /**
      * 还没解锁时,磁盘上那几条**读不出来**的密文原样带着。
      *
      * 没有它们的话,「解锁之前保存一次主机」(改个端口、换个名字)就会把密码
@@ -178,6 +183,27 @@ internal fun unreadableSecrets(sealed: List<String>, plain: List<String>): List<
     }
 
 /**
+ * 给还没有色点编号的主机分配一个:**挑还没被别的主机用的**(iOS 版 `HostStore.freeColorIndex` 的做法)。
+ * 已经有编号的原样不动;12 种颜色用完之后才重复(从用得最少的开始)。
+ * 按传入列表的顺序依次分配,所以同一份数据每次算出来一样。
+ */
+fun assignColors(hosts: List<Host>, palette: Int = HostPips.size): List<Host> {
+    if (hosts.none { it.colorIndex !in 0 until palette }) return hosts
+    val counts = IntArray(palette)
+    hosts.forEach { if (it.colorIndex in 0 until palette) counts[it.colorIndex]++ }
+    return hosts.map { host ->
+        if (host.colorIndex in 0 until palette) {
+            host
+        } else {
+            // 用得最少的颜色里编号最小的那个:前 12 台一定各不相同,之后均匀轮着用。
+            val pick = counts.indices.minByOrNull { counts[it] * palette + it } ?: 0
+            counts[pick]++
+            host.copy(colorIndex = pick)
+        }
+    }
+}
+
+/**
  * 首页 / 侧栏的显示顺序:**置顶在前,然后按最近使用,都没用过的保持添加顺序**。
  *
  * `sortedWith` 是稳定排序 —— pinned 和 lastUsed 都相同时保持原样,
@@ -200,14 +226,9 @@ class HostStore(context: Context) {
     private val prefs = context.getSharedPreferences("xssh_hosts", Context.MODE_PRIVATE)
 
     /**
-     * 这次 [save] 里有没有哪条凭据"封不上、退回了旧密文"。
-     *
-     * 退回旧密文是为了不丢东西,但它同时意味着"用户改了密码,界面说存好了,其实没改" ——
-     * 光靠日志看不见,得让界面把这件事说出来(见 MainActivity 的 persist)。
-     */
-    private var sealFellBack = false
      * 上一次 [save] 里有没有凭据"没封上"(见 [writeSecret])。封不上时旧密文会原样留着
-     * (不丢数据),但界面必须知道"新密码其实没存进去",否则用户以为改成功了。
+     * (不丢数据),但界面必须知道"新密码其实没存进去",否则用户以为改成功了
+     * (见 MainActivity 的 persist)。光靠日志看不见这件事。
      */
     var lastSaveSealFailed: Boolean = false
         private set
@@ -287,6 +308,7 @@ class HostStore(context: Context) {
                         portForwards = parsePortForwards(item.optJSONArray("portForwards")),
                         lastUsed = item.optLong("lastUsed", 0L),
                         pinned = item.optBoolean("pinned", false),
+                        colorIndex = item.optInt("colorIndex", -1),
                         // **这一条不能漏**:漏了每次加载都是 false —— 编辑页的开关显示成"关"
                         // (磁盘上明明锁着),而且保存时 `writeSecret` 会按"没加锁"用普通密钥
                         // 重新加密,用户没碰过开关,锁就被悄悄去掉了。
@@ -322,13 +344,12 @@ class HostStore(context: Context) {
      */
     private fun readSecret(sealed: String): String = Secrets.open(sealed)
 
-    /** 返回 true 表示有凭据没能重新加密、沿用了旧密文(界面要提示"密码没存上")。 */
+    /**
+     * 存盘。用 commit 而不是 apply,好让调用方知道写没写进去:返回 true = 已落盘。
+     *
+     * 凭据封不上、沿用旧密文时其余字段照常存好,这**不算**写盘失败,另看 [lastSaveSealFailed]。
+     */
     fun save(hosts: List<Host>): Boolean {
-        sealFellBack = false
-    /** 存盘。用 commit 而不是 apply,好让调用方知道写没写进去。 */
-
-    fun save(hosts: List<Host>): Boolean {
-    fun save(hosts: List<Host>) {
         lastSaveSealFailed = false
         val array = JSONArray()
         val disk = diskRecords()
@@ -375,15 +396,12 @@ class HostStore(context: Context) {
             if (host.portForwards.isNotEmpty()) item.put("portForwards", encodePortForwards(host.portForwards))
             item.put("lastUsed", host.lastUsed)
             item.put("pinned", host.pinned)
+            item.put("colorIndex", host.colorIndex)
             array.put(item)
         }
-        prefs.edit().putString(KEY_LIST, array.toString()).apply()
-        return sealFellBack
         val ok = prefs.edit().putString(KEY_LIST, array.toString()).commit()
         if (!ok) android.util.Log.e("XsshData", "host list persist commit failed")
         return ok
-
-        return prefs.edit().putString(KEY_LIST, array.toString()).commit()
     }
 
     /**
@@ -402,7 +420,6 @@ class HostStore(context: Context) {
         // 这个静默兜底已经骗过两轮排查了。
         locked -> runCatching { Secrets.writeLocked(plain) }.getOrElse { err ->
             android.util.Log.w("xssh", "seal locked secret failed: ${err.javaClass.simpleName} ${err.message}")
-            sealFellBack = true
             lastSaveSealFailed = true
             sealed ?: ""
         }
@@ -411,7 +428,6 @@ class HostStore(context: Context) {
         // 封不上就留着旧的,并记一条日志(界面这一层看不见,只能靠日志发现)。
         else -> Secrets.seal(plain).ifEmpty {
             android.util.Log.w("xssh", "seal secret failed; keeping the previous ciphertext")
-            sealFellBack = true
             lastSaveSealFailed = true
             sealed ?: ""
         }
@@ -500,28 +516,17 @@ class UiPrefs(context: Context) {
      */
     private fun foldKey(widthDp: Int, heightDp: Int) = "fold_${widthDp}x$heightDp"
 
-    /** 外观:跟随系统 / 浅色 / 深色。 */
-    var themeMode: ThemeMode
-        get() = ThemeMode.entries.firstOrNull { it.name == prefs.getString(KEY_THEME, null) } ?: ThemeMode.System
-        set(value) { setThemeMode(value) }
-
-    /** Persist theme. Returns false when SharedPreferences.commit failed. */
-    fun setThemeMode(value: ThemeMode): Boolean =
-        prefs.edit().putString(KEY_THEME, value.name).commit()
-
     /** 平板侧边栏是否展开(收起后终端独占整个宽度,下次打开保持用户的选择)。 */
     var sidebarVisible: Boolean
         get() = prefs.getBoolean(KEY_SIDEBAR, true)
         set(value) { setSidebarVisible(value) }
 
     /** 写侧边栏展开状态。返回 false = 没写进磁盘(下次冷启动会回到旧值)。 */
-    /** Persist sidebar visibility. Returns false when SharedPreferences.commit failed. */
     fun setSidebarVisible(value: Boolean): Boolean =
         prefs.edit().putBoolean(KEY_SIDEBAR, value).commit()
 
     companion object {
         private const val KEY_SIDEBAR = "sidebarVisible"
-        private const val KEY_THEME = "themeMode"
         const val FONT_MIN = 9f
         const val FONT_MAX = 30f
         private const val KEY_FONT = "terminalFontSize"

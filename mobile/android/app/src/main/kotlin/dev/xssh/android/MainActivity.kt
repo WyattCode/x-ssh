@@ -103,39 +103,16 @@ class MainActivity : ComponentActivity() {
                 keyPath = intent.getStringExtra("devKeyPath"),
             )
         }
-        val prefs = UiPrefs(this)
-        // 让系统也知道 app 选的是哪种外观。点开 app 的第一帧是**系统画的启动窗口**,
-        // 那时这里的代码还没跑,系统只看夜间模式配置来挑 values / values-night 的底色 ——
-        // 不告诉它,app 里选了深色而手机是浅色时,启动还是会先闪一下白。
-        applyNightMode(this, prefs.themeMode)
-        // 冷启动底色要和选中的外观一致:选了深色而系统是浅色时,
-        // 资源里的 windowBackground 是白的,不在这里改就会先闪一下白。
-        val systemDark = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
-            Configuration.UI_MODE_NIGHT_YES
-        val startDark = when (prefs.themeMode) {
-            ThemeMode.Light -> false
-            ThemeMode.Dark -> true
-            ThemeMode.System -> systemDark
-        }
-        window.setBackgroundDrawable(ColorDrawable(if (startDark) Color.BLACK else Color.WHITE))
+        // 只有深色:冷启动底色直接给黑,不让系统先闪一下白。
+        applyNightMode(this)
+        window.setBackgroundDrawable(ColorDrawable(Color.BLACK))
 
         setContent {
-            var mode by remember { mutableStateOf(prefs.themeMode) }
-            XsshTheme(mode) {
+            XsshTheme {
                 // 每一帧的窗口形态(尺寸档 + 铰链)只算一次,所有界面从这里取。
                 CompositionLocalProvider(
                     LocalAdaptive provides rememberAdaptive(),
                     LocalChrome provides remember { detectChrome(this) },
-                    LocalThemeControl provides ThemeControl(mode) {
-                        if (prefs.setThemeMode(it)) {
-                            mode = it
-                            applyNightMode(this, it)
-                        } else {
-                            android.widget.Toast
-                                .makeText(this, R.string.theme_persist_failed, android.widget.Toast.LENGTH_LONG)
-                                .show()
-                        }
-                    },
                 ) {
                     App(dev)
                 }
@@ -144,19 +121,11 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-/**
- * 按 app 设置夜间模式(Android 12+,系统会记住)。之后系统画这个 app 的启动窗口时,
- * 就按这里的选择去挑浅色 / 深色的底色。跟随系统就交还给系统(AUTO)。
- */
-private fun applyNightMode(context: android.content.Context, mode: ThemeMode) {
+/** 固定成夜间模式(Android 12+,系统会记住),系统画启动窗口时也走深色。 */
+private fun applyNightMode(context: android.content.Context) {
     if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S) return
     val manager = context.getSystemService(android.app.UiModeManager::class.java) ?: return
-    val target = when (mode) {
-        ThemeMode.Light -> android.app.UiModeManager.MODE_NIGHT_NO
-        ThemeMode.Dark -> android.app.UiModeManager.MODE_NIGHT_YES
-        ThemeMode.System -> android.app.UiModeManager.MODE_NIGHT_AUTO
-    }
-    runCatching { manager.setApplicationNightMode(target) }
+    runCatching { manager.setApplicationNightMode(android.app.UiModeManager.MODE_NIGHT_YES) }
 }
 
 /** 开发联调用目标(仅来自 adb intent extra,不落盘)。 */
@@ -281,7 +250,8 @@ fun App(devTarget: DevTarget? = null) {
     fun persist(list: List<Host>) {
         // 存和显示都走同一个顺序(置顶 → 最近使用 → 添加顺序);
         // 存排序后的列表,插入顺序作为并列时的兜底也一并固化下来。
-        val sorted = orderHosts(list)
+        // 先给还没有色点编号的主机分配一个(新建的、老数据),再排序落盘。
+        val sorted = orderHosts(assignColors(list))
         // 数据安全护栏:内存里一台主机都没有、磁盘上却还有主机时,唯一可能的来路是
         // Activity 重建后 load 失败(密钥没就绪 → getOrDefault(空) —— 见 HostStore.load)。
         // 此时绝不能把空表落盘:2026-10-10 真机上发生过一次,一次普通的"确认删除"
@@ -289,51 +259,21 @@ fun App(devTarget: DevTarget? = null) {
         // 不走这里 —— 那时内存里还有 1 台,不会命中这个条件。
         if (sorted.isEmpty() && hosts.isEmpty() && store.hasProtectedDiskData()) {
             android.util.Log.e("XsshData", "refusing to persist an empty host list over existing data")
-            android.widget.Toast.makeText(
-                context,
-                context.getString(R.string.hosts_persist_refused),
-                R.string.hosts_persist_refused,
-                android.widget.Toast.LENGTH_LONG,
-            ).show()
+            Toast.makeText(context, R.string.hosts_persist_refused, Toast.LENGTH_LONG).show()
             return
         }
+        // 先写盘,写进去了才改内存:写失败时界面上的列表和磁盘还是一致的。
+        // (否则界面显示"已保存"的新列表,下次启动却从磁盘读回旧列表,用户以为改丢了。)
         if (!store.save(sorted)) {
             android.util.Log.e("XsshData", "host list write failed")
-            android.widget.Toast.makeText(
-                context,
-                R.string.hosts_save_failed,
-                android.widget.Toast.LENGTH_LONG,
-            ).show()
+            Toast.makeText(context, R.string.hosts_save_failed, Toast.LENGTH_LONG).show()
             return
         }
-        // 落盘失败就把内存里的列表退回去 —— 否则界面显示的是"已保存"的新列表,
-        // 下次启动却从磁盘读回旧列表,用户以为改丢了(镜像 SnippetStore 的做法)。
-        val prev = hosts
         hosts = sorted
         // 密码 / 私钥 / 口令封不上时 save 会沿用旧密文 —— 其他字段照常存好了,
         // 但"新密码已保存"是假的,必须说出来,否则用户以为改成功了。
-        val sealFailed = store.save(sorted)
-        if (sealFailed) {
-            android.widget.Toast.makeText(
-                context,
-                context.getString(R.string.host_seal_failed),
-                android.widget.Toast.LENGTH_LONG,
-            ).show()
-        if (!store.save(sorted)) {
-            Toast.makeText(context, R.string.hosts_persist_failed, Toast.LENGTH_LONG).show()
-        }
-
-        if (!store.save(sorted)) {
-            hosts = prev
-            android.widget.Toast.makeText(context, R.string.hosts_save_failed, android.widget.Toast.LENGTH_LONG).show()
-        store.save(sorted)
-        // 封存失败时旧密文还在盘上(不丢数据),但用户以为新密码存好了 —— 必须说出来。
         if (store.lastSaveSealFailed) {
-            android.widget.Toast.makeText(
-                context,
-                context.getString(R.string.hosts_secret_seal_failed),
-                android.widget.Toast.LENGTH_LONG,
-            ).show()
+            Toast.makeText(context, R.string.host_seal_failed, Toast.LENGTH_LONG).show()
         }
     }
 
@@ -368,6 +308,34 @@ fun App(devTarget: DevTarget? = null) {
                     persist(hosts.map { if (it.id == host.id) it.withTrustedHostKey(fingerprint) else it })
                 },
                 onPin = { pinned -> persist(hosts.map { if (it.id == pinned.id) pinned else it }) },
+                onConnected = { id ->
+                    persist(hosts.map { if (it.id == id) it.copy(lastUsed = System.currentTimeMillis()) else it })
+                },
+            )
+        } else if (chrome == Chrome.Rail && LocalAdaptive.current.splits(maxWidth)) {
+            // 折叠屏内屏:抽屉 + 终端右栏(iPhone Duo 内屏同款,见 Duo.kt)。状态和平板共用上面这些。
+            DuoApp(
+                hosts = hosts,
+                selectedId = selectedId,
+                onSelect = { selectedId = it },
+                termHostId = termHostId?.takeIf { id -> hosts.any { it.id == id } },
+                onOpenTerminal = { termHostId = it.id },
+                onCloseTerminal = { termHostId = null },
+                onSave = { host ->
+                    val list = hosts.toMutableList()
+                    val index = list.indexOfFirst { it.id == host.id }
+                    if (index >= 0) list[index] = host else list.add(host)
+                    persist(list)
+                    selectedId = host.id
+                },
+                onDelete = { host ->
+                    persist(hosts.filterNot { it.id == host.id })
+                    if (selectedId == host.id) selectedId = null
+                    if (termHostId == host.id) termHostId = null
+                },
+                onTrustKey = { host, fingerprint ->
+                    persist(hosts.map { if (it.id == host.id) it.withTrustedHostKey(fingerprint) else it })
+                },
                 onConnected = { id ->
                     persist(hosts.map { if (it.id == id) it.copy(lastUsed = System.currentTimeMillis()) else it })
                 },
@@ -609,7 +577,16 @@ private fun PhoneFlow(
             }
         }
 
-        Screen.Fonts -> SettingsScreen(onBack = { onScreen(Screen.Home) })
+        Screen.Fonts -> SettingsScreen(
+            onBack = { onScreen(Screen.Home) },
+            // 「会话快照」恢复后连那一台(和主页点连接同一套:先清掉分屏的副窗格)。
+            onOpenHost = { host ->
+                onTerminalCompanion(null)
+                onPaneFocus(PaneSide.Left)
+                onTerminalHost(host.id)
+                onScreen(Screen.Terminal(host))
+            },
+        )
 
         is Screen.Editor -> HostEditorScreen(
             initial = current.host,
@@ -638,33 +615,21 @@ private fun PhoneFlow(
                     ?: current.host.takeIf { it.id == hid }
             }
             fun trustKey(host: Host, fingerprint: String) {
-                val trusted = host.copy(keyFingerprint = fingerprint)
-        is Screen.Terminal -> TerminalScreen(
-            host = current.host,
-            onExit = {
-                onTerminalHost(null)
-                onScreen(land(current.back))
-            },
-            onTrustKey = { fingerprint ->
                 // 换一个 Host 实例 → 终端屏的 remember(host) 失效 → 带着新指纹重连。
                 // 追加信任,不抹掉这台主机已有的其它主机密钥。
-                val trusted = current.host.withTrustedHostKey(fingerprint)
+                val trusted = host.withTrustedHostKey(fingerprint)
                 if (hosts.any { it.id == trusted.id }) {
                     persist(hosts.map { if (it.id == trusted.id) it.withTrustedHostKey(fingerprint) else it })
                 }
                 // 主窗格指纹变了要换 Screen 里的 Host 实例以触发重连。
                 if (current.host.id == trusted.id) onScreen(current.copy(host = trusted))
             }
-            fun connected(id: String) {
-                onScreen(current.copy(host = trusted))
-            },
             // 跳板机的指纹存到跳板机那台上;主机表一变,终端屏拿到新的跳板机实例,随之重连。
-            onTrustJumpKey = { jump, fingerprint ->
+            fun trustJumpKey(jump: Host, fingerprint: String) {
                 persist(hosts.map { if (it.id == jump.id) it.withTrustedHostKey(fingerprint) else it })
-            },
-            onFiles = { onScreen(Screen.Files(current)) },
+            }
             // 连上 / 接管的那一刻记一笔"最近使用"(失败和自动重连不算)。
-            onConnected = { id ->
+            fun connected(id: String) {
                 persist(hosts.map { if (it.id == id) it.copy(lastUsed = System.currentTimeMillis()) else it })
             }
             if (pickingBeside) {
@@ -700,8 +665,9 @@ private fun PhoneFlow(
                             onPaneFocus(next.third)
                             if (next.first == null) onScreen(land(current.back))
                             else {
-                                val keep = hostOf(next.first) ?: return@onExitPane
-                                onScreen(Screen.Terminal(keep, back = current.back))
+                                hostOf(next.first)?.let { keep ->
+                                    onScreen(Screen.Terminal(keep, back = current.back))
+                                }
                             }
                         },
                         onSwap = {
@@ -713,9 +679,7 @@ private fun PhoneFlow(
                         },
                         onOpenBeside = { pickingBeside = true },
                         onTrustKey = ::trustKey,
-                        onTrustJumpKey = { jump, fingerprint ->
-                            persist(hosts.map { if (it.id == jump.id) it.copy(keyFingerprint = fingerprint) else it })
-                        },
+                        onTrustJumpKey = ::trustJumpKey,
                         onFiles = { h ->
                             onScreen(Screen.Files(Screen.Terminal(h, back = current.back)))
                         },
@@ -735,9 +699,7 @@ private fun PhoneFlow(
                         onScreen(land(current.back))
                     },
                     onTrustKey = { fingerprint -> trustKey(shown, fingerprint) },
-                    onTrustJumpKey = { jump, fingerprint ->
-                        persist(hosts.map { if (it.id == jump.id) it.copy(keyFingerprint = fingerprint) else it })
-                    },
+                    onTrustJumpKey = ::trustJumpKey,
                     onFiles = { onScreen(Screen.Files(Screen.Terminal(shown, back = current.back))) },
                     onConnected = ::connected,
                     onEditHost = {
@@ -745,20 +707,13 @@ private fun PhoneFlow(
                         onScreen(Screen.Editor(shown, back = current.back))
                     },
                     onOpenBeside = { pickingBeside = true },
+                    onSwitchHost = { host ->
+                        onTerminalHost(host.id)
+                        onScreen(Screen.Terminal(host))
+                    },
                 )
             }
         }
-            },
-            onEditHost = {
-                onTerminalHost(null)
-                // 填完回到进终端之前的那一页(详情页或主机页),再点连接就是用新密码连。
-                onScreen(Screen.Editor(current.host, back = current.back))
-            },
-            onSwitchHost = { host ->
-                onTerminalHost(host.id)
-                onScreen(Screen.Terminal(host))
-            },
-        )
 
         is Screen.Files -> {
             val session = SessionRegistry.sessions.collectAsState().value[current.host.id]

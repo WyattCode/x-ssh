@@ -26,6 +26,9 @@ import androidx.compose.ui.input.pointer.isTertiaryPressed
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.key.isAltPressed
@@ -161,7 +164,7 @@ private val SENTINELS = arrayOf("\u200b", "\u200c")
 private data class PendingKey(val fingerprint: String, val changed: Boolean, val jump: Boolean = false)
 
 /** 错误页上那句话是哪一类:决定给不给「填写口令」按钮(原来靠比对中文原文,换了语言就失效)。 */
-private enum class FailureKind { Other, KeyPassphrase }
+private enum class FailureKind { Other, KeyPassphrase, CoreMissing }
 
 @Composable
 fun TerminalScreen(
@@ -172,6 +175,8 @@ fun TerminalScreen(
     onTrustJumpKey: (Host, String) -> Unit = { _, _ -> },
     /** 放在平板右栏里时不为空:工具栏换成平板那套,不再画手机的轨道 / 底栏按钮。 */
     tablet: TabletTerminalChrome? = null,
+    /** 折叠屏内屏的抽屉布局:终端嵌在右栏里,右下是竖向玻璃竖条(见 Duo.kt)。 */
+    duo: DuoTerminalChrome? = null,
     /** 手机 / 折叠屏:打开这条连接的文件页(平板走 [tablet] 里的开关)。 */
     onFiles: (() -> Unit)? = null,
     /** 手机 / 折叠屏:打开这台主机的编辑页(连接失败时「填写密码」这类就地修复用;平板走 [tablet])。 */
@@ -204,11 +209,20 @@ fun TerminalScreen(
     var live by remember(host, jumpHost) { mutableStateOf(SessionRegistry[host.id]) }
     // 连上 / 接管的那一刻记一笔"最近使用"。失败不记;自动重连不换 `live` 这个对象,也不记 ——
     // "最近使用"回答的是"用户最近主动去干哪台",不是"哪台最近还活着"(那是会话区的事)。
-    LaunchedEffect(live) { if (live != null) onConnected(host.id) }
+    // 触觉(iOS 版的三下):开始连接轻一下、连上「成功」一下、断开轻轻一下(见下面 TerminalView)。
+    val haptic = LocalHapticFeedback.current
+    LaunchedEffect(live) {
+        if (live != null) {
+            haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+            onConnected(host.id)
+        }
+    }
     // 错误页那句话**存成「怎么说」而不是说好的字**:换界面语言时界面不重建(见 Manifest 的 configChanges),
     // 存成字的话平板上开着错误页去设置里换语言,别处都变了,就这句还是旧语言。显示时再按当前语言取。
     var error by remember(host, jumpHost) { mutableStateOf<((android.content.Context) -> String)?>(null) }
     var errorKind by remember(host, jumpHost) { mutableStateOf(FailureKind.Other) }
+    // 错误页「详情」里的原文(只有应用自己的错误才有:原文是类名,不适合直接摆在最前面)。
+    var errorDetail by remember(host, jumpHost) { mutableStateOf<String?>(null) }
     var pendingKey by remember(host, jumpHost) { mutableStateOf<PendingKey?>(null) }
     var attempt by remember(host, jumpHost) { mutableStateOf(0) }
     // 这一屏里已经解锁过的凭据(本机, 跳板机)。确认完主机密钥重连时直接用,不再弹指纹:
@@ -237,11 +251,13 @@ fun TerminalScreen(
         if (live != null) return@LaunchedEffect
         error = null
         errorKind = FailureKind.Other
+        errorDetail = null
         pendingKey = null
         if (jumpGone) {
             error = { it.getString(R.string.term_err_jump_gone) }
             return@LaunchedEffect
         }
+        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
         // 开了「用生物识别解锁」的主机,列表里读到的密码是空的(没解锁就读不出来)。
         // 先解锁再判断"有没有存" —— 顺序反了会把"还没解锁"报成"没有保存密码"。
         val cached = unlocked
@@ -381,6 +397,13 @@ fun TerminalScreen(
                     failure is SessionRegistry.Cancelled ->
                         error = { it.getString(R.string.term_err_cancelled) }
 
+                    // 应用自己的核心库没装上:和服务器、网络都无关,别把类名当成失败原因摆出来。
+                    ConnectErrors.isCoreMissing(failure) -> {
+                        error = { c -> c.getString(R.string.term_err_core_missing) }
+                        errorKind = FailureKind.CoreMissing
+                        errorDetail = "${failure.javaClass.name}: ${failure.message ?: ""}".trim()
+                    }
+
                     else -> {
                         val message = failure.message?.ifBlank { null } ?: failure.toString()
                         val jumpText = readyJump?.let { jumpFailure(message, it, host) }
@@ -452,7 +475,10 @@ fun TerminalScreen(
                 waited = 0,
                 tablet = tablet != null,
                 // 没存密码 / 没导入私钥时,重试只会得到同一句话,不给这个按钮。
-                retry = if (noPassword || host.keyMissing || jumpGone || jumpNoCredentials) null else ({ attempt++ }),
+                retry = if (noPassword || host.keyMissing || jumpGone || jumpNoCredentials ||
+                    failureKind == FailureKind.CoreMissing
+                ) null else ({ attempt++ }),
+                detail = errorDetail,
                 onExit = onExit,
                 // 能就地修的直接给按钮,打开编辑页(平板是浮层)—— 不用先退回去再找编辑入口。
                 fix = (tablet?.onEdit ?: onEditHost)?.let { edit ->
@@ -491,6 +517,7 @@ fun TerminalScreen(
             host,
             onExit,
             tablet,
+            duo,
             onFiles,
             // 对端断了:丢掉这条死会话、按原主机重连(会话表里它已经自己摘掉了)。
             onReconnect = {
@@ -504,6 +531,7 @@ fun TerminalScreen(
             onSwapPanes = onSwapPanes,
             onTrustKey = onTrustKey,
             onTrustJumpKey = onTrustJumpKey,
+            onSwitchHost = onSwitchHost,
         )
     }
 }
@@ -514,6 +542,7 @@ private fun TerminalView(
     host: Host,
     onExit: () -> Unit,
     tablet: TabletTerminalChrome?,
+    duo: DuoTerminalChrome?,
     onFiles: (() -> Unit)?,
     onReconnect: () -> Unit,
     embedded: Boolean = false,
@@ -523,10 +552,19 @@ private fun TerminalView(
     onSwapPanes: (() -> Unit)? = null,
     onTrustKey: (String) -> Unit,
     onTrustJumpKey: (Host, String) -> Unit,
+    onSwitchHost: (Host) -> Unit = {},
 ) {
     val p = LocalXssh.current
     // Disconnect / leave must be one-shot: a double-tap would pop the nav stack twice.
-    var exiting by remember { mutableStateOf(false) }
+    var exiting by remember(host.id) { mutableStateOf(false) }
+    // 这把锁只防"连点两下退两层"。要是退出没有真的离开这一页(导航被别的状态拦下、会话切换后页面复用),
+    // 锁不能一直关着 —— 底部 ✕ / ‹ 就是这样"按着按着失效"的。1.2 秒后还在这一页就放开。
+    LaunchedEffect(exiting) {
+        if (exiting) {
+            kotlinx.coroutines.delay(1200)
+            exiting = false
+        }
+    }
     fun leaveScreen() {
         if (exiting) return
         exiting = true
@@ -544,11 +582,18 @@ private fun TerminalView(
     val prefs = remember(context) { UiPrefs(context) }
     // Dead-state Reconnect must be one-shot; a double-tap bumps attempt twice and
     // cancels the first open mid-handshake.
-    var reconnectTapped by remember { mutableStateOf(false) }
+    var reconnectTapped by remember(host.id) { mutableStateOf(false) }
+    LaunchedEffect(reconnectTapped) {
+        if (reconnectTapped) {
+            kotlinx.coroutines.delay(1500)
+            reconnectTapped = false
+        }
+    }
     fun requestReconnect() {
         if (reconnectTapped) return
         reconnectTapped = true
         onReconnect()
+    }
     val keyHalt by live.keyHalt.collectAsState()
     val failHint by live.reconnectFailHint.collectAsState()
     val jumpHost = host.jumpHostId.takeIf { it.isNotEmpty() }
@@ -659,6 +704,13 @@ private fun TerminalView(
     // 真正每帧都在变的行内容和光标只在**画**的时候读(见 TerminalCanvas 的画布 lambda),
     // 变了就只重画,不重组、不重新布局。
     val dead by remember { derivedStateOf { !frameState.value.alive } }
+    // 连着的会话掉线 / 被断开的那一刻轻轻一下(iOS 版的「放手」);进来时就是断的不震。
+    val hapticDead = LocalHapticFeedback.current
+    var wasAlive by remember { mutableStateOf(!dead) }
+    LaunchedEffect(dead) {
+        if (dead && wasAlive) hapticDead.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        wasAlive = !dead
+    }
     // 断线后正在自动重连的第几次;0 = 没在重连。
     val reconnecting by remember { derivedStateOf { frameState.value.reconnecting } }
     val deadFailHint = if (dead) when (failHint) {
@@ -666,6 +718,10 @@ private fun TerminalView(
         null -> null
     } else null
     val scrolled by remember { derivedStateOf { frameState.value.scrollOffset > 0 } }
+    // 滚动条的三个量以 State 传下去、在滚动条里才读(历史每多一行就变一次,不能读在这一层)。
+    val historyState = remember { derivedStateOf { frameState.value.historyLen } }
+    val offsetState = remember { derivedStateOf { frameState.value.scrollOffset } }
+    val altScreenState = remember { derivedStateOf { frameState.value.modes.altScreen } }
     val hasSelection by remember { derivedStateOf { frameState.value.selection != null } }
     val canFling by remember {
         derivedStateOf { !frameState.value.modes.altScreen && !frameState.value.modes.mouseReport }
@@ -698,21 +754,6 @@ private fun TerminalView(
         fontSize = (fontSize * zoomChange).coerceIn(UiPrefs.FONT_MIN, UiPrefs.FONT_MAX)
     }
 
-    val paste: () -> Unit = {
-        val clip = context.getSystemService(android.content.ClipboardManager::class.java)?.primaryClip
-        val raw = clip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty()
-        val text = PasteSanitize.sanitize(raw)
-        val mgr = context.getSystemService(android.content.ClipboardManager::class.java)
-        if (mgr == null) {
-            android.widget.Toast.makeText(
-                context,
-                context.getString(R.string.clipboard_unavailable),
-                android.widget.Toast.LENGTH_SHORT,
-            ).show()
-            return@paste
-        }
-        val clip = mgr.primaryClip
-        val text = clip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty()
     // 读剪贴板可能被系统拒绝(SecurityException),也可能根本没有 ClipboardManager(个别精简系统)。
     // 原来这两种都会让这个 lambda 直接抛出去 —— 点「粘贴」看着像没反应。现在说一句「读不到剪贴板」。
     // 剪贴板是空的仍然什么都不说:那不是错误。
@@ -722,12 +763,13 @@ private fun TerminalView(
             Toast.makeText(context, R.string.clipboard_unavailable, Toast.LENGTH_SHORT).show()
             return@paste
         }
-        val text = try {
+        val raw = try {
             mgr.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty()
         } catch (_: SecurityException) {
             Toast.makeText(context, R.string.clipboard_unavailable, Toast.LENGTH_SHORT).show()
             return@paste
         }
+        val text = PasteSanitize.sanitize(raw)
         if (text.isNotEmpty()) live.paste(text)
     }
 
@@ -825,12 +867,20 @@ private fun TerminalView(
         add(MenuAction(context.getString(R.string.term_menu_font_smaller), shortcut = "Ctrl+Shift+-") {
             fontSize = (fontSize - 1f).coerceIn(UiPrefs.FONT_MIN, UiPrefs.FONT_MAX)
         })
-        add(MenuAction(context.getString(R.string.term_menu_snippets)) { snippetsOpen = true })
-        add(MenuAction(context.getString(R.string.term_menu_forwards)) { forwardsOpen = true })
-        add(MenuAction(context.getString(R.string.term_menu_snapshots)) { snapshotsOpen = true })
+        // 暂时用不上,先隐藏(命令片段 / 端口转发 / 会话合照):
+        // add(MenuAction(context.getString(R.string.term_menu_snippets)) { snippetsOpen = true })
+        // add(MenuAction(context.getString(R.string.term_menu_forwards)) { forwardsOpen = true })
+        // add(MenuAction(context.getString(R.string.term_menu_snapshots)) { snapshotsOpen = true })
         tablet?.let { add(MenuAction(context.getString(R.string.term_menu_edit_host), shortcut = "Ctrl+Shift+E") { it.onEdit() }) }
     }
     var canvasMenuAt by remember { mutableStateOf<DpOffset?>(null) }
+    // 长按选词、松手之后弹出的玻璃胶囊(「复制 / 粘贴」,iPhone Duo 版同款)的锚点,
+    // 取外层 Box 的坐标;null = 不显示。胶囊要画在 layerBackdrop 那层的外面,背后的字才会透过玻璃。
+    var selectionAt by remember { mutableStateOf<Offset?>(null) }
+    var canvasRoot by remember { mutableStateOf(Offset.Zero) }
+    var outerRoot by remember { mutableStateOf(Offset.Zero) }
+    // 选区没了(点了别处、复制完、发了新输入)胶囊就跟着收。
+    LaunchedEffect(hasSelection) { if (!hasSelection) selectionAt = null }
     var canvasHeight by remember { mutableIntStateOf(0) }
 
     var dropHover by remember { mutableStateOf(false) }
@@ -851,18 +901,16 @@ private fun TerminalView(
             override fun onDrop(event: DragAndDropEvent): Boolean {
                 dropHover = false
                 val clip = event.toAndroidDragEvent().clipData ?: return false
-                val raw = (0 until clip.itemCount)
-                    .joinToString("\n") { clip.getItemAt(it).coerceToText(context).toString() }
-                val text = PasteSanitize.sanitize(raw)
                 // 拖进来的内容也要过一遍 coerceToText:它同样可能抛 SecurityException。
                 // 抛了就说明白,别让用户以为"拖了但没反应";内容为空仍旧安静地返回 false。
-                val text = try {
+                val raw = try {
                     (0 until clip.itemCount)
                         .joinToString("\n") { clip.getItemAt(it).coerceToText(context).toString() }
                 } catch (_: SecurityException) {
                     Toast.makeText(context, R.string.clipboard_unavailable, Toast.LENGTH_SHORT).show()
                     return false
                 }
+                val text = PasteSanitize.sanitize(raw)
                 if (text.isEmpty()) return false
                 live.paste(text)
                 return true
@@ -904,6 +952,7 @@ private fun TerminalView(
         Box(
             modifier
                 .onSizeChanged { canvasHeight = it.height }
+                .onGloballyPositioned { canvasRoot = it.positionInRoot() }
                 // 从别的应用(分屏另一边、小窗)拖一段文字进来 = 粘贴(小米:支持跨应用拖放)。
                 // 拖着经过时终端描一圈强调色,告诉用户"可以放在这里"。
                 .dragAndDropTarget(
@@ -945,6 +994,8 @@ private fun TerminalView(
                 // 全屏程序(less、vim、htop)收到方向键或滚轮事件。
                 // 翻历史不清选区:选区在核心里跟着内容走,可以边翻边选、翻回来还在。
                 onScroll = { deltaLines, col, row ->
+                    // 翻动时胶囊跟不上内容,收掉(选区还在)。
+                    selectionAt = null
                     live.wheel(deltaLines, col, row)
                 },
                 // 鼠标右键:平板出上下文菜单(小米 / HIG:右键呼出菜单);
@@ -959,16 +1010,37 @@ private fun TerminalView(
                     }
                 },
                 selection = selection,
-                onSelectStart = { at, kind -> live.selectStart(at.row, at.col, at.rightHalf, kind) },
+                onSelectStart = { at, kind ->
+                    selectionAt = null
+                    live.selectStart(at.row, at.col, at.rightHalf, kind)
+                },
                 onMouseReleased = { focusInput() },
-                onSelectUpdate = { at -> live.selectUpdate(at.row, at.col, at.rightHalf) },
+                onSelectUpdate = { at ->
+                    selectionAt = null
+                    live.selectUpdate(at.row, at.col, at.rightHalf)
+                },
                 onSelectClear = clearSelection,
-                // 手指选完松手:在松手的地方出「复制 / 粘贴」(手机、平板都一样)。
+                // 手指选完松手:在松手的地方出「复制 / 粘贴」。半开桌面模式(上下分屏、没有可挂胶囊的外层)
+                // 仍用原来的下拉菜单;其余都是玻璃胶囊。
                 onSelectionDone = { at ->
-                    canvasMenuAt = with(density) { DpOffset(at.x.toDp() + Gutter, (at.y - canvasHeight).toDp()) }
+                    if (adaptive.tabletop != null) {
+                        canvasMenuAt = with(density) { DpOffset(at.x.toDp() + Gutter, (at.y - canvasHeight).toDp()) }
+                    } else {
+                        // 画布在里面左右各缩了 Gutter(见下面的 padding),这里补回来。
+                        selectionAt = canvasRoot + Offset(at.x + with(density) { Gutter.toPx() }, at.y)
+                    }
                 },
                 // 留一点边距:内屏圆角半径 52dp,贴边的字会被切掉一角。
                 modifier = Modifier.fillMaxSize().padding(horizontal = Gutter),
+            )
+            // 右边缘的滚动条:有历史才有,滚动时淡入、停下淡出,按住右边缘拖动直接定位。
+            TerminalScrollBar(
+                history = historyState,
+                offset = offsetState,
+                rows = grid.second,
+                altScreen = altScreenState,
+                onScrollBy = { live.scroll(it) },
+                modifier = Modifier.align(Alignment.CenterEnd),
             )
             CompositionLocalProvider(LocalRestoreFocus provides restoreFocus) {
                 ContextMenu(at = canvasMenuAt, onDismiss = { canvasMenuAt = null }, actions = ::terminalMenu)
@@ -1021,7 +1093,7 @@ private fun TerminalView(
         )
     }
     val keys: @Composable () -> Unit = {
-        FloatingKeys(columns = if (adaptive.roomyKeys) 9 else 5) { keyWidth ->
+        FloatingKeys(columns = if (adaptive.roomyKeys) 9 else 5, reserveRail = adaptive.tabletop != null || duo != null) { keyWidth ->
             TerminalKeys(
                 keyWidth = keyWidth,
                 // 宽屏折成两行全部露出;窄屏保持一行横滚,不跟终端抢竖向空间。
@@ -1063,15 +1135,10 @@ private fun TerminalView(
 
     // 和主机页、编辑页同一条右侧竖轨道、同一个位置(见 EdgeRail),悬浮在终端上面。
     val actions: @Composable () -> Unit = {
-        // 外观:每一页都有,在最上面 —— 看着满屏输出想换个深浅色,不用先退回主机页。
-        // 键盘弹起来时先收走:外屏只有 623dp 高,键盘占掉一半,轨道再多一颗就顶到状态栏上去了。
-        // 正在打字的人也不会同时想换深浅色;收起键盘它自己长回来。
+        // 外观开关搬进了设置页(和 iPhone Duo 一致),这里不再占一颗。
+        // 键盘弹起来时先收走一些按钮:外屏只有 623dp 高,键盘占掉一半,轨道再多一颗就顶到状态栏上去了。
         @OptIn(ExperimentalLayoutApi::class)
         val imeUp = WindowInsets.isImeVisible
-        // 直板机竖屏(17 Ultra 400dp 宽)底栏一行放不下 7 颗 56dp 的按钮:外观让位 —— 终端页最用不上它,
-        // 别的页都有。放得下(横屏、宽一点的手机)照常显示。算法:7 颗 + 3 个间隔 + 两边边距 = 460dp。
-        val barCrowded = LocalChrome.current == Chrome.BottomBar && LocalConfiguration.current.screenWidthDp < 460
-        GlassReveal(!imeUp && !barCrowded) { GlassGroup { ThemeGlassItem() } }
         // 文件(SFTP):单独一颗,在输入那枚胶囊上面 —— 它是"换一页",不是输入。
         // 断开之后它会消失,所以长出来 / 收回去都带动效(见 GlassReveal)。
         GlassReveal(onFiles != null && !dead) { GlassButton(XIcons.Folder, stringResource(R.string.term_files)) { onFiles?.invoke() } }
@@ -1085,15 +1152,16 @@ private fun TerminalView(
                     live.scrollToBottom()
                 }
             }
-            // 命令片段也是"输入":点一下把存好的命令发出去。断开 / 重连中没东西可发,收起来。
-            // 键盘弹着时也收起(同外观):外屏键盘占掉一半高度,轨道不能再多一颗;正在打字的人要的是键盘。
-            GlassReveal(!dead && reconnecting == 0 && !imeUp) {
-                GlassItem(XIcons.Bolt, stringResource(R.string.term_snippets)) { snippetsOpen = true }
-                GlassItem(XIcons.Link, stringResource(R.string.term_forwards)) { forwardsOpen = true }
-            }
-            GlassReveal(!imeUp) {
-                GlassItem(XIcons.Layers, stringResource(R.string.term_snapshots)) { snapshotsOpen = true }
-            }
+            // 暂时用不上,先隐藏(命令片段 / 端口转发 / 会话合照):
+            // GlassReveal(!dead && reconnecting == 0 && !imeUp) {
+            //     GlassItem(XIcons.Bolt, stringResource(R.string.term_snippets)) { snippetsOpen = true }
+            // }
+            // GlassReveal(!dead && reconnecting == 0 && !imeUp) {
+            //     GlassItem(XIcons.Link, stringResource(R.string.term_forwards)) { forwardsOpen = true }
+            // }
+            // GlassReveal(!imeUp) {
+            //     GlassItem(XIcons.Layers, stringResource(R.string.term_snapshots)) { snapshotsOpen = true }
+            // }
             GlassItem(
                 XIcons.Command,
                 stringResource(if (showKeys) R.string.term_hide_keys else R.string.term_show_keys),
@@ -1112,20 +1180,111 @@ private fun TerminalView(
                 tint = if (imeOn) p.accent else null,
             ) { toggleIme(imeOn) }
         }
-        // 折叠屏双终端:「在右侧打开」/「交换左右」。只在上层接了回调时出现。
-        GlassReveal(onOpenBeside != null) {
-            GlassButton(XIcons.Split, stringResource(R.string.term_split_open)) { onOpenBeside?.invoke() }
-        }
-        GlassReveal(onSwapPanes != null) {
-            GlassItem(XIcons.Swap, stringResource(R.string.term_split_swap)) { onSwapPanes?.invoke() }
-        }
+        // 折叠屏双终端「在右侧打开」/「交换左右」(选择右侧会话):暂时用不上,先隐藏。
+        // GlassReveal(onOpenBeside != null) {
+        //     GlassButton(XIcons.Split, stringResource(R.string.term_split_open)) { onOpenBeside?.invoke() }
+        // }
+        // GlassReveal(onSwapPanes != null) {
+        //     GlassItem(XIcons.Swap, stringResource(R.string.term_split_swap)) { onSwapPanes?.invoke() }
+        // }
         // 断开是危险操作,单独一颗、红色图标,放在最下面(和 ＋ / ✓ 同一个位置)。
         GlassButton(XIcons.Close, stringResource(R.string.term_disconnect_session), tint = p.danger) {
             disconnectSession()
         }
     }
 
-    // 折叠屏:⌨ ✕ 在右侧轨道;直板机:和主机名一起放在最底下一行(见 bottomBarRow),按键面板铺满整宽。
+    // 折叠屏内屏(抽屉布局):右下角一枚竖向玻璃竖条(iPhone Duo 内屏同款),
+    // 从上到下:‹ 回主机列表(抽屉收起时才有)/ ↓ 回到底部(翻历史时)/ 文件 / ⌘ 快捷键 / ⌨ 键盘 / 粘贴 / ✕ 断开(红)。
+    val duoActions: @Composable () -> Unit = {
+        if (duo != null) {
+            CompositionLocalProvider(LocalGlassSize provides 46.dp) {
+                GlassGroup {
+                    GlassReveal(!duo.drawerOpen) {
+                        GlassItem(XIcons.Back, stringResource(R.string.term_back_to_hosts)) { duo.onShowHosts() }
+                    }
+                    GlassReveal(scrolled) {
+                        GlassItem(XIcons.ArrowDown, stringResource(R.string.term_scroll_bottom)) { live.scrollToBottom() }
+                    }
+                    GlassReveal(onFiles != null && !dead) {
+                        GlassItem(XIcons.Folder, stringResource(R.string.term_files)) { onFiles?.invoke() }
+                    }
+                    GlassItem(
+                        XIcons.Command,
+                        stringResource(if (showKeys) R.string.term_hide_keys else R.string.term_show_keys),
+                        tint = if (showKeys) p.accent else null,
+                    ) { showKeys = !showKeys }
+                    @OptIn(ExperimentalLayoutApi::class)
+                    val imeVisible = WindowInsets.isImeVisible
+                    val imeOn = imeFocused && (imeVisible || hardKeyboard)
+                    GlassItem(
+                        XIcons.Keyboard,
+                        stringResource(if (imeOn) R.string.term_hide_keyboard else R.string.term_show_keyboard),
+                        tint = if (imeOn) p.accent else null,
+                    ) { toggleIme(imeOn) }
+                    GlassItem(XIcons.Paste, stringResource(R.string.term_menu_paste)) { paste() }
+                    GlassItem(XIcons.Close, stringResource(R.string.term_disconnect_session), tint = p.danger) {
+                        disconnectSession()
+                    }
+                }
+            }
+        }
+    }
+
+    // 手机上的单终端(外屏、直板机、内屏竖屏):和 iPhone Duo 的会话页一样,最底下一枚横向玻璃胶囊 ——
+    // ‹ 回主机列表(会话继续跑)/ 命令片段 / 端口转发 / 快照 / 快捷键 / 键盘 / 红色断开。
+    // 占自己的一行,不浮在终端上:提示符就在最底下一行,浮着的玻璃会盖住正在敲的命令。
+    val bottomCapsule: @Composable () -> Unit = {
+        @OptIn(ExperimentalLayoutApi::class)
+        val imeUp = WindowInsets.isImeVisible
+        // 用户要求底部按钮再高再大:胶囊 62dp 高,每颗按钮 54dp(原来 46 / 42),图标随之放大。
+        CompositionLocalProvider(LocalGlassSize provides 54.dp, LocalGlassRow provides true) {
+            GlassCapsuleRow(height = 62.dp) {
+                GlassItem(XIcons.Back, stringResource(R.string.term_back_to_hosts)) { leaveScreen() }
+                GlassReveal(scrolled) {
+                    GlassItem(XIcons.ArrowDown, stringResource(R.string.term_scroll_bottom)) { live.scrollToBottom() }
+                }
+                GlassReveal(onFiles != null && !dead) {
+                    GlassItem(XIcons.Folder, stringResource(R.string.term_files)) { onFiles?.invoke() }
+                }
+                // 暂时用不上,先隐藏(命令片段 / 端口转发 / 会话合照)。
+                // 注意:一个 GlassReveal 只能装一个按钮 —— AnimatedVisibility 的内容是叠放的,两颗放一起会重叠。
+                // GlassReveal(!dead && reconnecting == 0 && !imeUp) {
+                //     GlassItem(XIcons.Bolt, stringResource(R.string.term_snippets)) { snippetsOpen = true }
+                // }
+                // GlassReveal(!dead && reconnecting == 0 && !imeUp && !scrolled) {
+                //     GlassItem(XIcons.Link, stringResource(R.string.term_forwards)) { forwardsOpen = true }
+                // }
+                // GlassReveal(!imeUp && !scrolled) {
+                //     GlassItem(XIcons.Layers, stringResource(R.string.term_snapshots)) { snapshotsOpen = true }
+                // }
+                GlassItem(
+                    XIcons.Command,
+                    stringResource(if (showKeys) R.string.term_hide_keys else R.string.term_show_keys),
+                    tint = if (showKeys) p.accent else null,
+                ) { showKeys = !showKeys }
+                @OptIn(ExperimentalLayoutApi::class)
+                val imeVisible = WindowInsets.isImeVisible
+                val imeOn = imeFocused && (imeVisible || hardKeyboard)
+                GlassItem(
+                    XIcons.Keyboard,
+                    stringResource(if (imeOn) R.string.term_hide_keyboard else R.string.term_show_keyboard),
+                    tint = if (imeOn) p.accent else null,
+                ) { toggleIme(imeOn) }
+                // 选择右侧会话(在右侧打开 / 交换左右):暂时用不上,先隐藏。
+                // GlassReveal(onOpenBeside != null) {
+                //     GlassItem(XIcons.Split, stringResource(R.string.term_split_open)) { onOpenBeside?.invoke() }
+                // }
+                // GlassReveal(onSwapPanes != null) {
+                //     GlassItem(XIcons.Swap, stringResource(R.string.term_split_swap)) { onSwapPanes?.invoke() }
+                // }
+                GlassItem(XIcons.Close, stringResource(R.string.term_disconnect_session), tint = p.danger) {
+                    disconnectSession()
+                }
+            }
+        }
+    }
+
+    // 折叠屏平板桌面模式:⌨ ✕ 在右侧轨道。
     val bottomBar = LocalChrome.current == Chrome.BottomBar
     val header: @Composable () -> Unit = {
         if (tablet != null) {
@@ -1154,11 +1313,12 @@ private fun TerminalView(
                 GlassRevealRow(scrolled) {
                     ToolbarIcon(XIcons.ArrowDown, stringResource(R.string.term_scroll_bottom)) { live.scrollToBottom() }
                 }
-                GlassRevealRow(!dead && reconnecting == 0) {
-                    ToolbarIcon(XIcons.Bolt, stringResource(R.string.term_snippets)) { snippetsOpen = true }
-                    ToolbarIcon(XIcons.Link, stringResource(R.string.term_forwards)) { forwardsOpen = true }
-                }
-                ToolbarIcon(XIcons.Layers, stringResource(R.string.term_snapshots)) { snapshotsOpen = true }
+                // 暂时用不上,先隐藏(命令片段 / 端口转发 / 会话合照):
+                // GlassRevealRow(!dead && reconnecting == 0) {
+                //     ToolbarIcon(XIcons.Bolt, stringResource(R.string.term_snippets)) { snippetsOpen = true }
+                //     ToolbarIcon(XIcons.Link, stringResource(R.string.term_forwards)) { forwardsOpen = true }
+                // }
+                // ToolbarIcon(XIcons.Layers, stringResource(R.string.term_snapshots)) { snapshotsOpen = true }
                 ToolbarIcon(
                     XIcons.Command,
                     stringResource(if (showKeys) R.string.term_hide_key_bar else R.string.term_show_key_bar),
@@ -1192,8 +1352,6 @@ private fun TerminalView(
                 if (dead) {
                     // 对端断了(服务器重启、网络掉了):最常见的下一步是重连,放在最显眼的位置。
                     ToolbarTextButton(stringResource(R.string.term_close), p.textDim) { leaveScreen() }
-                    ToolbarTextButton(stringResource(R.string.term_reconnect), p.accent, bold = true) { onReconnect() }
-                    ToolbarTextButton(stringResource(R.string.term_close), p.textDim) { onExit() }
                     ToolbarTextButton(stringResource(R.string.term_reconnect), p.accent, bold = true) { requestReconnect() }
                 } else {
                     ToolbarTextButton(stringResource(R.string.term_disconnect), p.danger) {
@@ -1206,7 +1364,7 @@ private fun TerminalView(
             // 直板机原来这一行右边挤着四颗按钮,全屏程序的头几行被压着(用户实测的抱怨);
             // 按钮挪到底下以后,名字留在顶上 —— 标题在上、操作在下,安卓手机的通常排法,
             // 也和折叠屏同一个样子。试过把名字放到底下按钮左边,用户否掉了。
-            HostLine(host = host, dead = dead, reconnecting = reconnecting, failHint = deadFailHint)
+            HostLine(host = host, dead = dead, reconnecting = reconnecting, failHint = deadFailHint, extraStart = duo?.headerStart ?: 0.dp)
         }
     }
 
@@ -1216,15 +1374,17 @@ private fun TerminalView(
         val liveEntries = remember(runningMap) {
             runningMap.values.sortedByDescending { it.lastOutputAt }.map { it.hostId to it.label }
         }
+        // LocalHosts 只能在组合里读,放不进下面 onRestore 这种普通回调。
+        val knownHosts = LocalHosts.current
         SnapshotSheet(
             tablet = tablet != null,
             liveEntries = liveEntries,
             activeHostId = host.id,
-            knownHostIds = LocalHosts.current.map { it.id }.toSet(),
+            knownHostIds = knownHosts.map { it.id }.toSet(),
             onRestore = { _, focus ->
                 snapshotsOpen = false
                 if (focus != host.id) {
-                    LocalHosts.current.firstOrNull { it.id == focus }?.let(onSwitchHost)
+                    knownHosts.firstOrNull { it.id == focus }?.let(onSwitchHost)
                 } else {
                     restoreFocus()
                 }
@@ -1330,7 +1490,14 @@ private fun TerminalView(
             }
         }
     } else Modifier
-    Box(Modifier.fillMaxSize().background(p.termBg).then(focusTap).then(keyModifier)) {
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(p.termBg)
+            .onGloballyPositioned { outerRoot = it.positionInRoot() }
+            .then(focusTap)
+            .then(keyModifier),
+    ) {
         Column(
             Modifier
                 .fillMaxSize()
@@ -1352,14 +1519,76 @@ private fun TerminalView(
             // 按钮和别的页一样大(56dp)、离底一样远:用户要的是从文件页退回来按钮不跳。
             // 代价是终端少一行左右,用户选了统一。
             // 双终端非聚焦侧不占底栏按钮(避免两套操作)。
-            if (bottomBar && focused) {
-                BottomBar(insets = false, end = { actions() })
+            // 玻璃胶囊不能画在 layerBackdrop 这一层里(它会把自己录进自己的背景,渲染树无限嵌套直接崩溃),
+            // 所以这里只留一行空位,胶囊本身画在外层 Box 的底部(见下面)。
+            if (tablet == null && duo == null && focused) Spacer(Modifier.height(BottomCapsuleRow))
+        }
+        if (duo != null && focused) {
+            CompositionLocalProvider(LocalBackdrop provides backdrop) {
+                EdgeRail(Modifier.align(Alignment.BottomEnd), content = duoActions)
             }
         }
-        // 聚焦窗格才画轨道:单终端 focused 恒 true;双终端同一时刻只有一侧为 true。
-        if (!bottomBar && tablet == null && focused) {
+        if (tablet == null && duo == null && focused) {
             CompositionLocalProvider(LocalBackdrop provides backdrop) {
-                EdgeRail(Modifier.align(Alignment.BottomEnd), content = actions)
+                Row(
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .windowInsetsPadding(stableSafeDrawing())
+                        .imePadding()
+                        .padding(top = 6.dp, bottom = 10.dp),
+                    horizontalArrangement = Arrangement.Center,
+                ) { bottomCapsule() }
+            }
+        }
+        // 长按选词松手后的玻璃胶囊:出现在手指上方 56dp 处(上面放不下就放到手指下面),
+        // 左右上下都收在终端里,不会伸到外面;出现时从 85% 缩放 + 淡入(iPhone Duo 版同款)。
+        var lastAnchor by remember { mutableStateOf(Offset.Zero) }
+        // 淡出的那 100ms 里 selectionAt 已经是 null,胶囊要留在原地,所以另记一份最后的锚点。
+        val anchorNow = selectionAt?.let { it - outerRoot }
+        LaunchedEffect(anchorNow) { anchorNow?.let { lastAnchor = it } }
+        val anchor = anchorNow ?: lastAnchor
+        CompositionLocalProvider(LocalBackdrop provides backdrop) {
+            AnimatedVisibility(
+                visible = selectionAt != null,
+                enter = fadeIn(tween(120)) + androidx.compose.animation.scaleIn(initialScale = 0.85f, animationSpec = tween(160)),
+                exit = fadeOut(tween(100)),
+            ) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .layout { measurable, constraints ->
+                            // 这个 lambda 里的 this 本身就是 Density,直接 toPx()。
+                            val margin = 8.dp.roundToPx()
+                            val capsule = measurable.measure(constraints.copy(minWidth = 0, minHeight = 0))
+                            layout(constraints.maxWidth, constraints.maxHeight) {
+                                val x = (anchor.x - capsule.width / 2f).toInt()
+                                    .coerceIn(margin, (constraints.maxWidth - capsule.width - margin).coerceAtLeast(margin))
+                                // 手指上方 56dp;按在最上面几行(上面放不下)就放到手指下面 52dp。
+                                val y = (if (anchor.y >= 86.dp.toPx()) anchor.y - 56.dp.toPx() else anchor.y + 52.dp.toPx())
+                                    .toInt() - capsule.height / 2
+                                capsule.place(
+                                    x,
+                                    y.coerceIn(margin, (constraints.maxHeight - capsule.height - margin).coerceAtLeast(margin)),
+                                )
+                            }
+                        },
+                ) {
+                    GlassCapsuleRow {
+                        if (hasSelection) {
+                            GlassMenuButton(stringResource(R.string.term_menu_copy), XIcons.Copy) {
+                                copySelection()
+                                clearSelection()
+                                selectionAt = null
+                            }
+                        }
+                        GlassMenuButton(stringResource(R.string.term_menu_paste), XIcons.Paste) {
+                            paste()
+                            clearSelection()
+                            selectionAt = null
+                        }
+                    }
+                }
             }
         }
     }
@@ -1428,9 +1657,9 @@ private val KeyGap = 6.dp
  * 屏幕窄(外屏)放不下时才等比缩窄。面板离底 16dp,和 ✕ 按钮底边齐平。
  */
 @Composable
-private fun FloatingKeys(columns: Int, content: @Composable (keyWidth: Dp) -> Unit) {
+private fun FloatingKeys(columns: Int, reserveRail: Boolean = true, content: @Composable (keyWidth: Dp) -> Unit) {
     val p = LocalXssh.current
-    val rail = LocalChrome.current == Chrome.Rail
+    val rail = reserveRail && LocalChrome.current == Chrome.Rail
     BoxWithConstraints(
         Modifier
             .fillMaxWidth()
@@ -1464,10 +1693,10 @@ private fun FloatingKeys(columns: Int, content: @Composable (keyWidth: Dp) -> Un
  * 原来这里是一条 56dp 的 bgElev 横条,还塞着键盘和断开两个按钮,把终端从顶上压掉一块。
  */
 @Composable
-private fun HostLine(host: Host, dead: Boolean, reconnecting: Int = 0, failHint: String? = null) {
+private fun HostLine(host: Host, dead: Boolean, reconnecting: Int = 0, failHint: String? = null, extraStart: Dp = 0.dp) {
     val p = LocalXssh.current
     Row(
-        Modifier.fillMaxWidth().padding(start = Gutter, end = Gutter, top = 10.dp, bottom = 8.dp),
+        Modifier.fillMaxWidth().padding(start = Gutter + extraStart, end = Gutter, top = 10.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // 圆点占住 16dp 那条线(与终端文字、第一个按键同缘),名字落在 32dp 文字线上。
@@ -1483,20 +1712,33 @@ private fun HostLine(host: Host, dead: Boolean, reconnecting: Int = 0, failHint:
         // 原来地址被截成「user@12…」,半截地址比没有更难看,也看不出是哪台机器。
         // 「已断开」是状态,必须显示,放不下时顶掉的是名字(名字自己省略)。
         // 重连中和已断开一样是状态,必须显示(放不下时顶掉的是名字)。
+        // 连着时右边写已连接时长(设计方案 A:顶上一行「● 名字 ……… 12:03」,绿色计时),取代原来的地址。
+        val startedAt = SessionRegistry[host.id]?.startedAt
+        val clock = if (!dead && reconnecting == 0 && startedAt != null) runningClock(startedAt) else null
         val detail = when {
             dead -> failHint ?: stringResource(R.string.term_disconnected)
             reconnecting > 0 -> reconnectingText(reconnecting)
+            clock != null -> clock
             else -> host.subtitle
         }
         val status = dead || reconnecting > 0
         androidx.compose.ui.layout.Layout(
             content = {
-                Text(host.label, color = p.text, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    host.label,
+                    color = p.text,
+                    fontSize = 15.sp,
+                    fontFamily = XsshFonts.monoTitle,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
                 Text(
                     text = detail,
                     color = when {
                         dead -> p.danger
                         reconnecting > 0 -> p.warn
+                        clock != null -> p.ok
                         else -> p.textFaint
                     },
                     fontFamily = XsshFonts.monoUi,
@@ -1807,6 +2049,14 @@ private fun TerminalCanvas(
     val selectDone by rememberUpdatedState(onSelectionDone)
     val released by rememberUpdatedState(onMouseReleased)
     val haptic = LocalHapticFeedback.current
+    // 光标闪烁的相位。只在画布里读,换相位只重画这块画布。
+    var blinkOn by remember { mutableStateOf(true) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(530)
+            blinkOn = !blinkOn
+        }
+    }
     // 手指离开之后的惯性翻历史(见下面的 dragModifier)。新的触摸一来就取消。
     val scope = rememberCoroutineScope()
     val fling = remember { mutableStateOf<Job?>(null) }
@@ -2045,15 +2295,12 @@ private fun TerminalCanvas(
                     )
                 }
             }
-            if (cursor.visible && cursor.row.toInt() < gridRows) {
-                val thickness = 2.dp.toPx()
+            // 光标:整格的块,70% 不透明,每 0.53 秒闪一下(iPhone Duo 版终端同款;原来是格底下 2dp 的横线)。
+            if (cursor.visible && blinkOn && cursor.row.toInt() < gridRows) {
                 drawRect(
-                    color = p.termCursor,
-                    topLeft = Offset(
-                        cursor.col.toFloat() * cw,
-                        (cursor.row.toInt() + 1) * ch - thickness,
-                    ),
-                    size = Size(cw, thickness),
+                    color = p.termCursor.copy(alpha = 0.7f),
+                    topLeft = Offset(cursor.col.toFloat() * cw, cursor.row.toInt() * ch),
+                    size = Size(cw, ch),
                 )
             }
         }
@@ -2340,3 +2587,6 @@ internal fun DrawScope.drawRun(
         strike = flags and STYLE_STRIKE != 0,
     )
 }
+
+/** 手机终端底部那一行(玻璃胶囊 62dp + 上 6dp + 下 10dp)占的高度。 */
+private val BottomCapsuleRow = 78.dp

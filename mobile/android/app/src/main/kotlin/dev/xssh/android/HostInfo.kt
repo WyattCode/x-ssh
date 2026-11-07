@@ -134,22 +134,18 @@ fun HostInfoGroups(host: Host, onPin: ((Host) -> Unit)? = null) {
             // 多把已信任密钥各显示一块(轮换后旧的仍在)。
             trusted.forEachIndexed { index, fp ->
                 if (index > 0) FormDivider()
-                val (algorithm, rows) = fingerprintRows(fp)
+                val algorithm = fingerprintRows(fp).first
                 Column(Modifier.fillMaxWidth().padding(horizontal = BoxPad, vertical = 14.dp)) {
                     val label = algorithm.ifBlank { stringResource(R.string.host_fingerprint) }
                     Text(
                         if (trusted.size == 1) label else "$label (${index + 1}/${trusted.size})",
                         color = p.textDim,
                         fontSize = 13.sp,
+                        fontFamily = XsshFonts.monoUi,
                     )
-                    Spacer(Modifier.height(6.dp))
-                    SelectionContainer {
-                        Column {
-                            rows.forEach {
-                                Text(it, color = p.text, fontSize = 15.sp, fontFamily = XsshFonts.monoUi)
-                            }
-                        }
-                    }
+                    Spacer(Modifier.height(10.dp))
+                    // 图案 + 分行指纹:和「确认主机密钥」那一页是同一块(设计方案 A)。
+                    FingerprintArtAndWords(fp, p.text)
                 }
             }
         }
@@ -273,27 +269,34 @@ fun HostActions(
             acted = true
             block()
         }
-        XsshButton(
+        // iOS 版状态卡片的按钮语言:实心胶囊主按钮 + 下面一排无底色的文字按钮;
+        // 危险操作平时只是红字,点到「确认删除」那一下才变成实心红胶囊。
+        val p = LocalXssh.current
+        CapsuleButton(
             stringResource(if (running) R.string.host_open_session else R.string.host_connect),
             modifier = Modifier.fillMaxWidth(),
         ) { actOnce { onConnect(host) } }
-        Spacer(Modifier.height(GapItem))
+        Spacer(Modifier.height(6.dp))
         var confirming by remember(host.id, running) { mutableStateOf(false) }
-        Row(horizontalArrangement = Arrangement.spacedBy(GapItem)) {
-            XsshButton(stringResource(R.string.host_edit), kind = ButtonKind.Ghost, modifier = Modifier.weight(1f)) { onEdit(host) }
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            CapsuleButton(stringResource(R.string.host_edit), kind = ButtonKind.Ghost, modifier = Modifier.weight(1f)) { onEdit(host) }
             if (running) {
-                XsshButton(stringResource(R.string.host_disconnect), kind = ButtonKind.Danger, modifier = Modifier.weight(1f)) {
-                    SessionRegistry.close(host.id)
-                }
+                CapsuleButton(
+                    stringResource(R.string.host_disconnect),
+                    kind = ButtonKind.Ghost,
+                    color = p.danger,
+                    modifier = Modifier.weight(1f),
+                ) { SessionRegistry.close(host.id) }
             } else {
                 val deleteLabel = if (confirming && jumpUsedBy > 0) {
                     stringResource(R.string.host_confirm_delete_jump, jumpUsedBy)
                 } else {
                     stringResource(if (confirming) R.string.host_confirm_delete else R.string.host_delete)
                 }
-                XsshButton(
+                CapsuleButton(
                     deleteLabel,
-                    kind = ButtonKind.Danger,
+                    kind = if (confirming) ButtonKind.Danger else ButtonKind.Ghost,
+                    color = p.danger,
                     modifier = Modifier.weight(1f),
                 ) {
                     if (confirming) actOnce { onDelete(host) } else confirming = true
@@ -308,27 +311,17 @@ fun HostActions(
 fun HostIdentity(host: Host, running: Boolean, modifier: Modifier = Modifier) {
     val p = LocalXssh.current
     Row(modifier, verticalAlignment = Alignment.CenterVertically) {
-        Box(
-            Modifier
-                .size(56.dp)
-                .clip(RoundedCornerShape(15.dp))
-                .background(if (running) p.ok.copy(alpha = 0.16f) else p.cardBg),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                XIcons.Terminal,
-                contentDescription = null,
-                tint = if (running) p.ok else p.text,
-                modifier = Modifier.size(30.dp),
-            )
-        }
+        // 圆环的颜色就是这台主机的色点(列表里行尾那颗);连着的时候换成绿色。
+        IconRing(XIcons.Terminal, if (running) p.ok else hostPip(host), size = 56.dp)
         Spacer(Modifier.width(16.dp))
         Column(Modifier.weight(1f)) {
             Text(
                 host.label,
                 color = p.text,
-                fontSize = 28.sp,
-                fontWeight = FontWeight.Bold,
+                fontSize = 26.sp,
+                fontFamily = XsshFonts.monoTitle,
+                fontWeight = FontWeight.SemiBold,
+                letterSpacing = (-0.4).sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -341,6 +334,18 @@ fun HostIdentity(host: Host, running: Boolean, modifier: Modifier = Modifier) {
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            // 连着时多一行绿色状态「✓ 运行中 · 时长」(和主机行同一句)。
+            if (running) {
+                val startedAt = SessionRegistry.sessions.collectAsState().value[host.id]?.startedAt
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "✓ " + stringResource(R.string.host_running) + (startedAt?.let { " · " + runningClock(it) } ?: ""),
+                    color = p.ok,
+                    fontSize = 12.sp,
+                    fontFamily = XsshFonts.monoUi,
+                    maxLines = 1,
+                )
+            }
         }
     }
 }
@@ -398,13 +403,11 @@ fun ReadingPage(
                 BottomBar(
                     Modifier.align(Alignment.BottomCenter),
                     start = { GlassButton(XIcons.Back, stringResource(R.string.host_back)) { onBack() } },
-                    end = { GlassGroup { ThemeGlassItem() } },
                 )
             }
         } else {
             CompositionLocalProvider(LocalBackdrop provides backdrop) {
                 EdgeRail(Modifier.align(Alignment.BottomEnd)) {
-                    GlassGroup { ThemeGlassItem() }
                     GlassButton(XIcons.Back, stringResource(R.string.host_back)) { onBack() }
                 }
             }

@@ -67,11 +67,25 @@ object XsshFonts {
             .getOrNull() ?: mono
     }
 
+    /**
+     * 大标题用的等宽字(`$ hosts`、`$ 设置`):同样的 Droid Sans Mono,但走 Compose 自己的字体族,
+     * 这样 SemiBold 会由 Compose 合成粗体 —— [monoUi] 是平台自定义回退链的 Typeface,Compose 不会给它加粗。
+     * 中文落到系统字体(标题里中文很少)。读不到系统字体时用 [monoUi]。
+     */
+    val monoTitle: FontFamily by lazy {
+        val droid = File("/system/fonts/DroidSansMono.ttf")
+        runCatching { if (droid.canRead()) FontFamily(Font(droid, FontWeight.Normal)) else null }.getOrNull() ?: monoUi
+    }
     @androidx.annotation.RequiresApi(android.os.Build.VERSION_CODES.Q)
     private fun withCjkFallback(): FontFamily? {
         val context = appContext ?: return null
         val index = cjkIndex ?: return null
-        val latin = android.graphics.fonts.Font.Builder(context.resources, R.font.xssh_mono_regular).build()
+        // 界面等宽字的英文:和 iPhone Duo 的 `.monospaced`(SF Mono,字宽 0.6em)对齐 —— Iosevka 只有 0.5em,太窄太高,
+        // 标题 `$ hosts`、行里的名字看上去和 iOS 不是一个字。系统自带的 Droid Sans Mono 同为 0.6em、字形圆润,
+        // 最接近;读不到(极少数系统)才退回 Iosevka。
+        val droid = File("/system/fonts/DroidSansMono.ttf")
+        val latin = runCatching { if (droid.canRead()) android.graphics.fonts.Font.Builder(droid).build() else null }.getOrNull()
+            ?: android.graphics.fonts.Font.Builder(context.resources, R.font.xssh_mono_regular).build()
         val cjkFont = android.graphics.fonts.Font.Builder(cjkFile).setTtcIndex(index).build()
         val typeface = android.graphics.Typeface.CustomFallbackBuilder(android.graphics.fonts.FontFamily.Builder(latin).build())
             .addCustomFallback(android.graphics.fonts.FontFamily.Builder(cjkFont).build())
