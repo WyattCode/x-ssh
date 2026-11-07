@@ -10,6 +10,8 @@ struct HostsView: View {
     let activeID: UUID?
     /// 正在连着的那台还在「连接中 / 等确认密钥」:行尾显示转圈而不是绿点。
     var activeConnecting = false
+    /// 用户刚点了断开、列表里这台正在「放手」(外屏:翻回列表的时候):箭头、光标、状态行一步步收场(见 `RootView.close`)。
+    var activeClosing = false
     /// 连着的那台是几点连上的(行里显示已连接时长)。
     var connectedSince: Date?
     /// 连着的那台正在等用户确认主机密钥(行上写「等待确认」,不是一直「连接中…」)。
@@ -37,6 +39,20 @@ struct HostsView: View {
     private var rowPad: CGFloat { min(rowPadBase, 28) }
     @ScaledMetric(relativeTo: .title) private var titleFont: CGFloat = 26
     private var promptWidth: CGFloat { rowFont * 14 / 19 }
+    /// 断开后那一行的状态行占的高度(行高里的 `❯ 名字` 下面多出来的那一截)。
+    private var statusSlot: CGFloat { smallFont * 1.3 + 8 }
+    /// 刚断开的那台是谁、列表单元格缩短之后「抵消位移」是不是已经放掉(见 `collapseShift`)。
+    @State private var lastFeatured: UUID?
+    @State private var settled = true
+    /// 断开收场时虚线的「替身」:真正的虚线是 1pt 高的单元格,位移时会被单元格裁掉,所以收起的这一小段由一根替身线
+    /// 从原来的位置一直滑到新位置,真线让位,落定的瞬间无缝换回来 —— 眼睛看到的是同一根线连续地走。
+    @State private var ghostMoved = false
+    @State private var ghostDone = true
+    @State private var collapseTask: Task<Void, Never>?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// 连着那台还在的时候,每一行位置的快照(`rowRects`):单元格缩短之后 `rowRects` 已经变了,替身线要从缩短之前的位置出发。
+    @State private var rowRects: [UUID: CGRect] = [:]
+    @State private var frozenRects: [UUID: CGRect] = [:]
     /// `❯` 的字形比字母的中线低约 1.3pt(量过),整体往上抬一点,和名字的中线对齐;随字号缩放。
     private var arrowLift: CGFloat { rowFont * 0.07 }
     @State private var editing: Host?
@@ -52,8 +68,7 @@ struct HostsView: View {
     @State private var measuredForWidth: CGFloat = 0
     /// 每张主机卡片的底边(整个列表视图坐标系里);所有卡片底边的最大值下面才是「空白处」。
     /// 按主机分别记:删掉最后一台之后,新的最后一台没有布局变化、不会重新量,单记「最后一张」会留着过期的值。
-    @State private var rowBottoms: [UUID: CGFloat] = [:]
-    private var lastRowBottom: CGFloat { shown.compactMap { rowBottoms[$0.id] }.max() ?? 0 }
+    private var lastRowBottom: CGFloat { shown.compactMap { rowRects[$0.id]?.maxY }.max() ?? 0 }
 
     /// 按添加的先后顺序排,点哪台就选中哪台(高亮),列表不会因为连接了某台就把它顶到第一个。
     private var shown: [Host] {
@@ -87,21 +102,40 @@ struct HostsView: View {
             titleRow
             // 连着的那台就在它原来的位置变成大卡,不往上提(主机的顺序一直按添加先后)。
             let rows = shown
-            ForEach(rows) { host in
+            ForEach(Array(rows.enumerated()), id: \.element.id) { index, host in
                 hostRow(host, featured: host.id == activeID, last: host.id == rows.last?.id)
+                    .modifier(CollapseShift(y: collapseShift(index: index, separator: false, rows: rows), settled: settled))
                 // 行间的虚线是独立的一行(单元格):长按时系统把被按的那一格整个换成浮起的预览,
                 // 虚线要是画在这一格里,会跟着消失、松手又弹回来。
-                if host.id != rows.last?.id { separatorRow }
+                if host.id != rows.last?.id { separatorRow.modifier(SeparatorSwap(hidden: separatorHidden(index: index, rows: rows))) }
             }
         }
         // 连上一台时,让列表滚到那张卡片(它在视野外也能看到自己选中了哪台)。
-        .onChange(of: activeID) { _, id in
+        .onChange(of: activeID) { old, id in
+            collapseTask?.cancel()
+            if let id { lastFeatured = id; settled = false; ghostDone = false; ghostMoved = false }
+            else if old != nil {
+                // 单元格高度已经一下子缩短了(列表做不到平滑改高度):下面的行在那一帧被抵消回原位(`collapseShift`),
+                // 虚线由替身线顶上(`ghostSeparators`);等那一帧画出来,再用同一条曲线把它们一起滑到新位置。
+                collapseTask = Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(20))
+                    guard !Task.isCancelled else { return }
+                    withAnimation(reduceMotion ? nil : Self.collapseCurve) { settled = true; ghostMoved = true }
+                    try? await Task.sleep(for: .milliseconds(250))
+                    guard !Task.isCancelled else { return }
+                    var t = Transaction(animation: nil); t.disablesAnimations = true
+                    withTransaction(t) { ghostDone = true }   // 替身线走到头了:真线在同一个位置,无缝换回来
+                }
+            }
             guard let id else { return }
             withAnimation(.smooth(duration: 0.3)) { proxy.scrollTo(id) }
         }
+        .onChange(of: rowRects) { _, new in if activeID != nil { frozenRects = new } }
         // 触觉:开始连接给一下轻的,连上给一下「成功」。
         .sensoryFeedback(trigger: activeID) { _, new in new != nil ? .impact(weight: .light) : nil }
         .sensoryFeedback(trigger: connectedSince) { _, new in new != nil ? .success : nil }
+        // 断开的那一刻轻轻一下(「放手」)。
+        .sensoryFeedback(trigger: activeClosing) { _, new in new ? .impact(flexibility: .soft, intensity: 0.6) : nil }
         // 紧凑宽度(主页)背景纯黑;展开成两栏时左边这一栏要和右边的会话(终端纯黑)有颜色区分,用深灰。
         .scrollContentBackground(.hidden)
         // 虚线是独立的一行(高 1pt):列表默认的最小行高会把它撑大,行距就乱了。
@@ -118,7 +152,7 @@ struct HostsView: View {
                     VStack(spacing: 10) {
                         HStack(spacing: 8) {
                             Text(verbatim: "❯").offset(y: -arrowLift).foregroundStyle(Color.green)
-                            Text(verbatim: "ssh --new")
+                            Text(verbatim: "new")
                             BlinkingCursor()
                         }
                         .font(.system(size: 22, design: .monospaced))
@@ -176,6 +210,7 @@ struct HostsView: View {
         }
         .animation(.smooth(duration: 0.25), value: searching)
         .coordinateSpace(name: "hostsRoot")
+        .modifier(GhostOverlay(ghosts: ghostSeparators))
         // 列表本身要能上下滑、有滚动条(主机多了要翻)。
         .scrollIndicators(.visible)
         // 只有从空白处(最后一张卡片下面)开始的向左滑才收起列表:滑主机卡片本身(删除 / 编辑)、标题区、会话内容都不算。
@@ -287,7 +322,7 @@ struct HostsView: View {
             if $0.width > 0, cardX == nil || abs(measuredForWidth - listWidth) > 0.5 {
                 cardX = $0.minX; cardWidth = $0.width; measuredForWidth = listWidth
             }
-            rowBottoms[host.id] = $0.maxY
+            rowRects[host.id] = $0
         }
         // 不允许一滑到底直接触发(第一个动作是删除,太容易误触);只能点露出来的按钮。
         .swipeActions(allowsFullSwipe: false) {
@@ -313,20 +348,20 @@ struct HostsView: View {
     /// 连着的那台:`❯` 变绿、名字后面一个闪烁的光标,下面多一行绿色的「✓ 已连接 · 时长」;连接中是「连接中…」,颜色点的位置转圈。
     /// 名字必须一行(太长截断)。不显示 IP / 端口。
     private func sshRow(_ host: Host, featured: Bool, last: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 0) {
             // 间距自己控制(HStack 间距为 0):名字和颜色点之间只留 8pt,长名字才不会被提前截断。
             HStack(alignment: .firstTextBaseline, spacing: 0) {
                 Text(verbatim: "❯")
                     .offset(y: -arrowLift)
-                    .foregroundStyle(featured ? Color.green : Color.white.opacity(0.4))
+                    .foregroundStyle(featured && !activeClosing ? Color.green : Color.white.opacity(0.4))
                     .frame(width: promptWidth, alignment: .leading)
                     .padding(.trailing, Self.promptGap)
-                Text(verbatim: host.displayName).foregroundStyle(Color.white.opacity(0.93))
+                Text.narrowingSpaces(host.displayName, font: .monospacedSystemFont(ofSize: rowFont, weight: .regular)).foregroundStyle(Color.white.opacity(0.93))
                     .lineLimit(1).truncationMode(.tail)
-                if featured && !activeConnecting { BlinkingCursor().padding(.leading, 8) }
+                if featured && !activeConnecting && !activeClosing { BlinkingCursor().padding(.leading, 8).transition(.opacity) }
                 Spacer(minLength: 8)
                 ZStack {
-                    if featured && activeConnecting {
+                    if featured && activeConnecting && !activeClosing {
                         ProgressView().controlSize(.mini).tint(.white)
                             .transition(.opacity.animation(.easeOut(duration: 0.18)))
                     } else {
@@ -342,19 +377,28 @@ struct HostsView: View {
                 Text(verbatim: hint)
                     .font(.system(size: smallFont, design: .monospaced)).foregroundStyle(Color.white.opacity(0.4))
                     .lineLimit(1).truncationMode(.middle)
+                    .padding(.top, 8)
                     .padding(.leading, promptWidth + Self.promptGap)
             }
-            if featured {
-                statusLine
-                    .transition(.opacity.animation(.easeOut(duration: 0.2)))
-            }
+            // 状态行一直在布局里,收起 = 高度和透明度一起平滑变到 0(不是直接从布局里拿掉):
+            // 拿掉的话列表单元格的高度瞬间缩短,名字被猛地顶上去,箭头走另一条动画、慢半拍追上来,看起来「闪跳一下」。
+            statusLine(showing: featured || (host.id == lastFeatured && !ghostDone))
+                .opacity(featured ? 1 : 0)
+                .frame(height: featured ? smallFont * 1.3 : 0, alignment: .top)
+                .clipped()
+                .padding(.top, featured ? 8 : 0)
         }
+        .animation(HostsView.collapseCurve, value: featured)
         .animation(.easeOut(duration: 0.2), value: activeConnecting)
+        // 断开收场:箭头绿 → 灰、光标淡出、状态行换成「已断开」,各自 0.45s 平滑过渡。
+        .animation(.smooth(duration: 0.3), value: activeClosing)
         // 读屏:一行 = 主机名;连着的报状态(`❯`、光标、颜色点都只是装饰)。
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(verbatim: host.displayName))
-        .accessibilityValue(featured ? (activeConnecting ? Text("Connecting…") : Text("Connected")) : Text(verbatim: ""))
+        .accessibilityValue(featured ? (activeClosing ? (connectedSince == nil ? Text("Cancelled") : Text("Disconnected")) : (activeConnecting ? Text("Connecting…") : Text("Connected"))) : Text(verbatim: ""))
         .padding(.horizontal, 0).padding(.vertical, rowPad)   // 每行的 `❯` 和标题的 `$`、logo、虚线起点同一条竖线
+        // 内容贴着单元格顶边(不居中):状态行收起时单元格高度是一下子变的、内容是慢慢缩的,居中的话名字会先被顶上去再落回来。
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     /// 搜索时,名字没匹配上、是地址 / 用户名匹配上的,在名字下面小字写出匹配到的那一项(平时列表不显示地址)。
@@ -367,10 +411,26 @@ struct HostsView: View {
     }
 
     /// `❯` 占的宽度和它到名字的间距:状态那一行的缩进用同一组数,才和名字的起点对齐。
-    private static let promptGap: CGFloat = 12
+    private static let promptGap: CGFloat = 9.4
 
-    @ViewBuilder private var statusLine: some View {
-        if activeConnecting {
+    @ViewBuilder private func statusLine(showing: Bool) -> some View {
+        if !showing {
+            // 别的行不画(那些行的「已连接 · 时长」是看不见的,但里面的计时器每秒都在走;只画连着的和刚断开的那一行)。
+            Color.clear
+        } else if activeClosing {
+            // 断开的那一刻:「✓ 已连接 · 时长」淡成灰色的「✕ 已断开」,停一下,再整行收掉。
+            HStack(spacing: 0) {
+                Text(verbatim: "✕ ")
+                // 还没连上就取消的(连接中 / 等确认主机密钥)写「已取消」,连上过的才写「已断开」。
+                if connectedSince == nil { Text("Cancelled") } else { Text("Disconnected") }
+            }
+            .foregroundStyle(Color.white.opacity(0.5))
+            .font(.system(size: smallFont, design: .monospaced))
+            .lineLimit(1)
+            .padding(.leading, promptWidth + Self.promptGap)
+            // 旧的一行先淡出(0.15s),这一行晚一点点再淡入:两行字不会叠在一起。
+            .transition(.opacity.animation(.easeInOut(duration: 0.2).delay(0.1)))
+        } else if activeConnecting {
             Text(activeNeedsConfirm ? "Waiting for confirmation" : "Connecting…").foregroundStyle(Color.white.opacity(activeNeedsConfirm ? 0.85 : 0.6))
                 .font(.system(size: smallFont, design: .monospaced))
                 // 和「已连接」那行一样缩进到名字的起点。
@@ -392,16 +452,57 @@ struct HostsView: View {
             .lineLimit(1)
             // 和上面那行名字的起点对齐(❯ 的宽度 + 间距)。
             .padding(.leading, promptWidth + Self.promptGap)
+            .transition(.opacity.animation(.easeInOut(duration: 0.1)))
         }
     }
 
-    static let cardGap: CGFloat = 6
-    /// 两栏时卡片宽 = 侧栏宽的 92%,左右各留 4%(参考图里卡片和分界线之间就是这么一条窄缝)。
-    /// 按侧栏实际宽度算,拖动改宽后比例不变。列表自带的左右边距已去掉(见 `SplitListMargins`)。
+    /// 内屏两栏时左右各留侧栏宽的 4%(行的起点和虚线的两端都在这条线内,见 `rowInset`)。
+    /// 按侧栏实际宽度算,宽度变了比例不变。列表自带的左右边距已去掉(见 `SplitListMargins`)。
     private var cardInset: CGFloat { splitLayout ? listWidth * 0.04 : 0 }
     /// 内屏侧栏的左右对齐线:logo、`$ hosts`、每行的 `❯`、虚线的起点都在这条线上(和外屏一致:外屏是列表自带的约 20pt 边距),
     /// 右边虚线的终点对称。外屏不用(0)。
     private var rowInset: CGFloat { splitLayout ? 16 + cardInset : 0 }
+
+    /// 连着的那台断开、状态行收掉的瞬间,它下面的行 / 虚线要抵消的位移:单元格高度是一下子变的,
+    /// 不抵消的话下面的行会在一帧里猛地往上提。(`settled` 为 false 的那一帧位移 = 缩短的高度,之后动画放到 0。)
+    private func collapseShift(index: Int, separator: Bool, rows: [Host]) -> CGFloat {
+        guard activeID == nil, !settled, let id = lastFeatured, let k = rows.firstIndex(where: { $0.id == id }) else { return 0 }
+        return (separator ? index >= k : index > k) ? statusSlot : 0
+    }
+
+    /// 断开收场的动画曲线:起步轻(不是一下子弹出去)、中间快、落地软,0.22s —— 快,又丝滑。
+    static let collapseCurve = Animation.timingCurve(0.3, 0.05, 0.1, 1, duration: 0.22)
+
+    /// 现在是不是在「替身线」阶段(单元格已缩短、下面的行正在滑上去)。
+    private var ghostsOn: Bool { activeID == nil && !ghostDone && lastFeatured != nil && !frozenRects.isEmpty }
+
+    /// 替身线要画在哪几条虚线上:连着那台下面(含它自己下面)的每一条,有缩短之前位置的才画。
+    private var ghostIndices: [Int] {
+        let rows = shown
+        guard let id = lastFeatured, let k = rows.firstIndex(where: { $0.id == id }) else { return [] }
+        return (k..<max(k, rows.count - 1)).filter { frozenRects[rows[$0].id] != nil }
+    }
+
+    /// 真线在替身线顶上的这段时间里让位(不带动画,和替身线同一帧换手)。
+    private func separatorHidden(index: Int, rows: [Host]) -> Bool {
+        ghostsOn && ghostIndices.contains(index)
+    }
+
+    @ViewBuilder private var ghostSeparators: some View {
+        if ghostsOn {
+            let rows = shown
+            ForEach(ghostIndices, id: \.self) { i in
+                // 位置和宽度都取自那一行缩短之前实时量到的矩形(半折 / 折叠展开时宽度会变,不能用早先量的一个固定值)。
+                let r = frozenRects[rows[i].id] ?? .zero
+                DashedLine().stroke(Color.white.opacity(0.16), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                    .frame(width: max(0, r.width - rowInset * 2), height: 1)
+                    .offset(x: r.minX + rowInset, y: r.maxY - (ghostMoved ? statusSlot : 0))
+                    .transition(.identity)   // 插入时不淡入:和真线同一帧换手,虚线一帧都不能断
+                    .animation(reduceMotion ? nil : Self.collapseCurve, value: ghostMoved)
+            }
+            .allowsHitTesting(false)
+        }
+    }
 
     /// 长按菜单要收掉的边:默认字号时外屏 7pt、内屏 13pt(内屏同样的行高下系统给的空隙比外屏大约 6pt),量过两边文字到菜单都约 42pt、虚线到菜单约 9pt。
     /// 字号变大时,行内上下留白和文字自己都变高,跟着多收(留白每多 1pt 多收 1pt,文字半高每多 1pt 多收 1pt),文字到菜单的距离不变。
@@ -412,9 +513,11 @@ struct HostsView: View {
 
     /// 搜索框也是一行命令:`❯ grep ▍输入`,没有圆角底,下面一条虚线;`❯` 和列表行的 `❯` 在同一条竖线上。
     private var searchField: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 0) {
+            // 箭头占的宽度和列表行一样(`promptWidth` + `promptGap`):`grep` 和下面名字的起点在同一条竖线上。
             Text(verbatim: "❯").offset(y: -arrowLift).foregroundStyle(Color.green)
-            Text(verbatim: "grep").foregroundStyle(Color.white.opacity(0.4))
+                .frame(width: promptWidth, alignment: .leading).padding(.trailing, Self.promptGap)
+            Text(verbatim: "grep").foregroundStyle(Color.white.opacity(0.4)).padding(.trailing, 10)
             TextField("Search hosts", text: $query)
                 .textInputAutocapitalization(.never).autocorrectionDisabled()
                 .focused($searchFocused).submitLabel(.search)
@@ -594,7 +697,7 @@ struct HostEditor: View {
                         .font(.system(.body, design: .monospaced))
                         .focused($focus, equals: .user).submitLabel(.next)
                         .onSubmit { focus = host.authKind == .password ? .password : nil }
-                    AuthKindPicker(selection: $host.authKind)
+                    AuthKindPicker(selection: $host.authKind).fullWidthSeparator()
                     if host.authKind == .password {
                         SecureField("Password", text: $credentials.password)
                             .textContentType(.password)
@@ -678,6 +781,7 @@ struct HostEditor: View {
                     copied = true
                     Task { try? await Task.sleep(for: .seconds(2)); copied = false }
                 }
+                .fullWidthSeparator()
             } else {
                 Text(keyProblem ?? String(localized: "No key yet. Generate one, or import an existing private key."))
                     .font(.footnote).foregroundStyle(keyProblem == nil ? Color.secondary : Color.red)
@@ -688,9 +792,9 @@ struct HostEditor: View {
                 .onSubmit { focus = nil; refreshKeyInfo() }
                 .onChange(of: credentials.passphrase) { _, _ in refreshKeyInfo() }
             // 一行一个按钮:三个并排在窄的弹层里会把文字挤成竖排。
-            Button("Generate", systemImage: "key", action: generate)
-            Button("Import…", systemImage: "arrow.down.doc") { importing = true }
-            Button("Paste", systemImage: "clipboard", action: pasteKey)
+            Button("Generate", systemImage: "key", action: generate).fullWidthSeparator()
+            Button("Import…", systemImage: "arrow.down.doc") { importing = true }.fullWidthSeparator()
+            Button("Paste", systemImage: "clipboard", action: pasteKey).fullWidthSeparator()
         } header: {
             Text(verbatim: "# ") .foregroundStyle(Color.green) + Text("Private Key")
         } footer: {
@@ -927,5 +1031,55 @@ private enum HostColor {
     static func pip(_ index: Int?) -> Color {
         guard let index, palette.indices.contains(index) else { return palette[0] }
         return palette[index]
+    }
+}
+
+
+/// 替身线顶上的时候真线藏起来:不带动画(和替身线同一帧换手),看起来虚线一直在。
+private struct SeparatorSwap: ViewModifier {
+    let hidden: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(hidden ? 0 : 1)
+            .transaction { $0.animation = nil }
+    }
+}
+
+/// 抵消位移:`settled` 为 false 时(缩短的那一帧)不带动画直接落在抵消位置,变成 true 时用动画平滑回到 0。
+private struct CollapseShift: ViewModifier {
+    let y: CGFloat
+    let settled: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        content
+            .offset(y: y)
+            .animation(settled && !reduceMotion ? HostsView.collapseCurve : nil, value: y)
+    }
+}
+
+
+/// 替身线的覆盖层。坐标和行的 `hostsRoot` 一致(原点是整块视图的左上角):覆盖层要吃掉安全区,不然整体错位一个安全区顶边的高度。
+/// (单独成修饰器:`HostsView.body` 的修饰符链已经长到编译器类型推断快超时了。)
+private struct GhostOverlay<Ghosts: View>: ViewModifier {
+    let ghosts: Ghosts
+
+    func body(content: Content) -> some View {
+        content.overlay {
+            ZStack(alignment: .topLeading) { ghosts }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
+        }
+    }
+}
+
+
+extension View {
+    /// 列表行下面的分隔线从行的最左边画到最右边。系统默认把分隔线的起点对到行里第一段文字(分段控件里的「密码」、
+    /// 带图标按钮的标题)上,于是这几行下面的线比别的行短一截(左边少了一段)。
+    func fullWidthSeparator() -> some View {
+        alignmentGuide(.listRowSeparatorLeading) { $0[.leading] }
     }
 }
