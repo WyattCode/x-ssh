@@ -693,14 +693,14 @@ struct HostEditor: View {
                 Section {
                     TextField("User", text: $host.username)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
-                        .textContentType(.username)
+                        // 不标 `.username` / `.password`:标了系统就把这两栏当成登录表单,保存后弹「保存密码」,
+                        // 同一个用户名在另一台服务器上换个密码又弹「更新密码」。密码由我们自己存进钥匙串(每台主机一条)。
                         .font(.system(.body, design: .monospaced))
                         .focused($focus, equals: .user).submitLabel(.next)
                         .onSubmit { focus = host.authKind == .password ? .password : nil }
                     AuthKindPicker(selection: $host.authKind).fullWidthSeparator()
                     if host.authKind == .password {
                         SecureField("Password", text: $credentials.password)
-                            .textContentType(.password)
                             .font(.system(.body, design: .monospaced))
                         .focused($focus, equals: .password).submitLabel(.done)
                             .onSubmit { focus = nil }
