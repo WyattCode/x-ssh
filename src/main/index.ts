@@ -11,6 +11,7 @@ import { readLaunchTarget, targetFromUrl, PROTOCOL, compareVersions } from '../s
 import { isRendererSettableKey } from '../shared/settingsKeys'
 import { resolveLang, type LangPref, type UiLang } from '../shared/lang'
 import { resolveDir, resolveInside } from '../shared/localPaths'
+import { extractBackupHosts } from '../shared/backup'
 import { SshManager } from './ssh'
 import { probeHosts } from './reachability'
 import { isTrustedFrame } from './ipcGuard'
@@ -559,7 +560,7 @@ async function buildBackupPayload(): Promise<string> {
       app: 'x-ssh',
       version: 2,
       exportedAt: new Date().toISOString(),
-      hosts: await store.exportJson(),
+      hosts: JSON.parse(await store.exportJson()),
       snippets: (await settings.get<Snippet[]>('snippets')) ?? [],
       snapshots: (await settings.get<unknown[]>('snapshots')) ?? [],
       transferHistory: (await settings.get<unknown[]>('sftpTransferHistory')) ?? [],
@@ -1423,7 +1424,7 @@ function registerIpc(): void {
         app: 'x-ssh',
         version: 2,
         exportedAt: new Date().toISOString(),
-      hosts: await store.exportJson(),
+        hosts: JSON.parse(await store.exportJson()),
         snippets: (await settings.get<Snippet[]>('snippets')) ?? [],
         snapshots: (await settings.get<unknown[]>('snapshots')) ?? [],
         transferHistory: (await settings.get<unknown[]>('sftpTransferHistory')) ?? [],
@@ -1445,8 +1446,9 @@ function registerIpc(): void {
     try {
       const buf = await readFile(res.filePaths[0], 'utf8')
       const data = JSON.parse(buf)
-      if (!Array.isArray(data.hosts)) return { ok: false, error: 'invalid-backup' }
-      await store.importJson(JSON.stringify(data.hosts))
+      const hosts = extractBackupHosts(data.hosts)
+      if (!hosts) return { ok: false, error: 'invalid-backup' }
+      await store.importJson(JSON.stringify({ hosts }))
       if (Array.isArray(data.snippets)) await settings.set('snippets', data.snippets)
       if (Array.isArray(data.snapshots)) await settings.set('snapshots', data.snapshots)
       if (Array.isArray(data.transferHistory)) await settings.set('sftpTransferHistory', data.transferHistory)
