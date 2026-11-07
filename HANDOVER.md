@@ -1,3 +1,119 @@
+# 会话记录:M3.187(2026-11-08,集中修复 + **发版改成手动触发**)
+
+> 范围:桌面(`src/`)与发版线,`mobile/` 未碰(期间 iOS 线自己发了 0.6.13 / 0.6.18)。
+
+## 零、最重要的一条:不要再自动发版
+
+**只有用户明确说「发版」,才 `npm version` / `dist` / 打 tag / 推 Release。** 其余时候改代码、跑测试、`git commit` 就行。
+
+这条是用户当面纠正的:2026-11-07 我每轮改完就顺手发版,两天出了 8 个桌面版本(0.6.10–0.6.19),代价是
+CI 白跑八次、Release 堆十条、**0.6.11 是启动即崩的版本**、版本号三次被 iOS 线抢占(0.6.13 / 0.6.18)
+后被迫顺延到 0.6.14 / 0.6.19。多个补丁本可以合成一个版本。同理,`release/` 里的旧安装包不要主动发给他。
+
+## 一、这轮修了什么(按主题,不按版本)
+
+### 连接生命周期
+- `releaseMaster` 幂等(`if (!m.sessions.delete(id)) return`)。根因是 `disconnect()` 与 shell `close`
+  双减 refs,关一个 pane 会把共用 master 的 peer 一起掐断。
+- 新增 `releaseSessionResources()`:suppressTimer / forwards / log / watchSyncs / sftp 一处收尾,
+  `disconnect` / `error` / `close` / `shell close` / `teardownMaster` / `destroyMaster` 全部改用它。
+  此前断线只 `stopLog`,残留的 `Server` 让重连报 `forward:in-use`。
+- 首会话 shell close 不再无条件 `client.end()`。注意:判断要写成
+  `master.sessions.has(id) || peerCount(client, id) > 0`——只看 `masters.has(key)` 会漏掉
+  「普通会话 + 同主机有 master」的情况,那是我当轮自己引入的回归,已有测试用服务端
+  `activeClients` 计数盯住。
+
+### 端口转发 / 主机密钥
+- `-R` 的 `tcp connection` 监听改为**每个 Client 只挂一次**(`remoteForwardTables: WeakMap`):
+  以前每个 pane 挂一个,一次入站连接被 N 个监听者同时 accept/reject。
+- `rejectedKeys` 改 `Map<host:port, Set<fp>>`(每主机上限 8):两个未知密钥卡片都能各自"信任"。
+- `write()` 先判 `destroyed/writable`:ssh2 的 Channel 关闭后不再回调,会卡死 Writable 队列。
+
+### 传输(两个会静默毁数据的)
+- 续传 `createWriteStream(..., { start })` 没带 `flags` → ssh2 默认 `'w'`(O_TRUNC):先截断再按旧偏移写,
+  前面变成 NUL,而结果大小恰好等于本地大小 → 下次上传判定"已同步",**损坏永久化**。现在 `flags:'r+'`,
+  且 `mode` 显式 `0o644`(ssh2 默认 0666 会绕过 umask)。
+  判定与参数已抽成 `resumeOffset()` / `uploadStreamOptions()`(`shared/fsUtils.ts`),有 7 条测试。
+- 持续同步 `posixJoin('', name)` 产生 `/name`,`safeLocalJoin` 判成路径穿越 → 任意非空目录同步 100% 失败
+  (watch 每轮静默 catch)。两个 walk 都改成 `base ? posixJoin(base,name) : name`。
+
+### X11
+- `x11Warned` 改 `WeakMap<Client, Set<notice>>`:`x11-starting` 不再吞掉 `x11-no-server`。
+- `pipeX11` 加 10s 首包超时(端口被非 X 程序占着不再永久挂起),accept 后只 destroy channel、不 reject。
+- autostart/probe 恒走 `127.0.0.1`;`DISPLAY` 指向远端时不本地拉起、不替换 cookie。
+- `.Xauthority` 改临时文件 + rename;解析失败时写独立临时 auth,**绝不无 `-auth` 裸启动**。
+
+### 输入链路(语音输入重复)
+- 根因:`adopt()` 无条件把 `floor` 设为全文长度,退格/删除也走它 → 输入法回头改写已提交文本时
+  `p < floor`,`reconcile` 走「只删保护区之后 + 追加」分支 → 远端 = 旧内容 + 新内容
+  (`默认把API key默认把API key写进去`)。
+- 现在:`adopt(baseline, protect)`,只有「纯尾部删除」(`synced.startsWith(baseline)`)才降水位;
+  `reconcile` 在 `p >= floor` 时**无条件精确回删 + 重发**,移除了 512 上限(那个上限反而让长段落
+  更容易落进追加分支)。外部写入(右键复制)的保护仍保留。
+
+### UI / 合并残留
+- 修掉一批合并遗留的重复控件:主机编辑页两个「保存」、密钥弹窗四个按钮、外观页两个取色器
+  (左边那个改了不落盘)、安全页两个「立即锁定」、「立即备份」点一次写两份。
+- 搜索计数/红框:**必须给 `@xterm/addon-search` 传 `decorations`**,否则 `_fireResults()` 直接 return,
+  `onDidChangeResults` 永不触发。不传就等于"所有搜索都 0 结果"。
+- 代理密码:入 vault(`secrets['proxy:<id>']`),`proxy.password` 三态(缺省=保留 / `''`=删除 / 值=替换),
+  界面有「清除 / 撤销清除」,输入新密码自动取消清除标记,标记纳入未保存提示。
+- 跳板机 host key 被拒时,失败卡片要显示**跳板机**地址(`hostKeyHost`),不是目标机。
+- 其他:关闭非末位 pane 时 Vue 复用组件导致 xterm 错位(leaf 按 paneId 作 key)、「停止记录」缺 return
+  会立刻重开、2×2 预设把总格数当列数、路径栏 title/末段裁切、本地栏 home 按钮挤爆工具栏、
+  `autocomplete` 统一 `off`。
+
+### 安全
+- 备份:`autoBackupDir` 移出 `RENDERER_SETTABLE_KEYS`(改主进程 `backup:pickDir` 弹框写入);
+  `backupNow` / 定时备份锁定即拒绝;删掉 `exportJson(allowLocked)` 布尔后门。
+- 导航:`will-navigate` 只放行 dev URL / 自己的 `out/renderer`,`will-attach-webview` 全拦;
+  所有 IPC 经 `handle()/on()` 校验 `senderFrame === mainWindow.webContents.mainFrame`
+  (92 个 invoke + 11 个 send),判帧身份而非 URL(同源 iframe 的 URL 相同)。
+- 代理密码入 vault 并迁移旧明文(先写 vault 再删明文,vault 失败则回滚)。
+- `keyManager.generate` 改 `ssh2.utils.generateKeyPairSync`(口令不再进 `ssh-keygen -N` argv)。
+  注意必须 `import ssh2 from 'ssh2'` 再取 `.utils`:ESM 下命名导入 `utils` 会在启动时崩(0.6.11 事故)。
+- `local:create/rename/delete` 要求目录已被 `local:list` 记录、条目在该次列表结果中;create 用 `flag:'wx'`。
+- `sftp:openWith` 拒绝脚本宿主(cmd/powershell/wscript/bash…),要求绝对路径且存在。
+- `userVerify.availability()` 只有**跑出结论**的探测才缓存:超时 / PowerShell 被策略禁用不再
+  被当成 "unavailable" 缓存 60 秒(以前一次探测失败就让门禁静默失效一分钟)。
+
+## 二、测试基建
+
+测试从 **637 → 663 条 / 66 文件**。新增的都属于"以前测不到、但一错就出事"的判断抽成纯函数:
+
+| 文件 | 守住什么 |
+|---|---|
+| `main/ipcGuard.test.ts` | 帧身份比较;同源 iframe 必须拒绝 |
+| `shared/uploadPlan.test.ts` | 续传必须 `flags:'r+'`;同尺寸/更大不得续传;mode 恒 0644 |
+| `main/sessionLifecycle.test.ts` | 关一个 pane 后 peer 仍可写;远端 shell 退出后本地端口能重新 bind;拒绝密钥多槽 |
+| `main/storeProxySecret.test.ts` | 代理密码不落 hosts.json、不回传、留空保留、空串删除、旧明文迁移 |
+| `main/userVerify.test.ts` | 探测失败不缓存、成功才缓存 |
+| `renderer/lib/imeSync.test.ts` | 2000 字草稿改首字不重复;退格后纠正不重复 |
+
+## 三、还没做的
+
+- `sftp:openWith` 的允许列表仍读 `settings`(渲染层可写),原计划移到主进程内存 + 对话框选择,需要 UI。
+- `local:list` 列出本身不限根(两步操作仍能到任意路径),真正的根白名单会和"全盘浏览"的产品定位冲突。
+- Hello 不可用时仍 fail-open + warning,改成强制主密码需要一条降级 UI 流程。
+- 长段落纠错会一次发出上千个 DEL。可以分批,但会让后续输入插到 DEL 中间造成乱序,所以保持一次性;
+  若实测 TUI 卡顿,再引入串行发送队列。
+- `durableFile` 无 `fsync`(掉电可能丢尾部,进程崩溃已由 rename 覆盖)。
+- Electron 仍是 33(EOL),升 35+ 是独立工程。
+
+## 四、这轮踩过的坑(给下一个人省时间)
+
+1. **构建绿 ≠ 能启动**:主进程 ESM + CJS 依赖,`import { utils } from 'ssh2'` 类型和 vitest 都过,
+   真机启动 `SyntaxError: Named export 'utils' not found`。已加 `scripts/check-esm-imports.mjs` 接进
+   `npm run build`,零命中也会失败(防止正则失效后静默放行)。
+2. **pack 命令要 `--`**:`tar czf <abs> -- <names>`;解包/`unzip` 统一 `./` 前缀,否则远端以 `-` 开头的
+   文件名会被当选项(GNU tar 有 `--checkpoint-action=exec=`)。
+3. **`@xterm/addon-search` 的 `decorations`**:不传就没有结果事件,也没有高亮。
+4. **`mainError.test.ts` 要求「一个 i18n 键对应一个码」**,两个本地操作码不能共用文案,按场景拆。
+5. **版本号会被 iOS 线抢**:发版前先 `git fetch --tags` + `git ls-remote origin refs/tags/vX`,被占就顺延;
+   `CHANGELOG.md` 冲突时保持版本倒序、桌面与 iOS 条目都保留。
+
+---
+
 # 会话记录:M3.186(2026-11-01,收掉 i18n 遗留两项 + 测试翻倍核对)
 
 > 范围只有桌面(`src/`)。用户要求「完善后再推」,所以本轮只做**已登记但没做完**的遗留项,不开新功能。
