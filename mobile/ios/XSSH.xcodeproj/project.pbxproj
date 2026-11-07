@@ -16,6 +16,7 @@
 		701248AC7809523E89810737 /* KeyCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67546D7180CF39865A1FCEA9 /* KeyCapture.swift */; };
 		730F1D8CB36D4752C73EF293 /* TerminalModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7AA13AB1E8539719A7AD181 /* TerminalModel.swift */; };
 		766889B2E5FD72AB857145AF /* HostsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90A700116E14789B6722DE37 /* HostsView.swift */; };
+		9E5B8BEC0DF591CBCD0ADE8E /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 7EED095D05D56F4A81804146 /* PrivacyInfo.xcprivacy */; };
 		BE3CA517D8EA35268B424A55 /* xssh_ffi.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBF96103E5FED6FF22B64431 /* xssh_ffi.swift */; };
 		C367438F25B3CB7622343595 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 7811C2DC0FBD8705949EBC0A /* Assets.xcassets */; };
 		CD156F4F021AC0E696678464 /* FoldState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 167F9953B597EB1D7BA057E4 /* FoldState.swift */; };
@@ -48,6 +49,7 @@
 		67546D7180CF39865A1FCEA9 /* KeyCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyCapture.swift; sourceTree = "<group>"; };
 		7368087C0BFDB2DD4A225C02 /* Host.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Host.swift; sourceTree = "<group>"; };
 		7811C2DC0FBD8705949EBC0A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		7EED095D05D56F4A81804146 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		908C2C163E9BCA7CB86BF5AD /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
 		90A700116E14789B6722DE37 /* HostsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostsView.swift; sourceTree = "<group>"; };
 		B2CB2495746BDBF4939BFC12 /* XSSH.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = XSSH.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -129,6 +131,7 @@
 				1B28A299AC2BED65E98F5049 /* Info.plist */,
 				67546D7180CF39865A1FCEA9 /* KeyCapture.swift */,
 				908C2C163E9BCA7CB86BF5AD /* Localizable.xcstrings */,
+				7EED095D05D56F4A81804146 /* PrivacyInfo.xcprivacy */,
 				F7AA13AB1E8539719A7AD181 /* TerminalModel.swift */,
 				FF0F57A4214E6389AC275F83 /* TerminalScreen.swift */,
 				3A6376447A9D21D6FDD076D3 /* Theme.swift */,
@@ -225,6 +228,7 @@
 			files = (
 				C367438F25B3CB7622343595 /* Assets.xcassets in Resources */,
 				265B7FC008DF6F6A3CF64CE9 /* Localizable.xcstrings in Resources */,
+				9E5B8BEC0DF591CBCD0ADE8E /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
