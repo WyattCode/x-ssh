@@ -39,6 +39,13 @@ export const MAIN_ERROR_KEYS: Record<string, string> = {
   'fs-no-space': 'err.fsNoSpace',
   'fs-quota': 'err.fsQuota',
   'fs-op-failed': 'err.fsOpFailed',
+  // Local pane / key library. These are main-side codes too; without a row they
+  // reached the UI as the raw English code (mainErrorText passes unknown kebab
+  // codes through on purpose, as a signal that a row is missing).
+  'dir-not-listed': 'err.dirChanged',
+  'not-listed': 'err.notListed',
+  'invalid-name': 'err.invalidName',
+  'keygen-failed': 'err.keygenFailed',
 
   // nothing useful to say
   'unknown-error': 'err.unknown'

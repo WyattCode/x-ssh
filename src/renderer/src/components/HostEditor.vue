@@ -746,7 +746,6 @@ async function remove(): Promise<void> {
                   <Icon name="chevron-down" :size="14" class="caret" />
                 </div>
               </div>
-              <p v-if="jumpBlocked" class="sub-hint jump-hint">{{ t('host.jumpBlocked', { label: jumpBlockerLabel }) }}</p>
               <p v-if="jumpGone || jumpBlocked" class="sub-hint jump-hint">
                 {{ jumpGone ? t('host.jumpGone') : t('host.jumpBlocked', { name: jumpBlockerLabel }) }}
               </p>
@@ -847,7 +846,7 @@ async function remove(): Promise<void> {
                 <span class="r-label wide">{{ t('host.x11Forward') }}</span>
                 <input v-model="form.x11Forward" type="checkbox" class="switch" />
               </label>
-              <p class="sub-hint">{{ t('host.x11ForwardHint') }}</p>
+              <p class="sub-hint jump-hint">{{ t('host.x11ForwardHint') }}</p>
             </div>
           </section>
         </div>
@@ -856,9 +855,10 @@ async function remove(): Promise<void> {
           <button v-if="host" type="button" class="btn btn-danger" @click="remove">{{ t('host.delete') }}</button>
           <span class="spacer" />
           <button type="button" class="btn" @click="void requestClose()">{{ t('host.cancel') }}</button>
-          <button type="button" class="btn btn-primary" :disabled="!canSave() || saving" :title="canSave() ? undefined : t('host.saveDisabled')" @click="save">{{ saving ? t('ed.saving') : t('host.save') }}</button>
-
-          <button type="button" class="btn btn-primary" :disabled="!canSave()" :title="canSave() ? undefined : saveBlockReason()" @click="save">{{ t('host.save') }}</button>
+          <!-- One save button. A merge left a second copy here, so the footer
+               showed two primary buttons and users could not tell which one
+               actually saved. This one explains why it is disabled. -->
+          <button type="button" class="btn btn-primary" :disabled="!canSave() || saving" :title="canSave() ? undefined : saveBlockReason()" @click="save">{{ saving ? t('ed.saving') : t('host.save') }}</button>
         </footer>
 
         <!-- Generate a key: a small sheet over the panel. -->
@@ -882,11 +882,11 @@ async function remove(): Promise<void> {
               </label>
             </div>
             <p v-if="keyModal.error" class="err">{{ keyModal.error }}</p>
+            <!-- Cancel + Save only: a merge had duplicated this row, giving the
+                 small sheet four buttons. -->
             <div class="key-actions">
-              <button type="button" class="btn" @click="closeKeySheet">{{ t('host.cancel') }}</button>
-              <button type="button" class="btn btn-primary" :disabled="keyBusy" @click="generateKey">{{ t('host.save') }}</button>
               <button type="button" class="btn" :disabled="keyModal.busy" @click="closeKeySheet">{{ t('host.cancel') }}</button>
-              <button type="button" class="btn btn-primary" :disabled="keyModal.busy" @click="generateKey">{{ keyModal.busy ? t('host.keyGenerating') : t('host.save') }}</button>
+              <button type="button" class="btn btn-primary" :disabled="keyBusy || keyModal.busy" @click="generateKey">{{ keyModal.busy ? t('host.keyGenerating') : t('host.save') }}</button>
             </div>
           </div>
         </div>

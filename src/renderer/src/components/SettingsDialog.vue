@@ -940,6 +940,9 @@ async function pickBackupDir(): Promise<void> {
   if (r.ok && r.dir) {
     store.autoBackupDir = r.dir
     void store.rescheduleBackup()
+  } else if (!r.ok && !r.canceled) {
+    // Cancelling is not an error; a refused write is, and used to be silent.
+    toast(t('set.sec.backupWriteFail'), 'error')
   }
 }
 function onBackupHours(e: Event): void {
@@ -956,12 +959,8 @@ function onBackupHours(e: Event): void {
 async function backupNow(): Promise<void> {
   if (backupBusy.value) return
   backupBusy.value = true
-  try {
-    const r = await window.api.data.backupNow()
-    toast(r.ok ? t('set.sec.backupDone') : (r.error ?? t('set.sec.backupFail')), r.ok ? 'success' : 'error')
-  } finally {
-    backupBusy.value = false
-  }
+  // One call. A merge left a second implementation below, so a single click
+  // wrote two backups (the toast de-duplicated, which hid it).
   const r = await window.api.data.backupNow()
   backupBusy.value = false
   if (r.ok) {
@@ -1425,8 +1424,10 @@ function onLockPassEnter(e: KeyboardEvent): void {
                 <div class="row">
                   <div class="r-text"><span class="r-title">{{ t('set.term.accent') }}</span></div>
                   <button v-if="store.accentColor" class="btn sm" @click="clearAccent">{{ t('set.term.accentReset') }}</button>
-                  <input type="color" class="color-in" :value="accentSwatch" @input="onAccent" />
-                  <input type="color" class="color-in" :value="store.accentColor || '#6ea8fe'" @input="onAccent" @change="commitAccent" />
+                  <!-- One picker. There were two after a merge, and the visible
+                       one (#accentSwatch) only committed on @input — it changed
+                       the UI but never saved, so the choice was lost on restart. -->
+                  <input type="color" class="color-in" :value="accentSwatch" @input="onAccent" @change="commitAccent" />
                 </div>
               </div>
               <p class="foot-note">{{ t('set.term.fontHint', { keys: `${modKey}+= / ${modKey}+-` }) }}</p>
@@ -1648,7 +1649,6 @@ function onLockPassEnter(e: KeyboardEvent): void {
                   <div class="row actions-row">
                     <button v-if="store.lockLocked" class="btn sm btn-primary" :disabled="lockBusy" @click="unlockNow">{{ t('lock.unlock') }}</button>
                     <button class="btn sm" :disabled="lockBusy" @click="lockApp">{{ t('lock.lockNow') }}</button>
-                    <button class="btn sm" @click="lockApp">{{ t('lock.lockNow') }}</button>
                     <button class="btn sm" :disabled="lockBusy" @click="disableMasterLock">{{ t('lock.disable') }}</button>
                     <span class="spacer" />
                     <button class="btn sm btn-danger" :disabled="lockBusy" @click="resetMasterLock">{{ t('lock.reset') }}</button>
@@ -1709,21 +1709,27 @@ function onLockPassEnter(e: KeyboardEvent): void {
                   </div>
                   <span class="switch" :class="{ on: store.autoBackup }"><i /></span>
                 </label>
+                <!-- Folder + "back up now" stay available with the timer off:
+                     wanting a single backup should not require enabling a
+                     recurring one. Only the interval follows the switch. -->
+                <div class="row">
+                  <div class="r-text"><span class="r-title">{{ t('set.sec.backupDir') }}</span></div>
+                  <span class="value" :class="{ dim: !store.autoBackupDir }" :title="store.autoBackupDir || ''">{{ store.autoBackupDir || t('set.sec.backupDirNone') }}</span>
+                  <button class="btn sm" @click="pickBackupDir">{{ t('host.browse') }}</button>
+                </div>
                 <template v-if="store.autoBackup">
-                  <div class="row">
-                    <div class="r-text"><span class="r-title">{{ t('set.sec.backupDir') }}</span></div>
-                    <span class="value" :class="{ dim: !store.autoBackupDir }" :title="store.autoBackupDir || ''">{{ store.autoBackupDir || t('set.sec.backupDirNone') }}</span>
-                    <button class="btn sm" @click="pickBackupDir">{{ t('host.browse') }}</button>
-                  </div>
                   <div class="row">
                     <div class="r-text"><span class="r-title">{{ t('set.sec.backupEvery') }}</span></div>
                     <span class="num">
                       <input :value="store.autoBackupEveryHours" class="box mono" type="number" min="1" max="720" @change="onBackupHours" />
                       <span class="unit">{{ t('set.sec.hours') }}</span>
                     </span>
-                    <button class="btn sm" :disabled="backupBusy" @click="backupNow">{{ t('set.sec.backupNow') }}</button>
                   </div>
                 </template>
+                <div class="row">
+                  <div class="r-text"><span class="r-title">{{ t('set.sec.backupNow') }}</span></div>
+                  <button class="btn sm" :disabled="backupBusy" @click="backupNow">{{ t('set.sec.backupNow') }}</button>
+                </div>
               </div>
             </section>
 
