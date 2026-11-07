@@ -2964,3 +2964,5 @@ M3.51 已有「用生物识别解锁」开关,连私钥密文(`lockedKeyData` / 
 - 断开收场整体节奏(外屏,`RootView.close`):翻页后 230ms 开始放手(箭头变灰 / 光标淡出 / 「已断开」,0.32s)→ 停 440ms → 收起(0.22s,自定义曲线)→ 300ms 后复位标志。用户前后几轮都说「再快一点」,现在比最初快了约一半。
 
 - **内屏的断开收场(`RootView.close` 的 `.regular` 分支)**:和外屏同一套行动画,只是没有翻页:0ms 右边的终端淡出(`TerminalModel.leaving` + `TerminalScreen` 嵌入式 `.opacity`,0.2s);抽屉收着就同时滑出来(`setDrawer(true)` **不带 swapping**,会话留到收场完了才清,以前是在抽屉动画里直接换掉);抽屉已经出来了(展开 / 半折)就 60ms 后、抽屉收着就 230ms 后那一行开始放手,后面的节奏和外屏一样。内屏测试:`screencapture -v -V 5 -R <区域>` 录 Device Hub 里的内屏(simctl 的录屏只录外屏),区域大约 `379,163,951,682`。
+
+- **半折 / 折叠展开时不放收场动画(`RootView.close` / `finishCloseNow`)**:铰链半开(`halfFolded`,列表和会话各占 50%)时 `close()` 直接按原来的方式关(`withAnimation(.smooth(0.25)) { active = nil }`),不放「放手 → 已断开 → 收起」;收场动画进行到一半用户开始折叠 / 展开(`halfFolded` 或 `sizeClass` 变了)就取消任务、立刻收尾(`closeTask` 要在每次 `sleep` 之后自己检查 `Task.isCancelled`,`try?` 会吞掉取消)。虚线替身线用每行实时量到的矩形(`rowRects` / `frozenRects`),不用早先量过的固定宽度(半折 / 折叠展开时宽度会变,会比真线短一截)。测半折:Device Hub 底部姿态按钮第二个。

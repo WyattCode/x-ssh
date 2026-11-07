@@ -108,6 +108,8 @@ struct RootView: View {
     @State private var active: TerminalModel?
     /// 外屏断开之后、列表里那台正在「放手」(箭头变灰、光标淡出、状态行变「已断开」),之后才真正清掉会话。
     @State private var closing = false
+    /// 正在放的断开收场动画(折叠屏半折 / 折叠展开的过程中要能立刻打断收尾)。
+    @State private var closeTask: Task<Void, Never>?
     @State private var addHostRequested = false
     @State private var searching = false
     /// 拖把手时侧栏内容跟手滑出去的位移(0 = 原位,-侧栏宽度 = 完全滑出)。
@@ -281,11 +283,14 @@ struct RootView: View {
             }
             .frame(width: 0, height: 0)
         }
-        .onChange(of: halfFolded) { _, _ in
+        .onChange(of: halfFolded) { _, now in
             updateLayout(containerSize)
             syncSidebarWidth(animated: true)
             pokeHandle()
+            // 折到一半(各占 50%)的过程中不放那套收场动画:正在放的话立刻收尾,按原来的方式换掉会话。
+            if now { finishCloseNow() }
         }
+        .onChange(of: sizeClass) { _, _ in finishCloseNow() }   // 折叠 / 展开(内外屏切换)也一样
         // 启动时直接用固定宽度(开屏盖着,不做淡出淡入)。
         .onAppear {
             shownSidebarWidth = effectiveSidebarWidth
@@ -488,6 +493,8 @@ struct RootView: View {
     /// 点一台主机:内屏横屏 / 展开时**立刻**收起抽屉,会话顺着滑进来(抽屉、会话、按钮竖条一条弹簧);
     /// 半折是并排设计、竖屏抽屉本来就是收起的,都不用收;外屏是翻页。
     private func open(_ host: Host) {
+        closeTask?.cancel()
+        closeTask = nil
         closing = false
         active?.leaving = false
         let collapse = sizeClass == .regular && drawerOpen && !halfFolded
@@ -513,47 +520,61 @@ struct RootView: View {
         }
     }
 
+    /// 收场动画被打断(半折 / 折叠展开 / 又点了别的):立刻按原来的方式收尾 —— 清掉会话,不再放那一行的收场。
+    private func finishCloseNow() {
+        guard closeTask != nil else { return }
+        closeTask?.cancel()
+        closeTask = nil
+        withAnimation(.smooth(duration: 0.25)) { active = nil }
+        closing = false
+    }
+
     private func close() {
+        closeTask?.cancel()
+        closeTask = nil
         active?.disconnect()
         compactColumn = .sidebar
+        // 折到一半(铰链半开,列表和会话各占 50%)时:不放收场动画,按原来的方式关 —— 列表本来就在眼前,
+        // 会话直接淡出换成「没有会话」。
+        if halfFolded {
+            withAnimation(.smooth(duration: 0.25)) { active = nil }
+            return
+        }
         // 断开 / 取消之后回到主机列表:横屏 / 展开时抽屉是收起的,要滑出来让人重新选。
+        let leaving = active?.id
         if sizeClass == .regular {
             // 内屏:和外屏同一套收场(列表里那一行放手 → 停一下 → 收起),只是没有翻页:
             //   0ms     会话(右边的终端)淡出;抽屉要是收着,同时滑出来(会话还在,收场完了才清掉,不在抽屉动画里换掉);
             //   60 / 230ms  列表已经看得见 / 抽屉快滑到位 —— 那一行开始放手;之后的节奏和外屏一样。
-            let leaving = active?.id
-            let listHidden = !drawerOpen && !halfFolded
+            let listHidden = !drawerOpen
             withAnimation(.easeOut(duration: 0.2)) { active?.leaving = true }
             if listHidden { setDrawer(true) }
-            Task { @MainActor in
-                try? await Task.sleep(for: .milliseconds(listHidden ? 230 : 60))
-                guard active?.id == leaving else { return }
-                withAnimation(.smooth(duration: 0.32)) { closing = true }
-                try? await Task.sleep(for: .milliseconds(440))
-                guard active?.id == leaving else { return }
-                withAnimation(HostsView.collapseCurve) { active = nil }
-                try? await Task.sleep(for: .milliseconds(300))
-                if active == nil { closing = false }
-            }
+            closeTask = Task { @MainActor in await sendOff(leaving, lead: listHidden ? 230 : 60) }
         } else {
             // 外屏:翻页(系统的滑动)照旧;列表里这台那一行的收场放在翻页快到位的时候才开始 —— 那时列表已经看得见了,
             // 用户眼睛正落在那一行上(以前翻回来之后它还「连着」约半秒,然后猛地一变,最不顺的就是这里)。
-            //   230ms   箭头绿 → 灰、光标淡出、「✓ 已连接 · 时长」换成灰色的「✕ 已断开」(0.32s,轻轻一下震动);
-            //   670ms   停了一会儿,状态行收起(高度 + 透明度一起,0.22s,下面的行平滑上移),这时才真正清掉会话
-            //           (早清的话翻页中途详情页会先变成「没有会话」的空页面,闪一下)。
-            let leaving = active?.id
-            Task { @MainActor in
-                try? await Task.sleep(for: .milliseconds(230))
-                guard active?.id == leaving else { return }
-                withAnimation(.smooth(duration: 0.32)) { closing = true }
-                try? await Task.sleep(for: .milliseconds(440))
-                guard active?.id == leaving else { return }
-                withAnimation(HostsView.collapseCurve) { active = nil }
-                // 收起的 0.22s 里状态行还显示着「✕ 已断开」,收完了才把标志复位(同时复位的话,这一行会在淡出的最后一刻闪回「✓ 已连接」)。
-                try? await Task.sleep(for: .milliseconds(300))
-                if active == nil { closing = false }
-            }
+            closeTask = Task { @MainActor in await sendOff(leaving, lead: 230) }
         }
+    }
+
+    /// 那一行的收场:`lead` 毫秒后箭头绿 → 灰、光标淡出、「✓ 已连接 · 时长」换成灰色的「✕ 已断开」(0.32s,轻轻一下震动),
+    /// 停 440ms,状态行收起(高度 + 透明度一起,0.22s,下面的行平滑上移),这时才真正清掉会话
+    /// (早清的话外屏翻页中途详情页会先变成「没有会话」的空页面,闪一下)。收起的 0.22s 里状态行还显示着「✕ 已断开」,
+    /// 收完了才把标志复位(同时复位的话,这一行会在淡出的最后一刻闪回「✓ 已连接」)。
+    /// `try?` 会吞掉取消:每次等待之后都要自己检查,被打断(`finishCloseNow`)就退出。
+    private func sendOff(_ leaving: UUID?, lead: Int) async {
+        try? await Task.sleep(for: .milliseconds(lead))
+        guard !Task.isCancelled else { return }
+        guard active?.id == leaving else { closeTask = nil; return }
+        withAnimation(.smooth(duration: 0.32)) { closing = true }
+        try? await Task.sleep(for: .milliseconds(440))
+        guard !Task.isCancelled else { return }
+        guard active?.id == leaving else { closeTask = nil; return }
+        withAnimation(HostsView.collapseCurve) { active = nil }
+        try? await Task.sleep(for: .milliseconds(300))
+        guard !Task.isCancelled else { return }
+        if active == nil { closing = false }
+        closeTask = nil
     }
 }
 

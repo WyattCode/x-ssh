@@ -49,7 +49,8 @@ struct HostsView: View {
     @State private var ghostMoved = false
     @State private var ghostDone = true
     /// 连着那台还在的时候,每一行的底边(`rowBottoms` 的快照):单元格缩短之后 `rowBottoms` 已经变了,替身线要从缩短之前的位置出发。
-    @State private var frozenBottoms: [UUID: CGFloat] = [:]
+    @State private var rowRects: [UUID: CGRect] = [:]
+    @State private var frozenRects: [UUID: CGRect] = [:]
     /// `❯` 的字形比字母的中线低约 1.3pt(量过),整体往上抬一点,和名字的中线对齐;随字号缩放。
     private var arrowLift: CGFloat { rowFont * 0.07 }
     @State private var editing: Host?
@@ -125,7 +126,7 @@ struct HostsView: View {
             guard let id else { return }
             withAnimation(.smooth(duration: 0.3)) { proxy.scrollTo(id) }
         }
-        .onChange(of: rowBottoms) { _, new in if activeID != nil { frozenBottoms = new } }
+        .onChange(of: rowRects) { _, new in if activeID != nil { frozenRects = new } }
         // 触觉:开始连接给一下轻的,连上给一下「成功」。
         .sensoryFeedback(trigger: activeID) { _, new in new != nil ? .impact(weight: .light) : nil }
         .sensoryFeedback(trigger: connectedSince) { _, new in new != nil ? .success : nil }
@@ -318,6 +319,7 @@ struct HostsView: View {
                 cardX = $0.minX; cardWidth = $0.width; measuredForWidth = listWidth
             }
             rowBottoms[host.id] = $0.maxY
+            rowRects[host.id] = $0
         }
         // 不允许一滑到底直接触发(第一个动作是删除,太容易误触);只能点露出来的按钮。
         .swipeActions(allowsFullSwipe: false) {
@@ -465,13 +467,13 @@ struct HostsView: View {
     static let collapseCurve = Animation.timingCurve(0.3, 0.05, 0.1, 1, duration: 0.22)
 
     /// 现在是不是在「替身线」阶段(单元格已缩短、下面的行正在滑上去)。
-    private var ghostsOn: Bool { activeID == nil && !ghostDone && lastFeatured != nil && !frozenBottoms.isEmpty }
+    private var ghostsOn: Bool { activeID == nil && !ghostDone && lastFeatured != nil && !frozenRects.isEmpty }
 
     /// 替身线要画在哪几条虚线上:连着那台下面(含它自己下面)的每一条,有缩短之前位置的才画。
     private var ghostIndices: [Int] {
         let rows = shown
         guard let id = lastFeatured, let k = rows.firstIndex(where: { $0.id == id }) else { return [] }
-        return (k..<max(k, rows.count - 1)).filter { frozenBottoms[rows[$0].id] != nil }
+        return (k..<max(k, rows.count - 1)).filter { frozenRects[rows[$0].id] != nil }
     }
 
     /// 真线在替身线顶上的这段时间里让位(不带动画,和替身线同一帧换手)。
@@ -480,13 +482,14 @@ struct HostsView: View {
     }
 
     @ViewBuilder private var ghostSeparators: some View {
-        if ghostsOn, let x = cardX, let w = cardWidth {
+        if ghostsOn {
             let rows = shown
             ForEach(ghostIndices, id: \.self) { i in
-                let y = frozenBottoms[rows[i].id] ?? 0
+                // 位置和宽度都取自那一行缩短之前实时量到的矩形(半折 / 折叠展开时宽度会变,不能用早先量的一个固定值)。
+                let r = frozenRects[rows[i].id] ?? .zero
                 DashedLine().stroke(Color.white.opacity(0.16), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
-                    .frame(width: w - rowInset * 2, height: 1)
-                    .offset(x: x + rowInset, y: y - (ghostMoved ? statusSlot : 0))
+                    .frame(width: max(0, r.width - rowInset * 2), height: 1)
+                    .offset(x: r.minX + rowInset, y: r.maxY - (ghostMoved ? statusSlot : 0))
                     .transition(.identity)   // 插入时不淡入:和真线同一帧换手,虚线一帧都不能断
                     .animation(Self.collapseCurve, value: ghostMoved)
             }
