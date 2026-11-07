@@ -48,7 +48,7 @@ struct HostsView: View {
     /// 从原来的位置一直滑到新位置,真线让位,落定的瞬间无缝换回来 —— 眼睛看到的是同一根线连续地走。
     @State private var ghostMoved = false
     @State private var ghostDone = true
-    /// 连着那台还在的时候,每一行的底边(`rowBottoms` 的快照):单元格缩短之后 `rowBottoms` 已经变了,替身线要从缩短之前的位置出发。
+    /// 连着那台还在的时候,每一行位置的快照(`rowRects`):单元格缩短之后 `rowRects` 已经变了,替身线要从缩短之前的位置出发。
     @State private var rowRects: [UUID: CGRect] = [:]
     @State private var frozenRects: [UUID: CGRect] = [:]
     /// `❯` 的字形比字母的中线低约 1.3pt(量过),整体往上抬一点,和名字的中线对齐;随字号缩放。
@@ -66,8 +66,7 @@ struct HostsView: View {
     @State private var measuredForWidth: CGFloat = 0
     /// 每张主机卡片的底边(整个列表视图坐标系里);所有卡片底边的最大值下面才是「空白处」。
     /// 按主机分别记:删掉最后一台之后,新的最后一台没有布局变化、不会重新量,单记「最后一张」会留着过期的值。
-    @State private var rowBottoms: [UUID: CGFloat] = [:]
-    private var lastRowBottom: CGFloat { shown.compactMap { rowBottoms[$0.id] }.max() ?? 0 }
+    private var lastRowBottom: CGFloat { shown.compactMap { rowRects[$0.id]?.maxY }.max() ?? 0 }
 
     /// 按添加的先后顺序排,点哪台就选中哪台(高亮),列表不会因为连接了某台就把它顶到第一个。
     private var shown: [Host] {
@@ -106,7 +105,7 @@ struct HostsView: View {
                     .modifier(CollapseShift(y: collapseShift(index: index, separator: false, rows: rows), settled: settled))
                 // 行间的虚线是独立的一行(单元格):长按时系统把被按的那一格整个换成浮起的预览,
                 // 虚线要是画在这一格里,会跟着消失、松手又弹回来。
-                if host.id != rows.last?.id { separatorRow.modifier(SeparatorFade(hidden: separatorHidden(index: index, rows: rows))) }
+                if host.id != rows.last?.id { separatorRow.modifier(SeparatorSwap(hidden: separatorHidden(index: index, rows: rows))) }
             }
         }
         // 连上一台时,让列表滚到那张卡片(它在视野外也能看到自己选中了哪台)。
@@ -318,7 +317,6 @@ struct HostsView: View {
             if $0.width > 0, cardX == nil || abs(measuredForWidth - listWidth) > 0.5 {
                 cardX = $0.minX; cardWidth = $0.width; measuredForWidth = listWidth
             }
-            rowBottoms[host.id] = $0.maxY
             rowRects[host.id] = $0
         }
         // 不允许一滑到底直接触发(第一个动作是删除,太容易误触);只能点露出来的按钮。
@@ -358,7 +356,7 @@ struct HostsView: View {
                 if featured && !activeConnecting && !activeClosing { BlinkingCursor().padding(.leading, 8).transition(.opacity) }
                 Spacer(minLength: 8)
                 ZStack {
-                    if featured && activeConnecting {
+                    if featured && activeConnecting && !activeClosing {
                         ProgressView().controlSize(.mini).tint(.white)
                             .transition(.opacity.animation(.easeOut(duration: 0.18)))
                     } else {
@@ -379,7 +377,7 @@ struct HostsView: View {
             }
             // 状态行一直在布局里,收起 = 高度和透明度一起平滑变到 0(不是直接从布局里拿掉):
             // 拿掉的话列表单元格的高度瞬间缩短,名字被猛地顶上去,箭头走另一条动画、慢半拍追上来,看起来「闪跳一下」。
-            statusLine
+            statusLine(showing: featured || host.id == lastFeatured)
                 .opacity(featured ? 1 : 0)
                 .frame(height: featured ? smallFont * 1.3 : 0, alignment: .top)
                 .clipped()
@@ -410,12 +408,16 @@ struct HostsView: View {
     /// `❯` 占的宽度和它到名字的间距:状态那一行的缩进用同一组数,才和名字的起点对齐。
     private static let promptGap: CGFloat = 9.4
 
-    @ViewBuilder private var statusLine: some View {
-        if activeClosing {
+    @ViewBuilder private func statusLine(showing: Bool) -> some View {
+        if !showing {
+            // 别的行不画(那些行的「已连接 · 时长」是看不见的,但里面的计时器每秒都在走;只画连着的和刚断开的那一行)。
+            Color.clear
+        } else if activeClosing {
             // 断开的那一刻:「✓ 已连接 · 时长」淡成灰色的「✕ 已断开」,停一下,再整行收掉。
             HStack(spacing: 0) {
                 Text(verbatim: "✕ ")
-                Text("Disconnected")
+                // 还没连上就取消的(连接中 / 等确认主机密钥)写「已取消」,连上过的才写「已断开」。
+                if connectedSince == nil { Text("Cancelled") } else { Text("Disconnected") }
             }
             .foregroundStyle(Color.white.opacity(0.5))
             .font(.system(size: smallFont, design: .monospaced))
@@ -1029,7 +1031,7 @@ private enum HostColor {
 
 
 /// 替身线顶上的时候真线藏起来:不带动画(和替身线同一帧换手),看起来虚线一直在。
-private struct SeparatorFade: ViewModifier {
+private struct SeparatorSwap: ViewModifier {
     let hidden: Bool
 
     func body(content: Content) -> some View {

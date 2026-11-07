@@ -527,7 +527,11 @@ struct RootView: View {
         closeTask?.cancel()
         closeTask = nil
         withAnimation(.smooth(duration: 0.25)) { active = nil }
-        closing = false
+        // 标志晚一点再复位:同时复位的话,正在收起的那一行会在最后一刻闪回「✓ 已连接」。
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(350))
+            if active == nil { closing = false }
+        }
     }
 
     private func close() {
