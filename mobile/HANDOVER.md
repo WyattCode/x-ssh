@@ -2968,3 +2968,6 @@ M3.51 已有「用生物识别解锁」开关,连私钥密文(`lockedKeyData` / 
 - **半折 / 折叠展开时不放收场动画(`RootView.close` / `finishCloseNow`)**:铰链半开(`halfFolded`,列表和会话各占 50%)时 `close()` 直接按原来的方式关(`withAnimation(.smooth(0.25)) { active = nil }`),不放「放手 → 已断开 → 收起」;收场动画进行到一半用户开始折叠 / 展开(`halfFolded` 或 `sizeClass` 变了)就取消任务、立刻收尾(`closeTask` 要在每次 `sleep` 之后自己检查 `Task.isCancelled`,`try?` 会吞掉取消)。虚线替身线用每行实时量到的矩形(`rowRects` / `frozenRects`),不用早先量过的固定宽度(半折 / 折叠展开时宽度会变,会比真线短一截)。测半折:Device Hub 底部姿态按钮第二个。
 
 - **退出后再点同一台不能「回到」已断开的会话**:`close()` 之后会话要在 `active` 里留到收场动画收完(外屏约 0.9s、内屏类似),它的 `state` 还是 `.connected`(`isEnded` 为 false,而且列表里「连着的那台」就靠 `isEnded` 决定,不能改)。`open()` 以前看到「点的是 `active` 这一台且没结束」就直接回到它 —— 回到的是一条已经 `disconnect()` 过的死会话。现在 `TerminalModel.userDisconnected`(`disconnect()` 里置位)参与判断:被用户断开过的一律新连。本机回环测试服务器连退 4 次都正常、断开后连接数回到 0,所以「第三次连接失败」在回环环境里复现不出来,真机上要看失败卡里的具体错误文字。
+
+- **编辑页分隔线从头画到尾(`fullWidthSeparator()`)**:系统把列表行下面分隔线的起点对到行里第一段文字上,分段控件(「密码 / 私钥」)和带图标的按钮下面的线就比别的行短一截。`alignmentGuide(.listRowSeparatorLeading) { $0[.leading] }` 让它们和别的行一样从最左画到最右。
+- **「ssh: Disconnected」可能是服务器在拒绝**:OpenSSH 9.8+ 默认开 `PerSourcePenalties`,同一个来源地址短时间内连得太勤(尤其是连上又不登录就断,或登录失败),sshd 会在握手一开始就回一行 `Not allowed at this time` 然后断开 —— 客户端把它当成不是 SSH 横幅,报「Disconnected」。用户的一台 GPU 服务器(OpenSSH_10.2p1)就是这样:连着来第三次横幅就变成这行。服务端的惩罚最长约 10 分钟,期间谁连都被拒;排查时别反复探测,会把惩罚越拉越长。

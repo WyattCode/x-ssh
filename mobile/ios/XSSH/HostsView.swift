@@ -690,7 +690,7 @@ struct HostEditor: View {
                         .font(.system(.body, design: .monospaced))
                         .focused($focus, equals: .user).submitLabel(.next)
                         .onSubmit { focus = host.authKind == .password ? .password : nil }
-                    AuthKindPicker(selection: $host.authKind)
+                    AuthKindPicker(selection: $host.authKind).fullWidthSeparator()
                     if host.authKind == .password {
                         SecureField("Password", text: $credentials.password)
                             .textContentType(.password)
@@ -774,6 +774,7 @@ struct HostEditor: View {
                     copied = true
                     Task { try? await Task.sleep(for: .seconds(2)); copied = false }
                 }
+                .fullWidthSeparator()
             } else {
                 Text(keyProblem ?? String(localized: "No key yet. Generate one, or import an existing private key."))
                     .font(.footnote).foregroundStyle(keyProblem == nil ? Color.secondary : Color.red)
@@ -784,9 +785,9 @@ struct HostEditor: View {
                 .onSubmit { focus = nil; refreshKeyInfo() }
                 .onChange(of: credentials.passphrase) { _, _ in refreshKeyInfo() }
             // 一行一个按钮:三个并排在窄的弹层里会把文字挤成竖排。
-            Button("Generate", systemImage: "key", action: generate)
-            Button("Import…", systemImage: "arrow.down.doc") { importing = true }
-            Button("Paste", systemImage: "clipboard", action: pasteKey)
+            Button("Generate", systemImage: "key", action: generate).fullWidthSeparator()
+            Button("Import…", systemImage: "arrow.down.doc") { importing = true }.fullWidthSeparator()
+            Button("Paste", systemImage: "clipboard", action: pasteKey).fullWidthSeparator()
         } header: {
             Text(verbatim: "# ") .foregroundStyle(Color.green) + Text("Private Key")
         } footer: {
@@ -1063,5 +1064,14 @@ private struct GhostOverlay<Ghosts: View>: ViewModifier {
                 .ignoresSafeArea()
                 .allowsHitTesting(false)
         }
+    }
+}
+
+
+extension View {
+    /// 列表行下面的分隔线从行的最左边画到最右边。系统默认把分隔线的起点对到行里第一段文字(分段控件里的「密码」、
+    /// 带图标按钮的标题)上,于是这几行下面的线比别的行短一截(左边少了一段)。
+    func fullWidthSeparator() -> some View {
+        alignmentGuide(.listRowSeparatorLeading) { $0[.leading] }
     }
 }
