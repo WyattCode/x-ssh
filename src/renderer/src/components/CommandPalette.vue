@@ -296,8 +296,13 @@ async function importSshConfig(): Promise<void> {
   store.togglePalette(false)
   await store.loadHosts()
   await store.loadKnownHosts()
-  if (res.count > 0) toast(t('set.sec.importSshOk', { n: res.count }), 'success')
-  else toast(t('set.sec.importSshNone'), 'info')
+  if (res.count > 0) {
+    toast(t('set.sec.importSshOk', { n: res.count }), 'success')
+  } else if (!res.parsed) {
+    toast(t('set.sec.importSshNoHost'), 'info')
+  } else {
+    toast(t('set.sec.importSshAllKnown', { n: res.parsed }), 'info')
+  }
 }
 watch(
   () => store.paletteOpen,

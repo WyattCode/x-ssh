@@ -863,9 +863,15 @@ async function importSshConfig(): Promise<void> {
   }
   await store.loadHosts()
   await store.loadKnownHosts()
-  if (r.count > 0) toast(t('set.sec.importSshOk', { n: r.count }), 'success')
-  else toast(t('set.sec.importSshNone'), 'info')
-  toast(`${t('set.sec.imported')} ${r.count ?? 0} ${t('set.sec.hosts')}`, 'success')
+  if (r.count > 0) {
+    toast(t('set.sec.importSshOk', { n: r.count }), 'success')
+  } else if (!r.parsed) {
+    // "Imported 0" has two very different causes; naming them saves a support
+    // round-trip when the user just wrote ten hosts.
+    toast(t('set.sec.importSshNoHost'), 'info')
+  } else {
+    toast(t('set.sec.importSshAllKnown', { n: r.parsed }), 'info')
+  }
 }
 /** Maps the machine codes main returns for backup/restore into UI wording. */
 function backupErr(err: string | undefined, fallbackKey: 'set.sec.exportFail' | 'set.sec.importFail'): string {

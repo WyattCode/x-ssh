@@ -485,8 +485,10 @@ const splitEl = ref<HTMLElement>()
   text-align: left;
 }
 .fp-label {
-  font-size: 11px;
-  color: var(--text-faint);
+  /* --text-faint is ~3.2:1 on the dark card, below WCAG AA — and this label
+     sits next to the fingerprint the user must read before trusting a key. */
+  font-size: 12px;
+  color: var(--text-dim);
 }
 .fp {
   font-family: var(--font-mono);
@@ -511,7 +513,9 @@ const splitEl = ref<HTMLElement>()
 .idle-sub {
   margin-top: 5px;
   font-size: 12px;
-  color: var(--text-faint);
+  /* Same reason as .fp-label: this is the only line that tells two identically
+     titled tabs apart, so it has to be readable. */
+  color: var(--text-dim);
   font-family: var(--font-mono);
   max-width: 100%;
   white-space: nowrap;

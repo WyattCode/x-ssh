@@ -88,12 +88,18 @@ const groupNames = computed(() => {
 const stats = computed(() => {
   let online = 0
   let offline = 0
+  let unknown = 0
   for (const h of store.hosts) {
     const s = stateOf(h)
+    // "connected" counts as online — it obviously is — but "unknown" needs its
+    // own bucket: hosts reached through a jump/proxy are never probed directly,
+    // so without it the three numbers did not add up and the grey dots had no
+    // explanation anywhere.
     if (s === 'online' || s === 'connected') online++
     else if (s === 'offline') offline++
+    else unknown++
   }
-  return { total: store.hosts.length, online, offline, connected: connectedIds.value.size }
+  return { total: store.hosts.length, online, offline, unknown, connected: connectedIds.value.size }
 })
 
 // ---- Filter / group tabs / sort ----
@@ -396,6 +402,12 @@ defineExpose({ focusSearch: () => searchEl.value?.focus() })
         <div class="stat">
           <span class="st-icon"><span class="dot big offline" /></span>
           <span class="st-text"><b>{{ stats.offline }}</b><small>{{ t('hosts.offline') }}</small></span>
+        </div>
+        <!-- Only when something is actually unprobed, so the usual case keeps
+             three numbers instead of four. -->
+        <div v-if="stats.unknown" class="stat" :title="t('hosts.unknownHint')">
+          <span class="st-icon"><span class="dot big unknown" /></span>
+          <span class="st-text"><b>{{ stats.unknown }}</b><small>{{ t('hosts.unknown') }}</small></span>
         </div>
         <div class="stat">
           <span class="st-icon"><Icon name="terminal" :size="18" /></span>

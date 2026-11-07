@@ -16,9 +16,8 @@ import type { Host } from './types'
  *    A newline in `group` injected a raw config line.
  */
 
-/** Characters that would turn a Host pattern into a glob or a negation. */
+/** Characters that would turn a value into two arguments, or a pattern into a glob. */
 const UNQUOTED_UNSAFE = /[\s"'\\]/
-const PATTERN_UNSAFE = /[*?!]/
 
 /** One token, free of whitespace, glob metacharacters and control characters. */
 function aliasBase(h: Host): string {

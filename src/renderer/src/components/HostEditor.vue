@@ -76,6 +76,8 @@ const form = reactive({
 const proxyPassCleared = ref(false)
 const password = ref('')
 const passphrase = ref('')
+/** Why the last save failed; cleared on every new attempt. */
+const saveError = ref('')
 
 /** Toggling the clear flag must also drop whatever was typed over it. */
 function toggleProxyPassCleared(): void {
@@ -525,6 +527,7 @@ async function save(): Promise<void> {
   const pw = form.auth === 'password' && password.value ? password.value : undefined
   const pp = form.auth === 'key' && passphrase.value ? passphrase.value : undefined
   saving.value = true
+  saveError.value = ''
   try {
     // `props.host.os` is a Pinia proxy. Passing it straight to `invoke` throws
     // "An object could not be cloned" before the main process ever runs, which
@@ -541,6 +544,9 @@ async function save(): Promise<void> {
     // Keep the raw reason in the console: "保存失败" alone is unactionable, and
     // IPC/clone errors carry no user-facing wording of their own.
     console.error('host save failed:', msg)
+    saveError.value = msg.includes('secrets-')
+      ? t('ed.saveFailSecret')
+      : `${t('ed.saveFail')}${msg ? ` — ${msg}` : ''}`
     toast(
       msg.includes('secrets-') ? t('ed.saveFailSecret') : t('ed.saveFail'),
       'error'
@@ -915,6 +921,10 @@ async function remove(): Promise<void> {
             </div>
           </section>
         </div>
+
+        <!-- Stays on screen after the toast fades: the panel itself must show
+             that the save failed and why, or it looks like nothing happened. -->
+        <div v-if="saveError" class="save-error" role="alert">{{ saveError }}</div>
 
         <footer class="p-foot">
           <button v-if="host" type="button" class="btn btn-danger" @click="remove">{{ t('host.delete') }}</button>
@@ -1543,6 +1553,18 @@ input[type='number']::-webkit-inner-spin-button {
   padding: 14px 24px;
   border-top: 1px solid var(--border);
   background: var(--bg);
+}
+.save-error {
+  flex: none;
+  margin: 0 24px 12px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.55;
+  word-break: break-word;
 }
 .spacer {
   flex: 1;

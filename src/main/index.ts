@@ -777,7 +777,15 @@ async function deleteSnippet(id: string): Promise<Snippet[]> {
 
 // ---- OpenSSH ~/.ssh/config import ----
 /** Imports hosts from the user's OpenSSH config, skipping ones already present. */
-async function importSshConfig(): Promise<{ ok: boolean; count: number; error?: string }> {
+async function importSshConfig(): Promise<{
+  ok: boolean
+  count: number
+  /** Host blocks found (Include expanded) — lets the UI explain a zero result. */
+  parsed?: number
+  /** Blocks already present, which is the common reason for "imported 0". */
+  skipped?: number
+  error?: string
+}> {
   const cfgPath = join(homedir(), '.ssh', 'config')
   let raw: string
   try {
@@ -846,7 +854,7 @@ async function importSshConfig(): Promise<{ ok: boolean; count: number; error?: 
     const target = (await store.list()).find((h) => h.id === hostId)
     if (target) await store.save({ ...target, jumpHostId: jid })
   }
-  return { ok: true, count }
+  return { ok: true, count, parsed: parsed.length, skipped: Math.max(0, parsed.length - count) }
 }
 
 /**
