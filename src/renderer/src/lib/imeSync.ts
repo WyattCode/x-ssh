@@ -17,17 +17,6 @@
 const DEL = '\x7f'
 const CONTROL = /[\x00-\x1f\x7f]/
 
-/**
- * Never erase more than this many characters for one correction.
- *
- * A voice IME can rewrite text it committed long ago (a punctuation fix at the
- * start of a paragraph). Mirroring that faithfully means one DEL per character
- * *of the whole paragraph* — hundreds of backspaces in a single keystroke, which
- * a line editor handles badly and a TUI can reject outright. Past this window we
- * accept a duplicated tail: a wrong-but-bounded line beats a DEL flood.
- */
-export const IME_MAX_UNDO = 512
-
 /** Printable text only — no C0 controls, DEL or escape sequences. */
 export const isPlainText = (data: string): boolean => data !== '' && !CONTROL.test(data)
 
@@ -54,11 +43,16 @@ export interface ImeMirror {
    */
   sync(settled: string): string
   /**
-   * Accept the textarea's current text as already accounted for, and never
-   * erase it: the remote line has changed in a way the textarea doesn't show
-   * (a keystroke), or xterm wrote the textarea itself (right-click copy).
+   * Accept the textarea's current text as already accounted for.
+   *
+   * `protect` (default true) marks the whole baseline as untouchable — right for
+   * text that came from outside the mirror, e.g. xterm filling the textarea
+   * with terminal output on right-click copy. Pass false when the text was the
+   * mirror's own and the user merely deleted part of it: keeping a backspace
+   * "protected" is what made the next dictation append a duplicate instead of
+   * replacing the old tail.
    */
-  adopt(baseline: string): void
+  adopt(baseline: string, protect?: boolean): void
   /** The textarea was emptied behind our back (xterm does this on blur). */
   clear(): void
 }
@@ -84,9 +78,14 @@ export function createImeMirror(): ImeMirror {
   /** Leading characters of `synced` that must never be erased. */
   let floor = 0
 
-  function adopt(baseline: string): void {
+  function adopt(baseline: string, protect = true): void {
+    const len = Array.from(baseline).length
+    // Only a pure tail deletion may lower the watermark. An external write (or
+    // any edit that is not a strict prefix of what we mirrored) keeps — or
+    // raises — the protection, so text the mirror never sent is never erased.
+    const tailOnly = synced.startsWith(baseline)
     synced = baseline
-    floor = Array.from(baseline).length
+    floor = protect ? len : tailOnly ? Math.min(floor, len) : len
   }
 
   function reconcile(next: string): string {
@@ -95,18 +94,16 @@ export function createImeMirror(): ImeMirror {
     let p = 0
     while (p < a.length && p < b.length && a[p] === b[p]) p++
     let out: string
-    const erase = a.length - p
-    if (p >= floor && erase <= IME_MAX_UNDO) {
-      out = DEL.repeat(erase) + b.slice(p).join('')
+    if (p >= floor) {
+      // Erase exactly the tail we sent, then resend from the change point.
+      // This is the only branch that produces correct text. It used to have a
+      // size limit here (falling back to "append only"), which is precisely why
+      // voice dictation duplicated words when it rewrote a long paragraph.
+      out = DEL.repeat(a.length - p) + b.slice(p).join('')
     } else {
-      // The change reaches into text we must not touch (it predates a manual
-      // edit, or never went to the remote at all), or undoing it would flood
-      // the remote. Erase at most what we own and within the window, then send
-      // the rest as new — a possible duplicate, never a wrong deletion and
-      // never an unbounded DEL burst.
-      out =
-        DEL.repeat(Math.min(Math.max(0, a.length - floor), IME_MAX_UNDO)) +
-        b.slice(p).join('')
+      // The change reaches into text the mirror never sent (right-click copy
+      // put terminal output in the textarea). Erase only what we own.
+      out = DEL.repeat(Math.max(0, a.length - floor)) + b.slice(p).join('')
       floor = p
     }
     synced = next
@@ -120,7 +117,9 @@ export function createImeMirror(): ImeMirror {
         // the user did can move the remote line under the mirror; a reply sent
         // from a timer (e.g. to a cursor-position query mid-composition) must
         // leave it alone.
-        if (eventType !== undefined) adopt(settled)
+        // A backspace deletes text the mirror sent, so that tail must stay
+        // erasable — protecting it is what caused duplicated dictation.
+        if (eventType !== undefined) adopt(settled, data !== DEL)
         return data
       }
       if (settled !== synced) return reconcile(settled)

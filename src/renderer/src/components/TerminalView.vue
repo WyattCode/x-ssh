@@ -675,6 +675,12 @@ onMounted(() => {
         if (out) send(out)
         return
       }
+      // A deletion removes text the mirror itself sent: keep it erasable, or
+      // the next dictation correction is appended as a duplicate.
+      if (kind.startsWith('delete')) {
+        ime.adopt(ta.value, false)
+        return
+      }
       // Anything else lands text xterm already sent or that isn't typing at
       // all: a native paste (xterm sends it, empties the textarea, then the
       // browser inserts it anyway), a drop, an undo, a keystroke's own

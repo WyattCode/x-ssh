@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { createImeMirror, IME_MAX_UNDO } from './imeSync'
+import { createImeMirror } from './imeSync'
 
 /**
  * Drives a mirror the way TerminalView does, and replays everything it sends
@@ -90,7 +90,12 @@ describe('createImeMirror (randomised)', () => {
             : mirror.sync(ta)
           apply(out, true)
         } else if (op === 5) {
-          apply(mirror.input(word(), { settled: ta, eventType: 'keydown' }), false)
+          // A typed character reaches the remote through xterm's onData and the
+          // same send() path as mirrored text, so it IS the mirror's output.
+          // Marking it "not mine" modelled a case that cannot happen and
+          // blocked the fix for duplicated dictation (which must be allowed to
+          // erase a tail the mirror had already sent).
+          apply(mirror.input(word(), { settled: ta, eventType: 'keydown' }), true)
         } else if (op === 6) {
           apply(mirror.input('\x7f', { settled: ta, eventType: 'keydown' }), false)
         } else if (op === 7) {
@@ -294,18 +299,30 @@ describe('createImeMirror', () => {
     expect(h.mirror.sync('你好')).toBe('')
   })
 
-  it('bounds the backspace burst when a long draft is rewritten', () => {
+  it('replaces a rewritten long draft instead of duplicating it', () => {
     const h = harness()
     const draft = '字'.repeat(2000)
     h.commit(draft, draft)
-    // Rewriting the very first character would naively be 1999 DELs — the
-    // "it breaks once the dictation gets long" failure.
+    // The IME rewrites the very first character of a long paragraph. The old
+    // "bounded undo" fallback appended the whole correction on top, which is
+    // exactly the duplicated text users saw with voice dictation.
     const fixed = '词' + draft.slice(1)
     h.commit(fixed, fixed, 'input')
-    const out = h.sent[1]
-    const dels = out.split('\x7f').length - 1
-    expect(dels).toBeLessThanOrEqual(IME_MAX_UNDO)
-    expect(out.length).toBeLessThanOrEqual(IME_MAX_UNDO + fixed.length)
+    expect(h.remote()).toBe(fixed)
+    // The first character differs, so the whole tail is erased and resent:
+    // correct text, no duplicate, regardless of how long the draft got.
+    expect(h.sent[1].split('\x7f').length - 1).toBe(2000)
+  })
+
+  it('does not duplicate after the user deleted a character', () => {
+    const h = harness()
+    h.commit('你好世界', '你好世界')
+    // Backspace: the textarea is one shorter and xterm sent the DEL.
+    h.value = '你好世'
+    h.emit('\x7f', 'keydown')
+    // The IME then rewrites the whole line, comma included.
+    h.commit('你好，世界', '你好，世界', 'input')
+    expect(h.remote()).toBe('你好，世界')
   })
 
   it('sends a long dictation one chunk at a time', () => {
