@@ -326,6 +326,7 @@ fun DuoApp(
                     underRail = true,
                     topPad = 0.dp,
                     bottomClearance = 84.dp,
+                    selectionFill = false,
                 )
             }
         }

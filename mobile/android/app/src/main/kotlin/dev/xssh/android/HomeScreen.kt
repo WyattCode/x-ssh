@@ -525,6 +525,8 @@ internal fun HostListPane(
     topPad: Dp,
     /** 列表底部给按钮留的高度:折叠屏是整条轨道,直板机是底栏。 */
     bottomClearance: Dp,
+    /** 选中的那一行要不要垫一块灰底(内屏抽屉里不要:运行中的那行靠绿色箭头、光标和「✓ 运行中」就够认了)。 */
+    selectionFill: Boolean = true,
 ) {
     val p = LocalXssh.current
     val scope = rememberCoroutineScope()
@@ -732,7 +734,7 @@ internal fun HostListPane(
                         HostCard(
                             host = host,
                             large = large,
-                            selected = host.id == selectedId,
+                            selected = selectionFill && host.id == selectedId,
                             running = host.id in running,
                             startedAt = sessions.firstOrNull { it.hostId == host.id }?.startedAt,
                             // 开着的时候点卡片是"合上",不是连接 —— 和 iOS 一致。
@@ -1142,6 +1144,15 @@ private fun HostCard(
 ) {
     val p = LocalXssh.current
     val font = rowFontSize(large)
+    // 连上 / 断开的过渡(iOS 的"放手"):箭头颜色渐变,光标淡入淡出,状态行平滑展开 / 收起,
+    // 而不是一帧之内全变。收起过程中状态行还在组合里,时长沿用断开前最后一次的值。
+    val arrow by androidx.compose.animation.animateColorAsState(
+        if (running) p.ok else p.text.copy(alpha = 0.4f),
+        androidx.compose.animation.core.tween(300),
+        label = "hostArrow",
+    )
+    var lastStartedAt by remember { mutableStateOf<Long?>(null) }
+    if (startedAt != null) lastStartedAt = startedAt
     XsshCard(
         modifier = Modifier.fillMaxWidth(),
         highlight = selected,
@@ -1156,7 +1167,7 @@ private fun HostCard(
         // 连着的那台:`❯` 变绿、名字后面一个闪几下的光标,下面多一行绿色的「✓ 运行中」。
         // 编辑/删除走左滑。
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Prompt(font, color = if (running) p.ok else null)
+            Prompt(font, color = arrow)
             Spacer(Modifier.width(PromptGap))
             // 名字 + 光标占掉中间所有空位(名字自己 fill = false:短名字不撑满,光标紧跟在名字后面;
             // 长名字被截断,但行尾的标签和色点永远留得下)。
@@ -1170,9 +1181,15 @@ private fun HostCard(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false),
                 )
-                if (running) {
-                    Spacer(Modifier.width(8.dp))
-                    BlinkingCursor()
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = running,
+                    enter = androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(200)),
+                    exit = androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(200)),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Spacer(Modifier.width(8.dp))
+                        BlinkingCursor()
+                    }
                 }
             }
             // 只标需要注意的状态;"密码登录""已信任"这类常态不贴标签。
@@ -1200,9 +1217,15 @@ private fun HostCard(
             }
         }
         // 连着的那台多一行绿色状态「✓ 运行中 · 12:03」,缩进到名字的起点(iOS 版的「已连接 · 时长」)。
-        if (running) {
+        androidx.compose.animation.AnimatedVisibility(
+            visible = running,
+            enter = androidx.compose.animation.expandVertically(androidx.compose.animation.core.tween(300)) +
+                androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(300)),
+            exit = androidx.compose.animation.shrinkVertically(androidx.compose.animation.core.tween(300)) +
+                androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(200)),
+        ) {
             val label = stringResource(R.string.host_running)
-            val elapsed = startedAt?.let { runningClock(it) }
+            val elapsed = lastStartedAt?.let { runningClock(it) }
             Text(
                 "✓ " + label + (elapsed?.let { " · $it" } ?: ""),
                 color = p.ok.copy(alpha = 0.95f),
