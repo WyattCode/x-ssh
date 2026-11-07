@@ -838,7 +838,7 @@ private fun HostsTitle(total: Int) {
  * 系统关了动画(动画时长缩放 = 0,即"减弱动态效果")就不闪,常亮。读屏跳过。
  */
 @Composable
-private fun BlinkingCursor(modifier: Modifier = Modifier, height: Dp = 15.dp) {
+private fun BlinkingCursor(modifier: Modifier = Modifier, height: Dp = 14.dp) {
     val p = LocalXssh.current
     val context = LocalContext.current
     val still = remember {
@@ -860,7 +860,7 @@ private fun BlinkingCursor(modifier: Modifier = Modifier, height: Dp = 15.dp) {
     val alpha by animateFloatAsState(if (bright) 1f else 0.15f, tween(500), label = "cursor")
     Box(
         modifier
-            .size(8.dp, height)
+            .size(6.dp, height)
             .graphicsLayer { this.alpha = alpha }
             .clip(RoundedCornerShape(1.dp))
             .background(p.ok)
@@ -1130,6 +1130,16 @@ private fun SessionRow(session: TerminalSession, large: Boolean, onOpen: () -> U
     }
 }
 
+/** 主机行的连接阶段:没连 / 连着 / 刚断开(停一下再收)。 */
+private enum class RowPhase { Idle, Running, Closing }
+
+/** 断开后"停一下"的时长(iOS:0.44s)。 */
+private const val RowClosingHoldMs = 440L
+
+/** 收起 / 展开的时长和曲线(iOS `collapseCurve`:起步轻、中间快、落地软)。 */
+private const val RowCurveMs = 220
+private val RowCurve = androidx.compose.animation.core.CubicBezierEasing(0.3f, 0.05f, 0.1f, 1f)
+
 @Composable
 private fun HostCard(
     host: Host,
@@ -1144,11 +1154,25 @@ private fun HostCard(
 ) {
     val p = LocalXssh.current
     val font = rowFontSize(large)
-    // 连上 / 断开的过渡(iOS 的"放手"):箭头颜色渐变,光标淡入淡出,状态行平滑展开 / 收起,
-    // 而不是一帧之内全变。收起过程中状态行还在组合里,时长沿用断开前最后一次的值。
+    // 连上 / 断开的编排(照 iOS 的"放手"):
+    //   断开那一刻  → 0.32s 里箭头由绿变灰、光标淡出、状态行换成灰色的「✕ 已断开」;
+    //   停 0.44s    → 让人看清"断开了";
+    //   然后整行收掉 → 0.22s 的专用曲线(起步轻、中间快、落地软),下面的行同步滑上来。
+    // 连上时状态行用同一条曲线展开。
+    var phase by remember { mutableStateOf(if (running) RowPhase.Running else RowPhase.Idle) }
+    LaunchedEffect(running) {
+        if (running) {
+            phase = RowPhase.Running
+        } else if (phase == RowPhase.Running) {
+            phase = RowPhase.Closing
+            delay(RowClosingHoldMs)
+            phase = RowPhase.Idle
+        }
+    }
+    val live = phase == RowPhase.Running
     val arrow by androidx.compose.animation.animateColorAsState(
-        if (running) p.ok else p.text.copy(alpha = 0.4f),
-        androidx.compose.animation.core.tween(300),
+        if (live) p.ok else p.text.copy(alpha = 0.4f),
+        androidx.compose.animation.core.tween(320, easing = androidx.compose.animation.core.FastOutSlowInEasing),
         label = "hostArrow",
     )
     var lastStartedAt by remember { mutableStateOf<Long?>(null) }
@@ -1182,9 +1206,9 @@ private fun HostCard(
                     modifier = Modifier.weight(1f, fill = false),
                 )
                 androidx.compose.animation.AnimatedVisibility(
-                    visible = running,
+                    visible = live,
                     enter = androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(200)),
-                    exit = androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(200)),
+                    exit = androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(240)),
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Spacer(Modifier.width(8.dp))
@@ -1217,23 +1241,50 @@ private fun HostCard(
             }
         }
         // 连着的那台多一行绿色状态「✓ 运行中 · 12:03」,缩进到名字的起点(iOS 版的「已连接 · 时长」)。
+        // 状态行一直占着高度直到"停一下"结束;收起 = 高度和透明度沿同一条曲线一起落到 0,内容贴着顶边。
         androidx.compose.animation.AnimatedVisibility(
-            visible = running,
-            enter = androidx.compose.animation.expandVertically(androidx.compose.animation.core.tween(300)) +
-                androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(300)),
-            exit = androidx.compose.animation.shrinkVertically(androidx.compose.animation.core.tween(300)) +
-                androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(200)),
+            visible = phase != RowPhase.Idle,
+            enter = androidx.compose.animation.expandVertically(
+                androidx.compose.animation.core.tween(RowCurveMs, easing = RowCurve),
+                expandFrom = Alignment.Top,
+            ) + androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(RowCurveMs, easing = RowCurve)),
+            exit = androidx.compose.animation.shrinkVertically(
+                androidx.compose.animation.core.tween(RowCurveMs, easing = RowCurve),
+                shrinkTowards = Alignment.Top,
+            ) + androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(RowCurveMs, easing = RowCurve)),
         ) {
-            val label = stringResource(R.string.host_running)
-            val elapsed = lastStartedAt?.let { runningClock(it) }
-            Text(
-                "✓ " + label + (elapsed?.let { " · $it" } ?: ""),
-                color = p.ok.copy(alpha = 0.95f),
-                fontFamily = XsshFonts.monoUi,
-                fontSize = 12.sp,
-                maxLines = 1,
-                modifier = Modifier.padding(top = 3.dp, start = promptWidth(font) + PromptGap),
-            )
+            // 「✓ 运行中 · 时长」和「✕ 已断开」交叉淡化:旧的先淡出,新的晚一点淡入,两行字不会叠在一起。
+            AnimatedContent(
+                targetState = live,
+                transitionSpec = {
+                    androidx.compose.animation.fadeIn(tween(200, delayMillis = 100)) togetherWith
+                        androidx.compose.animation.fadeOut(tween(150))
+                },
+                label = "hostStatus",
+            ) { isLive ->
+                val start = promptWidth(font) + PromptGap
+                if (isLive) {
+                    val label = stringResource(R.string.host_running)
+                    val elapsed = lastStartedAt?.let { runningClock(it) }
+                    Text(
+                        "✓ " + label + (elapsed?.let { " · $it" } ?: ""),
+                        color = p.ok.copy(alpha = 0.95f),
+                        fontFamily = XsshFonts.monoUi,
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        modifier = Modifier.padding(top = 3.dp, start = start),
+                    )
+                } else {
+                    Text(
+                        "✕ " + stringResource(R.string.host_disconnected),
+                        color = p.text.copy(alpha = 0.5f),
+                        fontFamily = XsshFonts.monoUi,
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        modifier = Modifier.padding(top = 3.dp, start = start),
+                    )
+                }
+            }
         }
     }
 }
@@ -1341,10 +1392,12 @@ private fun SwipeActions(
     } else {
         stringResource(R.string.host_confirm_delete)
     }
+    // 不要给这个 Box 设 height(IntrinsicSize.Min):固有高度只认内容的"完整高度",
+    // 看不到状态行正在播的收起动画,容器会一直撑着、动画播完才猛地塌 —— 下面的虚线就是这样"啪"一下上去的。
+    // 按钮层是 matchParentSize,本来就跟着卡片的实际高度走,用不着它。
     Box(
         modifier
             .fillMaxWidth()
-            .height(IntrinsicSize.Min)
             .semantics {
                 // 读屏用户做不了滑动手势,给同样的两个操作。
                 // 删除要和视觉上的两步确认一致:第一下只是亮出「确认删除」,

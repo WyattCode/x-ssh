@@ -186,6 +186,7 @@
     <string name="host_port">連接埠</string>
     <string name="host_private_key">私鑰</string>
     <string name="host_running">執行中</string>
+    <string name="host_disconnected">已斷開</string>
     <string name="host_search_hosts">搜尋主機</string>
     <string name="host_search_placeholder">搜尋名稱 / 位址 / 使用者</string>
     <string name="host_select_on_left">選擇左邊的主機</string>
