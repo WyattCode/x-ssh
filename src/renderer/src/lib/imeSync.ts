@@ -1,17 +1,22 @@
 /**
- * Keeps the remote input line in step with what an IME has put into xterm's
- * hidden textarea.
+ * Tracks what the remote input line holds while an IME (notably voice input)
+ * types into xterm's hidden textarea.
  *
- * Voice input (WeChat, Windows voice typing…) commits a draft and then rewrites
- * that already-committed text with a corrected version. In a normal text box
- * that is an in-place replacement. A terminal has already sent the draft, and
- * xterm sends the correction as new input, so the remote line ends up holding
- * both. Reconversion over committed text is worse: xterm measures the new
- * composition from the old length and sends only a fragment of the result.
+ * The fact the previous design got wrong: **`term.onData` IS xterm's send
+ * path.** When it fires, the payload has already been written to the SSH
+ * channel. Mirroring that payload back — as a diff, as a resend, in any form —
+ * puts it on the wire twice, which is exactly the duplicated dictation users
+ * saw (`默认把API key默认把API key`). A "reconcile the textarea against a mirror"
+ * model cannot work, because xterm empties the textarea after every commit:
+ * the textarea is a drop box for the *next* commit, not a view of the line.
  *
- * So instead of trusting what xterm emits for IME text, treat the remote line
- * as a mirror of the textarea: when committed text changes, erase the part that
- * changed (one DEL per character) and send the new tail.
+ * So `input()` never re-sends plain text; it only records it. `sync()` is the
+ * safety net for text xterm did NOT emit (some voice IMEs write straight into
+ * the textarea), and it sends only the part the remote does not already have.
+ *
+ * Control keys are the one thing the textarea cannot express: `\r` starts a new
+ * line, `DEL` removes a character, Ctrl+U clears it. They update the record
+ * without changing what goes on the wire.
  */
 
 const DEL = '\x7f'
@@ -21,7 +26,8 @@ const CONTROL = /[\x00-\x1f\x7f]/
 export const isPlainText = (data: string): boolean => data !== '' && !CONTROL.test(data)
 
 export interface ImeInputContext {
-  /** xterm's hidden textarea, minus any composition still in progress. */
+  /** xterm's hidden textarea, minus any composition still in progress. Kept in
+   *  the signature for callers; the mirror no longer needs it to decide. */
   settled: string
   /**
    * Type of the DOM event being dispatched when xterm emitted the data
@@ -32,34 +38,20 @@ export interface ImeInputContext {
 }
 
 export interface ImeMirror {
-  /** What should actually reach the remote for one xterm `onData` payload. */
+  /** What should additionally reach the remote for one xterm `onData` payload.
+   *  Empty for plain text: xterm already sent it. */
   input(data: string, ctx: ImeInputContext): string
   /**
-   * What to send so the remote catches up with the settled textarea, called
-   * when the IME commits (compositionend, a committed `input`). This is the
-   * safety net for commits xterm emits nothing for: a reconversion that made
-   * the text shorter, or voice text xterm ignores because it still believes
-   * a key is held (its keyup went to a dialog). Empty if already in step.
+   * The part of `settled` the remote does not have yet, for commits xterm
+   * emitted nothing for. Empty when already in step.
    */
   sync(settled: string): string
-  /**
-   * Accept the textarea's current text as already accounted for.
-   *
-   * `protect` (default true) marks the whole baseline as untouchable — right for
-   * text that came from outside the mirror, e.g. xterm filling the textarea
-   * with terminal output on right-click copy. Pass false when the text was the
-   * mirror's own and the user merely deleted part of it: keeping a backspace
-   * "protected" is what made the next dictation append a duplicate instead of
-   * replacing the old tail.
-   */
-  adopt(baseline: string, protect?: boolean): void
-  /** The textarea was emptied behind our back (xterm does this on blur). */
+  /** Record text xterm itself put in the textarea (right-click copy, paste). */
+  adopt(baseline: string): void
+  /** The textarea was emptied without ending the line. The remote line is
+   *  unchanged, so nothing to do — kept for callers. */
   clear(): void
 }
-
-/** Event types during which xterm's own IME paths emit text. */
-const imeEvent = (type: string | undefined): boolean =>
-  type === undefined || type === 'input' || type === 'compositionend'
 
 /** Pre-mirror behaviour, behind `localStorage['xssh.imeMirror'] = '0'`: useful
  *  for A/B diagnosis on a machine where a specific IME misbehaves. */
@@ -73,69 +65,62 @@ export function createPassthroughMirror(): ImeMirror {
 }
 
 export function createImeMirror(): ImeMirror {
-  /** Textarea text already reflected on the remote (or deliberately left alone). */
+  /** What the remote line currently holds, as far as we know. */
   let synced = ''
-  /** Leading characters of `synced` that must never be erased. */
-  let floor = 0
-
-  function adopt(baseline: string, protect = true): void {
-    const len = Array.from(baseline).length
-    // Only a pure tail deletion may lower the watermark. An external write (or
-    // any edit that is not a strict prefix of what we mirrored) keeps — or
-    // raises — the protection, so text the mirror never sent is never erased.
-    const tailOnly = synced.startsWith(baseline)
-    synced = baseline
-    floor = protect ? len : tailOnly ? Math.min(floor, len) : len
-  }
-
-  function reconcile(next: string): string {
-    const a = Array.from(synced)
-    const b = Array.from(next)
-    let p = 0
-    while (p < a.length && p < b.length && a[p] === b[p]) p++
-    let out: string
-    if (p >= floor) {
-      // Erase exactly the tail we sent, then resend from the change point.
-      // This is the only branch that produces correct text. It used to have a
-      // size limit here (falling back to "append only"), which is precisely why
-      // voice dictation duplicated words when it rewrote a long paragraph.
-      out = DEL.repeat(a.length - p) + b.slice(p).join('')
-    } else {
-      // The change reaches into text the mirror never sent (right-click copy
-      // put terminal output in the textarea). Erase only what we own.
-      out = DEL.repeat(Math.max(0, a.length - floor)) + b.slice(p).join('')
-      floor = p
-    }
-    synced = next
-    return out
-  }
+  /** The last payload xterm emitted for the current commit. A composition
+   *  usually produces BOTH an onData and an input event; `sync()` must
+   *  recognise the second one as already sent. */
+  let lastSent = ''
 
   return {
-    input(data, { settled, eventType }) {
+    input(data, { eventType }) {
       if (!isPlainText(data)) {
-        // Keys, escape sequences, replies to terminal queries. Only something
-        // the user did can move the remote line under the mirror; a reply sent
-        // from a timer (e.g. to a cursor-position query mid-composition) must
-        // leave it alone.
-        // A backspace deletes text the mirror sent, so that tail must stay
-        // erasable — protecting it is what caused duplicated dictation.
-        if (eventType !== undefined) adopt(settled, data !== DEL)
-        return data
+        // A timer-driven reply (cursor-position query, etc.) says nothing
+        // about the line; a user key does.
+        if (eventType === undefined) return data
+        if (data === '\r' || data === '\n') {
+          synced = ''
+          lastSent = ''
+        } else if (data === DEL) synced = synced.slice(0, -1)
+        else if (data === '\x15') synced = '' // Ctrl+U
+        // xterm already sent it. Returning `data` here sent every arrow key,
+        // Tab and Ctrl+C to the shell twice — the same duplication as text,
+        // just less visible.
+        return ''
       }
-      if (settled !== synced) return reconcile(settled)
-      // Nothing changed in the textarea: either xterm's second IME path is
-      // re-emitting text already mirrored, or this is an ordinary keystroke.
-      if (imeEvent(eventType)) return ''
-      adopt(settled)
-      return data
+      // xterm already sent this text. Recording it is the whole job — sending
+      // it again is the duplicate this module exists to prevent.
+      synced += data
+      lastSent = data
+      return ''
     },
+
     sync(settled) {
-      return settled === synced ? '' : reconcile(settled)
+      if (!settled) return ''
+      // A composition normally produces an onData AND an input/compositionend
+      // event for the same text. If xterm already emitted it, the catch-up must
+      // do nothing — this is the duplicate path that survived the previous fix.
+      if (lastSent && (lastSent === settled || settled.endsWith(lastSent) || lastSent.endsWith(settled))) {
+        lastSent = ''
+        return ''
+      }
+      // If the textarea carries the whole line, send only what is missing.
+      // Otherwise it is new text typed into a freshly-cleared box: send it all.
+      const missing = settled.startsWith(synced) ? settled.slice(synced.length) : settled
+      if (!missing) return ''
+      synced += missing
+      return missing
     },
-    adopt,
+
+    adopt(baseline) {
+      // The remote does not have this text, but neither will we send it again:
+      // recording it keeps `sync()` from repeating it later.
+      synced = baseline
+    },
+
     clear() {
-      synced = ''
-      floor = 0
+      // Intentionally does NOT reset `synced`: xterm clears the textarea after
+      // committing, and the remote line still holds what was committed.
     }
   }
 }

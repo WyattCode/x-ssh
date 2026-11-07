@@ -693,7 +693,9 @@ onMounted(() => {
       // A deletion removes text the mirror itself sent: keep it erasable, or
       // the next dictation correction is appended as a duplicate.
       if (kind.startsWith('delete')) {
-        ime.adopt(ta.value, false)
+        // The DEL itself went through onData, which already shortened the
+        // record; re-syncing it here keeps the two in step.
+        ime.adopt(ta.value)
         return
       }
       // Anything else lands text xterm already sent or that isn't typing at
@@ -717,7 +719,11 @@ onMounted(() => {
         },
         set(this: HTMLTextAreaElement, v: string) {
           set.call(this, v)
-          ime.adopt(get.call(this))
+          // During a composition the textarea holds the IME's *draft*, which is
+          // not the remote line; and xterm empties the box after committing,
+          // which does not mean the line was cleared either. Only a real write
+          // of text (right-click copy, paste) should be recorded.
+          if (!composing && v !== '') ime.adopt(get.call(this))
         }
       })
     }
