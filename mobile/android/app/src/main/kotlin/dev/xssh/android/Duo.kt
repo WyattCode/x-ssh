@@ -72,6 +72,9 @@ import com.kyant.backdrop.backdrops.rememberLayerBackdrop
    - 没有会话时右栏是 logo + 「没有会话 / 选一台主机来连接」。
 */
 
+/** 一个会话此刻的状态:会话区(右栏)报给外层,左边的主机列表据此显示「连接中 / 连接失败」,连上之后才收抽屉。 */
+enum class DuoStatus { None, Connecting, Confirm, Failed, Live }
+
 /** 终端嵌在抽屉布局右栏时,从外面带进来的东西(见 [TerminalScreen] 的 `duo` 参数)。 */
 class DuoTerminalChrome(
     /** 抽屉现在是展开的(收起时竖条里才有「回主机列表」)。 */
@@ -80,6 +83,8 @@ class DuoTerminalChrome(
     val onShowHosts: () -> Unit,
     /** 主机名那一行左边要多让出的宽度(左上角有圆形开关时)。 */
     val headerStart: Dp = 0.dp,
+    /** 这台主机的会话状态变了:(主机 id, 状态)。离开时报 [DuoStatus.None]。 */
+    val onStatus: (String, DuoStatus) -> Unit = { _, _ -> },
 )
 
 /** 抽屉宽度(iOS 的 SidebarHandle.width = 334.4)。 */
@@ -157,13 +162,27 @@ fun DuoApp(
         }
     }
 
+    // 会话区报上来的状态(哪台主机、什么状态)。连接中 / 要确认 / 失败时,这些状态就落在右栏里、
+    // 左边的主机列表一直在 —— 失败了可以直接点别的主机;真正连上之后才把抽屉收起来。
+    var gate by remember { mutableStateOf<Pair<String, DuoStatus>?>(null) }
+    var collapseWhenLive by remember { mutableStateOf(false) }
+    LaunchedEffect(gate, termHost?.id, collapseWhenLive) {
+        val g = gate
+        if (collapseWhenLive && g != null && g.first == termHost?.id && g.second == DuoStatus.Live) {
+            drawerOpen = false
+            collapseWhenLive = false
+        }
+    }
+    val rowStatus = remember(gate) { gate?.let { mapOf(it.first to it.second) } ?: emptyMap() }
+
     fun connect(host: Host) {
         onSelect(host.id)
         onOpenTerminal(host)
         filesOpen = false
         if (query.isNotEmpty()) query = ""
         searching = false
-        if (!halfFolded) drawerOpen = false
+        // 半折是并排设计,抽屉本来就不收;平摊时等连上了再收(见上)。
+        collapseWhenLive = drawerOpen && !halfFolded
     }
 
     // 返回:抽屉收着就先展开;展开着、右栏开着终端就收掉终端视图(会话照跑)。
@@ -236,6 +255,13 @@ fun DuoApp(
                                         duo = DuoTerminalChrome(
                                             drawerOpen = shown,
                                             onShowHosts = { drawerOpen = true },
+                                            onStatus = { id, status ->
+                                                if (status == DuoStatus.None) {
+                                                    if (gate?.first == id) gate = null
+                                                } else {
+                                                    gate = id to status
+                                                }
+                                            },
                                         ),
                                     )
                                 }
@@ -328,6 +354,7 @@ fun DuoApp(
                     topPad = 0.dp,
                     bottomClearance = 84.dp,
                     selectionFill = false,
+                    hostStatus = rowStatus,
                 )
             }
         }

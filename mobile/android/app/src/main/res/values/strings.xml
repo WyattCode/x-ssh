@@ -188,6 +188,9 @@
     <string name="host_private_key">Private key</string>
     <string name="host_running">Running</string>
     <string name="host_disconnected">Disconnected</string>
+    <string name="host_row_connecting">Connecting…</string>
+    <string name="host_row_confirm">Waiting for confirmation</string>
+    <string name="host_row_failed">Connection failed</string>
     <string name="host_search_hosts">Search hosts</string>
     <string name="host_search_placeholder">Search name / address / user</string>
     <string name="host_select_on_left">Select a host on the left</string>

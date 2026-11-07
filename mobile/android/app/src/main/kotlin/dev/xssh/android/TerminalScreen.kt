@@ -419,6 +419,19 @@ fun TerminalScreen(
     val failure = error?.let { phrase -> androidx.compose.ui.platform.LocalConfiguration.current; phrase(context) }
     val failureKind = errorKind
     val session = live
+    // 嵌在抽屉布局里时,把这台主机的会话状态报给外层:左边的主机行据此显示「连接中 / 连接失败」,
+    // 连上之后外层才把抽屉收起来(失败时抽屉留着,可以直接点别的主机)。
+    if (duo != null) {
+        val status = when {
+            pending != null -> DuoStatus.Confirm
+            failure != null -> DuoStatus.Failed
+            session == null -> DuoStatus.Connecting
+            else -> DuoStatus.Live
+        }
+        val report by androidx.compose.runtime.rememberUpdatedState(duo.onStatus)
+        LaunchedEffect(status, host.id) { report(host.id, status) }
+        androidx.compose.runtime.DisposableEffect(host.id) { onDispose { report(host.id, DuoStatus.None) } }
+    }
     // 平板右栏:确认页 / 错误页 / 连接中上面也要有工具栏(侧边栏开关、主机名),不能是一整块没有出口的页面。
     val frame: @Composable (@Composable () -> Unit) -> Unit = { content ->
         if (tablet == null) {

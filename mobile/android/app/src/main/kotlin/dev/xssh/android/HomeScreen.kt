@@ -31,6 +31,7 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.lazy.grid.itemsIndexed
@@ -527,6 +528,8 @@ internal fun HostListPane(
     bottomClearance: Dp,
     /** 选中的那一行要不要垫一块灰底(内屏抽屉里不要:运行中的那行靠绿色箭头、光标和「✓ 运行中」就够认了)。 */
     selectionFill: Boolean = true,
+    /** 会话区报上来的状态(主机 id → 连接中 / 等确认 / 失败):对应那一行显示转圈和状态字。 */
+    hostStatus: Map<String, DuoStatus> = emptyMap(),
 ) {
     val p = LocalXssh.current
     val scope = rememberCoroutineScope()
@@ -736,6 +739,7 @@ internal fun HostListPane(
                             large = large,
                             selected = selectionFill && host.id == selectedId,
                             running = host.id in running,
+                            status = hostStatus[host.id],
                             startedAt = sessions.firstOrNull { it.hostId == host.id }?.startedAt,
                             // 开着的时候点卡片是"合上",不是连接 —— 和 iOS 一致。
                             onPrimary = { if (openId != null) openId = null else onPrimary(it) },
@@ -1133,6 +1137,9 @@ private fun SessionRow(session: TerminalSession, large: Boolean, onOpen: () -> U
 /** 主机行的连接阶段:没连 / 连着 / 刚断开(停一下再收)。 */
 private enum class RowPhase { Idle, Running, Closing }
 
+/** 这一行此刻显示的状态(含会话区报上来的连接中 / 等确认 / 失败)。 */
+private enum class RowStatus { Idle, Connecting, Confirm, Failed, Running, Closing }
+
 /** 断开后"停一下"的时长(iOS:0.44s)。 */
 private const val RowClosingHoldMs = 440L
 
@@ -1146,6 +1153,8 @@ private fun HostCard(
     large: Boolean,
     selected: Boolean,
     running: Boolean,
+    /** 会话区报上来的这台主机的状态(没有 = null)。 */
+    status: DuoStatus? = null,
     /** 连着的这条会话是几点建立的(毫秒);状态行据此显示已连接时长。 */
     startedAt: Long?,
     onPrimary: (Host) -> Unit,
@@ -1169,12 +1178,27 @@ private fun HostCard(
             phase = RowPhase.Idle
         }
     }
-    val live = phase == RowPhase.Running
+    // 这一行此刻该显示什么:会话区报上来的「连接中 / 等确认 / 失败」优先,其次是连着、刚断开。
+    val row = when {
+        status == DuoStatus.Failed -> RowStatus.Failed
+        status == DuoStatus.Connecting -> RowStatus.Connecting
+        status == DuoStatus.Confirm -> RowStatus.Confirm
+        running -> RowStatus.Running
+        phase == RowPhase.Closing -> RowStatus.Closing
+        else -> RowStatus.Idle
+    }
+    // 箭头:连着 / 连接中是绿,失败是红,其余是灰;颜色渐变而不是跳。
+    val arrowTarget = when (row) {
+        RowStatus.Running, RowStatus.Connecting, RowStatus.Confirm -> p.ok
+        RowStatus.Failed -> p.danger
+        else -> p.text.copy(alpha = 0.4f)
+    }
     val arrow by androidx.compose.animation.animateColorAsState(
-        if (live) p.ok else p.text.copy(alpha = 0.4f),
+        arrowTarget,
         androidx.compose.animation.core.tween(320, easing = androidx.compose.animation.core.FastOutSlowInEasing),
         label = "hostArrow",
     )
+    val spinning = row == RowStatus.Connecting || row == RowStatus.Confirm
     var lastStartedAt by remember { mutableStateOf<Long?>(null) }
     if (startedAt != null) lastStartedAt = startedAt
     XsshCard(
@@ -1206,7 +1230,7 @@ private fun HostCard(
                     modifier = Modifier.weight(1f, fill = false),
                 )
                 androidx.compose.animation.AnimatedVisibility(
-                    visible = live,
+                    visible = row == RowStatus.Running,
                     enter = androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(200)),
                     exit = androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(240)),
                 ) {
@@ -1221,7 +1245,27 @@ private fun HostCard(
                 Chip(stringResource(R.string.host_key_pending), p.warn)
                 Spacer(Modifier.width(8.dp))
             }
-            StatusDot(hostPip(host))
+            // 连接中:色点的位置换成一个小转圈(iOS 一样),连上 / 失败后淡回色点。
+            AnimatedContent(
+                targetState = spinning,
+                transitionSpec = {
+                    androidx.compose.animation.fadeIn(tween(180)) togetherWith androidx.compose.animation.fadeOut(tween(180))
+                },
+                label = "hostPip",
+            ) { busy ->
+                Box(Modifier.size(14.dp), contentAlignment = Alignment.Center) {
+                    if (busy) {
+                        CircularProgressIndicator(
+                            Modifier.size(12.dp),
+                            color = p.text.copy(alpha = 0.85f),
+                            strokeWidth = 1.5.dp,
+                            trackColor = Color.Transparent,
+                        )
+                    } else {
+                        StatusDot(hostPip(host))
+                    }
+                }
+            }
             if (onInfo != null) {
                 val infoLabel = stringResource(R.string.host_info)
                 // ⓘ(iOS 无线局域网列表的做法):点卡片 = 连接,点 ⓘ = 看这台主机的信息。
@@ -1243,7 +1287,7 @@ private fun HostCard(
         // 连着的那台多一行绿色状态「✓ 运行中 · 12:03」,缩进到名字的起点(iOS 版的「已连接 · 时长」)。
         // 状态行一直占着高度直到"停一下"结束;收起 = 高度和透明度沿同一条曲线一起落到 0,内容贴着顶边。
         androidx.compose.animation.AnimatedVisibility(
-            visible = phase != RowPhase.Idle,
+            visible = row != RowStatus.Idle,
             enter = androidx.compose.animation.expandVertically(
                 androidx.compose.animation.core.tween(RowCurveMs, easing = RowCurve),
                 expandFrom = Alignment.Top,
@@ -1253,34 +1297,44 @@ private fun HostCard(
                 shrinkTowards = Alignment.Top,
             ) + androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(RowCurveMs, easing = RowCurve)),
         ) {
-            // 「✓ 运行中 · 时长」和「✕ 已断开」交叉淡化:旧的先淡出,新的晚一点淡入,两行字不会叠在一起。
+            // 状态字之间交叉淡化:旧的先淡出,新的晚一点淡入,两行字不会叠在一起。
             AnimatedContent(
-                targetState = live,
+                targetState = row,
                 transitionSpec = {
                     androidx.compose.animation.fadeIn(tween(200, delayMillis = 100)) togetherWith
                         androidx.compose.animation.fadeOut(tween(150))
                 },
                 label = "hostStatus",
-            ) { isLive ->
+            ) { shown ->
                 val start = promptWidth(font) + PromptGap
-                if (isLive) {
-                    val label = stringResource(R.string.host_running)
-                    val elapsed = lastStartedAt?.let { runningClock(it) }
-                    Text(
-                        "✓ " + label + (elapsed?.let { " · $it" } ?: ""),
-                        color = p.ok.copy(alpha = 0.95f),
-                        fontFamily = XsshFonts.monoUi,
-                        fontSize = 12.sp,
-                        maxLines = 1,
+                val mono = XsshFonts.monoUi
+                when (shown) {
+                    RowStatus.Running -> {
+                        val elapsed = lastStartedAt?.let { runningClock(it) }
+                        Text(
+                            "✓ " + stringResource(R.string.host_running) + (elapsed?.let { " · $it" } ?: ""),
+                            color = p.ok.copy(alpha = 0.95f), fontFamily = mono, fontSize = 12.sp, maxLines = 1,
+                            modifier = Modifier.padding(top = 3.dp, start = start),
+                        )
+                    }
+                    RowStatus.Connecting -> Text(
+                        stringResource(R.string.host_row_connecting),
+                        color = p.text.copy(alpha = 0.6f), fontFamily = mono, fontSize = 12.sp, maxLines = 1,
                         modifier = Modifier.padding(top = 3.dp, start = start),
                     )
-                } else {
-                    Text(
+                    RowStatus.Confirm -> Text(
+                        stringResource(R.string.host_row_confirm),
+                        color = p.text.copy(alpha = 0.85f), fontFamily = mono, fontSize = 12.sp, maxLines = 1,
+                        modifier = Modifier.padding(top = 3.dp, start = start),
+                    )
+                    RowStatus.Failed -> Text(
+                        "✕ " + stringResource(R.string.host_row_failed),
+                        color = p.danger.copy(alpha = 0.92f), fontFamily = mono, fontSize = 12.sp, maxLines = 1,
+                        modifier = Modifier.padding(top = 3.dp, start = start),
+                    )
+                    else -> Text(
                         "✕ " + stringResource(R.string.host_disconnected),
-                        color = p.text.copy(alpha = 0.5f),
-                        fontFamily = XsshFonts.monoUi,
-                        fontSize = 12.sp,
-                        maxLines = 1,
+                        color = p.text.copy(alpha = 0.5f), fontFamily = mono, fontSize = 12.sp, maxLines = 1,
                         modifier = Modifier.padding(top = 3.dp, start = start),
                     )
                 }
@@ -1288,7 +1342,6 @@ private fun HostCard(
         }
     }
 }
-
 /**
  * 已连接时长 `m:ss`(满一小时是 `h:mm:ss`),每秒走一格。
  * 只有连着的主机行才会调用,所以一屏最多几个计时器;读到的是「现在」,不记状态。
