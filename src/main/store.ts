@@ -242,10 +242,16 @@ export class HostStore {
     // masked field and must not wipe it just because it cannot display it.
     const proxyPassword = host.proxy?.password
     const wroteSecret =
-      password !== undefined || passphrase !== undefined || !!proxyPassword
+      password !== undefined || passphrase !== undefined || proxyPassword !== undefined
 
-    if (proxyPassword) {
-      this.secrets[this.proxyKey(host.id)] = proxyPassword
+    if (proxyPassword !== undefined) {
+      // '' is an explicit "remove it"; undefined keeps whatever is stored.
+      if (proxyPassword) this.secrets[this.proxyKey(host.id)] = proxyPassword
+      else delete this.secrets[this.proxyKey(host.id)]
+    } else if (!host.proxy) {
+      // The host no longer uses a proxy at all — a credential for one has no
+      // reason to stay in the vault.
+      delete this.secrets[this.proxyKey(host.id)]
     }
     if (password !== undefined) {
       if (password) this.secrets[host.id] = password

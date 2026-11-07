@@ -154,6 +154,12 @@ const splitEl = ref<HTMLElement>()
     <div v-else-if="pane.status === 'error'" class="idle">
       <div class="idle-card">
         <div class="idle-title">{{ tab.title }}</div>
+        <!-- Which machine failed. The "closed" card always showed this; the
+             failure card did not, so two tabs with the same title were
+             indistinguishable at exactly the moment it mattered. -->
+        <div class="idle-sub">
+          {{ pane.params.username }}@{{ pane.params.host }}<template v-if="pane.params.port !== 22">:{{ pane.params.port }}</template>
+        </div>
         <div class="idle-status" :class="{ warn: hostKeyRejected }">
           {{ hostKeyRejected ? (pane.errorCode === 'host_key_unknown' ? t('app.keyUntrusted') : t('app.keyChanged')) : t('app.connectFail') }}
         </div>

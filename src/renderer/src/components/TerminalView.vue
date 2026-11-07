@@ -302,9 +302,15 @@ function runMenu(action: () => void): void {
 // ---- In-terminal search ----
 const searchBar = reactive({ open: false, query: '', caseSensitive: false })
 const searchEl = ref<HTMLInputElement>()
+/** Match position reported by the addon: 1 of N, or 0 of 0 when nothing matches. */
+const searchHits = reactive({ index: 0, count: 0 })
 
 function runSearch(forward: boolean): void {
-  if (!search || !searchBar.query) return
+  if (!search || !searchBar.query) {
+    searchHits.index = 0
+    searchHits.count = 0
+    return
+  }
   const opts = { caseSensitive: searchBar.caseSensitive }
   if (forward) search.findNext(searchBar.query, opts)
   else search.findPrevious(searchBar.query, opts)
@@ -411,6 +417,12 @@ onMounted(() => {
   term.loadAddon(fit)
   search = new SearchAddon()
   term.loadAddon(search)
+  // Without this the bar gave no signal at all: "no match" and "match outside
+  // the viewport" looked identical, so a typo seemed like a broken search.
+  search.onDidChangeResults((e) => {
+    searchHits.index = e.resultIndex
+    searchHits.count = e.resultCount
+  })
   // Plain http(s) text in the output takes the same route.
   term.loadAddon(new WebLinksAddon((_e, uri) => openLink(uri)))
   term.open(el.value)
@@ -852,6 +864,7 @@ onBeforeUnmount(() => {
         ref="searchEl"
         v-model="searchBar.query"
         class="sb-input"
+        :class="{ 'no-match': searchBar.query && searchHits.count === 0 }"
         :placeholder="t('term.searchPlaceholder')"
         spellcheck="false"
         @keydown.enter.exact="onSearchEnter($event, true)"
@@ -859,6 +872,9 @@ onBeforeUnmount(() => {
         @keydown.esc="onSearchEsc($event)"
         @input="runSearch(true)"
       />
+      <span v-if="searchBar.query" class="sb-count" :class="{ none: searchHits.count === 0 }">
+        {{ searchHits.count ? `${searchHits.index + 1}/${searchHits.count}` : '0/0' }}
+      </span>
       <button class="sb-btn case" :class="{ on: searchBar.caseSensitive }" :title="t('term.caseTip')" @click="toggleCase">Aa</button>
       <button class="sb-btn" :title="t('term.prevTip')" @click="runSearch(false)"><Icon name="chevron-up" :size="15" /></button>
       <button class="sb-btn" :title="t('term.nextTip')" @click="runSearch(true)"><Icon name="chevron-down" :size="15" /></button>
@@ -938,6 +954,22 @@ onBeforeUnmount(() => {
 }
 .sb-input:focus {
   border-color: var(--accent);
+}
+/* A query that matches nothing gets the same red as a failed action. */
+.sb-input.no-match {
+  border-color: var(--danger);
+}
+.sb-count {
+  min-width: 40px;
+  padding: 0 2px;
+  text-align: center;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+  user-select: none;
+}
+.sb-count.none {
+  color: var(--danger);
 }
 .sb-btn {
   display: flex;

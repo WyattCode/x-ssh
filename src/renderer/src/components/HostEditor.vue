@@ -70,6 +70,9 @@ const form = reactive({
   proxyPass: '',
   forwards: [] as ForwardRow[]
 })
+/** The stored proxy password is not sent to the renderer, so "blank" means
+ *  "keep it". This flag is the only way to say "remove it" instead. */
+const proxyPassCleared = ref(false)
 const password = ref('')
 const passphrase = ref('')
 /** Guards against a second save (Enter / Save) while hosts.save is in flight. */
@@ -155,6 +158,7 @@ watch(
     })
     password.value = ''
     passphrase.value = ''
+    proxyPassCleared.value = false
     Object.assign(sections, { keys: false, proxy: false, forwards: false, onConnect: false, appearance: false })
     nextTick(() => labelEl.value?.focus())
     // Baseline for the unsaved-changes guard: capture after the form is
@@ -479,7 +483,13 @@ async function save(): Promise<void> {
           port: Number(form.proxyPort) || (form.proxyType === 'socks5' ? 1080 : 8080),
           type: form.proxyType,
           ...(form.proxyUser ? { username: form.proxyUser.trim() } : {}),
-          ...(form.proxyUser && form.proxyPass ? { password: form.proxyPass } : {})
+          // Three states, so "keep the saved one" and "remove it" are
+          // distinguishable: absent = keep, '' = delete, text = replace.
+          ...(proxyPassCleared
+            ? { password: '' }
+            : form.proxyPass
+              ? { password: form.proxyPass }
+              : {})
         }
       : undefined,
     // Not edited here, but part of the saved profile: without these an edit
@@ -513,6 +523,7 @@ async function save(): Promise<void> {
   } finally {
     saving.value = false
   }
+  proxyPassCleared.value = false
   emit('close')
 }
 
@@ -773,7 +784,28 @@ async function remove(): Promise<void> {
                   </div>
                   <div class="sub-grid">
                     <input v-model="form.proxyUser" class="box grow" :placeholder="t('host.proxyUserPh')" autocomplete="off" />
-                    <input v-model="form.proxyPass" class="box grow" type="password" :placeholder="host?.hasSavedProxyPassword ? t('host.proxyPassSaved') : t('host.proxyPassPh')" autocomplete="off" />
+                    <input
+                      v-model="form.proxyPass"
+                      class="box grow"
+                      type="password"
+                      :placeholder="
+                        proxyPassCleared
+                          ? t('host.proxyPassClearedMark')
+                          : host?.hasSavedProxyPassword
+                            ? t('host.proxyPassSaved')
+                            : t('host.proxyPassPh')
+                      "
+                      autocomplete="off"
+                    />
+                    <button
+                      v-if="host?.hasSavedProxyPassword || form.proxyPass"
+                      type="button"
+                      class="btn sm"
+                      :title="t('host.proxyPassClear')"
+                      @click="proxyPassCleared = true; form.proxyPass = ''"
+                    >
+                      {{ t('host.proxyPassClear') }}
+                    </button>
                   </div>
                 </template>
               </div>

@@ -146,6 +146,19 @@ function localEnter(entry: LocalEntry): void {
 function localGoUp(): void {
   void refreshLocal(localParent(localPath.value))
 }
+/** The remote pane has had a home button all along; the local one had to walk
+ *  up from wherever it opened. */
+function localGoHome(): void {
+  void window.api.local
+    .home()
+    .then((h) => {
+      localPath.value = h
+      void refreshLocal()
+    })
+    .catch(() => {
+      localError.value = tt('sfp.localErr')
+    })
+}
 function localDragStart(e: DragEvent, entry: LocalEntry): void {
   // If the dragged row is part of a multi-selection, carry them all so the
   // remote pane can accept them all as upload targets.
@@ -1795,7 +1808,10 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
             @keydown.esc.prevent="pathEditing = false"
             @blur="commitPathEdit"
           />
-          <div v-else class="crumbs" :title="tt('sfp.editPath')" @dblclick="startPathEdit">
+          <!-- Hovering the path should tell you the path, not repeat what the
+               pencil button already says. Long paths keep their last segment
+               visible instead of being clipped without an ellipsis. -->
+          <div v-else class="crumbs" :title="path" @dblclick="startPathEdit">
             <template v-for="(c, i) in crumbs" :key="c.full">
               <button class="crumb" :class="{ last: i === crumbs.length - 1 }" @click="load(c.full)">{{ c.label }}</button>
               <Icon v-if="i < crumbs.length - 1" name="chevron-right" :size="12" class="sep" />
@@ -1970,10 +1986,12 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
               <span class="ph-sub local-path" :title="localPath">{{ localPath }}</span>
             </div>
             <button class="ib sm" :title="tt('sfp.upLevel')" :disabled="localLoading" @click="localGoUp"><Icon name="arrow-up" :size="14" /></button>
+            <button class="ib sm" :title="tt('sfp.home')" :disabled="localLoading" @click="localGoHome"><Icon name="home" :size="14" /></button>
           </template>
           <template v-else>
             <span class="pb-title">{{ tt('sfp.localTitle') }}</span>
             <button class="ib sm" :title="tt('sfp.upLevel')" :disabled="localLoading" @click="localGoUp"><Icon name="arrow-up" :size="14" /></button>
+            <button class="ib sm" :title="tt('sfp.home')" :disabled="localLoading" @click="localGoHome"><Icon name="home" :size="14" /></button>
             <span class="local-path" :title="localPath">{{ localPath }}</span>
           </template>
           <label class="pattern" :class="{ bad: !!localPatternErr }" :title="localPatternErr || ''">
@@ -2408,7 +2426,10 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
   color: var(--text);
 }
 .crumb.last {
-  flex-shrink: 0;
+  /* It may shrink, but never vanish: the current directory is the one thing
+     the bar is for. The ellipsis comes from .crumb. */
+  flex: 0 1 auto;
+  min-width: 56px;
   color: var(--text);
   font-weight: 600;
 }
