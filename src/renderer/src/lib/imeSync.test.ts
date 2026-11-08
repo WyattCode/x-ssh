@@ -250,15 +250,51 @@ describe('createImeMirror', () => {
     expect(h.remote()).toBe('草稿完成')
   })
 
-  it('keeps a long dictation one chunk at a time', () => {
+  it('replaces the previous draft when the IME re-reads the audio', () => {
+    // Real report, screenshot 3: Doubao/WeChat re-read the whole sentence and
+    // post it again through onData. Both versions ended up on the line because
+    // the correction path only existed for the textarea catch-up.
+    const h = harness()
+    const draft = '二次审查代码检查 ui 细节检查'
+    const final = '审查代码二次审查代码，检查UI细节，检查Bug。'
+    h.value = draft
+    h.xterm(draft)
+    h.value = final
+    h.xterm(final)
+    expect(h.remote()).toBe(final)
+  })
+
+  it('sends only the new tail when the IME extends what it already sent', () => {
+    const h = harness()
+    h.value = '把日志'
+    h.xterm('把日志')
+    h.value = '把日志清理一下'
+    h.xterm('把日志清理一下')
+    expect(h.remote()).toBe('把日志清理一下')
+    expect(h.wire).toEqual(['把日志', '清理一下'])
+  })
+
+  it('appends when two dictations share no phrase', () => {
+    const h = harness()
+    h.value = '重启服务'
+    h.xterm('重启服务')
+    h.value = '查看磁盘'
+    h.xterm('查看磁盘')
+    // Nothing in common beyond a character → a new sentence, not a rewrite.
+    expect(h.remote()).toBe('重启服务查看磁盘')
+  })
+
+  it('keeps a long dictation in step as it grows', () => {
     const h = harness()
     let line = ''
-    for (let i = 0; i < 200; i++) {
+    for (let i = 0; i < 60; i++) {
       line += '字'
-      h.value = '字'
-      h.xterm('字')
+      // Each commit is the whole draft, one character longer than the last.
+      h.value = line
+      h.xterm(line)
     }
     expect(h.remote()).toBe(line)
+    // Only the character that was actually new goes on the wire.
     expect(h.wire.every((s) => s === '字')).toBe(true)
   })
 

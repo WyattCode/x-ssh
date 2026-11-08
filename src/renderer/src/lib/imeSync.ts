@@ -74,6 +74,40 @@ const charCount = (s: string): number => Array.from(s).length
 /** Drops the last character (a surrogate pair counts as one). */
 const chopLast = (s: string): string => Array.from(s).slice(0, -1).join('')
 
+/** Longest run of consecutive characters present in both strings, capped so a
+ *  pathological draft cannot stall a keystroke. */
+function longestSharedRun(a: string, b: string, limit = 160): number {
+  const A = Array.from(a.slice(0, limit))
+  const B = Array.from(b.slice(0, limit))
+  if (!A.length || !B.length) return 0
+  let best = 0
+  let prev = new Array<number>(B.length + 1).fill(0)
+  for (let i = 1; i <= A.length; i++) {
+    const cur = new Array<number>(B.length + 1).fill(0)
+    for (let j = 1; j <= B.length; j++) {
+      if (A[i - 1] === B[j - 1]) {
+        cur[j] = prev[j - 1] + 1
+        if (cur[j] > best) best = cur[j]
+      }
+    }
+    prev = cur
+    if (best >= limit) break
+  }
+  return best
+}
+
+/**
+ * Whether `next` looks like another pass over the same audio rather than a
+ * different sentence.
+ *
+ * Doubao/WeChat now re-read and rewrite what they committed, so a single
+ * dictation produces several full versions of the same sentence. Sharing a run
+ * of three consecutive characters is a much sharper signal than character
+ * overlap: "重启服务" vs "重启机器" shares only two, while every rewrite of the
+ * same sentence shares a phrase.
+ */
+const REWRITE_RUN = 3
+
 export function createImeMirror(): ImeMirror {
   /** What the remote line currently holds, as far as we know. */
   let synced = ''
@@ -139,10 +173,48 @@ export function createImeMirror(): ImeMirror {
         // Tab and Ctrl+C.
         return data
       }
-      // Record it and send it. `onData` asks the caller to write these bytes —
-      // returning '' (as one revision did) lost every keystroke.
+      // ---- plain text ----
+      if (fromKey) {
+        // Typed by hand: an incremental character, and the dictation run ends
+        // here so a later correction cannot delete it.
+        synced = (synced + data).slice(-MAX_TRACKED)
+        committed = ''
+        lastSent = data
+        return data
+      }
+
+      // Everything else is an IME commit. Modern voice IMEs post the WHOLE
+      // draft each time they re-read the audio, so a commit may be a revision
+      // of what is already on the wire rather than an addition to it. Handling
+      // only the append case here is what produced
+      // "二次审查代码检查 ui 细节检查审查代码二次审查代码，…".
+      if (committed) {
+        // The same version again.
+        if (data === committed) return ''
+        // A longer take on the same draft: only the new tail is missing.
+        if (data.startsWith(committed)) {
+          const add = data.slice(committed.length)
+          synced = (synced + add).slice(-MAX_TRACKED)
+          committed = data
+          lastSent = add
+          return add
+        }
+        // A re-read of the same audio: erase the previous version and send this
+        // one. Requires that the old text really is the tail of the line, and
+        // that the two share a phrase — otherwise a genuinely new sentence
+        // would wipe the previous one.
+        if (synced.endsWith(committed) && longestSharedRun(committed, data) >= REWRITE_RUN) {
+          const dels = DEL.repeat(charCount(committed))
+          synced = (synced.slice(0, synced.length - committed.length) + data).slice(-MAX_TRACKED)
+          committed = data
+          lastSent = data
+          return dels + data
+        }
+      }
+
+      // New text in the same run: append and remember the whole version.
       synced = (synced + data).slice(-MAX_TRACKED)
-      committed = fromKey ? '' : (committed + data).slice(-MAX_TRACKED)
+      committed = (committed + data).slice(-MAX_TRACKED)
       lastSent = data
       return data
     },
