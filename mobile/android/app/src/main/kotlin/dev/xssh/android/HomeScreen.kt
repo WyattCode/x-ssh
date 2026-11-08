@@ -1275,7 +1275,8 @@ private fun HostCard(
                 }
             }
             // 只标需要注意的状态;"密码登录""已信任"这类常态不贴标签。
-            if (host.trustedHostKeys().isEmpty()) {
+            // 正在等用户确认密钥时,状态行已经写着「等待确认」:不再同时贴一个意思一样的标签。
+            if (host.trustedHostKeys().isEmpty() && row != RowStatus.Confirm) {
                 Chip(stringResource(R.string.host_key_pending), p.warn)
                 Spacer(Modifier.width(8.dp))
             }
