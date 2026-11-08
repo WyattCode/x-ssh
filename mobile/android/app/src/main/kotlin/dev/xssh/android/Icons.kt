@@ -264,6 +264,16 @@ object XIcons {
         moveTo(8.8f, 12f); lineTo(11.2f, 14.4f); lineTo(15.4f, 9.8f)
     }
 
+    /** 钥匙:还差一个凭据(密码 / 私钥 / 口令)时的提示图标,和「出错了」的警告区分开。 */
+    val Key = icon("key") {
+        moveTo(11.5f, 15f)
+        arcTo(3.5f, 3.5f, 0f, true, true, 4.5f, 15f)
+        arcTo(3.5f, 3.5f, 0f, true, true, 11.5f, 15f)
+        moveTo(10.4f, 12.6f); lineTo(19.5f, 3.5f)
+        moveTo(16.2f, 6.8f); lineTo(18.6f, 9.2f)
+        moveTo(13.6f, 9.4f); lineTo(15.6f, 11.4f)
+    }
+
     /** 终端字体:大写 A 加小写 a。 */
     val Font = icon("font") {
         moveTo(2.6f, 18.5f); lineTo(7.6f, 6f); lineTo(12.6f, 18.5f)

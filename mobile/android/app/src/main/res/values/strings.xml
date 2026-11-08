@@ -186,6 +186,9 @@
     <string name="host_disconnected">Disconnected</string>
     <string name="host_gate_close">Close</string>
     <string name="duo_recent">Recent</string>
+    <string name="term_need_password">Password needed</string>
+    <string name="term_need_key">Private key needed</string>
+    <string name="term_need_passphrase">Passphrase needed</string>
     <string name="host_err_disconnected">The server dropped the connection. The network may be unstable, or the server limited this login.</string>
     <string name="host_err_timeout">The connection timed out. Check the address and port, and that your phone can reach the server.</string>
     <string name="host_err_refused">The server refused the connection. Make sure SSH is running and the port is right.</string>

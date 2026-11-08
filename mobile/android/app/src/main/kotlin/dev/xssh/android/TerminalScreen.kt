@@ -490,6 +490,14 @@ fun TerminalScreen(
             val fixPassword = stringResource(R.string.term_fix_enter_password)
             val fixKey = stringResource(R.string.term_fix_import_key)
             val fixPassphrase = stringResource(R.string.term_fix_enter_passphrase)
+            // 只是还差一个凭据(不是真的连不上):不用红色警告 + 「连接失败」,换成「需要…」。
+            val needsTitle = when {
+                jumpGone -> null
+                noPassword -> stringResource(R.string.term_need_password)
+                host.keyMissing -> stringResource(R.string.term_need_key)
+                keyProblem -> stringResource(R.string.term_need_passphrase)
+                else -> null
+            }
             ConnectGate(
                 host = host,
                 failure = failure,
@@ -502,6 +510,7 @@ fun TerminalScreen(
                 detail = errorDetail,
                 inDrawer = duo != null,
                 rawError = errorRaw,
+                needsTitle = needsTitle,
                 onEdit = tablet?.onEdit ?: onEditHost,
                 onExit = onExit,
                 // 能就地修的直接给按钮,打开编辑页(平板是浮层)—— 不用先退回去再找编辑入口。

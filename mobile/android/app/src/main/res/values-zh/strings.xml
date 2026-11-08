@@ -185,6 +185,9 @@
     <string name="host_disconnected">已断开</string>
     <string name="host_gate_close">关闭</string>
     <string name="duo_recent">最近连接</string>
+    <string name="term_need_password">需要密码</string>
+    <string name="term_need_key">需要私钥</string>
+    <string name="term_need_passphrase">需要私钥口令</string>
     <string name="host_err_disconnected">服务器中断了连接。可能是网络不稳定,或服务器限制了这次登录。</string>
     <string name="host_err_timeout">连接超时。检查地址和端口对不对,以及手机到服务器的网络通不通。</string>
     <string name="host_err_refused">服务器拒绝了连接。确认 SSH 服务已开启,端口是否正确。</string>

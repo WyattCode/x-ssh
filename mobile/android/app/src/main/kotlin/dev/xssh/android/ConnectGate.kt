@@ -91,6 +91,8 @@ private class GateContent(
     val actions: @Composable (stacked: Boolean) -> Unit,
     /** 内容只有一句话(正在连接 / 连接失败):整列收窄到按钮的宽度,卡片和按钮同宽;指纹页要放指纹,保持宽。 */
     val narrow: Boolean = false,
+    /** 按钮跟在正文下面、和正文聚成一组居中(「还差一个凭据」这类轻量提示页);否则钉在页底。 */
+    val inline: Boolean = false,
 )
 
 /** 首次连接 / 密钥变了:让用户比对指纹,决定信不信。 */
@@ -189,6 +191,8 @@ fun ConnectGate(
     rawError: String? = null,
     /** 打开这台主机的编辑页:地址 / 端口不对这类错误,让用户直接去改。 */
     onEdit: (() -> Unit)? = null,
+    /** 不为空 = 这不是故障、只是还差一个凭据(没存密码 / 没导入私钥 / 缺口令):换钥匙图标、中性配色、这个标题。 */
+    needsTitle: String? = null,
 ) {
     val p = LocalXssh.current
     // Retry / fix both reconnect: remember must be unconditional (Compose).
@@ -232,18 +236,31 @@ fun ConnectGate(
         // 认得出的底层英文错误给一句人话,原文收进「详情」。
         val friendly = rawError?.let { ConnectErrors.friendly(it) }
         val friendlyText = friendly?.let { stringResource(it.messageRes()) }
+        val needs = needsTitle != null
         GateContent(
-            icon = XIcons.Alert,
-            tint = p.danger,
-            tile = p.danger.copy(alpha = 0.12f),
-            title = stringResource(R.string.host_gate_failed),
+            icon = if (needs) XIcons.Key else XIcons.Alert,
+            tint = if (needs) p.accent else p.danger,
+            tile = if (needs) p.accentSoft else p.danger.copy(alpha = 0.12f),
+            title = needsTitle ?: stringResource(R.string.host_gate_failed),
             narrow = true,
+            inline = needs,
             onEnter = trigger,
             body = {
-                MessageCard(
-                    friendlyText ?: failure,
-                    if (friendlyText != null) listOfNotNull(rawError, detail).joinToString("\n") else detail,
-                )
+                if (needs && detail == null) {
+                    // 只有一句话:不套卡片,淡淡地写在图标和按钮之间。
+                    Text(
+                        failure,
+                        color = p.textDim,
+                        fontSize = 14.sp,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                    )
+                } else {
+                    MessageCard(
+                        friendlyText ?: failure,
+                        if (friendlyText != null) listOfNotNull(rawError, detail).joinToString("\n") else detail,
+                    )
+                }
             },
             actions = { stacked ->
                 GateButtons(
@@ -251,7 +268,9 @@ fun ConnectGate(
                     primary = primary?.first,
                     onPrimary = { trigger?.invoke() },
                     // 有「填写密码」这类修复时,重试退到第二颗(填完再连就是重试)。
-                    secondary = stringResource(if (inDrawer) R.string.host_gate_close else R.string.host_back),
+                    // 「需要凭据」页的主按钮就是去编辑页,再摆一个「返回」只是重复:屏上已经有 ‹(内屏抽屉里没有,留「关闭」)。
+                    secondary = if (needs && !inDrawer && !tablet) null
+                    else stringResource(if (inDrawer) R.string.host_gate_close else R.string.host_back),
                     onSecondary = onExit,
                     tertiary = if (fix != null && retry != null) retryLabel to ({ actOnce(retry) }) else null,
                     // 没有就地修复时(网络类错误)给一个「编辑主机」:检查地址和端口,得有地方改。
@@ -351,11 +370,16 @@ private fun GatePage(host: Host, content: GateContent, tablet: Boolean, inDrawer
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Identity(host, content)
-                Spacer(Modifier.height(20.dp))
+                Spacer(Modifier.height(if (content.inline) 14.dp else 20.dp))
                 content.body(this)
+                // 轻量提示页(还差一个凭据):按钮跟在正文下面,图标 → 说明 → 按钮聚成一组,中间不留一大截空。
+                if (content.inline) {
+                    Spacer(Modifier.height(24.dp))
+                    content.actions(true)
+                }
             }
         }
-        Box(
+        if (!content.inline) Box(
             Modifier
                 .fillMaxSize()
                 .windowInsetsPadding(insets.only(WindowInsetsSides.Vertical + WindowInsetsSides.End)),
@@ -633,7 +657,7 @@ private fun GateButtons(
     primary: String?,
     primaryKind: ButtonKind = ButtonKind.Primary,
     onPrimary: () -> Unit,
-    secondary: String,
+    secondary: String?,
     onSecondary: () -> Unit,
     tertiary: Pair<String, () -> Unit>? = null,
     edit: Pair<String, () -> Unit>? = null,
@@ -644,11 +668,11 @@ private fun GateButtons(
             if (primary != null) CapsuleButton(primary, Modifier.fillMaxWidth(), kind = primaryKind) { onPrimary() }
             tertiary?.let { (label, run) -> CapsuleButton(label, Modifier.fillMaxWidth(), kind = ButtonKind.Ghost) { run() } }
             edit?.let { (label, run) -> CapsuleButton(label, Modifier.fillMaxWidth(), kind = ButtonKind.Ghost) { run() } }
-            CapsuleButton(secondary, Modifier.fillMaxWidth(), kind = ButtonKind.Ghost) { onSecondary() }
+            if (secondary != null) CapsuleButton(secondary, Modifier.fillMaxWidth(), kind = ButtonKind.Ghost) { onSecondary() }
         }
     } else {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(GapItem)) {
-            CapsuleButton(secondary, Modifier.weight(1f), kind = ButtonKind.Ghost) { onSecondary() }
+            if (secondary != null) CapsuleButton(secondary, Modifier.weight(1f), kind = ButtonKind.Ghost) { onSecondary() }
             tertiary?.let { (label, run) -> CapsuleButton(label, Modifier.weight(1f), kind = ButtonKind.Ghost) { run() } }
             edit?.let { (label, run) -> CapsuleButton(label, Modifier.weight(1f), kind = ButtonKind.Ghost) { run() } }
             if (primary != null) CapsuleButton(primary, Modifier.weight(1f), kind = primaryKind) { onPrimary() }
