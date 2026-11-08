@@ -1,3 +1,146 @@
+# 会话记录:M3.188(2026-11-08,**未解决**:语音输入改写重复)
+
+> 这是一份**交接文档**,不是一个已完成的修复。接手前请先读完「四、必须实测」和「六、可能的方向」。
+> 范围：`src/renderer/src/lib/imeSync.ts`、`src/renderer/src/components/TerminalView.vue`（输入接线）。
+> 其余模块未动。
+
+## 零、接手须知
+
+**问题从 0.6.20 起改了六轮,全部没有在用户机器上生效。** 每一轮我都是基于"输入法会怎样提交"的
+推断去改,而推断的依据只有用户发来的截图——远端最终文本。**真实的事件序列从未被观测到。**
+这就是六次失败的根本原因:不是代码写错,是输入条件靠猜。
+
+因此接手第一件事不是改代码,是**取证**（第五节,一个 localStorage 开关,日志会打出每次提交的原始
+内容和我们的决策）。
+
+另外一个必须先排除的低级原因：用户可能设过 `localStorage['xssh.imeMirror'] = '0'`（我上一轮亲口
+建议过,作为"输入再出问题时的应急开关"）。**该值一旦存在,整个镜像逻辑被跳过,任何修复都不生效,
+而界面上毫无提示。** 0.6.27 起会在控制台 `console.warn` 提示,但已有用户的 localStorage 不会自动清。
+
+## 一、现象
+
+用户在 X-SSH 的终端里用**豆包输入法 / 微信输入法**的语音转文字。输入法的行为是：先说出一版草稿,
+停下来后**再用大模型把整段重新组织、重新输入一遍**。用户原话："你说出来的东西,并不一定真的就是
+输出来的东西。"
+
+终端里看到的是**两版叠在一行**（六次截图,原样记录）：
+
+1. `默认把API key默认把API key写进去`
+2. `杀青的时候四 g 卡片页有时候会位移修刷新的时候，4G卡片页有时候会位移，修复一下。`
+3. `刷新的时候四 g 卡片页会位移偶尔会位移的问题检查修复刷新的时候，4G卡片页会位移。偶尔位移的问题，检查修复一下。`
+4. `对对对，谢谢你`（说"对的，谢谢你"）
+5. `再次审查代码，提出 UI bug，提出程序再次审查代码，提出 UI bug 和程序bug。`
+6. `二次审查代码，检查所有细节，检查所有bug，检查所有U二次审核代码，检查所有细节，检查所有bug，检查所有UI界面。`
+7. `你好，我今天希望吃饭，吃了饭之后再吃，首先其一你好，我今天希望吃饭，吃了饭之后再吃。首先，其一。`
+
+注意第 7 条：两版**只差几个标点**。在这种"几乎相同"的情况下仍然叠加,说明替换分支根本没有执行,
+而不是判据太严。
+
+两种环境都复现：普通 bash 提示符 + Codex（TUI）。所以不是 TUI 特有。
+
+## 二、已尝试的六次修复与失败原因
+
+| 版本 | 做法 | 结果 |
+|---|---|---|
+| 0.6.15 前 | `reconcile()`：拿 textarea 与"远端行镜像"做 diff，删差额再发 | 用户报重复（当时判据基于错误的模型） |
+| 0.6.16 | 加 `IME_MAX_UNDO=512` 限制回删量，超出则追加 | 长段落纠错更容易落进追加分支，**重复更严重** |
+| 0.6.18 | 认为 `term.onData` 是"已经发送"，`input()` 恒返回 `''` | **键盘输入全部失效**（严重回归，0.6.22 才修回） |
+| 0.6.22 | 承认 `onData` 是"请求发送"，`input()` 返回 data；`sync()` 用 `endsWith` 去重 | 键盘恢复，但语音仍叠 |
+| 0.6.24 | `sync()` 改成"新文本不是旧文本前缀 → 替换"（删整段重发） | 仍叠 |
+| 0.6.25 | `input()` 也加替换分支，用"共享 ≥3 连续字符"判定同一句 | 仍叠 |
+| 0.6.26 | 替换判断不再依赖 `synced`（怀疑被 `adopt` 覆写）；只删差异尾巴 | 仍叠（用户最新一次反馈） |
+
+每一轮都补了测试,且测试都通过。**测试通过但真机不生效,说明测试里的 harness 事件序列与真实的
+不一致。** 这是最需要纠正的地方：`imeSync.test.ts` 的 `harness()` 里,`xterm()` 调用
+`mirror.input()` 并发送返回值——这条链是对的,但"输入法何时调用哪条路径、提交的内容是什么"
+完全是假设。
+
+## 三、当前实现（0.6.26 的模型）
+
+文件：`src/renderer/src/lib/imeSync.ts`
+
+三条状态：
+- `synced` —— 我们认为远端输入行现在是什么
+- `committed` —— **本轮语音**已经送到远端的文本（keydown 输入可打印字符、Enter、Ctrl+C/U 会清空）
+- `lastSent` —— xterm 上一次交给我们的 payload（用于识别"同一次提交的第二个事件"）
+
+两条入口（都来自 `TerminalView.vue` 的 xterm 接线）：
+- `input(data, {eventType})` ← `term.onData`。**返回值会被写到 SSH 通道**。
+- `sync(settled)` ← textarea 的 `compositionend`（setTimeout 0）和 `input` 事件（`insertText` /
+  `insertReplacementText`，且 `keyTextSent` 为假）。
+
+替换逻辑（两条路径都有）：若 `committed` 非空且 `longestSharedRun(committed, data) >= 3`，
+则 `rewriteBytes(committed, data)` = 公共前缀之后的部分：`DEL × (旧长度−前缀长度) + 新尾巴`。
+
+## 四、必须实测才能确定的三件事
+
+这三条决定了修复方向,任何一条都只能靠观测,不能靠推断：
+
+1. **输入法到底走哪条路径？** 每次提交触发的是 `term.onData`、`compositionend`、还是 textarea 的
+   `input` 事件？三类事件可能同时来,也可能只来一类。
+2. **每次提交的 `data` / `settled` 是什么？** 是"完整草稿"（第二版包含第一版全文），还是
+   "只有变化部分"？第 7 条截图（只差标点）如果第二版是完整草稿,共享前缀应命中；如果不是,
+   则 `committed` 的累积方式整个是错的。
+3. **我们返回的 DEL 有没有真的到远端？** 日志里 `erased: true` 表示我们决定删,但远端是否删了
+   要对照终端画面。如果日志显示 `erased: true` 而画面没删,问题在 `send()` 或 ssh 通道,不在本模块。
+
+## 五、诊断方法（接手第一件事）
+
+0.6.27 起内置了 trace。在 X-SSH 的开发者工具（Ctrl+Shift+I）里执行：
+
+```js
+localStorage.removeItem('xssh.imeMirror')   // 先排除应急开关
+localStorage['xssh.imeDebug'] = '1'
+location.reload()
+```
+
+然后对着终端说一句会被纠正的话（例如故意说错再补一句），控制台会输出：
+
+```
+[ime] input { eventType: '(timer)' | 'keydown' | 'input' | ..., data: '…', out: '…', erased: false }
+[ime] sync  { settled: '…', out: '…', erased: true }
+[ime] adopt '…'
+```
+
+需要的三行信息：
+- **一共几条记录**（输入法提交了几次）
+- **每条的 `data` / `settled` 全文**（`clip()` 只截 60 字,长句会显示 `…(长度)`，可临时把 60 调大）
+- **`erased` 是否为 true**
+
+把这一段日志贴出来,问题基本就能定位。**没有这段日志,下一轮修复仍然是猜。**
+
+另外,如果看到 `[ime] mirror disabled by localStorage xssh.imeMirror=0`,说明应急开关没清,
+先清掉再复现,否则一切修复都不会生效。
+
+## 六、可能的方向（按概率排序,均未验证）
+
+1. **应急开关未清**（`xssh.imeMirror=0`）—— 概率最高。这种情况下 `createPassthroughMirror()`
+   的 `input: (d) => d`、`sync: () => ''`,根本没有任何去重逻辑。**先排除它。**
+2. **`committed` 被意外清空**。清空点有：可打印字符的 keydown、`\r`、`\x03`、`\x15`、paste、
+   `adopt()`。如果输入法提交前夹带了任意一个（比如模拟一次 keydown,或触发一次 `input` 事件走了
+   `adopt`），`committed` 就是空,替换分支整段不执行,退化成追加。
+3. **`input()` 的 `data` 是增量而非完整草稿**。若如此,`longestSharedRun` 永远不达标。此时应改用
+   `sync()` 里的 `settled`（textarea 全文）做判断,而不是 `data`。
+4. **DEL 被 xterm 拦截或合并**。`send()` 走 `window.api.ssh.input`,中间有 8192 字符的分片逻辑;
+   `DEL × 30 + 30 字` 不会触发分片,但值得在 `send()` 里临时打日志确认真实写出的字节数。
+5. **输入法的"大模型重写"可能换过 textarea 的元素或方式**（比如不写 xterm 的 textarea,而是写
+   自己的隐藏输入框）。这种情况下本项目的事件监听根本收不到,只能靠 `term.onData`——而那正是
+   用户看到的重复来源。
+
+## 七、相关文件
+
+| 文件 | 作用 |
+|---|---|
+| `src/renderer/src/lib/imeSync.ts` | 镜像与替换逻辑；`createBareMirror()` / `withDebug()` |
+| `src/renderer/src/lib/imeSync.test.ts` | 30 条测试（harness 的事件序列是假设,见第二节末尾） |
+| `src/renderer/src/components/TerminalView.vue` | xterm 接线：`onData`、`compositionstart/end`、`input`、value setter 拦截、`keyTextSent` |
+| `src/main/ssh.ts` `write()` | 字节真正写到 ssh2 通道的地方 |
+
+**一个提醒**：这个模块已经因为"想当然"两次造成严重后果——0.6.18 让键盘输入全部失效、0.6.16 让长段落
+更糟。任何改动请先在 `xssh.imeDebug` 的日志下验证事件序列,再改判据,不要反过来。
+
+---
+
 # 会话记录:M3.187(2026-11-08,集中修复 + **发版改成手动触发**)
 
 > 范围:桌面(`src/`)与发版线,`mobile/` 未碰(期间 iOS 线自己发了 0.6.13 / 0.6.18)。

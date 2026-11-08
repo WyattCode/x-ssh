@@ -106,6 +106,26 @@ function longestSharedRun(a: string, b: string, limit = 160): number {
 const REWRITE_RUN = 3
 
 /**
+ * Set `localStorage['xssh.imeDebug'] = '1'` and reload to trace every decision
+ * this module makes. Without this, diagnosing a specific IME means guessing at
+ * the event sequence — which is exactly how several "fixes" were shipped and
+ * then found not to work.
+ */
+const debugEnabled = (): boolean => {
+  try {
+    return window.localStorage.getItem('xssh.imeDebug') === '1'
+  } catch {
+    return false
+  }
+}
+
+let debugOn: boolean | undefined
+function trace(...args: unknown[]): void {
+  if (debugOn === undefined) debugOn = debugEnabled()
+  if (debugOn) console.log('[ime]', ...args)
+}
+
+/**
  * Turns "the line currently ends with `prev`, and the IME now wants `next`"
  * into the bytes that get it there: backspace over the part that differs, then
  * type the replacement.
@@ -123,9 +143,14 @@ function rewriteBytes(prev: string, next: string): string {
 }
 
 export function createImeMirror(): ImeMirror {
+  const mirror = createBareMirror()
+  return debugEnabled() ? withDebug(mirror) : mirror
+}
+
+/** The real implementation; `createImeMirror` optionally wraps it in a logger. */
+function createBareMirror(): ImeMirror {
   /** What the remote line currently holds, as far as we know. */
-  let synced = ''
-  /** The last payload xterm emitted for the current commit. A composition
+  let synced = ''  /** The last payload xterm emitted for the current commit. A composition
    *  usually produces BOTH an onData and an input event; `sync()` must
    *  recognise the second one as already sent. */
   let lastSent = ''
@@ -293,6 +318,43 @@ export function createImeMirror(): ImeMirror {
     clear() {
       // Intentionally does NOT reset `synced`: xterm clears the textarea after
       // committing, and the remote line still holds what was committed.
+    }
+  }
+}
+
+/** Shortens a payload for the debug log without hiding its shape. */
+const clip = (s: string): string => (s.length > 60 ? `${s.slice(0, 60)}…(${s.length})` : s)
+
+/**
+ * Wraps a mirror so every call is logged when `xssh.imeDebug` is on.
+ *
+ * The log line answers the three questions a distant debugger cannot:
+ * how many commits the IME actually makes, what each one contains, and whether
+ * we decided to erase anything (`out` starting with \x7f).
+ */
+function withDebug(inner: ImeMirror): ImeMirror {
+  return {
+    input(data, ctx) {
+      const out = inner.input(data, ctx)
+      console.log('[ime] input', {
+        eventType: ctx.eventType ?? '(timer)',
+        data: clip(data),
+        out: clip(out),
+        erased: out.startsWith(DEL)
+      })
+      return out
+    },
+    sync(settled) {
+      const out = inner.sync(settled)
+      console.log('[ime] sync', { settled: clip(settled), out: clip(out), erased: out.startsWith(DEL) })
+      return out
+    },
+    adopt(baseline) {
+      inner.adopt(baseline)
+      console.log('[ime] adopt', clip(baseline))
+    },
+    clear() {
+      inner.clear()
     }
   }
 }

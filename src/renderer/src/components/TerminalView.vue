@@ -616,6 +616,15 @@ onMounted(() => {
     }
   })()
   const ime = useMirror ? createImeMirror() : createPassthroughMirror()
+  if (!useMirror) {
+    // Say it out loud: with the mirror off, voice corrections cannot be
+    // de-duplicated at all, and any "it still duplicates" report is unactionable
+    // until this switch is cleared. This has already cost several rounds.
+    console.warn(
+      '[ime] mirror disabled by localStorage xssh.imeMirror=0 — voice corrections will duplicate. ' +
+        "Run localStorage.removeItem('xssh.imeMirror') and reload to re-enable."
+    )
+  }
   /** Large payloads are split. One multi-kilobyte write lands in the main
    *  process stream buffer as a single burst; cutting it keeps memory bounded
    *  and lets the remote shell read it in order. Cut on a code-point boundary
