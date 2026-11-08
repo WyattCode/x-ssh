@@ -269,10 +269,10 @@ fun SnapshotSheet(
                         contentDescription = stringResource(R.string.snap_delete),
                         tint = p.textDim,
                         modifier = Modifier
-                            .size(36.dp)
-                            .clip(RoundedCornerShape(10.dp))
+                            .size(48.dp)
+                            .clip(RoundedCornerShape(12.dp))
                             .clickable { confirmingDelete = snap }
-                            .padding(8.dp),
+                            .padding(14.dp),
                     )
                 }
             }

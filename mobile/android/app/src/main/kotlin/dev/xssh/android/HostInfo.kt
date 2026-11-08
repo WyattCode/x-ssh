@@ -130,7 +130,7 @@ fun HostInfoGroups(host: Host, onPin: ((Host) -> Unit)? = null) {
         if (trusted.isEmpty()) {
             InfoRow(stringResource(R.string.host_status), stringResource(R.string.host_unconfirmed), valueColor = p.warn)
         } else {
-            // 指纹 11 字一组、两组一行(和确认主机身份那一页同一个断法),逐段比对时断点落在同一处。
+            // 指纹每 12 个字符一行(RandomArt.wrapped,和确认主机身份那一页同一个断法),逐段比对时断点落在同一处。
             // 多把已信任密钥各显示一块(轮换后旧的仍在)。
             trusted.forEachIndexed { index, fp ->
                 if (index > 0) FormDivider()

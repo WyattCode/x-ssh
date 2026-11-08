@@ -104,8 +104,6 @@ class DuoTerminalChrome(
     val drawerOpen: Boolean,
     /** 回到主机列表:展开抽屉,会话照跑。 */
     val onShowHosts: () -> Unit,
-    /** 主机名那一行左边要多让出的宽度(左上角有圆形开关时)。 */
-    val headerStart: Dp = 0.dp,
     /** 这台主机的会话状态变了:(主机 id, 状态)。离开时报 [DuoStatus.None]。 */
     val onStatus: (String, DuoStatus) -> Unit = { _, _ -> },
 )
@@ -336,6 +334,7 @@ fun DuoApp(
                                         onSwitchHost = { connect(it) },
                                         onFiles = { filesOpen = true },
                                         onEditHost = { sheet = SheetTarget.Edit(host) },
+                                        onEditJump = { jump -> sheet = SheetTarget.Edit(jump) },
                                         duo = remember(shown) {
                                             DuoTerminalChrome(
                                                 drawerOpen = shown,
@@ -467,7 +466,7 @@ fun DuoApp(
                 contentAlignment = Alignment.BottomCenter,
             ) {
                 if (hosts.isNotEmpty()) {
-                    CompositionLocalProvider(LocalGlassSize provides 46.dp, LocalGlassRow provides true) {
+                    CompositionLocalProvider(LocalGlassSize provides 48.dp, LocalGlassRow provides true) {
                         GlassCapsuleRow(Modifier.padding(bottom = 20.dp), height = 54.dp) {
                             GlassItem(XIcons.Search, stringResource(R.string.host_search_hosts)) {
                                 searching = !searching
@@ -506,7 +505,13 @@ fun DuoApp(
             if (showToggle) {
                 Box(
                     Modifier
-                        .windowInsetsPadding(stableSafeDrawing().only(WindowInsetsSides.Top + WindowInsetsSides.Start))
+                        // 抽屉展开时,它的宽度 drawerW **已经包含**了左边的系统内边距(内边距是抽屉里面的 padding):
+                        // 再加一遍的话,三键导航横屏时开关会比抽屉边缘多出去一个内边距的宽度。
+                        .windowInsetsPadding(
+                            stableSafeDrawing().only(
+                                if (shown) WindowInsetsSides.Top else WindowInsetsSides.Top + WindowInsetsSides.Start,
+                            ),
+                        )
                         .offset { IntOffset(toggleXState.value.roundToPx() + slide.value.roundToInt(), 8.dp.roundToPx()) },
                 ) {
                     CompositionLocalProvider(LocalGlassSize provides 48.dp) {

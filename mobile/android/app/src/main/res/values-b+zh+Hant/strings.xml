@@ -188,6 +188,7 @@
     <string name="term_need_password">需要密碼</string>
     <string name="term_need_key">需要私鑰</string>
     <string name="term_need_passphrase">需要私鑰口令</string>
+    <string name="term_need_jump_credential">需要跳板機憑證</string>
     <string name="host_err_disconnected">伺服器中斷了連線。可能是網路不穩,或伺服器限制了這次登入。</string>
     <string name="host_err_timeout">連線逾時。檢查位址與連接埠是否正確,以及手機到伺服器的網路是否通。</string>
     <string name="host_err_refused">伺服器拒絕了連線。確認 SSH 服務已開啟,連接埠是否正確。</string>
@@ -327,6 +328,7 @@
     <string name="term_err_unlock_jump_failed">無法解鎖跳板機「%1$s」的憑證。</string>
     <string name="term_files">檔案</string>
     <string name="term_fix_enter_passphrase">填寫密碼短語</string>
+    <string name="term_fix_edit_jump">補上跳板機憑證</string>
     <string name="term_fix_enter_password">填寫密碼</string>
     <string name="term_fix_import_key">匯入私鑰</string>
     <string name="term_fix_pick_jump">重新選擇跳板機</string>

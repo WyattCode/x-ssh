@@ -115,6 +115,14 @@ fun HostKeyGate(
 
     // 以指纹为键:先确认跳板机、再确认目标主机时,第二页是新的一次确认,不能沿用上一页的"已点过"。
     var trusted by remember(host.id, fingerprint, changed) { mutableStateOf(false) }
+    // 点成功时这一页马上被连接页替换,标记用不上;点了但存盘失败(磁盘写不进去)时页面原样还在,
+    // 标记不复位的话"信任"就永远点不动了。2 秒后复位,足够挡住连点 / 回车 + 点按钮。
+    LaunchedEffect(trusted) {
+        if (trusted) {
+            kotlinx.coroutines.delay(2000)
+            trusted = false
+        }
+    }
     fun trustOnce() {
         if (trusted) return
         trusted = true
@@ -337,7 +345,9 @@ private fun GatePage(host: Host, content: GateContent, tablet: Boolean, inDrawer
     val bottomBar = LocalChrome.current == Chrome.BottomBar
     val backdrop = rememberLayerBackdrop()
     val insets = stableSafeDrawing()
-    val startInset = insets.asPaddingValues().calculateStartPadding(LocalLayoutDirection.current)
+    // 嵌在内屏右栏里时,左边的系统内边距已经由外层处理了(抽屉展开:内边距在抽屉里;收起:右栏自己的 padding 已经加过),
+    // 这里再加就是两遍 / 加在了不该加的一侧。
+    val startInset = if (inDrawer) 0.dp else insets.asPaddingValues().calculateStartPadding(LocalLayoutDirection.current)
     // 版式:整页一条居中的轴(图标 → 标题 → 主机 → 卡片),操作按钮**钉在页底**、正文在上面滚。
     //
     // 两个教训:

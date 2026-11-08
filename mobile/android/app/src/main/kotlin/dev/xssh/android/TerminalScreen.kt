@@ -165,8 +165,11 @@ private val SENTINELS = arrayOf("\u200b", "\u200c")
 /** 等用户裁决的主机密钥:[fingerprint] 是服务端这次给出的指纹;[jump] = 说的是跳板机的密钥。 */
 private data class PendingKey(val fingerprint: String, val changed: Boolean, val jump: Boolean = false)
 
-/** 错误页上那句话是哪一类:决定给不给「填写口令」按钮(原来靠比对中文原文,换了语言就失效)。 */
-private enum class FailureKind { Other, KeyPassphrase, CoreMissing }
+/**
+ * 错误页上那句话是哪一类:决定给不给「填写口令」按钮(原来靠比对中文原文,换了语言就失效)。
+ * [JumpCredential]:缺的是**跳板机**那台的密码 / 私钥 / 口令(去它的编辑页补,重试没用)。
+ */
+private enum class FailureKind { Other, KeyPassphrase, CoreMissing, JumpCredential }
 
 @Composable
 fun TerminalScreen(
@@ -183,6 +186,8 @@ fun TerminalScreen(
     onFiles: (() -> Unit)? = null,
     /** 手机 / 折叠屏:打开这台主机的编辑页(连接失败时「填写密码」这类就地修复用;平板走 [tablet])。 */
     onEditHost: (() -> Unit)? = null,
+    /** 缺的是跳板机的凭据时:打开**跳板机**的编辑页(参数是那台跳板机)。 */
+    onEditJump: ((Host) -> Unit)? = null,
     /** 连上 / 接管到活会话的那一刻回调(主机 id):首页按"最近使用"排序就靠它。 */
     onConnected: (String) -> Unit = {},
     /**
@@ -281,10 +286,12 @@ fun TerminalScreen(
         }
         if (readyJump != null && readyJump.auth == AuthKind.PASSWORD && readyJump.password.isEmpty()) {
             error = { it.getString(R.string.term_err_jump_no_password, readyJump.label) }
+            errorKind = FailureKind.JumpCredential
             return@LaunchedEffect
         }
         if (readyJump != null && readyJump.keyMissing) {
             error = { it.getString(R.string.term_err_jump_no_key, readyJump.label) }
+            errorKind = FailureKind.JumpCredential
             return@LaunchedEffect
         }
         // 密码认证却没有存密码(旧版本只放内存、或者新建时没填):拿空密码去连,
@@ -378,7 +385,8 @@ fun TerminalScreen(
                     failure is FfiException.JumpHostKeyChanged ->
                         pendingKey = PendingKey(fingerprint, changed = true, jump = true)
 
-                    failure is FfiException.KeyEncrypted && readyJump != null && isJumpFailure(failure.message) ->
+                    failure is FfiException.KeyEncrypted && readyJump != null && isJumpFailure(failure.message) -> {
+                        errorKind = FailureKind.JumpCredential
                         error = { c ->
                             if (readyJump.keyPassphrase.isEmpty()) {
                                 c.getString(R.string.term_err_jump_key_passphrase_needed, readyJump.label)
@@ -386,6 +394,7 @@ fun TerminalScreen(
                                 c.getString(R.string.term_err_jump_key_passphrase_wrong, readyJump.label)
                             }
                         }
+                    }
 
                     // 看**解锁后**的口令:加锁主机的 host.keyPassphrase 永远是空的,填错了口令也会被说成"有口令"。
                     failure is FfiException.KeyEncrypted -> {
@@ -436,7 +445,8 @@ fun TerminalScreen(
             // 只是还差一个凭据(和右栏的「需要密码」页一致):行上不写红色的「连接失败」。
             failure != null && !jumpGone && (
                 (host.auth == AuthKind.PASSWORD && host.password.isEmpty() && host.lockedPassword == null) ||
-                    host.keyMissing || failureKind == FailureKind.KeyPassphrase
+                    host.keyMissing || failureKind == FailureKind.KeyPassphrase ||
+                    failureKind == FailureKind.JumpCredential
                 ) -> DuoStatus.Needs
             failure != null -> DuoStatus.Failed
             session == null -> DuoStatus.Connecting
@@ -489,17 +499,19 @@ fun TerminalScreen(
             val noPassword = host.auth == AuthKind.PASSWORD && !storedPassword
             val keyProblem = failureKind == FailureKind.KeyPassphrase
             // 跳板机没存凭据:重试只会得到同一句话(去跳板机那台的编辑页补上)。
-            val jumpNoCredentials = jumpHost != null && (
+            val jumpNoCredentials = failureKind == FailureKind.JumpCredential || (jumpHost != null && (
                 (jumpHost.auth == AuthKind.PASSWORD && jumpHost.password.isEmpty() && jumpHost.lockedPassword == null) ||
                     jumpHost.keyMissing
-                )
+                ))
             val fixPickJump = stringResource(R.string.term_fix_pick_jump)
+            val fixJump = stringResource(R.string.term_fix_edit_jump)
             val fixPassword = stringResource(R.string.term_fix_enter_password)
             val fixKey = stringResource(R.string.term_fix_import_key)
             val fixPassphrase = stringResource(R.string.term_fix_enter_passphrase)
             // 只是还差一个凭据(不是真的连不上):不用红色警告 + 「连接失败」,换成「需要…」。
             val needsTitle = when {
                 jumpGone -> null
+                failureKind == FailureKind.JumpCredential -> stringResource(R.string.term_need_jump_credential)
                 noPassword -> stringResource(R.string.term_need_password)
                 host.keyMissing -> stringResource(R.string.term_need_key)
                 keyProblem -> stringResource(R.string.term_need_passphrase)
@@ -521,8 +533,14 @@ fun TerminalScreen(
                 onEdit = tablet?.onEdit ?: onEditHost,
                 onExit = onExit,
                 // 能就地修的直接给按钮,打开编辑页(平板是浮层)—— 不用先退回去再找编辑入口。
-                fix = (tablet?.onEdit ?: onEditHost)?.let { edit ->
+                fix = run {
+                    val edit = tablet?.onEdit ?: onEditHost
+                    val jumpToEdit = jumpHost
                     when {
+                        // 缺的是跳板机的凭据:直接打开**跳板机**的编辑页(不是目标主机的)。
+                        failureKind == FailureKind.JumpCredential && jumpToEdit != null && onEditJump != null ->
+                            fixJump to { onEditJump(jumpToEdit) }
+                        edit == null -> null
                         jumpGone -> fixPickJump to edit
                         noPassword -> fixPassword to edit
                         host.keyMissing -> fixKey to edit
@@ -1258,13 +1276,17 @@ private fun TerminalView(
           // 变暗(40%)的竖条:第一下触摸只负责唤醒,不落到按钮上 —— 半透明的竖条压在终端右缘的长行上,
           // 想点字、定位光标时手一偏就会碰到最下面红色的「✕」把会话断掉。
           Box {
-            CompositionLocalProvider(LocalGlassSize provides 46.dp) {
+            CompositionLocalProvider(LocalGlassSize provides 48.dp) {
                 GlassGroup {
                     GlassReveal(!duo.drawerOpen) {
                         GlassItem(XIcons.Back, stringResource(R.string.term_back_to_hosts)) { duo.onShowHosts() }
                     }
                     GlassReveal(scrolled) {
                         GlassItem(XIcons.ArrowDown, stringResource(R.string.term_scroll_bottom)) { live.scrollToBottom() }
+                    }
+                    // 对端断了:手机 / 内屏原来只剩一颗红色 ✕,想重连得先断开、退回列表再点主机。
+                    GlassReveal(dead) {
+                        GlassItem(XIcons.Refresh, stringResource(R.string.term_reconnect), tint = p.accent) { requestReconnect() }
                     }
                     GlassReveal(onFiles != null && !dead) {
                         GlassItem(XIcons.Folder, stringResource(R.string.term_files)) { onFiles?.invoke() }
@@ -1316,6 +1338,10 @@ private fun TerminalView(
                 GlassItem(XIcons.Back, stringResource(R.string.term_back_to_hosts)) { leaveScreen() }
                 GlassReveal(scrolled) {
                     GlassItem(XIcons.ArrowDown, stringResource(R.string.term_scroll_bottom)) { live.scrollToBottom() }
+                }
+                // 对端断了:文件按钮消失的同时,这里长出「重新连接」(原来手机上没有重连入口)。
+                GlassReveal(dead) {
+                    GlassItem(XIcons.Refresh, stringResource(R.string.term_reconnect), tint = p.accent) { requestReconnect() }
                 }
                 GlassReveal(onFiles != null && !dead) {
                     GlassItem(XIcons.Folder, stringResource(R.string.term_files)) { onFiles?.invoke() }
@@ -1438,7 +1464,7 @@ private fun TerminalView(
             // 直板机原来这一行右边挤着四颗按钮,全屏程序的头几行被压着(用户实测的抱怨);
             // 按钮挪到底下以后,名字留在顶上 —— 标题在上、操作在下,安卓手机的通常排法,
             // 也和折叠屏同一个样子。试过把名字放到底下按钮左边,用户否掉了。
-            HostLine(host = host, dead = dead, reconnecting = reconnecting, failHint = deadFailHint, extraStart = duo?.headerStart ?: 0.dp)
+            HostLine(host = host, dead = dead, reconnecting = reconnecting, failHint = deadFailHint)
         }
     }
 
@@ -1783,10 +1809,10 @@ private fun FloatingKeys(columns: Int, reserveRail: Boolean = true, content: @Co
  * 原来这里是一条 56dp 的 bgElev 横条,还塞着键盘和断开两个按钮,把终端从顶上压掉一块。
  */
 @Composable
-private fun HostLine(host: Host, dead: Boolean, reconnecting: Int = 0, failHint: String? = null, extraStart: Dp = 0.dp) {
+private fun HostLine(host: Host, dead: Boolean, reconnecting: Int = 0, failHint: String? = null) {
     val p = LocalXssh.current
     Row(
-        Modifier.fillMaxWidth().padding(start = Gutter + extraStart, end = Gutter, top = 10.dp, bottom = 8.dp),
+        Modifier.fillMaxWidth().padding(start = Gutter, end = Gutter, top = 10.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // 圆点占住 16dp 那条线(与终端文字、第一个按键同缘),名字落在 32dp 文字线上。

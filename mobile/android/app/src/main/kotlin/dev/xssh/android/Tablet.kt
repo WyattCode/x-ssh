@@ -546,6 +546,7 @@ fun TabletApp(
                                         onTrustKey = { onTrustKey(host, it) },
                                         onTrustJumpKey = { jump, fingerprint -> onTrustKey(jump, fingerprint) },
                                         onConnected = onConnected,
+                                        onEditJump = { jump -> sheet = SheetTarget.Edit(jump) },
                                         onSwitchHost = {
                                             onSelect(it.id)
                                             onOpenTerminal(it)
@@ -987,7 +988,7 @@ fun ContextMenu(at: DpOffset?, onDismiss: () -> Unit, actions: () -> List<MenuAc
                         Text(action.label, color = if (action.danger) p.danger else p.text, fontSize = 15.sp)
                     },
                     trailingIcon = action.shortcut?.takeIf { hardKeyboard }?.let { hint ->
-                        { Text(hint, color = p.textFaint, fontSize = 12.sp) }
+                        { Text(hint, color = p.textDim, fontSize = 12.sp) }
                     },
                     onClick = {
                         onDismiss()

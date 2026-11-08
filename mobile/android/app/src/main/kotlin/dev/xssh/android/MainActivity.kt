@@ -363,6 +363,9 @@ fun App(devTarget: DevTarget? = null) {
                     val open = termHostId
                         ?.takeIf { SessionRegistry[it] != null }
                         ?.let { id -> hosts.firstOrNull { it.id == id } }
+                    // 没有活会话(内屏上正在连接 / 等确认 / 失败时折上):外屏回主机页,同时把 termHostId 一并清掉,
+                    // 否则再展开时内屏会为这个残留的 id 重新拨号(加锁主机还会平白再弹一次指纹框)。
+                    if (open == null && termHostId != null) termHostId = null
                     screen = when {
                         open != null -> Screen.Terminal(open)
                         screen is Screen.Terminal -> Screen.Home
@@ -712,6 +715,10 @@ private fun PhoneFlow(
                     onEditHost = {
                         onTerminalHost(null)
                         onScreen(Screen.Editor(shown, back = current.back))
+                    },
+                    onEditJump = { jump ->
+                        onTerminalHost(null)
+                        onScreen(Screen.Editor(jump, back = current.back))
                     },
                     onOpenBeside = { pickingBeside = true },
                     onSwitchHost = { host ->

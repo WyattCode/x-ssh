@@ -348,6 +348,7 @@ class RemoteFiles(session: Session, private val scope: CoroutineScope) {
     /** 下载到系统「下载 / X-SSH」。Android 9 及以下没有 MediaStore.Downloads,返回 false(界面改问目的地)。 */
     fun download(entries: List<RemoteEntry>, context: Context): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return false
+        val app = context.applicationContext // 见 open():收尾回调里不攥 Activity
         val resolver = context.contentResolver
         val created = mutableListOf<Uri>()
         // 在版本判断之后、lambda 之外建好:这样编译器和 lint 都看得见"只有 Android 10+ 才会走到这里"。
@@ -357,13 +358,14 @@ class RemoteFiles(session: Session, private val scope: CoroutineScope) {
             label = entries.singleOrNull()?.name ?: context.resources.getQuantityString(R.plurals.files_items, entries.size, entries.size),
             prepare = { s -> downloadSteps(s, entries, resolver, sink, created) },
         ) { sent, steps, failure, wasCancelled ->
-            reportDownload(context, sent, steps, failure, wasCancelled, created, FileText.of(R.string.files_downloads_folder, DownloadFolder))
+            reportDownload(app, sent, steps, failure, wasCancelled, created, FileText.of(R.string.files_downloads_folder, DownloadFolder))
         }
         return true
     }
 
     /** 下载到用户挑的文件夹 [tree](`ACTION_OPEN_DOCUMENT_TREE` 的结果)。 */
     fun downloadTo(entries: List<RemoteEntry>, tree: Uri, context: Context) {
+        val app = context.applicationContext // 见 open():收尾回调里不攥 Activity
         val resolver = context.contentResolver
         val created = mutableListOf<Uri>()
         val where = treeName(resolver, tree)?.let(FileText::raw) ?: FileText.of(R.string.files_selected_folder)
@@ -372,7 +374,7 @@ class RemoteFiles(session: Session, private val scope: CoroutineScope) {
             label = entries.singleOrNull()?.name ?: context.resources.getQuantityString(R.plurals.files_items, entries.size, entries.size),
             prepare = { s -> downloadSteps(s, entries, resolver, TreeSink(resolver, tree), created) },
         ) { sent, steps, failure, wasCancelled ->
-            reportDownload(context, sent, steps, failure, wasCancelled, created, where)
+            reportDownload(app, sent, steps, failure, wasCancelled, created, where)
         }
     }
 
@@ -406,6 +408,9 @@ class RemoteFiles(session: Session, private val scope: CoroutineScope) {
 
     /** 打开:下载到应用缓存 open/<批号>/,再交给能看它的应用。 */
     fun open(entry: RemoteEntry, context: Context) {
+        // 传输排在会话作用域里,可能比这个 Activity 活得久:收尾回调里只留 applicationContext,
+        // 不能攥着 Activity(转屏 / 退出后它就泄漏了,再拿它去 startActivity 也是在一个死窗口上)。
+        val app = context.applicationContext
         val batchId = UUID.randomUUID().toString()
         val dir = File(context.cacheDir, "open/$batchId")
         val file = File(dir, localSafe(entry.name))
@@ -414,7 +419,7 @@ class RemoteFiles(session: Session, private val scope: CoroutineScope) {
             label = entry.name,
             prepare = {
                 // 只清别的批,别动正在排队的。
-                File(context.cacheDir, "open").listFiles()?.forEach { old ->
+                File(app.cacheDir, "open").listFiles()?.forEach { old ->
                     if (old.name != batchId) runCatching { old.deleteRecursively() }
                 }
                 dir.mkdirs()
@@ -445,9 +450,9 @@ class RemoteFiles(session: Session, private val scope: CoroutineScope) {
                     notify(FileText.of(R.string.files_open_failed, failure.reason()), error = true)
                 }
                 sent == 1 -> {
-                    val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.files", file)
+                    val uri = androidx.core.content.FileProvider.getUriForFile(app, "${app.packageName}.files", file)
                     synchronized(lock) { cachedUris[entry.path] = uri; _cacheEpoch.value++ }
-                    view(context, uri, entry.name)
+                    view(app, uri, entry.name)
                 }
             }
         }
@@ -459,6 +464,7 @@ class RemoteFiles(session: Session, private val scope: CoroutineScope) {
      */
     fun share(entries: List<RemoteEntry>, context: Context) {
         if (entries.isEmpty()) return
+        val app = context.applicationContext // 见 open():收尾回调里不攥 Activity
         val batchId = UUID.randomUUID().toString()
         val dir = File(context.cacheDir, "share/$batchId")
         val created = mutableListOf<Pair<String, File>>() // remote path → local file
@@ -467,7 +473,7 @@ class RemoteFiles(session: Session, private val scope: CoroutineScope) {
             label = entries.singleOrNull()?.name
                 ?: context.resources.getQuantityString(R.plurals.files_items, entries.size, entries.size),
             prepare = { s ->
-                File(context.cacheDir, "share").listFiles()?.forEach { old ->
+                File(app.cacheDir, "share").listFiles()?.forEach { old ->
                     if (old.name != batchId) runCatching { old.deleteRecursively() }
                 }
                 dir.mkdirs()
@@ -513,15 +519,15 @@ class RemoteFiles(session: Session, private val scope: CoroutineScope) {
                 else -> {
                     val uris = created.map { (remote, file) ->
                         val uri = androidx.core.content.FileProvider.getUriForFile(
-                            context,
-                            "${context.packageName}.files",
+                            app,
+                            "${app.packageName}.files",
                             file,
                         )
                         synchronized(lock) { cachedUris[remote] = uri }
                         uri
                     }
                     if (uris.isNotEmpty()) _cacheEpoch.value++
-                    shareOut(context, uris, created.map { it.second.name })
+                    shareOut(app, uris, created.map { it.second.name })
                 }
             }
         }
@@ -540,7 +546,10 @@ class RemoteFiles(session: Session, private val scope: CoroutineScope) {
         }
         intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         try {
-            context.startActivity(Intent.createChooser(intent, context.getString(R.string.files_share)))
+            // 传进来的是 applicationContext(不是 Activity):没有任务栈,必须 NEW_TASK。
+            context.startActivity(
+                Intent.createChooser(intent, context.getString(R.string.files_share)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
         } catch (_: ActivityNotFoundException) {
             notify(FileText.of(R.string.files_no_app, names.firstOrNull() ?: ""), error = true)
         }
@@ -549,7 +558,7 @@ class RemoteFiles(session: Session, private val scope: CoroutineScope) {
     private fun view(context: Context, uri: Uri, name: String) {
         val intent = Intent(Intent.ACTION_VIEW)
             .setDataAndType(uri, viewMime(name))
-            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
         try {
             context.startActivity(intent)
         } catch (_: ActivityNotFoundException) {
@@ -580,7 +589,8 @@ class RemoteFiles(session: Session, private val scope: CoroutineScope) {
                         run = { listener ->
                             val pfd = resolver.openFileDescriptor(item.uri, "r") ?: throw FileTextException(FileText.of(R.string.files_cannot_read, item.name))
                             val size = pfd.statSize.takeIf { it >= 0 } ?: item.size.coerceAtLeast(0)
-                            pfd.use { s.uploadFromFd(joinPath(dir, item.name), pfd.detachFd(), size.toULong(), listener) }
+                            // 走 withSftp:通道在传输中死了就丢掉重连,别让下一次操作白白再失败一次。
+                            pfd.use { withSftp { it.uploadFromFd(joinPath(dir, item.name), pfd.detachFd(), size.toULong(), listener) } }
                         },
                     )
                 }

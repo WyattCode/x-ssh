@@ -117,6 +117,8 @@ object Secrets {
      */
     fun readLocked(sealed: String): String {
         val parts = sealed.removePrefix(PREFIX).split(':')
+        // 老格式至少是 `iv:密文` 两段;更短的是损坏的值,明确报错而不是靠数组越界。
+        require(parts.size >= 2) { "malformed locked secret" }
         if (parts.size < 3) {
             val cipher = Cipher.getInstance(TRANSFORM)
             cipher.init(
@@ -156,7 +158,25 @@ object Secrets {
 
     /** 加锁的密钥对建出来没有;没有就现建一对。建密钥本身不要求认证。 */
     fun ensureLockKey() {
-        if (loadOrNull(LOCKED_ALIAS) == null) generateRsa(LOCKED_ALIAS)
+        val existing = loadOrNull(LOCKED_ALIAS)
+        if (existing == null) {
+            generateRsa(LOCKED_ALIAS)
+            return
+        }
+        // 密钥还在,但可能已经**永久失效**(录入了新的生物特征等)。公钥加密不受影响、照样成功,
+        // 于是新存的密码会被悄悄加密给一把再也解不开的密钥。用私钥试着初始化一次解密:
+        // 要认证 → 说明密钥好好的(UserNotAuthenticated);永久失效 → 删掉、重建一对。
+        val probe = existing as? java.security.PrivateKey ?: return
+        try {
+            Cipher.getInstance(RSA_TRANSFORM).init(Cipher.DECRYPT_MODE, probe, oaep())
+        } catch (_: android.security.keystore.UserNotAuthenticatedException) {
+            // 正常:这把要认证,此刻没认证。
+        } catch (_: android.security.keystore.KeyPermanentlyInvalidatedException) {
+            KeyStore.getInstance("AndroidKeyStore").apply { load(null) }.deleteEntry(LOCKED_ALIAS)
+            generateRsa(LOCKED_ALIAS)
+        } catch (_: Exception) {
+            // 其他初始化问题不在这里判断,交给真正的加解密去报。
+        }
     }
 
     /**

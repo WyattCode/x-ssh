@@ -183,6 +183,18 @@ fun forwardErrorKind(message: String?): String = when {
     else -> "unknown"
 }
 
+/**
+ * 转发失败给人看的话:认得的几类换成本地化文案,认不得的才退回核心给的原文
+ * (原来一律把英文原文直接摆出来)。
+ */
+fun forwardErrorText(context: android.content.Context, message: String?): String = when (forwardErrorKind(message)) {
+    "in_use" -> context.getString(R.string.fwd_err_port_in_use)
+    "already" -> context.getString(R.string.fwd_err_already)
+    "bad_port" -> context.getString(R.string.fwd_err_bad_port)
+    "denied" -> context.getString(R.string.fwd_err_denied)
+    else -> message.orEmpty()
+}
+
 /* ----------------------------- UI: editor list ----------------------------- */
 
 /**
@@ -273,7 +285,7 @@ private fun ForwardEditorSheet(
                     Text(ruleLabel(rule), color = p.text, fontSize = 15.sp, fontFamily = XsshFonts.monoUi)
                 }
                 Box(
-                    Modifier.size(40.dp).clip(RoundedCornerShape(20.dp)).clickable {
+                    Modifier.size(48.dp).clip(RoundedCornerShape(24.dp)).clickable {
                         onChange(rules.filterIndexed { i, _ -> i != index })
                     },
                     contentAlignment = Alignment.Center,
@@ -362,7 +374,7 @@ private fun ForwardRuleForm(
                         .background(if (on) p.accent.copy(alpha = 0.15f) else p.bgElev)
                         .border(0.5.dp, if (on) p.accent else p.border, RoundedCornerShape(14.dp))
                         .clickable { mode = m; error = null }
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                        .padding(horizontal = 14.dp, vertical = 14.dp),
                 )
             }
         }
@@ -438,6 +450,7 @@ fun ForwardSheet(
 ) {
     val p = LocalXssh.current
     val scope = rememberCoroutineScope()
+    val context = androidx.compose.ui.platform.LocalContext.current
     var live by remember { mutableStateOf(session.forwards().map { it.toHostForward() to it.id }) }
     var adding by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
@@ -505,7 +518,7 @@ fun ForwardSheet(
                             runCatching { session.removeForward(id) }.exceptionOrNull()
                         }
                         if (err == null) refresh()
-                        else toast = err.message
+                        else toast = forwardErrorText(context, err.message)
                         busy = false
                     }
                 },
@@ -529,7 +542,7 @@ fun ForwardSheet(
                     result.onSuccess {
                         refresh()
                         // 临时规则不写入主机;用户要持久化去编辑页。
-                    }.onFailure { toast = it.message }
+                    }.onFailure { toast = forwardErrorText(context, it.message) }
                     busy = false
                 }
             },
@@ -568,7 +581,7 @@ private fun ForwardLiveRow(
         }
         if (onRemove != null) {
             Box(
-                Modifier.size(40.dp).clip(RoundedCornerShape(20.dp)).clickable { onRemove() },
+                Modifier.size(48.dp).clip(RoundedCornerShape(24.dp)).clickable { onRemove() },
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(XIcons.Close, contentDescription = stringResource(R.string.fwd_remove_live), tint = p.textDim, modifier = Modifier.size(16.dp))

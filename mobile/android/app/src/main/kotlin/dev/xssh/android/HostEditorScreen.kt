@@ -302,7 +302,7 @@ fun HostEditorScreen(
                         // 一行里标签在左、取值在右,行太宽的话视线要横跨半块屏幕 —— 所以限宽。
                         // 但**不能居中**:多出来的宽度左右一分,盒子就不在盒子线上了。
                         // 限宽之后靠左,盒子永远在 16dp、盒内文字永远在 32dp(版心)。
-                        // 用户要求表单框比整行再短 10% 左右:在原来的盒子线里再收到 90%,整体居中(顶栏标题也居中)。
+                        // 用户要求表单框比整行再短一点:在原来的盒子线里再收到 [EditorFormWidth](现在是 95%),整体居中(顶栏标题也居中)。
                         .align(Alignment.CenterHorizontally)
                         .padding(start = startInset)
                         .widthIn(max = PageMaxWidth + Gutter * 2)

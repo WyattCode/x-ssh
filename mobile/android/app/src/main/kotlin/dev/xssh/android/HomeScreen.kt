@@ -1410,7 +1410,7 @@ internal fun formatElapsed(millis: Long): String {
 
 /** 左滑露出的按钮:一个"编辑"、一个"删除",只有图标(iOS 版的做法),各 60dp,彼此之间、和卡片之间各留 8dp。 */
 private val ActionTile = 54.dp   // 每格占的宽度(圆本身是 SwipeTileSize)
-private val SwipeTileSize = 46.dp  // 左滑按钮的直径:正圆,比原来 60dp 的方块小一圈
+private val SwipeTileSize = 48.dp  // 左滑按钮的直径:正圆,比原来 60dp 的方块小一圈
 private val ActionGap = 4.dp
 private val RevealWidth = ActionTile * 2 + ActionGap * 2
 
@@ -1754,7 +1754,7 @@ private fun PaneTitle(
 }
 
 /** 主机页右侧竖胶囊里每颗按钮的直径(别的页是 56dp,这里小 20%)。 */
-private val HomeRailSize = 45.dp
+private val HomeRailSize = 48.dp
 
 /** 单栏主机页顶栏里字标那一块的高度(状态栏之下):字标 25dp 在里面垂直居中,位置和原来在列表里时一致。 */
 private val HomeBarBody = 57.dp
