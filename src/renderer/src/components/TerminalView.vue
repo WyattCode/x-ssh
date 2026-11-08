@@ -25,7 +25,7 @@ import { pasteLineCount } from '../lib/pasteLines'
 import { isMac } from '../composables/platform'
 
 const modKey = isMac ? '⌘' : 'Ctrl'
-import { attachImeBridge } from '../lib/imeBridge'
+import { attachImeBridge, type ImeBridge } from '../lib/imeBridge'
 import Icon from './Icon.vue'
 
 const props = withDefaults(
@@ -85,6 +85,8 @@ function scanCwd(data: string): void {
 
 const el = ref<HTMLDivElement>()
 let term: Terminal | null = null
+/** Voice-input wiring; pastes go through it so they are never mistaken for dictation. */
+let imeBridge: ImeBridge | null = null
 let fit: FitAddon | null = null
 let search: SearchAddon | null = null
 let webgl: WebglAddon | null = null
@@ -159,7 +161,8 @@ async function pasteClipboard(): Promise<void> {
   if (!term) return
   const pane = store.paneBySession(props.sessionId)
   if (!pane || pane.status !== 'connected' || pane.sshSessionId !== props.sessionId) return
-  term.paste(clean)
+  if (imeBridge) imeBridge.paste(clean)
+  else term.paste(clean)
   term.focus()
 }
 
@@ -622,7 +625,7 @@ onMounted(() => {
       i = Math.max(end, i + 1)
     }
   }
-  attachImeBridge(term, send, imeAbort.signal)
+  imeBridge = attachImeBridge(term, send, imeAbort.signal)
   term.onKey(() => {
     lastAppCopy = null
   })

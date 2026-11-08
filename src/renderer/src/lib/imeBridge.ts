@@ -2,8 +2,8 @@ import type { Terminal } from '@xterm/xterm'
 import { createImeMirror, isImeText, isPlainText } from './imeSync'
 
 /**
- * Connects xterm's hidden textarea to the IME mirror (see imeSync.ts) and
- * returns nothing: everything that must reach the remote goes through `send`.
+ * Connects xterm's hidden textarea to the IME mirror (see imeSync.ts).
+ * Everything that must reach the remote goes through `send`.
  *
  * Lives outside TerminalView so the exact same wiring can be driven by real
  * Chromium IME events in a test page — the previous harness replayed an
@@ -24,23 +24,46 @@ const vis = (s: string | null | undefined): string | null | undefined =>
     : s
 
 /**
+ * What a trace line may show of an xterm payload. Typed keys, terminal reports
+ * and pasted text never go into the log: with tracing on, a password typed at a
+ * prompt or a token pasted from the clipboard must not end up in a file.
+ */
+export function redactForTrace(data: string, eventType: string | undefined): string | null | undefined {
+  if (data.startsWith('\x1b')) return '(esc)'
+  if (eventType === 'paste' || eventType === 'drop') return `(paste, ${data.length} chars)`
+  if ((eventType === 'keydown' || eventType === 'keypress') && data.length <= 2 && data !== DEL) return '(key)'
+  return vis(data)
+}
+
+/**
  * A multi-line IME commit (a tidied-up dictation) must not reach a shell as raw
  * LF: that is Enter, so every line would execute. When the application has
  * switched bracketed paste on, deliver the text as a paste — erase part first,
- * outside the markers — so it is inserted, not run.
+ * outside the markers — so it is inserted, not run. A bare line break is a key
+ * and is left alone.
  */
-function bracketMultiline(out: string, bracketed: boolean): string {
+export function bracketMultiline(out: string, bracketed: boolean): string {
   if (!bracketed || !out.includes('\n')) return out
   const m = /^(\x7f*)([\s\S]*)$/.exec(out)
-  if (!m || !/[^\x00-\x1f\x7f]/.test(m[2])) return out // a bare line break is a key
+  if (!m || !/[^\x00-\x1f\x7f]/.test(m[2])) return out
   return m[1] + BRACKETED_PASTE_START + m[2] + BRACKETED_PASTE_END
+}
+
+export interface ImeBridge {
+  /**
+   * Pastes into the terminal as a PASTE. Everything xterm emits during the call
+   * is treated as pasted text whatever DOM event — or none, after an awaited
+   * confirm dialog — happens to be current; otherwise a multi-line paste is
+   * taken for a dictation commit, may match the recorded draft and erase it.
+   */
+  paste(text: string): void
 }
 
 export function attachImeBridge(
   term: Terminal,
   rawSend: (data: string) => void,
   signal: AbortSignal
-): void {
+): ImeBridge {
   const ta = term.textarea
   const ime = createImeMirror()
 
@@ -60,53 +83,53 @@ export function attachImeBridge(
   // ---- Diagnostic trace (off unless main says so) -------------------------
   // Every IME-relevant DOM event, what xterm reported, what the mirror decided
   // and what went on the wire, in order. Main decides whether tracing is on
-  // (see main/imeTrace.ts); it is asked once here, and while it is off nothing
-  // is built or sent. Typed keys are never recorded: single-key payloads are
-  // redacted so a password typed while tracing is on does not reach the log.
+  // (see main/imeTrace.ts). It is asked when the terminal mounts and again at
+  // every composition start and focus — rare events — so a flag file created
+  // while the app is running takes effect, and an expired one stops it. While
+  // off, nothing is built or sent.
   let tracing = false
   const diag = window.api?.ime
-  void diag
-    ?.traceEnabled()
-    .then((on) => {
-      tracing = on
-    })
-    .catch(() => undefined)
+  const refreshTracing = (): void => {
+    void diag
+      ?.traceEnabled()
+      .then((on) => {
+        tracing = on
+      })
+      .catch(() => undefined)
+  }
+  refreshTracing()
+  /** Text xterm itself wrote into the textarea (a right-click selection): terminal
+   *  output, never the user's dictation, so it is masked in the log. */
+  let xtermText = ''
+  const scrub = (s: string): string =>
+    xtermText && s.includes(xtermText) ? s.split(xtermText).join('(xterm text)') : s
   const t0 = performance.now()
   const trace = (kind: string, info: () => Record<string, unknown> = () => ({})): void => {
     if (!tracing || !diag) return
     try {
-      const snap = ta ? { ta: vis(ta.value), sel: [ta.selectionStart, ta.selectionEnd] } : {}
+      const snap = ta ? { ta: vis(scrub(ta.value)), sel: [ta.selectionStart, ta.selectionEnd] } : {}
       diag.trace(JSON.stringify({ t: Math.round(performance.now() - t0), kind, ...info(), ...snap }))
     } catch {
       /* diagnostics only */
     }
   }
-  /** What to show of a payload: nothing for typed keys and terminal reports. */
-  const shown = (data: string, eventType: string | undefined): string | null | undefined => {
-    if (data.startsWith('\x1b')) return '(esc)'
-    if ((eventType === 'keydown' || eventType === 'keypress') && data.length <= 2 && data !== DEL) return '(key)'
-    return vis(data)
-  }
 
   const send = (data: string, eventType?: string): void => {
-    trace('SEND', () => ({ data: shown(data, eventType), dels: (data.match(/\x7f/g) ?? []).length }))
+    trace('SEND', () => ({ data: redactForTrace(data, eventType), dels: (data.match(/\x7f/g) ?? []).length }))
     rawSend(data)
   }
   /** IME output: multi-line text goes out as a bracketed paste when the app wants that. */
   const sendIme = (out: string): void => send(bracketMultiline(out, term.modes.bracketedPasteMode))
 
-  // Anything emitted while the app pastes (term.paste) is a paste, whatever DOM
-  // event — or none, after an awaited confirm dialog — happens to be current.
-  // Otherwise a multi-line paste is mistaken for a dictation commit, may match
-  // the recorded draft, and erase it.
   let pasting = false
-  const nativePaste = term.paste.bind(term)
-  term.paste = (text: string): void => {
-    pasting = true
-    try {
-      nativePaste(text)
-    } finally {
-      pasting = false
+  const bridge: ImeBridge = {
+    paste(text) {
+      pasting = true
+      try {
+        term.paste(text)
+      } finally {
+        pasting = false
+      }
     }
   }
 
@@ -121,7 +144,7 @@ export function attachImeBridge(
 
   if (ta) {
     for (const type of ['compositionstart', 'compositionupdate', 'compositionend'] as const) {
-      ta.addEventListener(type, (e) => trace(type, () => ({ data: vis((e as CompositionEvent).data) })), {
+      ta.addEventListener(type, (e) => trace(type, () => ({ data: vis(scrub((e as CompositionEvent).data ?? '')) })), {
         capture: true,
         signal
       })
@@ -147,13 +170,15 @@ export function attachImeBridge(
       },
       { capture: true, signal }
     )
+    ta.addEventListener('focus', refreshTracing, { signal })
 
     const flushCommit = (snapshot: string): void => {
       const out = ime.sync(snapshot)
-      trace('flush', () => ({ snapshot: vis(snapshot), out: vis(out) }))
+      trace('flush', () => ({ snapshot: vis(scrub(snapshot)), out: vis(out) }))
       if (out) sendIme(out)
     }
     ta.addEventListener('compositionstart', () => {
+      refreshTracing()
       composing = true
       // A reconversion starts at the replaced range, not at the end.
       compStart = ta.selectionStart ?? ta.value.length
@@ -231,12 +256,14 @@ export function attachImeBridge(
           set.call(this, v)
           if (v === '') {
             // xterm emptied the box: the textarea no longer holds the draft.
+            xtermText = ''
             ime.clear()
             trace('clear')
           } else if (!composing) {
             // During a composition the textarea holds the IME's *draft*, which
             // is not the remote line. Only a real write of text (right-click
             // copy, paste) should be recorded.
+            xtermText = v
             ime.adopt(get.call(this))
             trace('adopt')
           }
@@ -251,15 +278,24 @@ export function attachImeBridge(
       return
     }
     const eventType = pasting ? 'paste' : (window.event as Event | undefined)?.type
+    // Terminal reports (mouse, focus, cursor position) and arrow keys arrive in
+    // the hundreds and say nothing about text: skip the textarea read and the
+    // trace work for them. A bracketed paste also starts with ESC but does need
+    // the textarea state.
+    if (data.startsWith('\x1b') && !data.startsWith(BRACKETED_PASTE_START)) {
+      const out = ime.input(data, { settled: '', eventType })
+      if (out) send(out, eventType)
+      return
+    }
     // A non-IME key during composition makes xterm finish it on the spot,
     // so the whole textarea counts as settled then.
     const settled = composing && eventType !== 'keydown' ? ta.value.slice(0, compStart) : ta.value
     const out = ime.input(data, { settled, eventType })
     trace('onData', () => ({
-      data: shown(data, eventType),
+      data: redactForTrace(data, eventType),
       eventType: eventType ?? '(timer)',
-      settled: data.startsWith('\x1b') ? '(esc)' : vis(settled),
-      out: shown(out, eventType)
+      settled: eventType === 'paste' || eventType === 'drop' ? '(paste)' : vis(scrub(settled)),
+      out: redactForTrace(out, eventType)
     }))
     const fromKey = eventType === 'keydown' || eventType === 'keypress'
     if (fromKey && isPlainText(data)) {
@@ -273,4 +309,6 @@ export function attachImeBridge(
     if (!fromKey && eventType !== 'paste' && eventType !== 'drop' && isImeText(data)) sendIme(out)
     else send(out, eventType)
   })
+
+  return bridge
 }
