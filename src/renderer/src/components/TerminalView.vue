@@ -25,7 +25,7 @@ import { pasteLineCount } from '../lib/pasteLines'
 import { isMac } from '../composables/platform'
 
 const modKey = isMac ? '⌘' : 'Ctrl'
-import { createImeMirror, createPassthroughMirror, isPlainText } from '../lib/imeSync'
+import { attachImeBridge } from '../lib/imeBridge'
 import Icon from './Icon.vue'
 
 const props = withDefaults(
@@ -602,29 +602,7 @@ onMounted(() => {
 
   // IME text (pinyin, and especially voice input that rewrites its own
   // draft) goes through a mirror of xterm's hidden textarea rather than
-  // straight from xterm — see lib/imeSync. The textarea is the source of
-  // truth; the flags below say which part of it is settled.
-  const ta = term.textarea
-  // Escape hatch for A/B diagnosis on a machine with a misbehaving IME:
-  //   localStorage['xssh.imeMirror'] = '0'  (then reload the window)
-  // sends xterm's bytes verbatim, i.e. the pre-mirror behaviour.
-  const useMirror = ((): boolean => {
-    try {
-      return window.localStorage.getItem('xssh.imeMirror') !== '0'
-    } catch {
-      return true
-    }
-  })()
-  const ime = useMirror ? createImeMirror() : createPassthroughMirror()
-  if (!useMirror) {
-    // Say it out loud: with the mirror off, voice corrections cannot be
-    // de-duplicated at all, and any "it still duplicates" report is unactionable
-    // until this switch is cleared. This has already cost several rounds.
-    console.warn(
-      '[ime] mirror disabled by localStorage xssh.imeMirror=0 — voice corrections will duplicate. ' +
-        "Run localStorage.removeItem('xssh.imeMirror') and reload to re-enable."
-    )
-  }
+  // straight from xterm — see lib/imeSync and lib/imeBridge.
   /** Large payloads are split. One multi-kilobyte write lands in the main
    *  process stream buffer as a single burst; cutting it keeps memory bounded
    *  and lets the remote shell read it in order. Cut on a code-point boundary
@@ -644,120 +622,10 @@ onMounted(() => {
       i = Math.max(end, i + 1)
     }
   }
-  let composing = false
-  let compStart = 0
-  /** A commit whose deferred flush was skipped because the next composition
-   *  started within the same tick — sent before that new draft is mirrored. */
-  let pendingCommit: string | null = null
-  /** A keystroke's own character was just sent; its input event (if the
-   *  browser still inserts it) must not be sent a second time. */
-  let keyTextSent = false
-  if (ta) {
-    const signal = imeAbort.signal
-    const flushCommit = (snapshot: string): void => {
-      const out = ime.sync(snapshot)
-      if (out) send(out)
-    }
-    ta.addEventListener('compositionstart', () => {
-      composing = true
-      // A reconversion starts at the replaced range, not at the end.
-      compStart = ta.selectionStart ?? ta.value.length
-      // The textarea already holds the new draft, so the previous commit's
-      // deferred flush would see `composing === true` and be dropped. Send it
-      // against the snapshot taken at its own compositionend instead.
-      if (pendingCommit !== null) {
-        const snapshot = pendingCommit
-        pendingCommit = null
-        flushCommit(snapshot)
-      }
-    }, { signal })
-    // Catch up after each commit in case xterm emitted nothing for it (see
-    // ImeMirror.sync). Deferred so xterm's own timer-based send runs first;
-    // whatever it mirrors makes this a no-op.
-    ta.addEventListener('compositionend', () => {
-      composing = false
-      const snapshot = ta.value
-      setTimeout(() => {
-        if (signal.aborted) return
-        if (composing) {
-          // A new composition began before this timer ran. Keep the committed
-          // text for compositionstart to flush: dropping it lost every commit
-          // that happened to be followed by another one in the same tick.
-          pendingCommit = snapshot
-          return
-        }
-        flushCommit(snapshot)
-      }, 0)
-    }, { signal })
-    // Same for text committed without a composition (voice input). xterm's
-    // capture listener has already handled — or silently dropped — it.
-    ta.addEventListener('input', (e) => {
-      const kind = (e as InputEvent).inputType
-      if (composing || kind === 'insertCompositionText') return
-      if ((kind === 'insertText' || kind === 'insertReplacementText') && !keyTextSent) {
-        const out = ime.sync(ta.value)
-        if (out) send(out)
-        return
-      }
-      // A deletion removes text the mirror itself sent: keep it erasable, or
-      // the next dictation correction is appended as a duplicate.
-      if (kind.startsWith('delete')) {
-        // The DEL itself went through onData, which already shortened the
-        // record; re-syncing it here keeps the two in step.
-        ime.adopt(ta.value)
-        return
-      }
-      // Anything else lands text xterm already sent or that isn't typing at
-      // all: a native paste (xterm sends it, empties the textarea, then the
-      // browser inserts it anyway), a drop, an undo, a keystroke's own
-      // character. Account for it without sending it again.
-      ime.adopt(ta.value)
-    }, { signal })
-    // Every time xterm itself rewrites the textarea — emptying it on Enter,
-    // Ctrl+C, blur and after a paste, or filling it with the selection on
-    // right-click — that text is not something the IME typed. Catch all of
-    // them at the one place they share (the value setter; IME edits never go
-    // through it) instead of listing xterm's code paths one by one.
-    const native = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')
-    if (native?.get && native.set) {
-      const { get, set } = native
-      Object.defineProperty(ta, 'value', {
-        configurable: true,
-        get(this: HTMLTextAreaElement) {
-          return get.call(this)
-        },
-        set(this: HTMLTextAreaElement, v: string) {
-          set.call(this, v)
-          // During a composition the textarea holds the IME's *draft*, which is
-          // not the remote line; and xterm empties the box after committing,
-          // which does not mean the line was cleared either. Only a real write
-          // of text (right-click copy, paste) should be recorded.
-          if (!composing && v !== '') ime.adopt(get.call(this))
-        }
-      })
-    }
-  }
+  attachImeBridge(term, send, imeAbort.signal)
   term.onKey(() => {
     lastAppCopy = null
   })
-  term.onData((data) => {
-    let out = data
-    if (ta) {
-      const eventType = (window.event as Event | undefined)?.type
-      // A non-IME key during composition makes xterm finish it on the spot,
-      // so the whole textarea counts as settled then.
-      const settled = composing && eventType !== 'keydown' ? ta.value.slice(0, compStart) : ta.value
-      out = ime.input(data, { settled, eventType })
-      if ((eventType === 'keydown' || eventType === 'keypress') && isPlainText(data)) {
-        // The browser inserts a key's character (if at all) within the same
-        // task, so this only covers that key.
-        keyTextSent = true
-        setTimeout(() => { keyTextSent = false }, 0)
-      }
-    }
-    if (out) send(out)
-  })
-
   offData = window.api.ssh.onData((payload) => {
     if (payload.sessionId === props.sessionId) {
       term?.write(payload.data)

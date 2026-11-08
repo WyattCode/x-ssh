@@ -5,6 +5,18 @@
 
 ## [Unreleased]
 
+## [0.6.28] - 2026-11-08
+
+### Fixed
+- **语音输入(豆包 / 微信输入法)“重读改写”后两版叠在同一行——真正的根因**:xterm 在两次回车之间**从不清空**隐藏 textarea,它会累积每一次提交(V1、V1V2……)。`sync()` 却把整个 textarea 当成“远端当前这一行”:`onData(V2)` 先把 V1 正确替换成 V2,紧接着的 `input` / `compositionend` 追补看到 textarea 是 “V1V2”,又把行“纠正”成 V1+V2。此前六轮修复的单测都假设 textarea 只装当前这一版,所以全部通过、真机无效。现在 `input()`/`sync()` 一律只处理 **textarea 相对上次记录的差异**:尾部被原地替换就精确擦掉再重写,纯追加则按草稿判断是否重读;同一次提交被 `onData` / `input` / `compositionend` 重复上报时天然无操作。
+- IME 删除 textarea 内容(`delete*` 输入事件)不再清空“本轮语音草稿”:先删后插式的改写以前会因此退化成追加。
+- xterm 清空 textarea(回车 / Ctrl+C / 失焦 / 粘贴)时同步清掉镜像记录,避免下一次提交与旧内容做差。
+- 移除 `localStorage['xssh.imeMirror']='0'` 应急开关,并在启动时清掉遗留值:它会静默关闭全部去重逻辑,任何修复都不会生效。
+
+### Added
+- `lib/imeBridge.ts`:把 TerminalView 里的 IME 接线抽成独立模块,便于用真实 xterm 驱动。
+- `scripts/ime-e2e/`:用 Chromium 的 CDP 输入法命令(`imeSetComposition` / `insertText`)在真实 xterm 上回放 11 种语音改写序列。旧实现在其中 9 种失败,新实现全部通过。
+
 ## [0.6.19] - 2026-11-08
 
 ### Added

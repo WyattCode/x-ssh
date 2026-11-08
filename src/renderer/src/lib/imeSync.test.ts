@@ -100,12 +100,13 @@ describe('createImeMirror', () => {
 
   it('does not duplicate consecutive dictated sentences', () => {
     const h = harness()
+    // xterm never empties its textarea between commits: it accumulates.
     h.value = '第一句。'
     h.xterm('第一句。')
     h.sync('第一句。')
-    h.value = '第二句。'
+    h.value = '第一句。第二句。'
     h.xterm('第二句。')
-    h.sync('第二句。')
+    h.sync('第一句。第二句。')
     expect(h.remote()).toBe('第一句。第二句。')
   })
 
@@ -211,6 +212,8 @@ describe('createImeMirror', () => {
     const h = harness()
     h.value = 'npm run build'
     h.xterm('npm run build', { eventType: 'paste' })
+    // xterm empties the textarea after a paste.
+    h.mirror.clear()
     h.value = 'npm run test'
     h.sync('npm run test')
     // The paste is not a dictation draft; it must survive.
@@ -278,7 +281,7 @@ describe('createImeMirror', () => {
     const h = harness()
     h.value = '重启服务'
     h.xterm('重启服务')
-    h.value = '查看磁盘'
+    h.value = '重启服务查看磁盘'
     h.xterm('查看磁盘')
     // Nothing in common beyond a character → a new sentence, not a rewrite.
     expect(h.remote()).toBe('重启服务查看磁盘')
@@ -388,5 +391,104 @@ describe('createImeMirror', () => {
     h.value = '默认把 API key 写进去'
     h.sync('默认把 API key 写进去')
     expect(h.remote()).toBe('默认把 API key 写进去')
+  })
+})
+
+// The textarea is NOT the remote line: xterm leaves it alone between commits, so
+// it accumulates every version a voice IME posts. These replay the sequences
+// real Chromium produced (see scripts/ime-e2e) — the earlier tests above model
+// a textarea that only ever holds the current draft, which is why six fixes
+// passed them and still duplicated on a real machine.
+describe('createImeMirror with an accumulating textarea', () => {
+  const V1 = '你好，我今天希望吃饭，吃了饭之后再吃，首先其一'
+  const V2 = '你好，我今天希望吃饭，吃了饭之后再吃。首先，其一。'
+
+  it('does not undo a correction when the catch-up reports the whole textarea', () => {
+    // The bug: onData(V2) rewrote V1 → V2, then the input/compositionend
+    // catch-up saw the textarea "V1V2" and "corrected" the line into V1+V2.
+    const h = harness()
+    h.value = V1
+    h.xterm(V1)
+    h.sync(V1)
+    h.value = V1 + V2
+    h.xterm(V2)
+    h.sync(V1 + V2)
+    h.sync(V1 + V2) // compositionend fires too
+    expect(h.remote()).toBe(V2)
+  })
+
+  it('applies a correction exactly once however many events report it', () => {
+    const h = harness()
+    h.value = V1
+    h.sync(V1)
+    h.value = V1 + V2
+    h.sync(V1 + V2)
+    h.sync(V1 + V2)
+    h.xterm(V2) // xterm's own timer-driven report arrives last
+    expect(h.remote()).toBe(V2)
+  })
+
+  it('follows an in-place edit of the textarea instead of appending', () => {
+    const h = harness()
+    h.value = V1
+    h.xterm(V1)
+    h.value = V2
+    // xterm's payload for a composition that replaced text in place is an
+    // arbitrary fragment of the new value; the textarea is what counts.
+    h.xterm(V2.slice(V1.length - 4), { eventType: undefined })
+    h.sync(V2)
+    expect(h.remote()).toBe(V2)
+  })
+
+  it('keeps the draft when the IME deletes the textarea before re-inserting', () => {
+    const h = harness()
+    h.value = V1
+    h.xterm(V1)
+    h.value = ''
+    h.mirror.track('') // an IME deletion must not end the dictation run
+    h.value = V2
+    h.xterm(V2)
+    h.sync(V2)
+    expect(h.remote()).toBe(V2)
+  })
+
+  it('resolves 对 / 对对 / 对的，谢谢你 when the IME edits its draft in place', () => {
+    const h = harness()
+    for (const text of ['对', '对对', '对的，谢谢你']) {
+      h.value = text
+      h.xterm(text)
+      h.sync(text)
+    }
+    expect(h.remote()).toBe('对的，谢谢你')
+  })
+
+  it('leaves the line alone when xterm empties the textarea', () => {
+    const h = harness()
+    h.value = '第一句。'
+    h.xterm('第一句。')
+    h.mirror.clear() // Enter / blur
+    h.value = '第二句。'
+    h.sync('第二句。')
+    expect(h.remote()).toBe('第一句。第二句。')
+  })
+
+  it('does not resend the textarea after a Ctrl+U that left it intact', () => {
+    const h = harness()
+    h.value = '清空这一行'
+    h.xterm('清空这一行')
+    h.xterm('', { eventType: 'keydown' })
+    h.value = '清空这一行新的内容'
+    h.sync('清空这一行新的内容')
+    // (the line editor stand-in ignores Ctrl+U, so look at the wire)
+    expect(h.wire).toEqual(['清空这一行', '', '新的内容'])
+  })
+
+  it('counts a surrogate pair as one character when erasing a replaced tail', () => {
+    const h = harness()
+    h.value = '今天天气好😀'
+    h.sync('今天天气好😀')
+    h.value = '今天天气好呀'
+    h.sync('今天天气好呀')
+    expect(h.remote()).toBe('今天天气好呀')
   })
 })

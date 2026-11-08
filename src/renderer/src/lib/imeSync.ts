@@ -7,13 +7,27 @@
  * earlier revision of this file assumed the opposite and returned '' for every
  * payload, which silently swallowed *all* keyboard input (English included).
  *
- * The duplication users saw with voice input had a different cause: the
- * composition-end safety net re-sent text that `onData` had already handed to
- * the caller. So:
- *   - `input()` always returns what must go on the wire (i.e. `data`), and only
- *     records it;
- *   - `sync()` sends text xterm never emitted (some voice IMEs write straight
- *     into the textarea) and refuses anything already accounted for.
+ * ## The model (and the bug it replaced)
+ *
+ * xterm never empties its textarea between commits — only on Enter, Ctrl+C,
+ * blur and paste. So the textarea ACCUMULATES: after dictating "A" then "B" it
+ * holds "AB", and a voice IME that re-reads its audio can leave "V1V2" in it.
+ * The textarea is therefore NOT the remote line, and mirroring its whole value
+ * (what `sync()` used to do) re-sent every earlier version on top of the
+ * correction that `input()` had just applied. That is the "two versions
+ * stacked on one line" bug that survived six fixes: each catch-up looked at
+ * the full textarea, found it different from the draft, and "corrected" the
+ * line into V1+V2.
+ *
+ * So both entry points now work on the CHANGE the textarea went through since
+ * we last looked (`diff`), never on its absolute value:
+ *   - text replaced at the tail (the IME edited its own draft in place):
+ *     erase exactly that tail on the remote and type the replacement;
+ *   - text appended: either a new sentence, or the IME re-posting a revised
+ *     version of the draft — told apart by the draft we recorded.
+ * A second report of a change we already applied is a no-op by construction,
+ * which is what makes `onData` + `input` + `compositionend` — all firing for
+ * one commit — safe to combine.
  *
  * Control keys are the one thing the textarea cannot express: `\r` starts a new
  * line, `DEL` removes a character, Ctrl+U clears it. They update the record and
@@ -21,8 +35,8 @@
  */
 
 const DEL = '\x7f'
-/** Cap on the tracked line. A line longer than this is recorded by its tail;
- *  the worst case is one full resend on a catch-up, never a duplicate. */
+/** Cap on the tracked draft. A longer one is recorded by its tail; the worst
+ *  case is a short erase, never a duplicate. */
 const MAX_TRACKED = 8192
 const CONTROL = /[\x00-\x1f\x7f]/
 
@@ -30,8 +44,7 @@ const CONTROL = /[\x00-\x1f\x7f]/
 export const isPlainText = (data: string): boolean => data !== '' && !CONTROL.test(data)
 
 export interface ImeInputContext {
-  /** xterm's hidden textarea, minus any composition still in progress. Kept in
-   *  the signature for callers; the mirror no longer needs it to decide. */
+  /** xterm's hidden textarea, minus any composition still in progress. */
   settled: string
   /**
    * Type of the DOM event being dispatched when xterm emitted the data
@@ -42,34 +55,29 @@ export interface ImeInputContext {
 }
 
 export interface ImeMirror {
-  /** What must reach the remote for one xterm `onData` payload. Always the
-   *  payload itself — `onData` is the request to send, not a report of a send. */
+  /** What must reach the remote for one xterm `onData` payload. */
   input(data: string, ctx: ImeInputContext): string
   /**
-   * The part of `settled` the remote does not have yet, for commits xterm
-   * emitted nothing for. Empty when already in step.
+   * What must reach the remote because the textarea now reads `settled`.
+   * Empty when already in step.
    */
   sync(settled: string): string
-  /** Record text xterm itself put in the textarea (right-click copy, paste). */
+  /** Record text xterm itself put in the textarea (right-click copy, paste).
+   *  It is not dictation, so the next commit must not erase it. */
   adopt(baseline: string): void
-  /** The textarea was emptied without ending the line. The remote line is
-   *  unchanged, so nothing to do — kept for callers. */
+  /** The textarea shrank (an IME deletion). Record it WITHOUT ending the
+   *  dictation run — an IME that rewrites by deleting then re-inserting must
+   *  still be recognised as correcting its draft. */
+  track(value: string): void
+  /** xterm emptied the textarea (Enter, Ctrl+C, blur, paste). */
   clear(): void
-}
-
-/** Pre-mirror behaviour, behind `localStorage['xssh.imeMirror'] = '0'`: useful
- *  for A/B diagnosis on a machine where a specific IME misbehaves. */
-export function createPassthroughMirror(): ImeMirror {
-  return {
-    input: (data) => data,
-    sync: () => '',
-    adopt: () => undefined,
-    clear: () => undefined
-  }
 }
 
 /** Drops the last character (a surrogate pair counts as one). */
 const chopLast = (s: string): string => Array.from(s).slice(0, -1).join('')
+
+/** Code points in `s`. */
+const countChars = (s: string): number => Array.from(s).length
 
 /** Longest run of consecutive characters present in both strings, capped so a
  *  pathological draft cannot stall a keystroke. */
@@ -97,11 +105,11 @@ function longestSharedRun(a: string, b: string, limit = 160): number {
  * Whether `next` looks like another pass over the same audio rather than a
  * different sentence.
  *
- * Doubao/WeChat now re-read and rewrite what they committed, so a single
- * dictation produces several full versions of the same sentence. Sharing a run
- * of three consecutive characters is a much sharper signal than character
- * overlap: "重启服务" vs "重启机器" shares only two, while every rewrite of the
- * same sentence shares a phrase.
+ * Doubao/WeChat re-read and rewrite what they committed, so a single dictation
+ * produces several full versions of the same sentence. Sharing a run of three
+ * consecutive characters is a much sharper signal than character overlap:
+ * "重启服务" vs "重启机器" shares only two, while every rewrite of the same
+ * sentence shares a phrase.
  */
 const REWRITE_RUN = 3
 
@@ -117,12 +125,6 @@ const debugEnabled = (): boolean => {
   } catch {
     return false
   }
-}
-
-let debugOn: boolean | undefined
-function trace(...args: unknown[]): void {
-  if (debugOn === undefined) debugOn = debugEnabled()
-  if (debugOn) console.log('[ime]', ...args)
 }
 
 /**
@@ -142,6 +144,23 @@ function rewriteBytes(prev: string, next: string): string {
   return DEL.repeat(A.length - p) + B.slice(p).join('')
 }
 
+/**
+ * What changed between two textarea values, assuming edits happen at the tail
+ * (which is where an IME works): the common prefix stays, `removed` is what the
+ * old value had after it and `added` what the new one has.
+ */
+function diff(prev: string, next: string): { removed: string; added: string } {
+  const n = Math.min(prev.length, next.length)
+  let p = 0
+  while (p < n && prev.charCodeAt(p) === next.charCodeAt(p)) p++
+  // Never split a surrogate pair between "kept" and "changed".
+  if (p > 0 && p < prev.length + 1) {
+    const unit = prev.charCodeAt(p - 1)
+    if (unit >= 0xd800 && unit <= 0xdbff) p--
+  }
+  return { removed: prev.slice(p), added: next.slice(p) }
+}
+
 export function createImeMirror(): ImeMirror {
   const mirror = createBareMirror()
   return debugEnabled() ? withDebug(mirror) : mirror
@@ -149,60 +168,111 @@ export function createImeMirror(): ImeMirror {
 
 /** The real implementation; `createImeMirror` optionally wraps it in a logger. */
 function createBareMirror(): ImeMirror {
-  /** What the remote line currently holds, as far as we know. */
-  let synced = ''  /** The last payload xterm emitted for the current commit. A composition
-   *  usually produces BOTH an onData and an input event; `sync()` must
-   *  recognise the second one as already sent. */
-  let lastSent = ''
+  /** The textarea value as of the last event we accounted for. */
+  let ta = ''
   /**
-   * Text the current dictation run has already put on the wire.
+   * Text the current dictation run has already put on the wire — the draft.
    *
    * A voice IME does not commit once: it posts a rough guess, then revises it —
-   * "对", "对对", "对的，谢谢你" — and every revision is the *whole* draft, not
-   * an addition to it. So when the new value is not an extension of the old
-   * one, the old one was replaced and has to be erased before the new one goes
-   * out. (Character-similarity heuristics were tried and are not needed: the
-   * draft is either a prefix or a replacement.)
+   * "对", "对对", "对的，谢谢你". The line has to end up holding only the last
+   * version, so the recorded draft is what a revision is measured against.
    *
    * Reset whenever the user types with the keyboard or ends the line, so a
    * correction can never reach back into hand-typed input.
    */
   let committed = ''
 
+  /** A commit that ADDS `text` to the textarea. Either a new sentence or the
+   *  IME's revised take on the draft. */
+  function append(text: string): string {
+    if (!text) return ''
+    // A draft shorter than a phrase cannot be told apart from a new word
+    // ("对" then "对": two words, not a re-read), so it is never a revision.
+    if (countChars(committed) >= REWRITE_RUN) {
+      // The same version again, or a longer take on it: only the tail is new.
+      if (text.startsWith(committed)) {
+        const tail = text.slice(committed.length)
+        committed = text.slice(-MAX_TRACKED)
+        return tail
+      }
+      // A re-read of the same audio. A terminal has no replace, so erase the
+      // differing tail of the draft and retype the rest.
+      if (longestSharedRun(committed, text) >= REWRITE_RUN) {
+        const out = rewriteBytes(committed, text)
+        committed = text.slice(-MAX_TRACKED)
+        return out
+      }
+    }
+    committed = (committed + text).slice(-MAX_TRACKED)
+    return text
+  }
+
+  /** The textarea now reads `settled`; `data` is what xterm reported for it, if
+   *  anything. Returns the bytes the remote is missing. */
+  function reconcile(settled: string, data?: string): string {
+    if (settled === ta) {
+      // The textarea has nothing new. Either this is the second report of a
+      // commit we already handled (onData, then input, then compositionend all
+      // fire for one commit), or the IME produced text without touching the
+      // textarea at all.
+      if (!data || ta.endsWith(data)) return ''
+      return append(data)
+    }
+
+    const { removed, added } = diff(ta, settled)
+    ta = settled
+    if (removed) {
+      // The IME edited its own text in place ("对对" → "对的，谢谢你"). The
+      // remote line ends with that text if it was dictated; erase exactly what
+      // was replaced and type what replaced it.
+      if (committed.endsWith(removed)) {
+        committed = (committed.slice(0, committed.length - removed.length) + added).slice(
+          -MAX_TRACKED
+        )
+        return DEL.repeat(countChars(removed)) + added
+      }
+      // The replaced text is not ours to erase (hand-typed, or already dropped
+      // from the record): add what is new, touch nothing else.
+    }
+    return append(added)
+  }
+
   return {
-    input(data, { eventType }) {
+    input(data, { settled, eventType }) {
       // A paste is not dictation. Older shells deliver it as plain text, and
       // treating it as a draft meant the next voice correction erased it.
       const pasted =
         eventType === 'paste' || eventType === 'drop' || data.startsWith('\x1b[200~')
       if (pasted) {
         committed = ''
-        lastSent = ''
-        synced = (synced + data).slice(-MAX_TRACKED)
+        ta = settled
         return data
       }
       const fromKey = eventType === 'keydown' || eventType === 'keypress'
       if (!isPlainText(data)) {
-        // A timer-driven reply (cursor-position query, etc.) says nothing
-        // about the line; a user key does.
-        if (eventType === undefined) return data
+        if (eventType === undefined) {
+          // xterm's own correction for a character the IME removed from the
+          // textarea (`_handleAnyTextareaChanges`): the textarea is already
+          // shorter, and the remote is about to be.
+          if (data === DEL) {
+            committed = chopLast(committed)
+            ta = settled
+          }
+          // Any other timer-driven reply (cursor-position query, etc.) says
+          // nothing about the line.
+          return data
+        }
         if (data === '\r' || data === '\n') {
-          synced = ''
           committed = ''
-          lastSent = ''
         } else if (data === DEL) {
           // One character, not one UTF-16 unit — otherwise an emoji or an
           // extension-B hanzi leaves half a surrogate pair behind and the next
           // correction sends one DEL too many.
-          synced = chopLast(synced)
           committed = chopLast(committed)
         } else if (data === '\x15' || data === '\x03') {
           // Ctrl+U clears the line; Ctrl+C cancels it (readline discards the
-          // buffer). Either way the remote line is empty afterwards, and
-          // keeping the old text made the next catch-up resend a whole line.
-          synced = ''
+          // buffer). Either way the remote line is empty afterwards.
           committed = ''
-          lastSent = ''
         }
         // Arrow keys, Esc, Tab and friends must NOT end the dictation run.
         // They are pressed constantly while editing in a TUI, and clearing the
@@ -214,110 +284,40 @@ function createBareMirror(): ImeMirror {
       }
       // ---- plain text ----
       if (fromKey) {
-        // Typed by hand: an incremental character, and the dictation run ends
-        // here so a later correction cannot delete it.
-        synced = (synced + data).slice(-MAX_TRACKED)
+        // Typed by hand: the dictation run ends here so a later correction
+        // cannot delete it. xterm cancels the key, so the textarea normally
+        // did not change — but a composition finished by this key did, and
+        // that text is going out right now.
         committed = ''
-        lastSent = data
+        ta = settled
         return data
       }
 
-      // Everything else is an IME commit. Modern voice IMEs post the WHOLE
-      // draft each time they re-read the audio, so a commit may be a revision
-      // of what is already on the wire rather than an addition to it. Handling
-      // only the append case here is what produced
-      // "二次审查代码检查 ui 细节检查审查代码二次审查代码，…".
-      if (committed) {
-        // The same version again.
-        if (data === committed) return ''
-        // A longer take on the same draft: only the new tail is missing.
-        if (data.startsWith(committed)) {
-          const add = data.slice(committed.length)
-          synced = (synced + add).slice(-MAX_TRACKED)
-          committed = data
-          lastSent = add
-          return add
-        }
-        // A re-read of the same audio. `synced` is NOT consulted here: the DOM
-        // input handler overwrites it with the textarea's new value for input
-        // types it does not recognise, which made "is the old version still the
-        // tail of the line?" false and sent the new version as an append. The
-        // draft we recorded is the one we wrote, and hand-typed text clears it,
-        // so it is the reliable anchor.
-        if (longestSharedRun(committed, data) >= REWRITE_RUN) {
-          const out = rewriteBytes(committed, data)
-          synced = (synced.endsWith(committed)
-            ? synced.slice(0, synced.length - committed.length) + data
-            : data
-          ).slice(-MAX_TRACKED)
-          committed = data
-          lastSent = data
-          return out
-        }
-      }
-
-      // New text in the same run: append and remember the whole version.
-      synced = (synced + data).slice(-MAX_TRACKED)
-      committed = (committed + data).slice(-MAX_TRACKED)
-      lastSent = data
-      return data
+      // Everything else is an IME commit. What it means is decided by how the
+      // textarea changed, not by the payload: for a composition that replaced
+      // text in place xterm's payload is a meaningless fragment of the new
+      // value, while the textarea is exact.
+      return reconcile(settled, data)
     },
 
     sync(settled) {
-      if (!settled) return ''
-      // The same draft posted again.
-      if (settled === committed) return ''
-      // Already at the end of the line we have sent (an IME may post a sentence
-      // through `onData` and then fire compositionend for the very same text).
-      if (synced.endsWith(settled)) return ''
-      // The exact payload xterm just handed us, reported a second time.
-      if (lastSent && settled === lastSent) {
-        lastSent = ''
-        return ''
-      }
-
-      // A draft we recorded is the anchor. `synced` is deliberately NOT used
-      // to decide whether the draft is still on the line: the DOM input handler
-      // overwrites `synced` with the textarea's new value for input types it
-      // does not recognise, which made this test false and turned every
-      // correction into an append.
-      if (committed) {
-        if (settled.startsWith(committed)) {
-          // The IME extended the draft: only the added tail is new.
-          const add = settled.slice(committed.length)
-          committed = settled
-          synced = (synced + add).slice(-MAX_TRACKED)
-          return add
-        }
-        // The IME re-read the audio ("对" → "对对" → "对的，谢谢你"). A terminal
-        // has no replace, so erase the differing tail and retype the rest.
-        const out = rewriteBytes(committed, settled)
-        synced = (synced.endsWith(committed)
-          ? synced.slice(0, synced.length - committed.length) + settled
-          : settled
-        ).slice(-MAX_TRACKED)
-        committed = settled
-        lastSent = ''
-        return out
-      }
-
-      // Unrelated text, or the first commit of a run: plain append.
-      committed = settled
-      synced = (synced + settled).slice(-MAX_TRACKED)
-      return settled
+      return reconcile(settled)
     },
 
     adopt(baseline) {
-      // The remote does not have this text, but neither will we send it again:
-      // recording it keeps `sync()` from repeating it later.
-      synced = baseline
+      // The remote does not have this text, but neither will we send it again.
+      ta = baseline
       // Not dictation: the next commit must not erase it.
       committed = ''
     },
 
+    track(value) {
+      ta = value
+    },
+
     clear() {
-      // Intentionally does NOT reset `synced`: xterm clears the textarea after
-      // committing, and the remote line still holds what was committed.
+      ta = ''
+      committed = ''
     }
   }
 }
@@ -339,6 +339,7 @@ function withDebug(inner: ImeMirror): ImeMirror {
       console.log('[ime] input', {
         eventType: ctx.eventType ?? '(timer)',
         data: clip(data),
+        settled: clip(ctx.settled),
         out: clip(out),
         erased: out.startsWith(DEL)
       })
@@ -353,8 +354,13 @@ function withDebug(inner: ImeMirror): ImeMirror {
       inner.adopt(baseline)
       console.log('[ime] adopt', clip(baseline))
     },
+    track(value) {
+      inner.track(value)
+      console.log('[ime] track', clip(value))
+    },
     clear() {
       inner.clear()
+      console.log('[ime] clear')
     }
   }
 }

@@ -1,3 +1,42 @@
+# 会话记录:M3.189(2026-11-08,**已解决**:语音输入改写重复,0.6.28)
+
+> 接 M3.188。根因找到并修了,**这次是在真实 Chromium 事件序列上验证的**,不是靠推断。
+> 未提交、未发版(发版仍是手动触发)。需要用户在真机上用豆包 / 微信输入法确认一次。
+
+## 根因
+
+xterm 在两次回车之间**不清空**隐藏 textarea,它**累积**每次提交(V1、V1V2…)。旧 `sync()` 把
+整个 textarea 当作“远端当前行”:`onData(V2)` 先把 V1 正确替换成 V2,随后 `input` /
+`compositionend` 的追补看到 textarea=“V1V2”≠草稿,又把行纠正成 V1+V2。六张截图全是 V1+V2。
+次要路径:`delete*` 输入事件走 `adopt()` 会清空草稿,“先删后插”的改写退化成追加。
+之前每轮单测通过,是因为 harness 里 textarea 只装当前一版——**测试模型错了,不是代码笔误**。
+M3.188 的方向 1(`xssh.imeMirror=0`)不是主因;已顺手移除该开关并在启动时清遗留值。
+
+## 改法
+
+- `imeSync.ts` 重写核心:`input()`/`sync()` 统一走 `reconcile()`,只处理 textarea **相对上次记录的差异**
+  (公共前缀之后 removed/added)。removed 非空且是草稿尾巴 → 擦 removed 再写 added;纯追加 → 按
+  草稿判断“重读”(startsWith / 共享≥3 字符)或新句。同一次提交被多个事件重复上报 = 无操作。
+- 新增 `track()`(IME 删除只记录、不结束草稿)与真正的 `clear()`(xterm 清空 textarea 时重置记录)。
+- 接线抽成 `lib/imeBridge.ts`(TerminalView 只剩 `attachImeBridge(term, send, signal)`)。
+
+## 验证
+
+- `scripts/ime-e2e/`:CDP `imeSetComposition`/`insertText` → 真实 xterm → 真实 bridge → 模拟行编辑器。
+  11 个场景(追加、composition 追加、全选替换、reconversion、先删后插、三次改写、无关句子、
+  键盘夹语音…)。**0.6.27 代码 9/11 失败(复现用户 bug),新代码 11/11 通过。**
+- vitest 71 文件 / 716 用例通过(新增一组“累积 textarea”回归用例,并把三条不真实的 fixture 改成累积)。
+- 这台机器没有 node:用 `ELECTRON_RUN_AS_NODE=1 node_modules/electron/dist/electron.exe …` 代跑
+  vitest / tsc / esbuild(见 `scripts/ime-e2e/README.md`)。
+
+## 已知局限(没有证据前不动)
+
+- 输入法若用**追加**方式重发**短草稿**(“对”→“对对”→“对的，谢谢你”,textarea 累成“对对对对的，谢谢你”),
+  与“连说几个词”无法区分,不会被当成改写(要共享 ≥3 字符的短语才算)。textarea 原地替换的写法没问题。
+- `xssh.imeDebug=1` 的 trace 仍在(现在多打一个 `settled` 字段)。若真机仍有问题,贴这段日志。
+
+---
+
 # 会话记录:M3.188(2026-11-08,**未解决**:语音输入改写重复)
 
 > 这是一份**交接文档**,不是一个已完成的修复。接手前请先读完「四、必须实测」和「六、可能的方向」。
