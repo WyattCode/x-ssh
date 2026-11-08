@@ -35,7 +35,12 @@
  * one commit — safe to combine.
  *
  * Escape sequences (mouse and focus reports, cursor-position replies, arrow
- * keys) are never line content and are never recorded as such.
+ * keys) are never line content and are never recorded as such. Keys that move
+ * the cursor or edit the line (Left/Right/Home/End, Ctrl+A/W/K, Alt+Backspace,
+ * Tab completion, history) make the line inexact: erasing "the last N
+ * characters" would then hit the wrong text, so until the line is emptied
+ * again (Enter, Ctrl+C/U) a correction is only appended. Mouse and focus
+ * reports do not do that, so a TUI's constant pointer traffic is harmless.
  */
 
 const DEL = '\x7f'
@@ -64,6 +69,32 @@ export const isImeText = (data: string): boolean =>
  */
 const ESC_SEQ =
   /\x1b\[M[\s\S]{3}|\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1bO[\s\S]|\x1b[\s\S]/g
+
+/**
+ * Whether an escape sequence moves the cursor or edits the line: arrows, Home,
+ * End, Delete/PageUp/PageDown (CSI ... ~, except the bracketed-paste markers),
+ * Shift-Tab, SS3 cursor keys, and ESC + character (Alt-keys such as Alt+B and
+ * Alt+Backspace). Mouse and focus reports, cursor-position replies, device
+ * attributes and OSC replies do neither.
+ */
+export function movesCursor(seq: string): boolean {
+  if (seq.startsWith('\x1b[')) {
+    if (seq.startsWith('\x1b[M')) return false // legacy mouse report
+    const params = seq.slice(2, -1)
+    if (/^[<>=?]/.test(params)) return false // SGR mouse, device attributes, modes
+    const final = seq[seq.length - 1]
+    if (final === '~') return params !== '200' && params !== '201'
+    return 'ABCDHFZ'.includes(final)
+  }
+  if (seq.startsWith('\x1b]')) return false
+  if (seq.startsWith('\x1bO')) return 'ABCDHF'.includes(seq[2] ?? '')
+  return true
+}
+
+/** Control characters that move the cursor or edit the line in readline-style
+ *  editors: Ctrl+A/B/D/E/F/H/K/N/P/T/W/Y and Tab (completion). Ctrl+U and
+ *  Ctrl+C empty the line and are handled separately. */
+const CURSOR_EDIT_CONTROLS = '\x01\x02\x04\x05\x06\x08\x0b\x0e\x10\x14\x17\x19\t'
 
 export interface ImeInputContext {
   /** xterm's hidden textarea, minus any composition still in progress. */
@@ -197,14 +228,27 @@ export function createImeMirror(): ImeMirror {
    * so a correction can never reach back into input the user typed.
    */
   let runLen = 0
+  /**
+   * Whether `line` is trustworthy: every byte sent so far was appended at the
+   * end. A cursor move or editing key (Left, Home, Ctrl+W, Alt+Backspace, Tab
+   * completion, history) breaks that — the remote then edits somewhere other
+   * than the end, so erasing "the last N characters" would hit the wrong text.
+   * Until the line is emptied again, corrections are only appended.
+   */
+  let exact = true
   const draft = (): string => line.slice(line.length - runLen)
 
   /**
    * Records bytes headed for the remote. `imeText` marks IME output, whose line
-   * breaks are part of the text; for anything else a CR/LF submits the line.
+   * breaks and tabs are part of the text; for anything else a CR/LF submits the
+   * line and a tab is a completion key.
    */
   function note(out: string, imeText: boolean): void {
-    for (const ch of Array.from(out.replace(ESC_SEQ, ''))) {
+    const text = out.replace(ESC_SEQ, (seq) => {
+      if (movesCursor(seq)) exact = false
+      return ''
+    })
+    for (const ch of Array.from(text)) {
       if (ch === DEL) {
         const n = lastCharLength(line)
         line = line.slice(0, line.length - n)
@@ -214,15 +258,21 @@ export function createImeMirror(): ImeMirror {
         // buffer). Either way the remote line is empty afterwards.
         line = ''
         runLen = 0
+        exact = true
       } else if (ch === '\r' || ch === '\n') {
         if (imeText) {
           line += ch
         } else {
           line = ''
           runLen = 0
+          exact = true
         }
+      } else if (ch === '\t' && imeText) {
+        line += ch
       } else if (ch >= ' ') {
         line += ch
+      } else if (CURSOR_EDIT_CONTROLS.includes(ch)) {
+        exact = false
       }
     }
     if (line.length > MAX_TRACKED) line = line.slice(-MAX_TRACKED)
@@ -276,16 +326,18 @@ export function createImeMirror(): ImeMirror {
     const { removed, added } = diff(ta, settled)
     ta = settled
     if (removed) {
-      // The IME edited its own text in place ("对对" → "对的，谢谢你"). If the
-      // remote line ends with that text — dictated or not — erase exactly what
-      // was replaced and type what replaced it.
-      if (line.endsWith(removed)) {
-        const d = draft()
-        const kept = d.endsWith(removed) ? d.length - removed.length : 0
-        return { out: DEL.repeat(countChars(removed)) + added, run: kept + added.length }
+      // The IME edited its own text in place ("对对" → "对的，谢谢你"). If that
+      // text is the end of the current dictation run — and nothing has moved the
+      // cursor or edited the line since — erase exactly what was replaced and
+      // type what replaced it. Anchoring on the run (not just the line) is what
+      // keeps text typed by hand after a dictation from being erased because it
+      // happens to resemble the end of the old draft.
+      const d = draft()
+      if (exact && d.endsWith(removed)) {
+        return { out: DEL.repeat(countChars(removed)) + added, run: d.length - removed.length + added.length }
       }
-      // The replaced text is no longer at the end of the line (something was
-      // typed after it): add what is new, touch nothing else.
+      // The replaced text is not at the end of the run any more (something was
+      // typed after it, or the cursor moved): add what is new, touch nothing else.
     }
     return append(added)
   }
@@ -326,14 +378,16 @@ export function createImeMirror(): ImeMirror {
       }
       // ---- plain text ----
       if (fromKey) {
-        // Typed by hand: the dictation run ends here so a later correction
-        // cannot delete it. xterm cancels the key, so the textarea normally
-        // did not change — but a composition finished by this key did (the
-        // untidied draft Doubao's fake keyCode-252 key forces out), and that
-        // text is going out right now: it stays on the line, erasable.
+        // xterm cancels a typed key, so the textarea normally did not change.
+        // When it did, this "key" is a composition xterm just finished on the
+        // spot — the untidied draft Doubao's fake keyCode-252 key forces out
+        // mid-dictation. A hand cannot type that: it is the start of the
+        // dictation run, and the tidied text will replace it. Anything else is
+        // typed by hand; the run ends so a later correction cannot delete it.
+        const forced = settled !== ta && isImeText(data)
         ta = settled
-        note(data, false)
-        runLen = 0
+        note(data, forced)
+        runLen = forced ? Math.min(data.length, line.length) : 0
         return data
       }
 
