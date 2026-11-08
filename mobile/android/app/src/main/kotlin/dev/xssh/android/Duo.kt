@@ -504,21 +504,24 @@ fun DuoApp(
             // 收起了又连着会话时让位(竖条里有「‹」)。
             // 连接中 / 失败 / 要确认时右栏没有竖条里的「‹」,抽屉收着的话这颗开关是回列表的唯一入口,要留着。
             val showToggle = drawerOpen || termHost == null || gate?.second.let { it != null && it != DuoStatus.Live }
-            // 左边的系统内边距并进**动画的目标值**,不用 windowInsetsPadding 的左侧:
+            // 左边的系统内边距并进位置的下限,不用 windowInsetsPadding 的左侧:
             // 展开时抽屉宽度 drawerW 已经包含了它(再加一遍开关就比抽屉边缘多出一个内边距),
-            // 收起时开关要让开它。两种状态之间由同一条弹簧过渡,不会在切换那一刻跳一下。
+            // 收起时开关要让开它。
             val startInset = stableSafeDrawing().asPaddingValues()
                 .calculateStartPadding(androidx.compose.ui.platform.LocalLayoutDirection.current)
-            val toggleXState = animateDpAsState(
-                if (shown) drawerW - 16.dp - 48.dp else 16.dp + startInset,
-                drawerSpring(),
-                label = "duoToggleX",
-            )
+            val toggleMinX = 16.dp + startInset
             if (showToggle) {
                 Box(
                     Modifier
                         .windowInsetsPadding(stableSafeDrawing().only(WindowInsetsSides.Top))
-                        .offset { IntOffset(toggleXState.value.roundToPx() + slide.value.roundToInt(), 8.dp.roundToPx()) },
+                        // 开关**骑在抽屉的右边缘上**(边缘左边 16dp + 自身 48dp),跟着抽屉的那条弹簧走,
+                        // 不再自己起一条动画:原来开关走 254dp、边缘走 334dp,开合的前 80% 开关都跑在边缘前面,
+                        // 压在终端的主机名和第一行字上。收起时边缘退回 0,开关就停在屏幕左上(下限)。
+                        .offset {
+                            val edge = drawerW + baseXState.value.coerceAtMost(0.dp)
+                            val x = maxOf(toggleMinX, edge - 64.dp)
+                            IntOffset(x.roundToPx() + slide.value.roundToInt(), 8.dp.roundToPx())
+                        },
                 ) {
                     CompositionLocalProvider(LocalGlassSize provides 48.dp) {
                         GlassButton(XIcons.Sidebar, stringResource(R.string.duo_toggle_hosts)) {
