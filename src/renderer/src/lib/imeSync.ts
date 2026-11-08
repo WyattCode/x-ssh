@@ -71,37 +71,8 @@ export function createPassthroughMirror(): ImeMirror {
 /** A terminal backspace removes one character, not one UTF-16 unit. */
 const charCount = (s: string): number => Array.from(s).length
 
-/**
- * How much of `next` already exists in `prev`, 0..1.
- *
- * Distinguishes a dictation *correction* — same sentence, a few words or the
- * punctuation changed, so the characters overlap heavily — from a *new*
- * sentence, which shares almost nothing. Character-multiset overlap is enough
- * for that call and stays O(n) on a long draft.
- *
- * Measured on the real failure: "杀青的时候四 g 卡片页有时候会位移修" vs
- * "刷新的时候，4G卡片页有时候会位移，修复一下。" ≈ 0.6. Two unrelated
- * sentences score near 0.
- */
-function overlap(prev: string, next: string): number {
-  if (!prev || !next) return 0
-  const left = Array.from(prev)
-  const right = Array.from(next)
-  const pool = new Map<string, number>()
-  for (const ch of left) pool.set(ch, (pool.get(ch) ?? 0) + 1)
-  let common = 0
-  for (const ch of right) {
-    const n = pool.get(ch) ?? 0
-    if (n > 0) {
-      common++
-      pool.set(ch, n - 1)
-    }
-  }
-  return common / Math.max(left.length, right.length)
-}
-
-/** Above this a new dictation is treated as a rewrite of the previous one. */
-const REWRITE_OVERLAP = 0.4
+/** Drops the last character (a surrogate pair counts as one). */
+const chopLast = (s: string): string => Array.from(s).slice(0, -1).join('')
 
 export function createImeMirror(): ImeMirror {
   /** What the remote line currently holds, as far as we know. */
@@ -113,11 +84,12 @@ export function createImeMirror(): ImeMirror {
   /**
    * Text the current dictation run has already put on the wire.
    *
-   * Voice IMEs commit a rough draft, keep listening, then *replace* what they
-   * committed with a better transcription. That replacement only ever shows up
-   * as a new textarea value — nothing says which old text it supersedes. This
-   * is that old text, so a correction can erase exactly it instead of appending
-   * a second copy (which is what produced "刷新的时候四 g…检查修复刷新的时候…").
+   * A voice IME does not commit once: it posts a rough guess, then revises it —
+   * "对", "对对", "对的，谢谢你" — and every revision is the *whole* draft, not
+   * an addition to it. So when the new value is not an extension of the old
+   * one, the old one was replaced and has to be erased before the new one goes
+   * out. (Character-similarity heuristics were tried and are not needed: the
+   * draft is either a prefix or a replacement.)
    *
    * Reset whenever the user types with the keyboard or ends the line, so a
    * correction can never reach back into hand-typed input.
@@ -126,6 +98,16 @@ export function createImeMirror(): ImeMirror {
 
   return {
     input(data, { eventType }) {
+      // A paste is not dictation. Older shells deliver it as plain text, and
+      // treating it as a draft meant the next voice correction erased it.
+      const pasted =
+        eventType === 'paste' || eventType === 'drop' || data.startsWith('\x1b[200~')
+      if (pasted) {
+        committed = ''
+        lastSent = ''
+        synced = (synced + data).slice(-MAX_TRACKED)
+        return data
+      }
       const fromKey = eventType === 'keydown' || eventType === 'keypress'
       if (!isPlainText(data)) {
         // A timer-driven reply (cursor-position query, etc.) says nothing
@@ -136,8 +118,11 @@ export function createImeMirror(): ImeMirror {
           committed = ''
           lastSent = ''
         } else if (data === DEL) {
-          synced = synced.slice(0, -1)
-          committed = committed.slice(0, -1)
+          // One character, not one UTF-16 unit — otherwise an emoji or an
+          // extension-B hanzi leaves half a surrogate pair behind and the next
+          // correction sends one DEL too many.
+          synced = chopLast(synced)
+          committed = chopLast(committed)
         } else if (data === '\x15' || data === '\x03') {
           // Ctrl+U clears the line; Ctrl+C cancels it (readline discards the
           // buffer). Either way the remote line is empty afterwards, and
@@ -164,43 +149,37 @@ export function createImeMirror(): ImeMirror {
 
     sync(settled) {
       if (!settled) return ''
-      // The text is already at the end of the line we have sent: a voice IME
-      // commits a sentence through `onData` and then fires compositionend for
-      // the very same text.
+      // The same draft posted again.
+      if (settled === committed) return ''
+      // Already at the end of the line we have sent (an IME may post a sentence
+      // through `onData` and then fire compositionend for the very same text).
       if (synced.endsWith(settled)) return ''
-      // Same commit, reported twice (onData, then input/compositionend).
-      if (
-        lastSent &&
-        (lastSent === settled || (lastSent.length >= 2 && settled.endsWith(lastSent)))
-      ) {
+      // The exact payload xterm just handed us, reported a second time.
+      if (lastSent && settled === lastSent) {
         lastSent = ''
         return ''
       }
 
-      if (committed) {
-        // Continuing the same draft: only the added tail is new.
+      // Only a draft we know is the tail of the line can be erased safely.
+      if (committed && synced.endsWith(committed)) {
         if (settled.startsWith(committed)) {
+          // The IME extended the draft: only the added tail is new.
           const add = settled.slice(committed.length)
           committed = settled
           synced = (synced + add).slice(-MAX_TRACKED)
           return add
         }
-        // Same draft, rewritten. A terminal has no "replace" — the only way to
-        // correct text that already reached the shell is to erase it and retype
-        // the new version.
-        if (overlap(committed, settled) >= REWRITE_OVERLAP) {
-          const base = synced.endsWith(committed)
-            ? synced.slice(0, synced.length - committed.length)
-            : synced
-          const dels = DEL.repeat(charCount(committed))
-          synced = (base + settled).slice(-MAX_TRACKED)
-          committed = settled
-          lastSent = ''
-          return dels + settled
-        }
+        // The IME replaced the draft ("对" → "对对" → "对的，谢谢你"). A
+        // terminal has no replace, so erase what we sent and retype the rest.
+        const dels = DEL.repeat(charCount(committed))
+        const base = synced.slice(0, synced.length - committed.length)
+        synced = (base + settled).slice(-MAX_TRACKED)
+        committed = settled
+        lastSent = ''
+        return dels + settled
       }
 
-      // Unrelated text (or the first commit of a run): plain append.
+      // Unrelated text, or the first commit of a run: plain append.
       committed = settled
       synced = (synced + settled).slice(-MAX_TRACKED)
       return settled

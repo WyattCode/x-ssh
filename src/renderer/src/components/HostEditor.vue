@@ -180,6 +180,9 @@ watch(
     password.value = ''
     passphrase.value = ''
     proxyPassCleared.value = false
+    // The panel is a persistent component, so a failure banner from the last
+    // host would otherwise still be on screen for the next one.
+    saveError.value = ''
     Object.assign(sections, { keys: false, proxy: false, forwards: false, onConnect: false, appearance: false })
     nextTick(() => labelEl.value?.focus())
     // Baseline for the unsaved-changes guard: capture after the form is

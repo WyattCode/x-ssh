@@ -429,6 +429,9 @@ async function resumeDownloads(): Promise<void> {
   const ops = toPlain([...store.downloadQueue])
   const keep: DownloadQueueOp[] = []
   let failed = 0
+  /** Ops that actually ran — a queue kept because its host is offline is not
+   *  a success, and reporting one made the banner look broken. */
+  let resumed = 0
   resuming.value = true
   try {
     // A reconnect gives the pane a new session id, so ops map through hostId to
@@ -458,6 +461,7 @@ async function resumeDownloads(): Promise<void> {
       // (which also blocked the resume forever when nobody was at the keyboard)
       // is skipped.
       const r = await window.api.sftp.downloadTo(sid, op.items, op.localDir, store.transferConcurrency, true)
+      resumed++
       if (!r.ok && !r.canceled) {
         failed++
         keep.push(op)
@@ -465,8 +469,9 @@ async function resumeDownloads(): Promise<void> {
     }
     if (keep.length) await store.setDownloadQueue(keep)
     else await store.clearDownloadQueue()
+    // Only the ops that ran count; the rest are waiting for their host.
     if (failed > 0) toast(tt('sfp.resumeDownloadPartial', { n: failed }), 'error')
-    else if (ops.length) toast(tt('sfp.resumeDone', { n: ops.length }), 'success')
+    else if (resumed > 0) toast(tt('sfp.resumeDone', { n: resumed }), 'success')
   } finally {
     resuming.value = false
   }

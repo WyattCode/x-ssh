@@ -391,7 +391,7 @@ defineExpose({ focusSearch: () => searchEl.value?.focus() })
       </header>
 
       <section class="stats">
-        <div class="stat">
+        <div class="stat" :title="stats.unknown ? t('hosts.unknownHint') : undefined">
           <span class="st-icon"><Icon name="server" :size="18" /></span>
           <span class="st-text"><b>{{ stats.total }}</b><small>{{ t('hosts.total') }}</small></span>
         </div>
@@ -402,12 +402,6 @@ defineExpose({ focusSearch: () => searchEl.value?.focus() })
         <div class="stat">
           <span class="st-icon"><span class="dot big offline" /></span>
           <span class="st-text"><b>{{ stats.offline }}</b><small>{{ t('hosts.offline') }}</small></span>
-        </div>
-        <!-- Only when something is actually unprobed, so the usual case keeps
-             three numbers instead of four. -->
-        <div v-if="stats.unknown" class="stat" :title="t('hosts.unknownHint')">
-          <span class="st-icon"><span class="dot big unknown" /></span>
-          <span class="st-text"><b>{{ stats.unknown }}</b><small>{{ t('hosts.unknown') }}</small></span>
         </div>
         <div class="stat">
           <span class="st-icon"><Icon name="terminal" :size="18" /></span>

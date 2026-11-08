@@ -177,9 +177,56 @@ describe('createImeMirror', () => {
     const h = harness()
     h.value = '。'
     h.xterm('。')
+    // A keystroke ends the dictation run, so the next sentence is not a
+    // correction of the previous one.
+    h.xterm('\r', { eventType: 'keydown' })
     h.value = '第二句。'
     h.sync('第二句。')
-    expect(h.remote()).toBe('。第二句。')
+    expect(h.remote()).toBe('第二句。')
+  })
+
+  it('appends a second dictation after the run was closed by typing', () => {
+    const h = harness()
+    h.value = '检查一下磁盘'
+    h.sync('检查一下磁盘')
+    h.value = '检查一下磁盘 '
+    h.xterm(' ', { eventType: 'keydown' })
+    h.value = '重启服务'
+    h.sync('重启服务')
+    expect(h.remote()).toBe('检查一下磁盘 重启服务')
+  })
+
+  it('replaces each intermediate draft a voice IME posts', () => {
+    // Real report: saying "对的，谢谢你" produced "对对对，谢谢你" because every
+    // intermediate draft ("对", "对对") was appended to the previous one.
+    const h = harness()
+    for (const text of ['对', '对对', '对的，谢谢你']) {
+      h.value = text
+      h.sync(text)
+    }
+    expect(h.remote()).toBe('对的，谢谢你')
+  })
+
+  it('never erases pasted text when a correction follows', () => {
+    const h = harness()
+    h.value = 'npm run build'
+    h.xterm('npm run build', { eventType: 'paste' })
+    h.value = 'npm run test'
+    h.sync('npm run test')
+    // The paste is not a dictation draft; it must survive.
+    expect(h.remote()).toBe('npm run buildnpm run test')
+  })
+
+  it('removes one character per backspace even for a surrogate pair', () => {
+    const h = harness()
+    h.value = '你好😀'
+    h.xterm('你好😀')
+    h.value = '你好'
+    h.xterm('\x7f', { eventType: 'keydown' })
+    h.value = '你好世界'
+    h.sync('你好世界')
+    // A stray DEL here would eat a character that belongs to the user.
+    expect(h.remote()).toBe('你好世界')
   })
 
   it('keeps the tracked line bounded during a very long line', () => {
@@ -260,16 +307,6 @@ describe('createImeMirror', () => {
     h.value = '看看最近的报错'
     h.sync('看看最近的报错')
     expect(h.remote()).toBe('ls /var/log看看最近的报错')
-  })
-
-  it('appends a second, unrelated dictation instead of deleting the first', () => {
-    const h = harness()
-    h.value = '检查一下磁盘'
-    h.sync('检查一下磁盘')
-    h.value = '重启服务'
-    h.sync('重启服务')
-    // Low character overlap → a new sentence, not a correction.
-    expect(h.remote()).toBe('检查一下磁盘重启服务')
   })
 
   it('appends when the IME extends the same draft', () => {

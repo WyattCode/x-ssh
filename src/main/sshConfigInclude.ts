@@ -1,4 +1,5 @@
 import { readFile, readdir } from 'node:fs/promises'
+import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 
 /**
@@ -43,7 +44,10 @@ function unquote(value: string): string {
 
 /** Resolves one include spec (possibly a glob) to existing file paths. */
 async function resolveSpec(spec: string, baseDir: string): Promise<string[]> {
-  const path = isAbsolute(spec) ? spec : join(baseDir, spec)
+  // ssh expands `~` in Include before anything else; `Include ~/.ssh/conf.d/*`
+  // is a common spelling and used to resolve against baseDir literally.
+  const expanded = spec.startsWith('~/') || spec.startsWith('~\\') ? join(homedir(), spec.slice(2)) : spec
+  const path = isAbsolute(expanded) ? expanded : join(baseDir, expanded)
   if (!/[*?]/.test(path)) return [path]
   const dir = dirname(path)
   let names: string[]
