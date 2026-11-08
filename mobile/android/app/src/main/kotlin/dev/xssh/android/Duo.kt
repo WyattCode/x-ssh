@@ -33,6 +33,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
@@ -577,21 +578,23 @@ private fun DuoEmpty(hosts: List<Host>, running: Set<String>, onConnect: (Host) 
             ) { onNew() }
         } else {
             val recent = remember(hosts) { hosts.sortedByDescending { it.lastUsed }.take(3) }
-            Column(Modifier.padding(top = 28.dp).width(260.dp)) {
+            // 居中的窄列,行与行之间用和左边抽屉一样的虚线;右边是「上次连接 / 运行中」和主机色点。
+            Column(Modifier.padding(top = 28.dp).widthIn(max = 320.dp).fillMaxWidth(0.8f)) {
                 Text(
                     stringResource(R.string.duo_recent),
                     color = p.textFaint,
                     fontSize = 12.sp,
-                    modifier = Modifier.padding(start = 12.dp, bottom = 4.dp),
+                    modifier = Modifier.padding(start = 2.dp, bottom = 8.dp),
                 )
+                DashedDivider()
                 recent.forEach { host ->
+                    val isRunning = host.id in running
                     androidx.compose.foundation.layout.Row(
                         Modifier
                             .fillMaxWidth()
-                            .clip(androidx.compose.foundation.shape.RoundedCornerShape(10.dp))
                             .clickable { onConnect(host) }
-                            .heightIn(min = 48.dp)
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                            .heightIn(min = 52.dp)
+                            .padding(horizontal = 2.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text("❯", color = p.text.copy(alpha = 0.4f), fontFamily = XsshFonts.monoUi, fontSize = 15.sp)
@@ -603,13 +606,31 @@ private fun DuoEmpty(hosts: List<Host>, running: Set<String>, onConnect: (Host) 
                             fontSize = 15.sp,
                             maxLines = 1,
                             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f, fill = false),
+                            modifier = Modifier.weight(1f),
                         )
-                        if (host.id in running) {
-                            androidx.compose.foundation.layout.Spacer(Modifier.width(10.dp))
-                            Text("✓", color = p.ok, fontFamily = XsshFonts.monoUi, fontSize = 13.sp)
+                        val whenText = when {
+                            isRunning -> stringResource(R.string.host_running)
+                            host.lastUsed > 0L -> android.text.format.DateUtils.getRelativeTimeSpanString(
+                                host.lastUsed,
+                                System.currentTimeMillis(),
+                                android.text.format.DateUtils.MINUTE_IN_MILLIS,
+                                android.text.format.DateUtils.FORMAT_ABBREV_RELATIVE,
+                            ).toString()
+                            else -> ""
                         }
+                        if (whenText.isNotEmpty()) {
+                            androidx.compose.foundation.layout.Spacer(Modifier.width(10.dp))
+                            Text(
+                                whenText,
+                                color = if (isRunning) p.ok else p.textFaint,
+                                fontSize = 12.sp,
+                                maxLines = 1,
+                            )
+                        }
+                        androidx.compose.foundation.layout.Spacer(Modifier.width(12.dp))
+                        StatusDot(hostPip(host))
                     }
+                    DashedDivider()
                 }
             }
         }
