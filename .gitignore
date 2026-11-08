@@ -38,3 +38,4 @@ service-account*.json
 *.kdbx
 # ime-e2e (real-Chromium IME test)
 scripts/ime-e2e/.out
+release-trace

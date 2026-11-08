@@ -101,6 +101,8 @@ export const IPC = {
 
   // SSH data stream (send, no reply)
   sshInput: 'ssh:input', // renderer -> main : keystrokes
+  imeTrace: 'ime:trace', // renderer -> main : one IME trace line (dropped unless tracing is on)
+  imeTraceEnabled: 'ime:traceEnabled', // renderer -> main : is voice-input tracing switched on?
   sshResize: 'ssh:resize', // renderer -> main : pty resize
   sshAttach: 'ssh:attach', // renderer -> main : listener ready, flush buffered output
   sshTmuxList: 'ssh:tmuxList', // list remote tmux sessions

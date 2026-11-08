@@ -7,41 +7,63 @@
  * earlier revision of this file assumed the opposite and returned '' for every
  * payload, which silently swallowed *all* keyboard input (English included).
  *
- * ## The model (and the bug it replaced)
+ * ## What a real voice IME does (observed, not assumed)
+ *
+ * Doubao's dictation is ONE long composition. While it runs the draft lives in
+ * the textarea; partway through, the IME fires a fake key (keyCode 252), which
+ * makes xterm finish the composition on the spot and send the *untidied draft*
+ * as if it had been typed (`onData` with eventType `keydown`). When the
+ * "smart tidy-up" finishes, the textarea text is replaced in place by the
+ * rewritten version — often several lines — and xterm reports that once, later,
+ * from a timer. The remote line therefore holds a draft that looks hand-typed
+ * and has to be erased and retyped.
+ *
+ * ## The model
  *
  * xterm never empties its textarea between commits — only on Enter, Ctrl+C,
- * blur and paste. So the textarea ACCUMULATES: after dictating "A" then "B" it
- * holds "AB", and a voice IME that re-reads its audio can leave "V1V2" in it.
- * The textarea is therefore NOT the remote line, and mirroring its whole value
- * (what `sync()` used to do) re-sent every earlier version on top of the
- * correction that `input()` had just applied. That is the "two versions
- * stacked on one line" bug that survived six fixes: each catch-up looked at
- * the full textarea, found it different from the draft, and "corrected" the
- * line into V1+V2.
- *
- * So both entry points now work on the CHANGE the textarea went through since
- * we last looked (`diff`), never on its absolute value:
- *   - text replaced at the tail (the IME edited its own draft in place):
- *     erase exactly that tail on the remote and type the replacement;
- *   - text appended: either a new sentence, or the IME re-posting a revised
- *     version of the draft — told apart by the draft we recorded.
+ * blur and paste. So the textarea ACCUMULATES, and is NOT the remote line:
+ * mirroring its whole value re-sent every earlier version on top of a correction
+ * that had just been applied. Both entry points therefore work on the CHANGE the
+ * textarea went through since we last looked (`diff`), never on its value:
+ *   - text replaced at the tail (the IME edited its own draft in place): if the
+ *     remote LINE ends with that text, erase exactly it and type the
+ *     replacement — whether or not it was dictated or looked hand-typed;
+ *   - text appended: a new sentence, or the IME re-posting a revised version of
+ *     the dictation run, told apart by the run recorded at the end of the line.
  * A second report of a change we already applied is a no-op by construction,
  * which is what makes `onData` + `input` + `compositionend` — all firing for
  * one commit — safe to combine.
  *
- * Control keys are the one thing the textarea cannot express: `\r` starts a new
- * line, `DEL` removes a character, Ctrl+U clears it. They update the record and
- * still go out unchanged.
+ * Escape sequences (mouse and focus reports, cursor-position replies, arrow
+ * keys) are never line content and are never recorded as such.
  */
 
 const DEL = '\x7f'
-/** Cap on the tracked draft. A longer one is recorded by its tail; the worst
+/** Cap on the tracked line. A longer one is recorded by its tail; the worst
  *  case is a short erase, never a duplicate. */
 const MAX_TRACKED = 8192
 const CONTROL = /[\x00-\x1f\x7f]/
 
 /** Printable text only — no C0 controls, DEL or escape sequences. */
 export const isPlainText = (data: string): boolean => data !== '' && !CONTROL.test(data)
+
+/**
+ * Text an IME can commit: at least one printable character, and no control
+ * characters other than tab and LF. A restructured dictation contains line
+ * breaks, but a CR is what xterm turns a *paste's* line breaks into, so CR
+ * never counts — pasted text must not be mistaken for dictation.
+ */
+export const isImeText = (data: string): boolean =>
+  /[^\x00-\x1f\x7f]/.test(data) && !/[\x00-\x08\x0b-\x1f\x7f]/.test(data)
+
+/**
+ * One escape sequence: legacy mouse report (ESC [ M + 3 raw bytes), CSI, OSC, or
+ * ESC + one character (Alt-key, SS3 prefix). They carry no line text; recording
+ * their printable tail ("[<35;12;5M", "[A") made the line look like it ended
+ * with garbage, so a correction could no longer find the text it had to erase.
+ */
+const ESC_SEQ =
+  /\x1b\[M[\s\S]{3}|\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1bO[\s\S]|\x1b[\s\S]/g
 
 export interface ImeInputContext {
   /** xterm's hidden textarea, minus any composition still in progress. */
@@ -73,8 +95,16 @@ export interface ImeMirror {
   clear(): void
 }
 
-/** Drops the last character (a surrogate pair counts as one). */
-const chopLast = (s: string): string => Array.from(s).slice(0, -1).join('')
+/** UTF-16 length of the last character of `s` (a surrogate pair is one). */
+function lastCharLength(s: string): number {
+  if (!s) return 0
+  const low = s.charCodeAt(s.length - 1)
+  if (s.length >= 2 && low >= 0xdc00 && low <= 0xdfff) {
+    const high = s.charCodeAt(s.length - 2)
+    if (high >= 0xd800 && high <= 0xdbff) return 2
+  }
+  return 1
+}
 
 /** Code points in `s`. */
 const countChars = (s: string): number => Array.from(s).length
@@ -114,20 +144,6 @@ function longestSharedRun(a: string, b: string, limit = 160): number {
 const REWRITE_RUN = 3
 
 /**
- * Set `localStorage['xssh.imeDebug'] = '1'` and reload to trace every decision
- * this module makes. Without this, diagnosing a specific IME means guessing at
- * the event sequence — which is exactly how several "fixes" were shipped and
- * then found not to work.
- */
-const debugEnabled = (): boolean => {
-  try {
-    return window.localStorage.getItem('xssh.imeDebug') === '1'
-  } catch {
-    return false
-  }
-}
-
-/**
  * Turns "the line currently ends with `prev`, and the IME now wants `next`"
  * into the bytes that get it there: backspace over the part that differs, then
  * type the replacement.
@@ -153,8 +169,9 @@ function diff(prev: string, next: string): { removed: string; added: string } {
   const n = Math.min(prev.length, next.length)
   let p = 0
   while (p < n && prev.charCodeAt(p) === next.charCodeAt(p)) p++
-  // Never split a surrogate pair between "kept" and "changed".
-  if (p > 0 && p < prev.length + 1) {
+  // Never split a surrogate pair between "kept" and "changed". The prefix is
+  // identical on both sides, so looking at `prev` is enough.
+  if (p > 0) {
     const unit = prev.charCodeAt(p - 1)
     if (unit >= 0xd800 && unit <= 0xdbff) p--
   }
@@ -162,77 +179,113 @@ function diff(prev: string, next: string): { removed: string; added: string } {
 }
 
 export function createImeMirror(): ImeMirror {
-  const mirror = createBareMirror()
-  return debugEnabled() ? withDebug(mirror) : mirror
-}
-
-/** The real implementation; `createImeMirror` optionally wraps it in a logger. */
-function createBareMirror(): ImeMirror {
   /** The textarea value as of the last event we accounted for. */
   let ta = ''
   /**
-   * Text the current dictation run has already put on the wire — the draft.
-   *
-   * A voice IME does not commit once: it posts a rough guess, then revises it —
-   * "对", "对对", "对的，谢谢你". The line has to end up holding only the last
-   * version, so the recorded draft is what a revision is measured against.
-   *
-   * Reset whenever the user types with the keyboard or ends the line, so a
-   * correction can never reach back into hand-typed input.
+   * Everything this mirror has put on the remote line since it was last empty,
+   * hand-typed text included. A correction may erase the textarea text the IME
+   * replaced whenever the line really ends with it — that must not depend on a
+   * dictation record surviving, or one stray reset turns a correction into
+   * "append the new tail, leave the old one": the half-erased lines users saw.
    */
-  let committed = ''
+  let line = ''
+  /**
+   * How much of the END of `line` belongs to the current dictation run (UTF-16
+   * units). The run — the draft a revision is measured against — is derived
+   * from `line` instead of being kept as a second string, so the two cannot
+   * drift apart. Zero after hand-typed text, a paste, Enter, or a cleared box,
+   * so a correction can never reach back into input the user typed.
+   */
+  let runLen = 0
+  const draft = (): string => line.slice(line.length - runLen)
 
-  /** A commit that ADDS `text` to the textarea. Either a new sentence or the
-   *  IME's revised take on the draft. */
-  function append(text: string): string {
-    if (!text) return ''
-    // A draft shorter than a phrase cannot be told apart from a new word
-    // ("对" then "对": two words, not a re-read), so it is never a revision.
-    if (countChars(committed) >= REWRITE_RUN) {
-      // The same version again, or a longer take on it: only the tail is new.
-      if (text.startsWith(committed)) {
-        const tail = text.slice(committed.length)
-        committed = text.slice(-MAX_TRACKED)
-        return tail
-      }
-      // A re-read of the same audio. A terminal has no replace, so erase the
-      // differing tail of the draft and retype the rest.
-      if (longestSharedRun(committed, text) >= REWRITE_RUN) {
-        const out = rewriteBytes(committed, text)
-        committed = text.slice(-MAX_TRACKED)
-        return out
+  /**
+   * Records bytes headed for the remote. `imeText` marks IME output, whose line
+   * breaks are part of the text; for anything else a CR/LF submits the line.
+   */
+  function note(out: string, imeText: boolean): void {
+    for (const ch of Array.from(out.replace(ESC_SEQ, ''))) {
+      if (ch === DEL) {
+        const n = lastCharLength(line)
+        line = line.slice(0, line.length - n)
+        runLen = Math.max(0, runLen - n)
+      } else if (ch === '\x15' || ch === '\x03') {
+        // Ctrl+U clears the line; Ctrl+C cancels it (readline discards the
+        // buffer). Either way the remote line is empty afterwards.
+        line = ''
+        runLen = 0
+      } else if (ch === '\r' || ch === '\n') {
+        if (imeText) {
+          line += ch
+        } else {
+          line = ''
+          runLen = 0
+        }
+      } else if (ch >= ' ') {
+        line += ch
       }
     }
-    committed = (committed + text).slice(-MAX_TRACKED)
-    return text
+    if (line.length > MAX_TRACKED) line = line.slice(-MAX_TRACKED)
+    runLen = Math.min(runLen, line.length)
+  }
+
+  /** A commit that ADDS `text` to the textarea. Either a new sentence or the
+   *  IME's revised take on the dictation run. `run` is the new run length. */
+  function append(text: string): { out: string; run: number } {
+    if (!text) return { out: '', run: runLen }
+    const d = draft()
+    // A draft shorter than a phrase cannot be told apart from a new word
+    // ("对" then "对": two words, not a re-read), so it is never a revision.
+    if (countChars(d) >= REWRITE_RUN) {
+      // The same version again, or a longer take on it: only the tail is new.
+      if (text.startsWith(d)) return { out: text.slice(d.length), run: text.length }
+      // A re-read of the same audio. A terminal has no replace, so erase the
+      // differing tail of the draft and retype the rest.
+      if (longestSharedRun(d, text) >= REWRITE_RUN) {
+        return { out: rewriteBytes(d, text), run: text.length }
+      }
+    }
+    return { out: text, run: runLen + text.length }
   }
 
   /** The textarea now reads `settled`; `data` is what xterm reported for it, if
    *  anything. Returns the bytes the remote is missing. */
   function reconcile(settled: string, data?: string): string {
+    const { out, run } = plan(settled, data)
+    note(out, true)
+    runLen = Math.min(run, line.length)
+    return out
+  }
+
+  function plan(settled: string, data?: string): { out: string; run: number } {
     if (settled === ta) {
       // The textarea has nothing new. Either this is the second report of a
       // commit we already handled (onData, then input, then compositionend all
       // fire for one commit), or the IME produced text without touching the
       // textarea at all.
-      if (!data || ta.endsWith(data)) return ''
+      //
+      // A multi-line insertion lands in the textarea in one piece, after which
+      // Chromium fires one `input` event per line and xterm reports each line
+      // as its own payload — every one of them already accounted for. So "the
+      // text is somewhere in the textarea" is enough to ignore a payload; only
+      // text the textarea does not hold at all counts as untracked.
+      if (!data || ta.includes(data)) return { out: '', run: runLen }
       return append(data)
     }
 
     const { removed, added } = diff(ta, settled)
     ta = settled
     if (removed) {
-      // The IME edited its own text in place ("对对" → "对的，谢谢你"). The
-      // remote line ends with that text if it was dictated; erase exactly what
+      // The IME edited its own text in place ("对对" → "对的，谢谢你"). If the
+      // remote line ends with that text — dictated or not — erase exactly what
       // was replaced and type what replaced it.
-      if (committed.endsWith(removed)) {
-        committed = (committed.slice(0, committed.length - removed.length) + added).slice(
-          -MAX_TRACKED
-        )
-        return DEL.repeat(countChars(removed)) + added
+      if (line.endsWith(removed)) {
+        const d = draft()
+        const kept = d.endsWith(removed) ? d.length - removed.length : 0
+        return { out: DEL.repeat(countChars(removed)) + added, run: kept + added.length }
       }
-      // The replaced text is not ours to erase (hand-typed, or already dropped
-      // from the record): add what is new, touch nothing else.
+      // The replaced text is no longer at the end of the line (something was
+      // typed after it): add what is new, touch nothing else.
     }
     return append(added)
   }
@@ -244,52 +297,43 @@ function createBareMirror(): ImeMirror {
       const pasted =
         eventType === 'paste' || eventType === 'drop' || data.startsWith('\x1b[200~')
       if (pasted) {
-        committed = ''
         ta = settled
+        // Pasted line breaks may submit the line, so they end it here.
+        note(data, false)
+        runLen = 0
         return data
       }
       const fromKey = eventType === 'keydown' || eventType === 'keypress'
+      // Doubao's "smart text tidy-up" has a model restructure the dictation into
+      // paragraphs and numbered lists, so an IME commit can legitimately carry
+      // line breaks. Those are text, not a key: treating them as control input
+      // sent the whole rewrite through untouched, with the old version still on
+      // the line.
+      if (!fromKey && isImeText(data)) return reconcile(settled, data)
       if (!isPlainText(data)) {
-        if (eventType === undefined) {
-          // xterm's own correction for a character the IME removed from the
-          // textarea (`_handleAnyTextareaChanges`): the textarea is already
-          // shorter, and the remote is about to be.
-          if (data === DEL) {
-            committed = chopLast(committed)
-            ta = settled
-          }
-          // Any other timer-driven reply (cursor-position query, etc.) says
-          // nothing about the line.
-          return data
-        }
-        if (data === '\r' || data === '\n') {
-          committed = ''
-        } else if (data === DEL) {
-          // One character, not one UTF-16 unit — otherwise an emoji or an
-          // extension-B hanzi leaves half a surrogate pair behind and the next
-          // correction sends one DEL too many.
-          committed = chopLast(committed)
-        } else if (data === '\x15' || data === '\x03') {
-          // Ctrl+U clears the line; Ctrl+C cancels it (readline discards the
-          // buffer). Either way the remote line is empty afterwards.
-          committed = ''
-        }
-        // Arrow keys, Esc, Tab and friends must NOT end the dictation run.
-        // They are pressed constantly while editing in a TUI, and clearing the
-        // draft on them meant the next voice commit looked like brand-new text
-        // and was appended instead of replacing the previous version.
-        // Still has to go out: returning '' here swallowed every arrow key,
-        // Tab and Ctrl+C.
+        // xterm's own correction for a character the IME removed from the
+        // textarea (`_handleAnyTextareaChanges`): the textarea is already
+        // shorter, and the remote is about to be.
+        if (eventType === undefined && data === DEL) ta = settled
+        // Everything else — user keys, and timer-driven replies such as a
+        // cursor-position report — goes out unchanged. `note` ignores escape
+        // sequences, so arrow keys, mouse and focus reports neither pollute the
+        // line nor end the dictation run (they are pressed constantly while
+        // editing in a TUI); backspace, Enter and Ctrl+C/U update it. Dropping
+        // them here would swallow every arrow key, Tab and Ctrl+C.
+        note(data, false)
         return data
       }
       // ---- plain text ----
       if (fromKey) {
         // Typed by hand: the dictation run ends here so a later correction
         // cannot delete it. xterm cancels the key, so the textarea normally
-        // did not change — but a composition finished by this key did, and
-        // that text is going out right now.
-        committed = ''
+        // did not change — but a composition finished by this key did (the
+        // untidied draft Doubao's fake keyCode-252 key forces out), and that
+        // text is going out right now: it stays on the line, erasable.
         ta = settled
+        note(data, false)
+        runLen = 0
         return data
       }
 
@@ -308,7 +352,7 @@ function createBareMirror(): ImeMirror {
       // The remote does not have this text, but neither will we send it again.
       ta = baseline
       // Not dictation: the next commit must not erase it.
-      committed = ''
+      runLen = 0
     },
 
     track(value) {
@@ -317,50 +361,7 @@ function createBareMirror(): ImeMirror {
 
     clear() {
       ta = ''
-      committed = ''
-    }
-  }
-}
-
-/** Shortens a payload for the debug log without hiding its shape. */
-const clip = (s: string): string => (s.length > 60 ? `${s.slice(0, 60)}…(${s.length})` : s)
-
-/**
- * Wraps a mirror so every call is logged when `xssh.imeDebug` is on.
- *
- * The log line answers the three questions a distant debugger cannot:
- * how many commits the IME actually makes, what each one contains, and whether
- * we decided to erase anything (`out` starting with \x7f).
- */
-function withDebug(inner: ImeMirror): ImeMirror {
-  return {
-    input(data, ctx) {
-      const out = inner.input(data, ctx)
-      console.log('[ime] input', {
-        eventType: ctx.eventType ?? '(timer)',
-        data: clip(data),
-        settled: clip(ctx.settled),
-        out: clip(out),
-        erased: out.startsWith(DEL)
-      })
-      return out
-    },
-    sync(settled) {
-      const out = inner.sync(settled)
-      console.log('[ime] sync', { settled: clip(settled), out: clip(out), erased: out.startsWith(DEL) })
-      return out
-    },
-    adopt(baseline) {
-      inner.adopt(baseline)
-      console.log('[ime] adopt', clip(baseline))
-    },
-    track(value) {
-      inner.track(value)
-      console.log('[ime] track', clip(value))
-    },
-    clear() {
-      inner.clear()
-      console.log('[ime] clear')
+      runLen = 0
     }
   }
 }

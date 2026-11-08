@@ -15,6 +15,7 @@ import { extractBackupHosts } from '../shared/backup'
 import { parseSshConfig, type SshConfigHost } from './sshConfigParse'
 import { expandIncludes } from './sshConfigInclude'
 import { SshManager } from './ssh'
+import { createImeTrace } from './imeTrace'
 import { probeHosts } from './reachability'
 import { isTrustedFrame } from './ipcGuard'
 import { OS_PROBE_COMMAND, parseOsProbe } from '../shared/hostOs'
@@ -35,6 +36,7 @@ const store = new HostStore()
 const knownHosts = new KnownHosts()
 const settings = new SettingsStore()
 const keyManager = new KeyManager(app.getPath('userData'))
+const imeTrace = createImeTrace(app.getPath('userData'))
 const masterLock = new MasterLock(settings)
 const userVerify = registerUserVerifyIpc({ settings, lang: uiLang, isTrusted: isTrustedIpcSender })
 const activeEdits = new Set<string>()
@@ -1909,6 +1911,11 @@ function registerIpc(): void {
   // ---- SSH stream (fire-and-forget) ----
   on(IPC.sshInput, (_e, sessionId: string, data: string) => {
     sshManager?.write(sessionId, data)
+  })
+  // Voice-input diagnostics (see imeTrace.ts): off unless a fresh flag file exists.
+  handle(IPC.imeTraceEnabled, () => imeTrace.enabled())
+  on(IPC.imeTrace, (_e, line: unknown) => {
+    if (typeof line === 'string') imeTrace.write(line)
   })
   on(IPC.sshResize, (_e, sessionId: string, cols: number, rows: number) => {
     sshManager?.resize(sessionId, cols, rows)

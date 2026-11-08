@@ -163,6 +163,11 @@ const api = {
     pickFile: (): Promise<{ ok: boolean; path?: string; canceled?: boolean; error?: string }> =>
       ipcRenderer.invoke(IPC.localPickFile)
   },
+  /** Voice-input diagnostics (off by default; see main/imeTrace.ts). */
+  ime: {
+    traceEnabled: (): Promise<boolean> => ipcRenderer.invoke(IPC.imeTraceEnabled),
+    trace: (line: string): void => ipcRenderer.send(IPC.imeTrace, line)
+  },
   ssh: {
     connect: (params: ConnectParams): Promise<ConnectResult> =>
       ipcRenderer.invoke(IPC.sshConnect, params),
