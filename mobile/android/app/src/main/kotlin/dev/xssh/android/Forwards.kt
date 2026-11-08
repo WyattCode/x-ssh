@@ -187,12 +187,15 @@ fun forwardErrorKind(message: String?): String = when {
  * 转发失败给人看的话:认得的几类换成本地化文案,认不得的才退回核心给的原文
  * (原来一律把英文原文直接摆出来)。
  */
-fun forwardErrorText(context: android.content.Context, message: String?): String = when (forwardErrorKind(message)) {
+fun forwardErrorText(context: android.content.Context, message: String?): String? = when (forwardErrorKind(message)) {
     "in_use" -> context.getString(R.string.fwd_err_port_in_use)
     "already" -> context.getString(R.string.fwd_err_already)
     "bad_port" -> context.getString(R.string.fwd_err_bad_port)
-    "denied" -> context.getString(R.string.fwd_err_denied)
-    else -> message.orEmpty()
+    // 「permission denied」多半是本机绑定 < 1024 的端口被系统拒了,不是服务器拒绝转发:别套服务器那句,给原文。
+    "denied" -> if (message.orEmpty().contains("permission denied", ignoreCase = true)) message
+    else context.getString(R.string.fwd_err_denied)
+    // 空消息就别弹一块空的红字条。
+    else -> message?.ifBlank { null }
 }
 
 /* ----------------------------- UI: editor list ----------------------------- */

@@ -35,6 +35,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -497,21 +499,20 @@ fun DuoApp(
             // 收起了又连着会话时让位(竖条里有「‹」)。
             // 连接中 / 失败 / 要确认时右栏没有竖条里的「‹」,抽屉收着的话这颗开关是回列表的唯一入口,要留着。
             val showToggle = drawerOpen || termHost == null || gate?.second.let { it != null && it != DuoStatus.Live }
+            // 左边的系统内边距并进**动画的目标值**,不用 windowInsetsPadding 的左侧:
+            // 展开时抽屉宽度 drawerW 已经包含了它(再加一遍开关就比抽屉边缘多出一个内边距),
+            // 收起时开关要让开它。两种状态之间由同一条弹簧过渡,不会在切换那一刻跳一下。
+            val startInset = stableSafeDrawing().asPaddingValues()
+                .calculateStartPadding(androidx.compose.ui.platform.LocalLayoutDirection.current)
             val toggleXState = animateDpAsState(
-                if (shown) drawerW - 16.dp - 48.dp else 16.dp,
+                if (shown) drawerW - 16.dp - 48.dp else 16.dp + startInset,
                 drawerSpring(),
                 label = "duoToggleX",
             )
             if (showToggle) {
                 Box(
                     Modifier
-                        // 抽屉展开时,它的宽度 drawerW **已经包含**了左边的系统内边距(内边距是抽屉里面的 padding):
-                        // 再加一遍的话,三键导航横屏时开关会比抽屉边缘多出去一个内边距的宽度。
-                        .windowInsetsPadding(
-                            stableSafeDrawing().only(
-                                if (shown) WindowInsetsSides.Top else WindowInsetsSides.Top + WindowInsetsSides.Start,
-                            ),
-                        )
+                        .windowInsetsPadding(stableSafeDrawing().only(WindowInsetsSides.Top))
                         .offset { IntOffset(toggleXState.value.roundToPx() + slide.value.roundToInt(), 8.dp.roundToPx()) },
                 ) {
                     CompositionLocalProvider(LocalGlassSize provides 48.dp) {

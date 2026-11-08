@@ -175,7 +175,11 @@ class SnippetStore(context: Context) {
                     .put("hostId", s.hostId ?: ""),
             )
         }
-        return prefs.edit().putString(KEY_LIST, array.toString()).commit()
+        val saved = prefs.edit().putString(KEY_LIST, array.toString()).commit()
+        // 写进去的是一份合法 JSON,磁盘上不再有"解析不了的唯一副本"要保护:不清掉的话,
+        // 坏文件被覆盖之后,最后一条片段仍然永远删不掉(直到重开面板)。
+        if (saved) loadFailed = false
+        return saved
     }
 
     private companion object {

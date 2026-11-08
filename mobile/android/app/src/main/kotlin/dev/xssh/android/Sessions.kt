@@ -185,17 +185,20 @@ class TerminalSession(
                 credentials = null
                 jumpCredentials = null
                 _frame.value = _frame.value.copy(alive = false)
-                withContext(NonCancellable + Dispatchers.IO) {
-                    files.close()
-                    live.close()
-                }
                 // 对端断了就自己从名单上摘掉。
                 //
                 // 原来这件事是终端界面用 `LaunchedEffect(dead)` 做的 —— 那就要求
                 // 用户**正好开着那一屏**。切出去之后服务器挂了,回到主机页还写着
                 // 「运行中」,状态栏的常驻通知也一直挂着,而连接早就没了。
                 // 这一屏自己 remember 着 session 引用,摘牌不影响它继续显示最后的输出。
+                //
+                // **必须在关连接之前摘**:关连接可能要阻塞好几秒,而界面一看到 alive=false 就会露出
+                // 「重新连接」。这几秒里用户点了,open() 在名单里还看得到这条死会话、直接把它复用回去。
                 SessionRegistry.forget(this@TerminalSession)
+                withContext(NonCancellable + Dispatchers.IO) {
+                    files.close()
+                    live.close()
+                }
                 // 队列和写协程也要收掉。只 `forget` 就 `break` 的话,`writer` 还挂在
                 // `for (op in outbox)` 上等下一条命令,进程级的作用域又一直活着 ——
                 // 于是每断一次线就永久漏一个协程,连带整个 TerminalSession
@@ -433,7 +436,8 @@ object SessionRegistry {
      */
     fun open(host: Host, jump: Host?, cols: Int, rows: Int): TerminalSession {
         val generation = synchronized(lock) {
-            _sessions.value[host.id]?.let { return it }
+            // 已经死了(alive=false,还没来得及摘牌)的不复用:否则「重新连接」会把同一条死会话又拿回来。
+            _sessions.value[host.id]?.takeIf { it.frame.value.alive }?.let { return it }
             closedGeneration
         }
         // 真正的连接不能放在锁里 —— 它要好几秒,会把 close / 通知栏的全部断开一起堵死。
@@ -444,7 +448,7 @@ object SessionRegistry {
                 live.closeAsync()
                 throw Cancelled()
             }
-            _sessions.value[host.id]?.let { existing ->
+            _sessions.value[host.id]?.takeIf { it.frame.value.alive }?.let { existing ->
                 // 这段时间里别人先连上了:把自己这条多余的连接关掉,别让它漏在外面。
                 live.closeAsync()
                 return existing

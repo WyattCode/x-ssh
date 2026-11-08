@@ -591,6 +591,7 @@ fun TerminalScreen(
             onTrustKey = onTrustKey,
             onTrustJumpKey = onTrustJumpKey,
             onSwitchHost = onSwitchHost,
+            onEditHost = onEditHost,
         )
     }
 }
@@ -612,6 +613,8 @@ private fun TerminalView(
     onTrustKey: (String) -> Unit,
     onTrustJumpKey: (Host, String) -> Unit,
     onSwitchHost: (Host) -> Unit = {},
+    /** 重连时撞上"跳板机已被删"的失败页上,给「重新选跳板机」打开编辑页用。 */
+    onEditHost: (() -> Unit)? = null,
 ) {
     val p = LocalXssh.current
     // Disconnect / leave must be one-shot: a double-tap would pop the nav stack twice.
@@ -658,6 +661,22 @@ private fun TerminalView(
     val jumpHost = host.jumpHostId.takeIf { it.isNotEmpty() }
         ?.let { id -> LocalHosts.current.firstOrNull { it.id == id } }
     val halt = keyHalt
+    if (halt != null && halt.jump && jumpHost == null) {
+        // 跳板机已经被删了:指纹是它的,确认页上却只能摆目标主机的名字和旧指纹(张冠李戴),
+        // 「信任」还会什么都不做。直接说清楚:它没了,要重新选一台。
+        ConnectGate(
+            host = host,
+            failure = stringResource(R.string.term_err_jump_gone),
+            waited = 0,
+            tablet = tablet != null,
+            retry = null,
+            fix = (tablet?.onEdit ?: onEditHost)?.let { edit -> stringResource(R.string.term_fix_pick_jump) to edit },
+            onExit = onExit,
+            inDrawer = duo != null,
+            onEdit = tablet?.onEdit ?: onEditHost,
+        )
+        return
+    }
     if (halt != null) {
         val keyHost = if (halt.jump) jumpHost ?: host else host
         HostKeyGate(

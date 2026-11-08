@@ -168,6 +168,9 @@ class RemoteFiles(session: Session, private val scope: CoroutineScope) {
         } catch (t: CancellationException) {
             // 换目录会 cancel 上一次 list —— 通道本身没坏,别丢掉。
             throw t
+        } catch (t: FfiException.Cancelled) {
+            // 用户在传输里点了取消(进度回调返回 false):同样不是通道的错。
+            throw t
         } catch (t: Throwable) {
             // 通道坏了(EOF、连接断了、子系统挂了):别把死句柄留给下一次调用 ——
             // 否则换目录 / 再传一次都还是同一个坏通道,要等用户点「重试」才会重开。
@@ -465,6 +468,8 @@ class RemoteFiles(session: Session, private val scope: CoroutineScope) {
     fun share(entries: List<RemoteEntry>, context: Context) {
         if (entries.isEmpty()) return
         val app = context.applicationContext // 见 open():收尾回调里不攥 Activity
+        // 用调用方(Activity)的上下文现在取:应用内换的语言只套在 Activity 上,applicationContext 取到的是系统语言。
+        val chooserTitle = context.getString(R.string.files_share)
         val batchId = UUID.randomUUID().toString()
         val dir = File(context.cacheDir, "share/$batchId")
         val created = mutableListOf<Pair<String, File>>() // remote path → local file
@@ -527,13 +532,13 @@ class RemoteFiles(session: Session, private val scope: CoroutineScope) {
                         uri
                     }
                     if (uris.isNotEmpty()) _cacheEpoch.value++
-                    shareOut(app, uris, created.map { it.second.name })
+                    shareOut(app, uris, created.map { it.second.name }, chooserTitle)
                 }
             }
         }
     }
 
-    private fun shareOut(context: Context, uris: List<Uri>, names: List<String>) {
+    private fun shareOut(context: Context, uris: List<Uri>, names: List<String>, chooserTitle: String) {
         if (uris.isEmpty()) return
         val intent = if (uris.size == 1) {
             Intent(Intent.ACTION_SEND)
@@ -548,7 +553,7 @@ class RemoteFiles(session: Session, private val scope: CoroutineScope) {
         try {
             // 传进来的是 applicationContext(不是 Activity):没有任务栈,必须 NEW_TASK。
             context.startActivity(
-                Intent.createChooser(intent, context.getString(R.string.files_share)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                Intent.createChooser(intent, chooserTitle).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
             )
         } catch (_: ActivityNotFoundException) {
             notify(FileText.of(R.string.files_no_app, names.firstOrNull() ?: ""), error = true)

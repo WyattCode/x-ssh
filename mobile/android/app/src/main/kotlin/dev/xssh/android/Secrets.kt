@@ -157,6 +157,9 @@ object Secrets {
     }
 
     /** 加锁的密钥对建出来没有;没有就现建一对。建密钥本身不要求认证。 */
+    // 加锁:enableLock(IO 线程)和 HostStore.save(主线程)可能同时进来,
+    // 各自"删了重建"的话,先写下去的那条密文就被另一把新密钥孤立了。
+    @Synchronized
     fun ensureLockKey() {
         val existing = loadOrNull(LOCKED_ALIAS)
         if (existing == null) {

@@ -621,8 +621,10 @@ private fun PhoneFlow(
             var pickingBeside by remember(current.host.id) { mutableStateOf(false) }
             fun hostOf(id: String?): Host? = id?.let { hid ->
                 hosts.firstOrNull { it.id == hid }
-                    ?: SessionRegistry[hid]?.host
+                    // 屏幕自己带着的那份(有完整凭据)优先于会话里清掉明文的那份:
+                    // 否则 dev 跳转这类不在主机表里的主机,连上后实例一换,remember(host) 失效就悄悄重连。
                     ?: current.host.takeIf { it.id == hid }
+                    ?: SessionRegistry[hid]?.host
             }
             fun trustKey(host: Host, fingerprint: String) {
                 // 换一个 Host 实例 → 终端屏的 remember(host) 失效 → 带着新指纹重连。
