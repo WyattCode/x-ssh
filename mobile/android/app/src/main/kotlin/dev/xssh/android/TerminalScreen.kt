@@ -817,6 +817,7 @@ private fun TerminalView(
     var showKeys by remember { mutableStateOf(false) }
     var alt by remember { mutableStateOf(false) }
     var grid by remember { mutableStateOf(0 to 0) }
+    var cellPx by remember { mutableStateOf(0 to 0) }
     // 命令片段面板(轨道 / 底栏 / 平板工具栏上的 ⚡)。
     var snippetsOpen by remember { mutableStateOf(false) }
     var forwardsOpen by remember { mutableStateOf(false) }
@@ -1070,8 +1071,11 @@ private fun TerminalView(
                 frame = { frameState.value },
                 fontSize = fontSize,
                 onGridSize = { cols, rows, cellW, cellH ->
-                    if (cols != grid.first || rows != grid.second) {
+                    // 单元格像素也要比:改了字号但行列恰好没变时,服务端问窗口像素(CSI 14t、图片 / sixel 工具)
+                    // 才会拿到新值。只比行列的话,上游那次重新触发被这里原样丢掉了。
+                    if (cols != grid.first || rows != grid.second || cellW != cellPx.first || cellH != cellPx.second) {
                         grid = cols to rows
+                        cellPx = cellW to cellH
                         live.resizeGrid(cols, rows, cellW, cellH)
                     }
                 },
@@ -1175,8 +1179,12 @@ private fun TerminalView(
                 // 输入法一次提交了带换行 / 控制字符的一大段(Gboard、MIUI 的剪贴板条走的就是这条路):
                 // 这是粘贴,不是打字。和菜单粘贴同一条路 —— 剔掉控制字符、开了括号粘贴的程序收到包好的整段,
                 // 否则多行内容会被当成命令逐行执行,ESC 之类的字节原样送到远端。
+                // 末尾**只有一个**换行的("ls\n"):是"打字 + 回车"被某些键盘(SwiftKey、部分中文输入法)合在一次提交里,
+                // 不是粘贴。当成粘贴会被括号粘贴包起来,bash 5.1+ / zsh 把换行当字面量插进去、命令不会执行,
+                // 回车就这么悄悄失效了。去掉末尾那一个再判断:剩下的里还有换行 / 控制字符才算粘贴。
+                val core = text.removeSuffix("\r\n").removeSuffix("\n").removeSuffix("\r")
                 val looksLikePaste = !useCtrl && !useAlt && text.length > 1 &&
-                    text.any { it == '\n' || it == '\r' || (it.code < 0x20 && it != '\t') || it.code in 0x7F..0x9F }
+                    core.any { it == '\n' || it == '\r' || (it.code < 0x20 && it != '\t') || it.code in 0x7F..0x9F }
                 if (looksLikePaste) {
                     val clean = PasteSanitize.sanitize(text)
                     if (clean.isNotEmpty()) live.paste(clean)

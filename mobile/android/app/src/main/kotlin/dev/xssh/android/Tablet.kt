@@ -529,8 +529,10 @@ fun TabletApp(
                 }
                 AnimatedContent(
                     targetState = pane,
-                    // 与内屏同一套:淡出先走完、淡入随后,不透明度不会在中间掉下去(见 Duo.kt)。
-                    transitionSpec = { fadeIn(tween(210, delayMillis = 90)) togetherWith fadeOut(tween(90)) },
+                    // 与内屏同一套:新页在旧页上面淡入,旧页等新页盖住才撤(见 Duo.kt)。
+                    transitionSpec = {
+                        fadeIn(tween(180)) togetherWith androidx.compose.animation.ExitTransition.KeepUntilTransitionsFinished
+                    },
                     label = "tabletPane",
                 ) { paneKey ->
                     // 淡入淡出的那一小段里,退场的那一栏也还在组合里。焦点请求只给进场的那一栏 ——

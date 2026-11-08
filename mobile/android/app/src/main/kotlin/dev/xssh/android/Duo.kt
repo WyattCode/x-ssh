@@ -299,9 +299,11 @@ fun DuoApp(
                             poke()
                         }
                     }
-                    // 让出抽屉的宽度(弹簧会过冲到负数,不能为负)。用 layout 读动画值,不触发重组。
+                    // 让出抽屉的宽度(弹簧会过冲到负数,不能为负;也不能比抽屉自己多 ——
+                    // 抽屉的位置被夹在 0,这里不夹的话,过冲的那一两百毫秒里两者之间会露出一条底色)。
+                    // 用 layout 读动画值,不触发重组。
                     .layout { measurable, constraints ->
-                        val start = insetState.value.coerceAtLeast(0.dp).roundToPx()
+                        val start = insetState.value.coerceIn(0.dp, drawerW + creaseW).roundToPx()
                         val placeable = measurable.measure(constraints.offset(horizontal = -start))
                         layout(constraints.maxWidth, placeable.height) { placeable.placeRelative(start, 0) }
                     }
@@ -319,11 +321,12 @@ fun DuoApp(
                 }
                 AnimatedContent(
                     targetState = pane,
-                    // 淡出 90ms 先走完、淡入 210ms 从 90ms 起:两页的不透明度加起来始终不低于 1,
-                    // 原来 160 进 / 120 出同时播,中间有一段两边都半透明,底下的黑色透出来(换主机时闪一下)。
+                    // 新页在旧页**上面**淡入,旧页一直不透明、等新页完全盖住才撤掉:任何一帧都不会露出底色。
+                    // (原来 160 进 / 120 出同时播,中间两边都半透明;上一版"先出后进"更糟 ——
+                    // 90ms 处旧页已经透明、新页还没开始,整整几帧是纯底色。)
                     transitionSpec = {
-                        fadeIn(androidx.compose.animation.core.tween(210, delayMillis = 90)) togetherWith
-                            fadeOut(androidx.compose.animation.core.tween(90))
+                        fadeIn(androidx.compose.animation.core.tween(180)) togetherWith
+                            androidx.compose.animation.ExitTransition.KeepUntilTransitionsFinished
                     },
                     label = "duoPane",
                 ) { paneKey ->
@@ -518,9 +521,11 @@ fun DuoApp(
                         // 不再自己起一条动画:原来开关走 254dp、边缘走 334dp,开合的前 80% 开关都跑在边缘前面,
                         // 压在终端的主机名和第一行字上。收起时边缘退回 0,开关就停在屏幕左上(下限)。
                         .offset {
-                            val edge = drawerW + baseXState.value.coerceAtMost(0.dp)
-                            val x = maxOf(toggleMinX, edge - 64.dp)
-                            IntOffset(x.roundToPx() + slide.value.roundToInt(), 8.dp.roundToPx())
+                            // 手指拖出去的位移 slide 要算进**夹之前**的边缘位置:加在夹之后的话,
+                            // 拖着收起、松手后的那段弹簧里,开关会被 slide 的负值再往左拽出屏幕,然后弹回来。
+                            val edgePx = (drawerW + baseXState.value.coerceAtMost(0.dp)).toPx() + slide.value
+                            val x = maxOf(toggleMinX.toPx(), edgePx - 64.dp.toPx())
+                            IntOffset(x.roundToInt(), 8.dp.roundToPx())
                         },
                 ) {
                     CompositionLocalProvider(LocalGlassSize provides 48.dp) {

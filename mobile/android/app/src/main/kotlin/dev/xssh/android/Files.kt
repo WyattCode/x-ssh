@@ -932,7 +932,11 @@ fun FilesPane(
                 scope.launch {
                     runCatching { files.rename(d.entry.path, to) }
                         // 做完时用户可能已经去了别的目录:别把他拽回来(还会多出一条历史)。
-                        .onSuccess { if (path == dir) load(dir, select = to) }
+                        // 比较前两边都去掉尾斜杠:服务器给的家目录可能是 "/home/u/",和 parentPath 的结果对不上的话,
+                        // 重命名成功了列表却不刷新。
+                        .onSuccess {
+                            if (path?.trimEnd('/')?.ifEmpty { "/" } == dir.trimEnd('/').ifEmpty { "/" }) load(dir, select = to)
+                        }
                         .onFailure { e -> files.notify(FileText.of(R.string.files_rename_failed, e.reason()), error = true) }
                 }
             },
@@ -949,7 +953,9 @@ fun FilesPane(
                 scope.launch {
                     runCatching { files.mkdir(at) }
                         // 慢服务器上建完时用户可能已经去了别的目录:别把他拽回来。
-                        .onSuccess { if (path == dir) load(dir, select = at) }
+                        .onSuccess {
+                            if (path?.trimEnd('/')?.ifEmpty { "/" } == dir.trimEnd('/').ifEmpty { "/" }) load(dir, select = at)
+                        }
                         .onFailure { e -> files.notify(FileText.of(R.string.files_create_failed, e.reason()), error = true) }
                 }
             },

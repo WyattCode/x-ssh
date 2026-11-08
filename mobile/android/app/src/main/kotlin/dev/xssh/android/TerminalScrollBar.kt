@@ -64,16 +64,23 @@ fun TerminalScrollBar(
     // 原来没人滚动、只是历史第一次超过一屏(或退出 vim / less 回来)就白闪 1.2 秒。
     // 这几个状态放在下面的提前 return 之前,进出备用屏时不会被丢掉重来。
     var lastOffset by remember { mutableStateOf(offsetNow) }
+    val active = historyNow > 0 && !altNow
+    // 拖着拖着滚动条整个消失了(远端进了备用屏、历史被清空):手势协程被取消时不一定会走 onDragCancel,
+    // dragging 不复位的话,滚动条下次出现就一直是亮的、粗的。
+    LaunchedEffect(active) { if (!active) dragging = false }
     // 滚动一下(偏移变了)就亮,停下 1.2 秒后收;偏移又变了,上一次的计时随之取消。
+    // 没在显示(备用屏里)时偏移变了也只记下来、不亮:否则 1.2 秒内退出 vim 回来会白闪一下。
     LaunchedEffect(offsetNow) {
         if (offsetNow != lastOffset) {
             lastOffset = offsetNow
-            visible = true
-            delay(1200)
-            visible = false
+            if (active) {
+                visible = true
+                delay(1200)
+                visible = false
+            }
         }
     }
-    if (historyNow <= 0 || altNow) return
+    if (!active) return
     val shown = visible || dragging
     val alpha by animateFloatAsState(if (shown) 1f else 0f, tween(if (shown) 120 else 500), label = "scrollbarAlpha")
     val thumbWidth by animateDpAsState(if (dragging) 6.dp else 4.dp, tween(200), label = "scrollbarThumb")
