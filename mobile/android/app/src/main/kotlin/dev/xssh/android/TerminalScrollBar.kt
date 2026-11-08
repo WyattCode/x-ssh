@@ -27,6 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -80,12 +81,21 @@ fun TerminalScrollBar(
         val thumbY = travel * (1f - offsetNow.toFloat() / historyNow)
 
         // 触摸条:几乎透明但接得住手指。手指在轨道里的位置 → 离底部多少行(上 = 历史最早)。
+        // 拖动事件比重组快:currentOffset 要等下一次重组才更新,拿它算差值会把上一步又发一遍
+        // (终点越过手指、滑块抖)。所以拖的时候记住"上一次发出去的目标",差值从它算起。
+        val sent = remember { intArrayOf(-1) }
         fun move(y: Float) {
             val f = ((y - thumbPx / 2f) / travel).coerceIn(0f, 1f)
             val target = ((1f - f) * currentHistory).roundToInt()
-            val delta = target - currentOffset
-            if (delta != 0) onScrollBy(delta)
+            val base = if (sent[0] >= 0) sent[0] else currentOffset
+            val delta = target - base
+            if (delta != 0) {
+                sent[0] = target
+                onScrollBy(delta)
+            }
         }
+        // pointerInput(shown) 里的闭包只在 shown 变时重建:thumbPx / travel 要经由 State 取最新的。
+        val moveLatest by rememberUpdatedState<(Float) -> Unit> { move(it) }
         Box(
             Modifier
                 .fillMaxSize()
@@ -96,14 +106,15 @@ fun TerminalScrollBar(
                     detectDragGestures(
                         onDragStart = {
                             dragging = true
-                            move(it.y)
+                            sent[0] = -1
+                            moveLatest(it.y)
                         },
                         onDrag = { change, _ ->
                             change.consume()
-                            move(change.position.y)
+                            moveLatest(change.position.y)
                         },
-                        onDragEnd = { dragging = false },
-                        onDragCancel = { dragging = false },
+                        onDragEnd = { dragging = false; sent[0] = -1 },
+                        onDragCancel = { dragging = false; sent[0] = -1 },
                     )
                 },
         )

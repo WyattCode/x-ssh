@@ -111,6 +111,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -893,6 +894,7 @@ private fun SearchField(modifier: Modifier, query: String, onQuery: (String) -> 
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
     val closeLabel = stringResource(R.string.host_close_search)
+    val searchLabel = stringResource(R.string.host_search_hosts)
     val font = 17.sp
     val mono = TextStyle(color = p.text, fontSize = font, fontFamily = XsshFonts.monoUi)
     Column(modifier.fillMaxWidth()) {
@@ -922,7 +924,11 @@ private fun SearchField(modifier: Modifier, query: String, onQuery: (String) -> 
                     singleLine = true,
                     textStyle = mono,
                     cursorBrush = SolidColor(p.ok),
-                    modifier = Modifier.fillMaxWidth().focusRequester(focus),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .focusRequester(focus)
+                        // 占位符是旁边的另一个 Text,一输入就没了:读屏要有个固定的名字。
+                        .semantics { contentDescription = searchLabel },
                 )
             }
             // 右边的 ✕ 去掉了(用户要求):收起搜索靠右下角玻璃胶囊里的搜索钮再点一下。
@@ -1470,6 +1476,11 @@ private fun SwipeActions(
         scope.launch { offset.animateTo(if (shouldOpen) -reveal else 0f, motion, initialVelocity = velocity) }
         if (shouldOpen != open) onOpenChange(shouldOpen)
     }
+    // pointerInput(Unit) 只在第一次组合时建一次,里面直接调 settle() 会一直拿着当时的 open / onOpenChange:
+    // 一行"先关着、后来被滑开"之后再滑回去,shouldOpen != open 永远比的是旧值,openId 就卡在这一行上。
+    // 经由 State 间接调用,每次重组后拿到的都是最新的那份。
+    val settleLatest by rememberUpdatedState<(Float, Float) -> Unit> { pos, vel -> settle(pos, vel) }
+    val onDragStartLatest by rememberUpdatedState(onDragStart)
 
     val progress = (-offset.value / reveal).coerceIn(0f, 1f)
     val infoLabel = stringResource(R.string.host_info)
@@ -1491,14 +1502,16 @@ private fun SwipeActions(
                 // 读屏用户做不了滑动手势,给同样的两个操作。
                 // 删除要和视觉上的两步确认一致:第一下只是亮出「确认删除」,
                 // 第二下才真的删 —— 主机记录里有已信任的指纹和加密存着的密码。
-                customActions = listOf(
+                customActions = listOfNotNull(
+                    // 单栏里 ⓘ 只存在于滑出的按钮里,读屏用户同样要能打开详情。
+                    onInfo?.let { info -> CustomAccessibilityAction(infoLabel) { info(); true } },
                     CustomAccessibilityAction(editLabel) { onEdit(); true },
                     CustomAccessibilityAction(deleteLabel) {
                         if (!confirming) {
                             confirming = true
                             true
                         } else {
-                            onDelete()
+                            deleteOnce()
                             true
                         }
                     },
@@ -1567,10 +1580,10 @@ private fun SwipeActions(
                             finger = offset.value
                             shown = offset.value
                             crossed = -finger > reveal / 2
-                            onDragStart()
+                            onDragStartLatest()
                         },
-                        onDragEnd = { settle(shown, tracker.calculateVelocity().x) },
-                        onDragCancel = { settle(shown, 0f) },
+                        onDragEnd = { settleLatest(shown, tracker.calculateVelocity().x) },
+                        onDragCancel = { settleLatest(shown, 0f) },
                     ) { change, dx ->
                         change.consume()
                         tracker.addPosition(change.uptimeMillis, change.position)

@@ -172,6 +172,7 @@ class LiveTerminal(
      * 之后它是 null,而核心里那份还在。界面原来拿它当"有没有选区"用,于是选区滚出去之后
      * 就再也清不掉了 —— 打字不清、`Ctrl+Shift+C` 还能把看不见的那段复制走。
      */
+    @Volatile
     var hasSelection = false
         private set
 

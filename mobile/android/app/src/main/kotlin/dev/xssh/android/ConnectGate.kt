@@ -113,7 +113,8 @@ fun HostKeyGate(
     // Enter and the primary button both trust. A double Enter (or Enter + tap)
     // used to fire onTrust twice and kick two overlapping reconnects.
 
-    var trusted by remember { mutableStateOf(false) }
+    // 以指纹为键:先确认跳板机、再确认目标主机时,第二页是新的一次确认,不能沿用上一页的"已点过"。
+    var trusted by remember(host.id, fingerprint, changed) { mutableStateOf(false) }
     fun trustOnce() {
         if (trusted) return
         trusted = true
@@ -164,7 +165,7 @@ fun HostKeyGate(
                 ),
                 primaryKind = if (changed) ButtonKind.Danger else ButtonKind.Primary,
                 onPrimary = { trustOnce() },
-                secondary = stringResource(R.string.host_cancel),
+                secondary = stringResource(if (inDrawer) R.string.host_gate_close else R.string.host_cancel),
                 onSecondary = onExit,
             )
         },
@@ -606,7 +607,8 @@ private fun FriendlyError.messageRes(): Int = when (this) {
 @Composable
 private fun MessageCard(message: String, detail: String? = null) {
     val p = LocalXssh.current
-    var expanded by remember { mutableStateOf(false) }
+    // 换了一条失败原因就收回去,别让新错误一出来就是展开的。
+    var expanded by remember(message, detail) { mutableStateOf(false) }
     // 等宽小字、可选中复制(iOS 版:错误原文是要拿去搜的东西)。
     Column(
         Modifier

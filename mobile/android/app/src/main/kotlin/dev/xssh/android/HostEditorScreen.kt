@@ -559,6 +559,8 @@ class HostDraft(private val initial: Host?) {
             // 排序字段不是本页的编辑项:改个备注存一下,置顶和最近使用不能被冲回默认。
             pinned = initial?.pinned ?: false,
             lastUsed = initial?.lastUsed ?: 0,
+            // 色点同理:不带上的话存一次就被 assignColors 重新分一个,改个名字颜色就变了。
+            colorIndex = initial?.colorIndex ?: -1,
             // 解不开的旧密文:这次没重新输入的就继续带着,保存时才会写回磁盘上那条而不是空串。
             unreadableSecrets = initial?.unreadableSecrets.orEmpty().filter {
                 when (it) {

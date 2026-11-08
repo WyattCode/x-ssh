@@ -593,7 +593,7 @@ fun CapsuleButton(
     Box(
         modifier
             .scale(scale)
-            .heightIn(min = if (solid) 50.dp else 44.dp)
+            .heightIn(min = if (solid) 50.dp else 48.dp)
             .clip(CircleShape)
             .background(if (enabled) background else background.copy(alpha = background.alpha * 0.35f))
             .pointerHoverIcon(PointerIcon.Hand)

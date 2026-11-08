@@ -429,8 +429,10 @@ fun TerminalScreen(
     // 嵌在抽屉布局里时,把这台主机的会话状态报给外层:左边的主机行据此显示「连接中 / 连接失败」,
     // 连上之后外层才把抽屉收起来(失败时抽屉留着,可以直接点别的主机)。
     if (duo != null) {
+        // 自动重连撞上"密钥变了":右栏是确认页,行上也该是「待确认」,不能还写着已连接。
+        val keyHaltNow = session?.keyHalt?.collectAsState()?.value
         val status = when {
-            pending != null -> DuoStatus.Confirm
+            pending != null || keyHaltNow != null -> DuoStatus.Confirm
             // 只是还差一个凭据(和右栏的「需要密码」页一致):行上不写红色的「连接失败」。
             failure != null && !jumpGone && (
                 (host.auth == AuthKind.PASSWORD && host.password.isEmpty() && host.lockedPassword == null) ||
@@ -648,9 +650,14 @@ private fun TerminalView(
             tablet = tablet != null,
             jumpFor = if (halt.jump) host else null,
             onTrust = {
-                live.clearReconnectHalt()
-                if (halt.jump && jumpHost != null) onTrustJumpKey(jumpHost, halt.fingerprint)
-                else onTrustKey(halt.fingerprint)
+                if (halt.jump && jumpHost == null) {
+                    // 跳板机已经被删了:这把指纹是它的,不能记到目标主机名下。
+                    onExit()
+                } else {
+                    live.clearReconnectHalt()
+                    if (halt.jump && jumpHost != null) onTrustJumpKey(jumpHost, halt.fingerprint)
+                    else onTrustKey(halt.fingerprint)
+                }
             },
             onExit = onExit,
         )

@@ -50,6 +50,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -75,7 +76,10 @@ import kotlin.math.roundToInt
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import kotlinx.coroutines.flow.collectLatest
 import com.kyant.backdrop.backdrops.layerBackdrop
@@ -222,6 +226,8 @@ fun DuoApp(
     // 会话区报上来的状态(哪台主机、什么状态)。连接中 / 要确认 / 失败时,这些状态就落在右栏里、
     // 左边的主机列表一直在 —— 失败了可以直接点别的主机;真正连上之后才把抽屉收起来。
     var gate by remember { mutableStateOf<Pair<String, DuoStatus>?>(null) }
+    // 回调里要读"此刻"打开的主机,不是创建回调那一刻的。
+    val currentTermId by rememberUpdatedState(termHost?.id)
     var collapseWhenLive by remember { mutableStateOf(false) }
     LaunchedEffect(gate, termHost?.id, collapseWhenLive, halfFolded) {
         val g = gate
@@ -335,7 +341,10 @@ fun DuoApp(
                                                 drawerOpen = shown,
                                                 onShowHosts = { drawerOpen = true },
                                                 onStatus = { id, status ->
-                                                    if (status == DuoStatus.None) {
+                                                    // 正在淡出的旧页面还会再报一次:只认当前打开的那台,别盖掉新主机的状态。
+                                                    if (id != currentTermId) {
+                                                        if (status == DuoStatus.None && gate?.first == id) gate = null
+                                                    } else if (status == DuoStatus.None) {
                                                         if (gate?.first == id) gate = null
                                                     } else {
                                                         gate = id to status
@@ -452,7 +461,9 @@ fun DuoApp(
                     .offset { IntOffset(baseXState.value.roundToPx() + slide.value.roundToInt(), 0) }
                     .width(drawerW)
                     .fillMaxHeight()
-                    .windowInsetsPadding(stableSafeDrawing().only(WindowInsetsSides.Bottom + WindowInsetsSides.Start)),
+                    .windowInsetsPadding(stableSafeDrawing().only(WindowInsetsSides.Bottom + WindowInsetsSides.Start))
+                    // 抽屉收起时胶囊跟着在屏外:读屏 / Tab 键不该落到屏外的两个按钮上。
+                    .then(if (!shown) Modifier.clearAndSetSemantics { } else Modifier),
                 contentAlignment = Alignment.BottomCenter,
             ) {
                 if (hosts.isNotEmpty()) {
@@ -680,7 +691,12 @@ private fun DuoHandle(
             Modifier
                 .width(20.dp)
                 .height(160.dp)
-                .semantics { contentDescription = handleLabel }
+                // 读屏用户做不了拖动,双击直接收起(和往左拖过阈值同一个效果)。
+                .semantics {
+                    contentDescription = handleLabel
+                    role = Role.Button
+                    onClick { onCollapse(); true }
+                }
                 .pointerInput(drawerWpx) {
                     val tracker = androidx.compose.ui.input.pointer.util.VelocityTracker()
                     var finger = 0f
@@ -747,7 +763,11 @@ private fun DuoEdgeHandle(visible: Boolean, onReveal: () -> Unit) {
             Modifier
                 .width(40.dp)
                 .height(140.dp)
-                .semantics { contentDescription = edgeLabel }
+                .semantics {
+                    contentDescription = edgeLabel
+                    role = Role.Button
+                    onClick { onReveal(); true }
+                }
                 // 屏幕最左边缘本来是系统的"返回"手势区,不排除的话往右拖会被系统拿去退出应用。
                 .systemGestureExclusion()
                 .pointerInput(Unit) { detectTapGestures { onReveal() } }
