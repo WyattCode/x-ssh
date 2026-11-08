@@ -68,6 +68,41 @@ export function createPassthroughMirror(): ImeMirror {
   }
 }
 
+/** A terminal backspace removes one character, not one UTF-16 unit. */
+const charCount = (s: string): number => Array.from(s).length
+
+/**
+ * How much of `next` already exists in `prev`, 0..1.
+ *
+ * Distinguishes a dictation *correction* — same sentence, a few words or the
+ * punctuation changed, so the characters overlap heavily — from a *new*
+ * sentence, which shares almost nothing. Character-multiset overlap is enough
+ * for that call and stays O(n) on a long draft.
+ *
+ * Measured on the real failure: "杀青的时候四 g 卡片页有时候会位移修" vs
+ * "刷新的时候，4G卡片页有时候会位移，修复一下。" ≈ 0.6. Two unrelated
+ * sentences score near 0.
+ */
+function overlap(prev: string, next: string): number {
+  if (!prev || !next) return 0
+  const left = Array.from(prev)
+  const right = Array.from(next)
+  const pool = new Map<string, number>()
+  for (const ch of left) pool.set(ch, (pool.get(ch) ?? 0) + 1)
+  let common = 0
+  for (const ch of right) {
+    const n = pool.get(ch) ?? 0
+    if (n > 0) {
+      common++
+      pool.set(ch, n - 1)
+    }
+  }
+  return common / Math.max(left.length, right.length)
+}
+
+/** Above this a new dictation is treated as a rewrite of the previous one. */
+const REWRITE_OVERLAP = 0.4
+
 export function createImeMirror(): ImeMirror {
   /** What the remote line currently holds, as far as we know. */
   let synced = ''
@@ -75,23 +110,45 @@ export function createImeMirror(): ImeMirror {
    *  usually produces BOTH an onData and an input event; `sync()` must
    *  recognise the second one as already sent. */
   let lastSent = ''
+  /**
+   * Text the current dictation run has already put on the wire.
+   *
+   * Voice IMEs commit a rough draft, keep listening, then *replace* what they
+   * committed with a better transcription. That replacement only ever shows up
+   * as a new textarea value — nothing says which old text it supersedes. This
+   * is that old text, so a correction can erase exactly it instead of appending
+   * a second copy (which is what produced "刷新的时候四 g…检查修复刷新的时候…").
+   *
+   * Reset whenever the user types with the keyboard or ends the line, so a
+   * correction can never reach back into hand-typed input.
+   */
+  let committed = ''
 
   return {
     input(data, { eventType }) {
+      const fromKey = eventType === 'keydown' || eventType === 'keypress'
       if (!isPlainText(data)) {
         // A timer-driven reply (cursor-position query, etc.) says nothing
         // about the line; a user key does.
         if (eventType === undefined) return data
         if (data === '\r' || data === '\n') {
           synced = ''
+          committed = ''
           lastSent = ''
-        } else if (data === DEL) synced = synced.slice(0, -1)
-        else if (data === '\x15' || data === '\x03') {
+        } else if (data === DEL) {
+          synced = synced.slice(0, -1)
+          committed = committed.slice(0, -1)
+        } else if (data === '\x15' || data === '\x03') {
           // Ctrl+U clears the line; Ctrl+C cancels it (readline discards the
           // buffer). Either way the remote line is empty afterwards, and
           // keeping the old text made the next catch-up resend a whole line.
           synced = ''
+          committed = ''
           lastSent = ''
+        } else if (fromKey) {
+          // Keyboard input ends the dictation run: a later correction must not
+          // delete what was just typed by hand.
+          committed = ''
         }
         // Still has to go out: returning '' here swallowed every arrow key,
         // Tab and Ctrl+C.
@@ -100,16 +157,16 @@ export function createImeMirror(): ImeMirror {
       // Record it and send it. `onData` asks the caller to write these bytes —
       // returning '' (as one revision did) lost every keystroke.
       synced = (synced + data).slice(-MAX_TRACKED)
+      committed = fromKey ? '' : (committed + data).slice(-MAX_TRACKED)
       lastSent = data
       return data
     },
 
     sync(settled) {
       if (!settled) return ''
-      // The most reliable check: this text is already at the end of the line we
-      // have sent. Voice IMEs commit a whole sentence through `onData` and then
-      // fire compositionend for the very same text — that second pass is the
-      // duplicate users reported.
+      // The text is already at the end of the line we have sent: a voice IME
+      // commits a sentence through `onData` and then fires compositionend for
+      // the very same text.
       if (synced.endsWith(settled)) return ''
       // Same commit, reported twice (onData, then input/compositionend).
       if (
@@ -119,18 +176,42 @@ export function createImeMirror(): ImeMirror {
         lastSent = ''
         return ''
       }
-      // If the textarea carries the whole line, send only what is missing.
-      // Otherwise it is new text typed into a freshly-cleared box: send it all.
-      const missing = settled.startsWith(synced) ? settled.slice(synced.length) : settled
-      if (!missing) return ''
-      synced = (synced + missing).slice(-MAX_TRACKED)
-      return missing
+
+      if (committed) {
+        // Continuing the same draft: only the added tail is new.
+        if (settled.startsWith(committed)) {
+          const add = settled.slice(committed.length)
+          committed = settled
+          synced = (synced + add).slice(-MAX_TRACKED)
+          return add
+        }
+        // Same draft, rewritten. A terminal has no "replace" — the only way to
+        // correct text that already reached the shell is to erase it and retype
+        // the new version.
+        if (overlap(committed, settled) >= REWRITE_OVERLAP) {
+          const base = synced.endsWith(committed)
+            ? synced.slice(0, synced.length - committed.length)
+            : synced
+          const dels = DEL.repeat(charCount(committed))
+          synced = (base + settled).slice(-MAX_TRACKED)
+          committed = settled
+          lastSent = ''
+          return dels + settled
+        }
+      }
+
+      // Unrelated text (or the first commit of a run): plain append.
+      committed = settled
+      synced = (synced + settled).slice(-MAX_TRACKED)
+      return settled
     },
 
     adopt(baseline) {
       // The remote does not have this text, but neither will we send it again:
       // recording it keeps `sync()` from repeating it later.
       synced = baseline
+      // Not dictation: the next commit must not erase it.
+      committed = ''
     },
 
     clear() {

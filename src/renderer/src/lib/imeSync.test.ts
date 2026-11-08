@@ -214,4 +214,70 @@ describe('createImeMirror', () => {
     expect(h.remote()).toBe(line)
     expect(h.wire.every((s) => s === '字')).toBe(true)
   })
+
+  // ---- voice IME corrections: the draft is REPLACED, not appended ----
+
+  it('replaces a voice draft the IME rewrote', () => {
+    // Real report, screenshot 1.
+    const h = harness()
+    h.value = '杀青的时候四 g 卡片页有时候会位移修'
+    h.sync(h.value)
+    expect(h.remote()).toBe('杀青的时候四 g 卡片页有时候会位移修')
+
+    h.value = '刷新的时候，4G卡片页有时候会位移，修复一下。'
+    h.sync(h.value)
+    // Before the fix this was draft + final on one line.
+    expect(h.remote()).toBe('刷新的时候，4G卡片页有时候会位移，修复一下。')
+  })
+
+  it('replaces a draft that was committed through onData', () => {
+    // Same failure, but xterm emitted the draft before the correction arrived.
+    const h = harness()
+    const draft = '刷新的时候四 g 卡片页会位移偶尔会位移的问题检查修复'
+    h.value = draft
+    h.xterm(draft)
+    h.value = '刷新的时候，4G卡片页会位移。偶尔位移的问题，检查修复一下。'
+    h.sync('刷新的时候，4G卡片页会位移。偶尔位移的问题，检查修复一下。')
+    expect(h.remote()).toBe('刷新的时候，4G卡片页会位移。偶尔位移的问题，检查修复一下。')
+  })
+
+  it('handles repeated corrections of the same draft', () => {
+    const h = harness()
+    for (const text of ['你好世界这是草稿', '你好世界这是最终的句子', '你好世界，这是最终句。']) {
+      h.value = text
+      h.sync(text)
+    }
+    expect(h.remote()).toBe('你好世界，这是最终句。')
+  })
+
+  it('never erases hand-typed text when a correction follows', () => {
+    const h = harness()
+    h.value = 'ls /var/log'
+    for (const ch of 'ls /var/log') h.xterm(ch, { eventType: 'keydown' })
+    // A new dictation run starts after keyboard input.
+    h.value = '看看最近的错误'
+    h.sync('看看最近的错误')
+    h.value = '看看最近的报错'
+    h.sync('看看最近的报错')
+    expect(h.remote()).toBe('ls /var/log看看最近的报错')
+  })
+
+  it('appends a second, unrelated dictation instead of deleting the first', () => {
+    const h = harness()
+    h.value = '检查一下磁盘'
+    h.sync('检查一下磁盘')
+    h.value = '重启服务'
+    h.sync('重启服务')
+    // Low character overlap → a new sentence, not a correction.
+    expect(h.remote()).toBe('检查一下磁盘重启服务')
+  })
+
+  it('appends when the IME extends the same draft', () => {
+    const h = harness()
+    h.value = '默认把 API key'
+    h.sync('默认把 API key')
+    h.value = '默认把 API key 写进去'
+    h.sync('默认把 API key 写进去')
+    expect(h.remote()).toBe('默认把 API key 写进去')
+  })
 })
