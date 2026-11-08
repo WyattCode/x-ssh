@@ -68,9 +68,6 @@ export function createPassthroughMirror(): ImeMirror {
   }
 }
 
-/** A terminal backspace removes one character, not one UTF-16 unit. */
-const charCount = (s: string): number => Array.from(s).length
-
 /** Drops the last character (a surrogate pair counts as one). */
 const chopLast = (s: string): string => Array.from(s).slice(0, -1).join('')
 
@@ -107,6 +104,23 @@ function longestSharedRun(a: string, b: string, limit = 160): number {
  * same sentence shares a phrase.
  */
 const REWRITE_RUN = 3
+
+/**
+ * Turns "the line currently ends with `prev`, and the IME now wants `next`"
+ * into the bytes that get it there: backspace over the part that differs, then
+ * type the replacement.
+ *
+ * Only the diverging tail is erased. Erasing the whole previous version and
+ * retyping it sent dozens of backspaces plus a long string in one write, which
+ * a TUI input line can drop.
+ */
+function rewriteBytes(prev: string, next: string): string {
+  const A = Array.from(prev)
+  const B = Array.from(next)
+  let p = 0
+  while (p < A.length && p < B.length && A[p] === B[p]) p++
+  return DEL.repeat(A.length - p) + B.slice(p).join('')
+}
 
 export function createImeMirror(): ImeMirror {
   /** What the remote line currently holds, as far as we know. */
@@ -164,11 +178,11 @@ export function createImeMirror(): ImeMirror {
           synced = ''
           committed = ''
           lastSent = ''
-        } else if (fromKey) {
-          // Keyboard input ends the dictation run: a later correction must not
-          // delete what was just typed by hand.
-          committed = ''
         }
+        // Arrow keys, Esc, Tab and friends must NOT end the dictation run.
+        // They are pressed constantly while editing in a TUI, and clearing the
+        // draft on them meant the next voice commit looked like brand-new text
+        // and was appended instead of replacing the previous version.
         // Still has to go out: returning '' here swallowed every arrow key,
         // Tab and Ctrl+C.
         return data
@@ -199,16 +213,21 @@ export function createImeMirror(): ImeMirror {
           lastSent = add
           return add
         }
-        // A re-read of the same audio: erase the previous version and send this
-        // one. Requires that the old text really is the tail of the line, and
-        // that the two share a phrase — otherwise a genuinely new sentence
-        // would wipe the previous one.
-        if (synced.endsWith(committed) && longestSharedRun(committed, data) >= REWRITE_RUN) {
-          const dels = DEL.repeat(charCount(committed))
-          synced = (synced.slice(0, synced.length - committed.length) + data).slice(-MAX_TRACKED)
+        // A re-read of the same audio. `synced` is NOT consulted here: the DOM
+        // input handler overwrites it with the textarea's new value for input
+        // types it does not recognise, which made "is the old version still the
+        // tail of the line?" false and sent the new version as an append. The
+        // draft we recorded is the one we wrote, and hand-typed text clears it,
+        // so it is the reliable anchor.
+        if (longestSharedRun(committed, data) >= REWRITE_RUN) {
+          const out = rewriteBytes(committed, data)
+          synced = (synced.endsWith(committed)
+            ? synced.slice(0, synced.length - committed.length) + data
+            : data
+          ).slice(-MAX_TRACKED)
           committed = data
           lastSent = data
-          return dels + data
+          return out
         }
       }
 
@@ -232,8 +251,12 @@ export function createImeMirror(): ImeMirror {
         return ''
       }
 
-      // Only a draft we know is the tail of the line can be erased safely.
-      if (committed && synced.endsWith(committed)) {
+      // A draft we recorded is the anchor. `synced` is deliberately NOT used
+      // to decide whether the draft is still on the line: the DOM input handler
+      // overwrites `synced` with the textarea's new value for input types it
+      // does not recognise, which made this test false and turned every
+      // correction into an append.
+      if (committed) {
         if (settled.startsWith(committed)) {
           // The IME extended the draft: only the added tail is new.
           const add = settled.slice(committed.length)
@@ -241,14 +264,16 @@ export function createImeMirror(): ImeMirror {
           synced = (synced + add).slice(-MAX_TRACKED)
           return add
         }
-        // The IME replaced the draft ("对" → "对对" → "对的，谢谢你"). A
-        // terminal has no replace, so erase what we sent and retype the rest.
-        const dels = DEL.repeat(charCount(committed))
-        const base = synced.slice(0, synced.length - committed.length)
-        synced = (base + settled).slice(-MAX_TRACKED)
+        // The IME re-read the audio ("对" → "对对" → "对的，谢谢你"). A terminal
+        // has no replace, so erase the differing tail and retype the rest.
+        const out = rewriteBytes(committed, settled)
+        synced = (synced.endsWith(committed)
+          ? synced.slice(0, synced.length - committed.length) + settled
+          : settled
+        ).slice(-MAX_TRACKED)
         committed = settled
         lastSent = ''
-        return dels + settled
+        return out
       }
 
       // Unrelated text, or the first commit of a run: plain append.

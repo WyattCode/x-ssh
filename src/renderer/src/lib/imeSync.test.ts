@@ -284,6 +284,42 @@ describe('createImeMirror', () => {
     expect(h.remote()).toBe('重启服务查看磁盘')
   })
 
+  it('replaces a draft that only changed punctuation', () => {
+    // Real report, screenshot 4 (plain shell): the second pass added a full
+    // stop and a comma, which is not a prefix of the first — it was appended.
+    const h = harness()
+    const draft = '你好，我今天希望吃饭，吃了饭之后再吃，首先其一'
+    const final = '你好，我今天希望吃饭，吃了饭之后再吃。首先，其一。'
+    h.value = draft
+    h.xterm(draft)
+    h.value = final
+    h.xterm(final)
+    expect(h.remote()).toBe(final)
+  })
+
+  it('only erases the part that differs', () => {
+    const h = harness()
+    h.value = 'abcdef中文结尾'
+    h.xterm('abcdef中文结尾')
+    h.value = 'abcdef中文收尾'
+    h.xterm('abcdef中文收尾')
+    expect(h.remote()).toBe('abcdef中文收尾')
+    // One erasure pair, not the whole sentence re-typed.
+    expect(h.wire[1]).toBe('\x7f\x7f收尾')
+  })
+
+  it('does not end the dictation when an arrow key is pressed', () => {
+    // TUI editing is full of arrow keys; clearing the draft on them made the
+    // next voice commit look like new text.
+    const h = harness()
+    h.value = '第一版'
+    h.xterm('第一版')
+    h.xterm('\x1b[A', { eventType: 'keydown' })
+    h.value = '第一版改'
+    h.xterm('第一版改')
+    expect(h.remote()).toBe('第一版改')
+  })
+
   it('keeps a long dictation in step as it grows', () => {
     const h = harness()
     let line = ''
