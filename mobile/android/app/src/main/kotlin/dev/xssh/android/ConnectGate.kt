@@ -359,7 +359,11 @@ private fun GatePage(host: Host, content: GateContent, tablet: Boolean, inDrawer
                 .fillMaxSize()
                 .layerBackdrop(backdrop)
                 .windowInsetsPadding(insets.only(WindowInsetsSides.Vertical + WindowInsetsSides.End))
-                .padding(start = side, end = Gutter, top = Gutter, bottom = actionsHeight + bottomReserve),
+                // actionsHeight 是 PinnedActions 整条的高度,**已经带着它自己的底部留白 bottomReserve**:
+                // 这里再加一遍,滚动区的下缘就停在按钮上方一大截(外屏实测:指纹卡片在离按钮 ~90dp 处被硬切断)。
+                // 再减掉渐变条的 28dp:正文从渐变底下滚过去(淡出),而不是停在它上沿被硬切一刀;
+                // 滚到底时下面补一个同样高的 Spacer,最后一行停在渐变上面。
+                .padding(start = side, end = Gutter, top = Gutter, bottom = (actionsHeight - 28.dp).coerceAtLeast(0.dp)),
             contentAlignment = Alignment.Center,
         ) {
             Column(
@@ -377,6 +381,8 @@ private fun GatePage(host: Host, content: GateContent, tablet: Boolean, inDrawer
                 if (content.inline) {
                     Spacer(Modifier.height(24.dp))
                     content.actions(true)
+                } else {
+                    Spacer(Modifier.height(28.dp))
                 }
             }
         }
