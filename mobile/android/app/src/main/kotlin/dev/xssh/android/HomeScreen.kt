@@ -1159,7 +1159,7 @@ private fun SessionRow(session: TerminalSession, large: Boolean, onOpen: () -> U
 private enum class RowPhase { Idle, Running, Closing }
 
 /** 这一行此刻显示的状态(含会话区报上来的连接中 / 等确认 / 失败)。 */
-private enum class RowStatus { Idle, Connecting, Confirm, Failed, Running, Closing }
+private enum class RowStatus { Idle, Connecting, Confirm, Failed, Needs, Running, Closing }
 
 /** 断开后"停一下"的时长(iOS:0.44s)。 */
 private const val RowClosingHoldMs = 440L
@@ -1202,6 +1202,7 @@ private fun HostCard(
     // 这一行此刻该显示什么:会话区报上来的「连接中 / 等确认 / 失败」优先,其次是连着、刚断开。
     val row = when {
         status == DuoStatus.Failed -> RowStatus.Failed
+        status == DuoStatus.Needs -> RowStatus.Needs
         status == DuoStatus.Connecting -> RowStatus.Connecting
         status == DuoStatus.Confirm -> RowStatus.Confirm
         running -> RowStatus.Running
@@ -1212,6 +1213,7 @@ private fun HostCard(
     val arrowTarget = when (row) {
         RowStatus.Running, RowStatus.Connecting, RowStatus.Confirm -> p.ok
         RowStatus.Failed -> p.danger
+        RowStatus.Needs -> p.accent
         else -> p.text.copy(alpha = 0.4f)
     }
     val arrow by androidx.compose.animation.animateColorAsState(
@@ -1359,6 +1361,11 @@ private fun HostCard(
                     RowStatus.Failed -> Text(
                         "✕ " + stringResource(R.string.host_row_failed),
                         color = p.danger.copy(alpha = 0.92f), fontFamily = mono, fontSize = 12.sp, maxLines = 1,
+                        modifier = Modifier.padding(top = 3.dp, start = start),
+                    )
+                    RowStatus.Needs -> Text(
+                        stringResource(R.string.host_row_needs),
+                        color = p.accent.copy(alpha = 0.92f), fontFamily = mono, fontSize = 12.sp, maxLines = 1,
                         modifier = Modifier.padding(top = 3.dp, start = start),
                     )
                     else -> Text(

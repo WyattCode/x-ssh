@@ -197,6 +197,7 @@
     <string name="host_row_connecting">連線中…</string>
     <string name="host_row_confirm">等待確認</string>
     <string name="host_row_failed">連線失敗</string>
+    <string name="host_row_needs">需要憑證</string>
     <string name="host_search_hosts">搜尋主機</string>
     <string name="host_search_placeholder">搜尋名稱 / 位址 / 使用者</string>
     <string name="host_select_on_left">選擇左邊的主機</string>

@@ -197,6 +197,7 @@
     <string name="host_row_connecting">连接中…</string>
     <string name="host_row_confirm">等待确认</string>
     <string name="host_row_failed">连接失败</string>
+    <string name="host_row_needs">需要凭据</string>
     <string name="host_search_hosts">搜索主机</string>
     <string name="host_search_placeholder">搜索名称 / 地址 / 用户</string>
     <string name="host_select_on_left">选择左边的主机</string>

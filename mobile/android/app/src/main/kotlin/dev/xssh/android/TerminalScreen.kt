@@ -431,6 +431,11 @@ fun TerminalScreen(
     if (duo != null) {
         val status = when {
             pending != null -> DuoStatus.Confirm
+            // 只是还差一个凭据(和右栏的「需要密码」页一致):行上不写红色的「连接失败」。
+            failure != null && !jumpGone && (
+                (host.auth == AuthKind.PASSWORD && host.password.isEmpty() && host.lockedPassword == null) ||
+                    host.keyMissing || failureKind == FailureKind.KeyPassphrase
+                ) -> DuoStatus.Needs
             failure != null -> DuoStatus.Failed
             session == null -> DuoStatus.Connecting
             else -> DuoStatus.Live

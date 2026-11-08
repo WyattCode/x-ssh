@@ -92,7 +92,7 @@ import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 */
 
 /** 一个会话此刻的状态:会话区(右栏)报给外层,左边的主机列表据此显示「连接中 / 连接失败」,连上之后才收抽屉。 */
-enum class DuoStatus { None, Connecting, Confirm, Failed, Live }
+enum class DuoStatus { None, Connecting, Confirm, Failed, Needs, Live }
 
 /** 终端嵌在抽屉布局右栏时,从外面带进来的东西(见 [TerminalScreen] 的 `duo` 参数)。 */
 class DuoTerminalChrome(
@@ -241,7 +241,7 @@ fun DuoApp(
         // 点的是当前这台、而它已经失败(或会话被对端断掉了,右栏还停在旧的 Live):等于重试。
         val g = gate
         if (g != null && g.first == host.id && termHost?.id == host.id &&
-            (g.second == DuoStatus.Failed || (g.second == DuoStatus.Live && !running.containsKey(host.id)))
+            ((g.second == DuoStatus.Failed || g.second == DuoStatus.Needs) || (g.second == DuoStatus.Live && !running.containsKey(host.id)))
         ) {
             retryNonce++
             gate = host.id to DuoStatus.Connecting
