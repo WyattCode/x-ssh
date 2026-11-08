@@ -51,6 +51,16 @@ keydown 路径会清空“本轮草稿”记录,而旧擦除判据是 `committed
 - 重放脚本思路:把 SEND 字节喂给单行模型,`clear` 事件视为行结束,在每次 `compositionend` 之后第一笔发送处比对 `compositionend.data`。
 - 复测完成后已删除 `ime-trace.enabled` 与 `ime-trace.log`。
 
+## 发版记录
+
+- 提交 `80b1e5a` → 推 `main`,CI 全绿(`test-build` + `rust-core`)后才打 tag `v0.6.29` 并推送。
+- tag 的 CI 把 `X-SSH.Setup.0.6.29.exe`(约 82 MB)+ `.blockmap` 自动挂到 GitHub Release
+  (https://github.com/WyattCode/x-ssh/releases/tag/v0.6.29,非草稿)。
+- 发版前在同一棵树上复跑了 CI 同款检查:vitest 732、`vue-tsc`、`tsc -p tsconfig.node.json`、三个 i18n lint、
+  `electron-vite build`、ESM 导入检查。
+- 上一个 tag 是 `v0.6.28`(也是本轮之前发的,在用户机器上没有真正修好)。0.6.20–0.6.27 仍是未打 tag 的测试构建。
+- 发版前已关闭测试版并删除 `%APPDATA%\X-SSH\ime-trace.enabled` / `ime-trace.log`。
+
 ## 下一步
 
 1. 观察用户反馈。若仍有问题:`%APPDATA%\X-SSH\ime-trace.enabled` 需**现 touch**(24 h 后失效),复现后读 `ime-trace.log`。
