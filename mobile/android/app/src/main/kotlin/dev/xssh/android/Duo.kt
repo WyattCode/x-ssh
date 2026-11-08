@@ -319,7 +319,12 @@ fun DuoApp(
                 }
                 AnimatedContent(
                     targetState = pane,
-                    transitionSpec = { fadeIn(androidx.compose.animation.core.tween(160)) togetherWith fadeOut(androidx.compose.animation.core.tween(120)) },
+                    // 淡出 90ms 先走完、淡入 210ms 从 90ms 起:两页的不透明度加起来始终不低于 1,
+                    // 原来 160 进 / 120 出同时播,中间有一段两边都半透明,底下的黑色透出来(换主机时闪一下)。
+                    transitionSpec = {
+                        fadeIn(androidx.compose.animation.core.tween(210, delayMillis = 90)) togetherWith
+                            fadeOut(androidx.compose.animation.core.tween(90))
+                    },
                     label = "duoPane",
                 ) { paneKey ->
                     when {
@@ -383,7 +388,7 @@ fun DuoApp(
             // ── 抽屉(主机列表)
             Box(
                 Modifier
-                    .offset { IntOffset(baseXState.value.roundToPx() + slide.value.roundToInt(), 0) }
+                    .offset { IntOffset(baseXState.value.coerceAtMost(0.dp).roundToPx() + slide.value.roundToInt(), 0) }
                     .width(drawerW)
                     .fillMaxHeight()
                     // 收起时抽屉只是移到屏外:读屏 / Tab 键不该再走进屏外的主机行和搜索框。
@@ -459,7 +464,7 @@ fun DuoApp(
             // 抽屉底部的玻璃胶囊:搜索 + 新建(iOS 内屏:列表底部,和列表在一起)。
             Box(
                 Modifier
-                    .offset { IntOffset(baseXState.value.roundToPx() + slide.value.roundToInt(), 0) }
+                    .offset { IntOffset(baseXState.value.coerceAtMost(0.dp).roundToPx() + slide.value.roundToInt(), 0) }
                     .width(drawerW)
                     .fillMaxHeight()
                     .windowInsetsPadding(stableSafeDrawing().only(WindowInsetsSides.Bottom + WindowInsetsSides.Start))

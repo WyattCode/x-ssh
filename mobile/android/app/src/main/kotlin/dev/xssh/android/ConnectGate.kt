@@ -44,6 +44,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -385,6 +386,9 @@ private fun GatePage(host: Host, content: GateContent, tablet: Boolean, inDrawer
                 Modifier
                     .widthIn(max = columnMax)
                     .fillMaxWidth()
+                    // 固定按钮栏的高度要下一帧才量得出来(这之前是 0):第一帧正文是按"没有按钮栏"居中的,
+                    // 量出来之后再往上跳 35–90dp。量出来之前先不画,第一帧就不会露出错位的画面。
+                    .graphicsLayer { alpha = if (content.inline || actionsHeight > 0.dp) 1f else 0f }
                     .bounce()
                     .verticalScroll(rememberScrollState()),
                 horizontalAlignment = Alignment.CenterHorizontally,

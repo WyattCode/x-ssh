@@ -45,6 +45,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -1171,7 +1172,17 @@ private fun TerminalView(
             },
             onText = { text, useCtrl, useAlt ->
                 clearSelection()
-                live.sendText(text, useCtrl, useAlt)
+                // 输入法一次提交了带换行 / 控制字符的一大段(Gboard、MIUI 的剪贴板条走的就是这条路):
+                // 这是粘贴,不是打字。和菜单粘贴同一条路 —— 剔掉控制字符、开了括号粘贴的程序收到包好的整段,
+                // 否则多行内容会被当成命令逐行执行,ESC 之类的字节原样送到远端。
+                val looksLikePaste = !useCtrl && !useAlt && text.length > 1 &&
+                    text.any { it == '\n' || it == '\r' || (it.code < 0x20 && it != '\t') || it.code in 0x7F..0x9F }
+                if (looksLikePaste) {
+                    val clean = PasteSanitize.sanitize(text)
+                    if (clean.isNotEmpty()) live.paste(clean)
+                } else {
+                    live.sendText(text, useCtrl, useAlt)
+                }
             },
             onBackspace = { live.sendRaw(byteArrayOf(0x7F)) },
         )
@@ -2188,6 +2199,13 @@ private fun TerminalCanvas(
     var blinkOn by remember { mutableStateOf(true) }
     LaunchedEffect(Unit) {
         while (true) {
+            // 应用在后台时不闪:每次翻相位都要把整块画布(整屏文字)重画一遍,没人看就是白烧电。
+            // 光标停在"亮"的一相,回到前台再接着闪。
+            if (!AppVisibility.foreground) {
+                blinkOn = true
+                delay(1000)
+                continue
+            }
             delay(530)
             blinkOn = !blinkOn
         }
@@ -2195,6 +2213,8 @@ private fun TerminalCanvas(
     // 手指离开之后的惯性翻历史(见下面的 dragModifier)。新的触摸一来就取消。
     val scope = rememberCoroutineScope()
     val fling = remember { mutableStateOf<Job?>(null) }
+    // 惯性滑动中途进了备用屏(vim / less / htop):剩下的动量不能再当方向键 / 滚轮发给它们。
+    LaunchedEffect(canFling) { if (!canFling) fling.value?.cancel() }
     BoxWithConstraints(modifier.clipToBounds()) {
         // 画布的高度**等停下来再跟**。键盘 / 快捷键面板升起的 300ms 里可用高度每帧都在变,
         // 原来画布跟着每帧变高变矮,每一帧都要把整屏几千个字重画一遍,动画一路掉帧(实测
@@ -2208,11 +2228,22 @@ private fun TerminalCanvas(
                 height = liveHeight
             }
         }
-        val cols = (constraints.maxWidth / cell.first).toInt().coerceAtLeast(1)
+        // 宽度同理:内屏开合抽屉时右栏的宽度每帧都在变(弹簧 400~600ms),画布每帧都要整屏重画。
+        // 画布保持原宽度、多出来的被外层裁掉(清晰的"窗口在滑"),停稳 120ms 后才按新宽度重排一次。
+        val liveWidth = constraints.maxWidth
+        var width by remember { mutableIntStateOf(liveWidth) }
+        LaunchedEffect(liveWidth) {
+            if (liveWidth != width) {
+                delay(120)
+                width = liveWidth
+            }
+        }
+        val cols = (width / cell.first).toInt().coerceAtLeast(1)
         val gridRows = (height / cell.second).toInt().coerceAtLeast(1)
         // 行列也等停下来再改:原来每变一行就让核心重排一次、给服务端发一次窗口大小
         // (远端全屏程序跟着整屏重画)。LaunchedEffect 换了键就会取消上一次,天然就是防抖。
-        LaunchedEffect(cols, gridRows) {
+        // 单元格像素也在键里:改了字号但行列恰好没变时,服务端问窗口像素(CSI 14t、图片 / sixel 工具)才不会拿到旧值。
+        LaunchedEffect(cols, gridRows, cell.first.roundToInt(), cell.second.roundToInt()) {
             delay(120)
             onGridSize(cols, gridRows, cell.first.roundToInt(), cell.second.roundToInt())
         }
@@ -2369,7 +2400,9 @@ private fun TerminalCanvas(
         }
         // 鼠标 / 触控板:滚轮一格翻 3 行(桌面终端的惯例),触控板的小数增量攒够一行再翻;
         // 右键粘贴。
-        val mouseModifier = Modifier.pointerInput(cell) {
+        // cols / gridRows 也在键里(拖动那条早就是):cellAt 捕获的是它们,不换键的话
+        // 展开 / 旋转 / 弹出键盘之后鼠标滚轮报给 vim / tmux 的还是旧的行列,位置会被夹到错的地方。
+        val mouseModifier = Modifier.pointerInput(cell, cols, gridRows) {
             awaitPointerEventScope {
                 var carry = 0f
                 while (true) {
@@ -2397,9 +2430,11 @@ private fun TerminalCanvas(
         }
 
         val heightDp = with(LocalDensity.current) { height.toDp() }
+        val widthDp = with(LocalDensity.current) { width.toDp() }
         Canvas(
             Modifier
-                .fillMaxWidth()
+                .wrapContentWidth(align = Alignment.Start, unbounded = true)
+                .width(widthDp)
                 .wrapContentHeight(align = Alignment.Top, unbounded = true)
                 .height(heightDp)
                 .graphicsLayer()

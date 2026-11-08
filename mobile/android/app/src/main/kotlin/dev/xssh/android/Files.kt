@@ -922,12 +922,17 @@ fun FilesPane(
             confirm = stringResource(R.string.files_rename),
             onConfirm = { name ->
                 dialog = null
-                val dir = path ?: return@NameDialog
+                if (path == null) return@NameDialog
                 if (name == d.entry.name) return@NameDialog
+                // 目标放在**这个条目自己所在的目录**里,不是"此刻正在看的目录":
+                // 慢网络下点进文件夹的同时对旧列表里的文件点了重命名,两者不一致,文件会被挪进新打开的文件夹
+                // (对文件夹自己重命名时甚至是挪进它自己里面)。
+                val dir = parentPath(d.entry.path)
                 val to = joinPath(dir, name)
                 scope.launch {
                     runCatching { files.rename(d.entry.path, to) }
-                        .onSuccess { load(dir, select = to) }
+                        // 做完时用户可能已经去了别的目录:别把他拽回来(还会多出一条历史)。
+                        .onSuccess { if (path == dir) load(dir, select = to) }
                         .onFailure { e -> files.notify(FileText.of(R.string.files_rename_failed, e.reason()), error = true) }
                 }
             },
@@ -943,7 +948,8 @@ fun FilesPane(
                 val at = joinPath(dir, name)
                 scope.launch {
                     runCatching { files.mkdir(at) }
-                        .onSuccess { load(dir, select = at) }
+                        // 慢服务器上建完时用户可能已经去了别的目录:别把他拽回来。
+                        .onSuccess { if (path == dir) load(dir, select = at) }
                         .onFailure { e -> files.notify(FileText.of(R.string.files_create_failed, e.reason()), error = true) }
                 }
             },

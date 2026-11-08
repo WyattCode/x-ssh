@@ -1167,6 +1167,9 @@ private enum class RowPhase { Idle, Running, Closing }
 /** 这一行此刻显示的状态(含会话区报上来的连接中 / 等确认 / 失败)。 */
 private enum class RowStatus { Idle, Connecting, Confirm, Failed, Needs, Running, Closing }
 
+/** 主机行右边那一小格里显示什么:色点 / 转圈 / 盾牌。用作 AnimatedContent 的目标,让三者之间互相淡入淡出。 */
+private enum class RowPip { Dot, Spinner, Shield }
+
 /** 断开后"停一下"的时长(iOS:0.44s)。 */
 private const val RowClosingHoldMs = 440L
 
@@ -1281,18 +1284,26 @@ private fun HostCard(
                 Spacer(Modifier.width(8.dp))
             }
             // 连接中:色点的位置换成一个小转圈(iOS 一样),连上 / 失败后淡回色点。
+            // 目标值必须是**三选一**(点 / 转圈 / 盾牌),里面也只按 lambda 参数分支:
+            // 原来目标是 spinning(布尔)、里面却读外层的 row —— 连接中 → 等确认时目标没变、转圈不会淡出换成盾牌;
+            // 等确认 → 运行中时,淡出的那一份读到的已经是新状态,盾牌消失得很怪。
+            val pip = when {
+                row == RowStatus.Confirm -> RowPip.Shield
+                spinning -> RowPip.Spinner
+                else -> RowPip.Dot
+            }
             AnimatedContent(
-                targetState = spinning,
+                targetState = pip,
                 transitionSpec = {
                     androidx.compose.animation.fadeIn(tween(180)) togetherWith androidx.compose.animation.fadeOut(tween(180))
                 },
                 label = "hostPip",
-            ) { busy ->
+            ) { shown ->
                 Box(Modifier.size(14.dp), contentAlignment = Alignment.Center) {
-                    if (row == RowStatus.Confirm) {
+                    if (shown == RowPip.Shield) {
                         // 等你确认主机指纹:不是在自动处理,转圈会误导 —— 用盾牌。
                         Icon(XIcons.Shield, contentDescription = null, tint = p.text.copy(alpha = 0.85f), modifier = Modifier.size(13.dp))
-                    } else if (busy) {
+                    } else if (shown == RowPip.Spinner) {
                         CircularProgressIndicator(
                             Modifier.size(12.dp),
                             color = p.text.copy(alpha = 0.85f),
@@ -1483,7 +1494,6 @@ private fun SwipeActions(
     val settleLatest by rememberUpdatedState<(Float, Float) -> Unit> { pos, vel -> settle(pos, vel) }
     val onDragStartLatest by rememberUpdatedState(onDragStart)
 
-    val progress = (-offset.value / reveal).coerceIn(0f, 1f)
     val infoLabel = stringResource(R.string.host_info)
     val editLabel = stringResource(R.string.host_edit)
     val deleteLabel = stringResource(R.string.host_delete)
@@ -1523,6 +1533,8 @@ private fun SwipeActions(
             Modifier
                 .matchParentSize()
                 .graphicsLayer {
+                    // 进度在绘制阶段才读:拖动 / 弹簧每一帧都只重画这一层,不重组整行(原来写在组合里)。
+                    val progress = (-offset.value / reveal).coerceIn(0f, 1f)
                     alpha = progress
                     // 从右边稍微"长"出来,而不是一块死板的底色被揭开。
                     val s = 0.9f + 0.1f * progress
