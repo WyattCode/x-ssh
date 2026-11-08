@@ -4,8 +4,9 @@ import { attachImeBridge } from '../../src/renderer/src/lib/imeBridge'
 
 // Stand-in for the preload API the bridge talks to (tracing on, lines collected).
 const traceLines: string[] = []
+let traceOn = true
 ;(window as unknown as { api: unknown }).api = {
-  ime: { traceEnabled: async () => true, trace: (l: string) => { traceLines.push(l) } }
+  ime: { traceEnabled: async () => traceOn, trace: (l: string) => { traceLines.push(l) } }
 }
 
 const term = new Terminal({ cols: 80, rows: 10 })
@@ -37,7 +38,7 @@ const send = (data: string): void => {
     }
   }
 }
-attachImeBridge(term, send, new AbortController().signal)
+const bridge = attachImeBridge(term, send, new AbortController().signal)
 term.focus()
 
 const events: string[] = []
@@ -56,6 +57,7 @@ let blurs = 0
 ta0.addEventListener('blur', () => { blurs++ }, true)
 
 Object.assign(window, {
+  __setTrace: (on: boolean) => { traceOn = on },
   __blurs: () => blurs,
   __hasFocus: () => document.hasFocus() && document.activeElement === ta0,
   __remote: () => line.join(''),
@@ -87,5 +89,5 @@ Object.assign(window, {
   __mouseTracking: (on: boolean) =>
     new Promise<void>((r) => term.write(on ? '\x1b[?1003h\x1b[?1006h' : '\x1b[?1003l\x1b[?1006l', r)),
   /** The app's own paste, called later from a timer (after an awaited confirm dialog). */
-  __pasteLater: (text: string) => new Promise<void>((r) => setTimeout(() => { term.paste(text); r() }, 0))
+  __pasteLater: (text: string) => new Promise<void>((r) => setTimeout(() => { bridge.paste(text); r() }, 0))
 })

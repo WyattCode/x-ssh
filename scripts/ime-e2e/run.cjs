@@ -56,6 +56,14 @@ app.whenReady().then(async () => {
     await cdp('Input.dispatchKeyEvent', { type: 'keyUp', windowsVirtualKeyCode: 252, key: 'Unidentified' })
     await settle()
   }
+  /** Enter submits the line, so the next scenario starts on a fresh one — the mirror
+   *  (like the real app) only trusts its line again once the line is empty. */
+  const pressEnter = async () => {
+    await ev('document.querySelector("textarea").focus()')
+    await cdp('Input.dispatchKeyEvent', { type: 'keyDown', windowsVirtualKeyCode: 13, key: 'Enter', code: 'Enter', text: '\r' })
+    await cdp('Input.dispatchKeyEvent', { type: 'keyUp', windowsVirtualKeyCode: 13, key: 'Enter', code: 'Enter' })
+    await sleep(30)
+  }
   const moveMouse = async (n) => {
     for (let i = 0; i < n; i++) {
       await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 60 + i * 9, y: 40 + i * 5 })
@@ -68,6 +76,8 @@ app.whenReady().then(async () => {
     await ev('document.querySelector("textarea").focus()')
     await settle()
   }
+
+  const traceState = { off: -1, on: -1 }
 
   // opts: bracketed = the app has bracketed paste on (bash / Codex); mouse = TUI mouse reports on
   const scenarios = [
@@ -119,13 +129,32 @@ app.whenReady().then(async () => {
       // single line, so nothing here depends on how LF is delivered
       await compose(D1); await key252(); await compose('今天我要吃个饭：'); await insert('今天我要吃个饭：')
     }],
-    ['arrow key between draft and rewrite keeps the correction working', V2, {}, async () => {
+    // A cursor/editing key means the remote may no longer be editing at the end of
+    // the line, so erasing "the last N characters" could hit the wrong text:
+    // the correction is only appended, never erased.
+    ['cursor key between draft and rewrite: no backspaces are sent', null, {}, async () => {
       await insert(V1)
-      await cdp('Input.dispatchKeyEvent', { type: 'rawKeyDown', windowsVirtualKeyCode: 38, key: 'ArrowUp' })
-      await cdp('Input.dispatchKeyEvent', { type: 'keyUp', windowsVirtualKeyCode: 38, key: 'ArrowUp' })
+      await cdp('Input.dispatchKeyEvent', { type: 'rawKeyDown', windowsVirtualKeyCode: 37, key: 'ArrowLeft' })
+      await cdp('Input.dispatchKeyEvent', { type: 'keyUp', windowsVirtualKeyCode: 37, key: 'ArrowLeft' })
       await settle()
       await ev('window.__selectAll()'); await insert(V2)
+    }, (got, wire) => !wire.join('').includes('\x7f')],
+    // Mouse reports are not cursor keys: the correction still erases.
+    ['mouse reports do not stop the correction from erasing', V2, { mouse: true }, async () => {
+      await insert(V1); await moveMouse(5); await ev('window.__selectAll()'); await insert(V2)
     }],
+    // The tracing flag is re-read at every composition start, so a flag file created
+    // (or expired) while the app is running takes effect without reopening the pane.
+    ['tracing follows the flag at each composition start', null, {}, async () => {
+      await ev('window.__setTrace(false)')
+      await compose('一'); await insert('一'); await sleep(60)
+      await ev('window.__trace()') // drain what was recorded while it was still on
+      await compose('二'); await insert('二'); await sleep(60)
+      traceState.off = await ev('window.__trace().length')
+      await ev('window.__setTrace(true)')
+      await compose('三'); await insert('三'); await sleep(60)
+      traceState.on = await ev('window.__trace().length')
+    }, () => traceState.off === 0 && traceState.on > 0],
     ['app paste after a dictation is neither erased nor mistaken for a rewrite', '你好世界这是草稿你好世界这是粘贴', {}, async () => {
       await insert('你好世界这是草稿'); await ev('window.__pasteLater("你好世界这是粘贴")'); await sleep(120)
     }]
@@ -146,10 +175,11 @@ app.whenReady().then(async () => {
 
   let failed = 0
   let invalid = 0
-  for (const [name, want, opts, run] of scenarios) {
-    let got, rawLf
+  for (const [name, want, opts, run, check] of scenarios) {
+    let got, rawLf, wire
     let valid = false
     for (let attempt = 1; attempt <= 4 && !valid; attempt++) {
+      await pressEnter()
       await ev('window.__reset()')
       if (!(await focused())) continue
       await ev(`window.__bracketed(${!!opts.bracketed})`)
@@ -159,6 +189,7 @@ app.whenReady().then(async () => {
       await sleep(80)
       got = await ev('window.__remote()')
       rawLf = await ev('window.__rawLf()')
+      wire = await ev('window.__wire()')
       valid = (await ev('window.__blurs()')) === 0
     }
     if (!valid) {
@@ -166,13 +197,15 @@ app.whenReady().then(async () => {
       console.log(`SKIP  ${name}  (window kept losing focus; result not trustworthy)`)
       continue
     }
-    const ok = got === want && rawLf === 0
+    // `want === null` scenarios assert only through `check(line, wire)`.
+    const ok = (want === null || got === want) && rawLf === 0 && (!check || (await check(got, wire, ev)))
     if (!ok) failed++
     console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}`)
     if (!ok) {
-      console.log('   want:', JSON.stringify(want))
+      console.log('   want:', want === null ? '(custom check)' : JSON.stringify(want))
       console.log('   got :', JSON.stringify(got), rawLf ? `(raw LF outside a paste: ${rawLf})` : '')
-      console.log('   wire:', JSON.stringify(await ev('window.__wire()')))
+      // JSON.stringify leaves DEL (0x7f) raw, i.e. invisible: show it.
+      console.log('   wire:', JSON.stringify(wire).replace(/[\x00-\x1f\x7f]/g, (c) => '\\x' + c.charCodeAt(0).toString(16).padStart(2, '0')))
       console.log('   ta  :', JSON.stringify(await ev('window.__ta()')))
     }
   }

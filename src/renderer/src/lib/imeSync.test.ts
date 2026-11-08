@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { createImeMirror, isImeText } from './imeSync'
+import { createImeMirror, isImeText, movesCursor } from './imeSync'
 
 /**
  * Replays the real chain:
@@ -626,17 +626,128 @@ describe('createImeMirror telling dictation from paste', () => {
 })
 
 describe('createImeMirror erasing a replaced tail', () => {
-  it('erases even when the draft record was reset by a paste in between', () => {
+  it('erases the draft that a keydown forced out when the IME later replaces it', () => {
     // Real report: the front of the line survived, the old tail stayed, and the
-    // new tail was appended after it — the replacement was seen but not applied.
+    // new tail was appended after it. The forced draft is the dictation run.
     const h = harness()
     const V1 = '你好啊，现在说话你会觉得我会可能产生重复吗'
     const V2 = '你好啊，现在说话，你会觉得我会可能产生重复吗？'
     h.value = V1
-    h.xterm(V1)
-    h.xterm('', { eventType: 'paste' }) // clears the draft record, line is unchanged
+    h.xterm(V1, { eventType: 'keydown' }) // xterm finished the composition on a fake key
     h.value = V2
     h.sync(V2)
     expect(h.remote()).toBe(V2)
+  })
+
+  it('does not erase across text that was pasted after the draft', () => {
+    const h = harness()
+    h.value = '你好世界这是草稿'
+    h.xterm('你好世界这是草稿')
+    h.xterm('粘贴内容', { eventType: 'paste' })
+    h.value = '你好世界这是定稿'
+    h.sync('你好世界这是定稿')
+    expect(h.wire.join('')).not.toContain('\x7f')
+  })
+
+  it('does not erase typed text that merely looks like the end of the old draft', () => {
+    // The draft ends with "。"; the user types "。" by hand; the IME then edits
+    // its own trailing "。". The typed one is at the end of the line, but it is
+    // not part of the dictation, so it must not be what gets erased.
+    const h = harness()
+    h.value = '今天吃饭。'
+    h.xterm('今天吃饭。')
+    h.xterm('。', { eventType: 'keydown' })
+    h.value = '今天吃饭！'
+    h.sync('今天吃饭！')
+    expect(h.wire.join('')).not.toContain('\x7f')
+  })
+
+  it('records a tab in IME text so a later correction can still erase across it', () => {
+    const h = harness()
+    const V1 = '前缀文字草稿\t结尾'
+    const V2 = '前缀文字最终\t结尾'
+    h.value = V1
+    h.xterm(V1)
+    h.value = V2
+    h.sync(V2)
+    // removed = "草稿\t结尾": 5 characters.
+    expect(h.wire.join('').match(/\x7f/g)?.length).toBe(5)
+  })
+})
+
+describe('createImeMirror after the cursor moved or the line was edited', () => {
+  const V1 = '你好，我今天希望吃饭，吃了饭之后再吃，首先其一'
+  const V2 = '你好，我今天希望吃饭，吃了饭之后再吃。首先，其一。'
+  const edits: Array<[string, string]> = [
+    ['Left (CSI)', '\x1b[D'],
+    ['Right with modifier', '\x1b[1;5C'],
+    ['Home (SS3)', '\x1bOH'],
+    ['End (CSI ~)', '\x1b[4~'],
+    ['Delete', '\x1b[3~'],
+    ['Up (history)', '\x1b[A'],
+    ['Alt+Backspace', '\x1b\x7f'],
+    ['Alt+b', '\x1bb'],
+    ['Ctrl+A', '\x01'],
+    ['Ctrl+E', '\x05'],
+    ['Ctrl+W', '\x17'],
+    ['Ctrl+K', '\x0b'],
+    ['Tab completion', '\t']
+  ]
+  for (const [name, bytes] of edits) {
+    it(`appends instead of erasing after ${name}`, () => {
+      // Erasing "the last N characters" would hit the wrong text now.
+      const h = harness()
+      h.value = V1
+      h.xterm(V1)
+      h.xterm(bytes, { eventType: 'keydown' })
+      h.value = V2
+      h.sync(V2)
+      // wire = [draft, the key itself, correction]; the key may contain DEL (Alt+Backspace).
+      expect(h.wire.slice(2).join('')).not.toContain('\x7f')
+    })
+  }
+
+  const harmless: Array<[string, string]> = [
+    ['SGR mouse report', '\x1b[<35;12;5M'],
+    ['legacy mouse report', '\x1b[M #!'],
+    ['focus in', '\x1b[I'],
+    ['focus out', '\x1b[O'],
+    ['cursor position reply', '\x1b[12;40R'],
+    ['device attributes reply', '\x1b[?1;2c'],
+    ['OSC colour reply', '\x1b]10;rgb:e6e6/e8e8/ecec\x1b\\']
+  ]
+  for (const [name, bytes] of harmless) {
+    it(`still erases after a ${name}`, () => {
+      const h = harness()
+      h.value = V1
+      h.xterm(V1)
+      h.xterm(bytes, { eventType: 'mousemove' })
+      h.value = V2
+      h.sync(V2)
+      expect(h.remote()).toBe(V2)
+    })
+  }
+
+  it('trusts the line again once Enter empties it', () => {
+    const h = harness()
+    h.value = V1
+    h.xterm(V1)
+    h.xterm('\x1b[D', { eventType: 'keydown' })
+    h.xterm('\r', { eventType: 'keydown' })
+    h.mirror.clear() // xterm empties the textarea on Enter
+    h.value = V1
+    h.xterm(V1)
+    h.value = V2
+    h.sync(V2)
+    expect(h.remote()).toBe(V2)
+  })
+})
+
+describe('movesCursor', () => {
+  it('separates cursor/editing sequences from terminal reports', () => {
+    for (const s of ['\x1b[A', '\x1b[1;2B', '\x1b[C', '\x1b[D', '\x1b[H', '\x1b[F', '\x1b[Z', '\x1b[3~', '\x1bOA', '\x1bOD', '\x1bb', '\x1b\x7f'])
+      expect(movesCursor(s), JSON.stringify(s)).toBe(true)
+    for (const s of ['\x1b[<0;1;1M', '\x1b[<35;12;5m', '\x1b[M !!', '\x1b[I', '\x1b[O', '\x1b[1;1R', '\x1b[?62c', '\x1b[200~', '\x1b[201~', '\x1b]11;rgb:0e0e/0f0f/1212\x07', '\x1bOP'])
+      expect(movesCursor(s), JSON.stringify(s)).toBe(false)
   })
 })
