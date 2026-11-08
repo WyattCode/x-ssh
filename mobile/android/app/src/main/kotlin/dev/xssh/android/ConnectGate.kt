@@ -363,7 +363,12 @@ private fun GatePage(host: Host, content: GateContent, tablet: Boolean, inDrawer
                 // 这里再加一遍,滚动区的下缘就停在按钮上方一大截(外屏实测:指纹卡片在离按钮 ~90dp 处被硬切断)。
                 // 再减掉渐变条的 28dp:正文从渐变底下滚过去(淡出),而不是停在它上沿被硬切一刀;
                 // 滚到底时下面补一个同样高的 Spacer,最后一行停在渐变上面。
-                .padding(start = side, end = Gutter, top = Gutter, bottom = (actionsHeight - 28.dp).coerceAtLeast(0.dp)),
+                // inline 页(需要凭据)没有固定的按钮栏:不能用 actionsHeight(要么是 0、要么是上一页留下的旧值),
+                // 老老实实给右下角的 ‹ / 底栏让一行。
+                .padding(
+                    start = side, end = Gutter, top = Gutter,
+                    bottom = if (content.inline) bottomReserve else (actionsHeight - 28.dp).coerceAtLeast(0.dp),
+                ),
             contentAlignment = Alignment.Center,
         ) {
             Column(

@@ -293,19 +293,26 @@ class RemoteFiles(session: Session, private val scope: CoroutineScope) {
             }
             _transfer.value = null
             val wasCancelled = batch.cancelled.get() || failure is FfiException.Cancelled
-            withContext(Dispatchers.Main) {
-                batch.finish(sent, steps, if (wasCancelled) null else failure, wasCancelled)
+            // 收尾回调(开文件 / 弹分享)抛了、或这里被取消,下面的 poll() 也必须跑:
+            // 否则 running 永远为真,之后的上传 / 下载全部卡在"排队中"。
+            try {
+                withContext(Dispatchers.Main) {
+                    batch.finish(sent, steps, if (wasCancelled) null else failure, wasCancelled)
+                }
+            } catch (t: Throwable) {
+                Log.w(TAG, "batch finish failed: ${t.message}")
+            } finally {
+                val next = batches.poll()
+                _queued.value = batches.pendingCount
+                if (next != null) startBatch(next) else currentCancel = null
             }
-            val next = batches.poll()
-            _queued.value = batches.pendingCount
-            if (next != null) startBatch(next) else currentCancel = null
         }
     }
 
     /** 把要下载的远端项展开成一个个文件(文件夹递归;指向目录的链接跳过,免得绕圈)。[rel] 是在目的地里的相对目录。 */
     private fun plan(s: Sftp, entry: RemoteEntry, rel: List<String>, out: MutableList<Pair<List<String>, RemoteEntry>>) {
         when {
-            entry.isDir && !entry.isLink -> s.list(entry.path).forEach { plan(s, it, rel + entry.name, out) }
+            entry.isDir && !entry.isLink -> s.list(entry.path).forEach { plan(s, it, rel + localSafe(entry.name), out) }
             entry.isLink && s.isDir(entry.path) -> Unit
             else -> out += rel to entry
         }
@@ -326,7 +333,7 @@ class RemoteFiles(session: Session, private val scope: CoroutineScope) {
                 name = entry.name,
                 size = entry.size.toLong(),
                 run = { listener ->
-                    val uri = sink.create(rel, entry.name).also { target = it }
+                    val uri = sink.create(rel, localSafe(entry.name)).also { target = it }
                     val pfd = openForWrite(resolver, uri) ?: throw FileTextException(FileText.of(R.string.files_cannot_write, entry.name))
                     // use:通道没开成(还没交给 Rust)时描述符也要关;交出去之后 close 是空操作。
                     pfd.use { withSftp { it.downloadToFd(entry.path, pfd.detachFd(), listener) } }
@@ -401,7 +408,7 @@ class RemoteFiles(session: Session, private val scope: CoroutineScope) {
     fun open(entry: RemoteEntry, context: Context) {
         val batchId = UUID.randomUUID().toString()
         val dir = File(context.cacheDir, "open/$batchId")
-        val file = File(dir, entry.name.replace('/', '_'))
+        val file = File(dir, localSafe(entry.name))
         runBatch(
             upload = false,
             label = entry.name,
@@ -468,7 +475,7 @@ class RemoteFiles(session: Session, private val scope: CoroutineScope) {
                 entries.forEach { plan(s, it, emptyList(), jobs) }
                 if (jobs.isEmpty()) emptyList()
                 else jobs.map { (rel, entry) ->
-                    val local = File(dir, (rel + entry.name.replace('/', '_')).joinToString("/"))
+                    val local = File(dir, (rel + localSafe(entry.name)).joinToString("/"))
                     Step(
                         name = entry.name,
                         size = entry.size.toLong(),
@@ -607,6 +614,15 @@ class RemoteFiles(session: Session, private val scope: CoroutineScope) {
     fun closeAsync() {
         scope.launch(Dispatchers.IO) { close() }
     }
+}
+
+/**
+ * 远端给的名字落到本地之前清一遍:服务器说了算的字符串不能直接当路径用。
+ * `/`、`\`、NUL 换成 `_`;空名字、`.`、`..`(会跳出目标目录)整个换成 `_`。
+ */
+internal fun localSafe(name: String): String {
+    val t = name.replace('/', '_').replace('\\', '_').replace('\u0000', '_')
+    return if (t.isBlank() || t == "." || t == "..") "_" else t
 }
 
 /* ─────────────────────────────── 下载目的地 ─────────────────────────────── */
@@ -748,6 +764,19 @@ private fun viewMime(name: String): String {
 
 /** SFTP 路径总是 `/` 分隔(和 Rust 的 `sftp::join` 一致)。 */
 fun joinPath(dir: String, name: String): String = if (dir.endsWith('/')) dir + name else "$dir/$name"
+
+/** 折叠绝对路径里的 `.` / `..` / 重复的斜杠;`..` 到根就停在根。 */
+fun normalizeRemotePath(path: String): String {
+    val out = ArrayDeque<String>()
+    for (seg in path.split('/')) {
+        when (seg) {
+            "", "." -> Unit
+            ".." -> out.removeLastOrNull()
+            else -> out.addLast(seg)
+        }
+    }
+    return "/" + out.joinToString("/")
+}
 
 fun parentPath(path: String): String {
     val trimmed = path.trimEnd('/')

@@ -255,11 +255,6 @@ fun TabletApp(
             sidebarVisible = next
         } else {
             Toast.makeText(context, R.string.tab_sidebar_persist_failed, Toast.LENGTH_SHORT).show()
-            android.widget.Toast.makeText(
-                context,
-                R.string.sidebar_persist_failed,
-                android.widget.Toast.LENGTH_LONG,
-            ).show()
         }
     }
 
@@ -912,7 +907,7 @@ private fun SidebarRow(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f, fill = false),
                     )
-                    if (showChips && host.keyFingerprint.isBlank()) {
+                    if (showChips && host.trustedHostKeys().isEmpty()) {
                         Spacer(Modifier.width(6.dp))
                         Chip(stringResource(R.string.tab_chip_unverified), p.warn)
                     }

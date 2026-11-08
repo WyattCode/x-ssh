@@ -117,7 +117,9 @@ class SnippetStore(context: Context) {
     fun hasProtectedDiskData(): Boolean {
         val raw = prefs.getString(KEY_LIST, null) ?: return false
         if (raw.isBlank()) return false
-        return runCatching { JSONArray(raw).length() > 0 }.getOrDefault(true)
+        // 只有"解析不了"才需要保护:能正常解析出记录的话,用户删掉最后一条、存一张空表是正当操作
+        // (原来这里 length() > 0 也算受保护,于是最后一条片段永远删不掉)。
+        return loadFailed || runCatching { JSONArray(raw); false }.getOrDefault(true)
     }
 
     private fun keepCorruptCopy(raw: String) {
@@ -299,8 +301,10 @@ fun SnippetSheet(
                 if (store.save(next)) {
                     all = next
                     editing = null
+                    true
                 } else {
                     Toast.makeText(context, R.string.snip_save_failed, Toast.LENGTH_SHORT).show()
+                    false
                 }
             },
             onDelete = { gone ->
@@ -308,8 +312,10 @@ fun SnippetSheet(
                 if (store.save(next)) {
                     all = next
                     editing = null
+                    true
                 } else {
                     Toast.makeText(context, R.string.snip_delete_failed, Toast.LENGTH_SHORT).show()
+                    false
                 }
             },
             onDismiss = { editing = null },
@@ -353,8 +359,9 @@ private fun SnippetEditor(
     hostLabel: String,
     hostId: String,
     tablet: Boolean,
-    onSave: (Snippet) -> Unit,
-    onDelete: (Snippet) -> Unit,
+    /** 返回有没有存成:失败时编辑页留着,保存 / 删除要能再点一次。 */
+    onSave: (Snippet) -> Boolean,
+    onDelete: (Snippet) -> Boolean,
     onDismiss: () -> Unit,
 ) {
     val p = LocalXssh.current
@@ -368,7 +375,7 @@ private fun SnippetEditor(
     fun deleteOnce() {
         if (deleted) return
         deleted = true
-        onDelete(initial)
+        if (!onDelete(initial)) deleted = false
     }
     var saving by remember { mutableStateOf(false) }
     val commandFocus = remember { FocusRequester() }
@@ -377,7 +384,7 @@ private fun SnippetEditor(
     fun save() {
         if (!valid || saving) return
         saving = true
-        onSave(
+        val saved = onSave(
             initial.copy(
                 title = title.trim(),
                 text = text.trimEnd(),
@@ -387,6 +394,7 @@ private fun SnippetEditor(
                 hostId = if (onlyHere) initial.hostId ?: hostId else null,
             ),
         )
+        if (!saved) saving = false
     }
 
     SheetFrame(

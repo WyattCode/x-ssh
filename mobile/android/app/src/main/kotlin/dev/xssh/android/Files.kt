@@ -892,16 +892,26 @@ fun FilesPane(
                         runCatching { files.home() }
                             .onSuccess { load(it) }
                             .onFailure { e ->
+                                // GoTo 只在浏览时出现:和加载失败一样提示一次,列表保持原样。
+                                // (原来紧跟着又发了一条原始错误,把这条本地化的提示立刻顶掉。)
                                 if (e !is CancellationException) {
                                     files.notify(FileText.of(R.string.files_cannot_read_folder, e.reason()), error = true)
                                 }
-                                // GoTo only appears while browsing — notify like a
-                                // load failure that leaves the current listing.
-                                if (e !is CancellationException) files.notify(e.reason(), error = true)
                             }
                     }
-                    target.startsWith("/") -> load(target.trimEnd('/').ifEmpty { "/" })
-                    else -> load(joinPath(path ?: "/", target).trimEnd('/'))
+                    // `~/子目录`:家目录 + 余下部分。
+                    target.startsWith("~/") -> scope.launch {
+                        runCatching { files.home() }
+                            .onSuccess { home -> load(normalizeRemotePath(joinPath(home, target.drop(2)))) }
+                            .onFailure { e ->
+                                if (e !is CancellationException) {
+                                    files.notify(FileText.of(R.string.files_cannot_read_folder, e.reason()), error = true)
+                                }
+                            }
+                    }
+                    // `.` / `..` 先折叠:否则面包屑里会出现 ".."、"上一级"也会回到错误的目录。
+                    target.startsWith("/") -> load(normalizeRemotePath(target))
+                    else -> load(normalizeRemotePath(joinPath(path ?: "/", target)))
                 }
             },
             onDismiss = { dialog = null },
@@ -1582,16 +1592,17 @@ private fun ColumnHeader(showTime: Boolean) {
             Modifier.fillMaxWidth().height(30.dp).padding(start = 52.dp, end = 24.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(stringResource(R.string.files_name), color = p.textFaint, fontSize = 12.sp, modifier = Modifier.weight(1f))
+            // 列头是要读的文字:用 textDim(约 6:1),textFaint 在黑底上只有 2:1 出头。
+            Text(stringResource(R.string.files_name), color = p.textDim, fontSize = 12.sp, modifier = Modifier.weight(1f))
             Text(
                 stringResource(R.string.files_size),
-                color = p.textFaint,
+                color = p.textDim,
                 fontSize = 12.sp,
                 textAlign = TextAlign.End,
                 modifier = Modifier.width(SizeColumn),
             )
             if (showTime) {
-                Text(stringResource(R.string.files_modified), color = p.textFaint, fontSize = 12.sp, textAlign = TextAlign.End, modifier = Modifier.width(TimeColumn))
+                Text(stringResource(R.string.files_modified), color = p.textDim, fontSize = 12.sp, textAlign = TextAlign.End, modifier = Modifier.width(TimeColumn))
             }
         }
         Box(Modifier.fillMaxWidth().height(0.5.dp).background(p.border))
@@ -1806,11 +1817,11 @@ private fun TransferBar(
                         modifier = Modifier.weight(1f),
                     )
                     if (queued > 0) {
-                        Text(stringResource(R.string.files_queue_n, queued), color = p.textFaint, fontSize = 12.sp)
+                        Text(stringResource(R.string.files_queue_n, queued), color = p.textDim, fontSize = 12.sp)
                         Spacer(Modifier.width(10.dp))
                     }
                     if (t.count > 1) {
-                        Text("${t.index + 1}/${t.count}", color = p.textFaint, fontSize = 12.sp)
+                        Text("${t.index + 1}/${t.count}", color = p.textDim, fontSize = 12.sp)
                         Spacer(Modifier.width(12.dp))
                     }
                     Text(

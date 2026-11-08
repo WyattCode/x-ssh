@@ -1275,7 +1275,7 @@ private fun HostCard(
                 }
             }
             // 只标需要注意的状态;"密码登录""已信任"这类常态不贴标签。
-            if (host.keyFingerprint.isBlank()) {
+            if (host.trustedHostKeys().isEmpty()) {
                 Chip(stringResource(R.string.host_key_pending), p.warn)
                 Spacer(Modifier.width(8.dp))
             }
