@@ -576,7 +576,9 @@ private fun DuoEmpty(hosts: List<Host>, running: Set<String>, onConnect: (Host) 
                 stringResource(R.string.host_new_host),
                 Modifier.padding(top = 24.dp).width(220.dp),
             ) { onNew() }
-        } else {
+        }
+        /* 「最近连接」暂时注释掉了(A 方案:居中虚线列表)。要恢复就删掉这对注释符。
+        else {
             val recent = remember(hosts) { hosts.sortedByDescending { it.lastUsed }.take(3) }
             // 居中的窄列,行与行之间用和左边抽屉一样的虚线;右边是「上次连接 / 运行中」和主机色点。
             Column(Modifier.padding(top = 28.dp).widthIn(max = 320.dp).fillMaxWidth(0.8f)) {
@@ -634,6 +636,7 @@ private fun DuoEmpty(hosts: List<Host>, running: Set<String>, onConnect: (Host) 
                 }
             }
         }
+        */
     }
 }
 /** 弹层专用配色:底换成 [XsshPalette.sheet],表单卡片换成 [XsshPalette.sheetCard],其余不变。 */
