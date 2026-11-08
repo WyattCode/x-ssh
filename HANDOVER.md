@@ -1,7 +1,27 @@
 # 会话记录:M3.189(2026-11-08,**已解决**:语音输入改写重复,0.6.28)
 
 > 接 M3.188。根因找到并修了,**这次是在真实 Chromium 事件序列上验证的**,不是靠推断。
-> 未提交、未发版(发版仍是手动触发)。需要用户在真机上用豆包 / 微信输入法确认一次。
+> **已发版 v0.6.28**(用户明确说“发版”后才发)。**仍需用户在真机上用豆包 / 微信输入法确认一次**——
+> 修复只在 Chromium CDP 回放里验证过,没有在真实输入法上跑过。
+
+## 发版记录
+
+- 提交 `5ae13a6` → 推 `main`,CI 全绿(`test-build` + `rust-core`)后才打 tag `v0.6.28` 并推送。
+- tag 的 CI 把 `X-SSH.Setup.0.6.28.exe`(约 82 MB)+ `.blockmap` 自动挂到 GitHub Release
+  (https://github.com/WyattCode/x-ssh/releases/tag/v0.6.28,非草稿)。
+  **这是 tag→自动发 Release 链路继 v0.6.19 之后又一次跑通**,M3.185 里“必须现场盯”的担心可以放下。
+- 发版前本机复跑了 CI 同款检查:`tsc -p tsconfig.node.json`、`vue-tsc`(含 `.vue`)、三个 i18n lint、
+  ESM 导入检查、vitest 716、`electron-vite build`。没有 node 时一律用
+  `ELECTRON_RUN_AS_NODE=1 node_modules/electron/dist/electron.exe <脚本>` 代跑。
+- 上一个 tag 是 `v0.6.19`;0.6.20–0.6.27 是测试构建,**从未打 tag**,`CHANGELOG.md` 里也没有对应条目
+  (0.6.28 条目里只写了本次修复)。如要补记,以 `git log v0.6.19..v0.6.28` 为准。
+
+## 下一步
+
+1. 让用户装 0.6.28,对着 bash 和 Codex 各说一句会被输入法改写的话,确认不再叠两版。
+2. 若仍重复:Ctrl+Shift+I → `localStorage['xssh.imeDebug']='1'` → 重载 → 复现 → 把 `[ime]` 日志贴出来
+   (现在含 `settled` 字段)。**不要在没有这段日志的情况下继续猜。**
+3. 若日志显示输入法走“追加短草稿”(见下方已知局限),再讨论是否引入时间窗口判据。
 
 ## 根因
 
