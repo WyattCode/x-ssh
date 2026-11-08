@@ -39,6 +39,33 @@ export function buildPackCommand(parent: string, tmpArchive: string, names: stri
   return `${cd} && ${quoted ? `tar czf ${shellQuoteName(tmpArchive)} -- ${quoted}` : ''}`.replace(/&&\s*$/, '')
 }
 
+/** How many bytes of an existing remote file may be reused.
+ *
+ *  Resume only when the remote copy is a strict prefix of the local one. A
+ *  same-size or larger remote file is written from scratch: equal size does not
+ *  mean equal content, and appending past the end would be worse than a rewrite.
+ */
+export function resumeOffset(remoteSize: number, localSize: number): number {
+  if (!Number.isFinite(remoteSize) || !Number.isFinite(localSize)) return 0
+  return remoteSize > 0 && remoteSize < localSize ? remoteSize : 0
+}
+
+/** Options for `sftp.createWriteStream`.
+ *
+ *  ssh2's default flags are 'w' (O_TRUNC), so passing `start` on its own empties
+ *  the file and then writes at the old offset — the "resume" that left NUL bytes
+ *  in the prefix, with a final size that made the next run treat the corrupt
+ *  file as already synced. `r+` keeps the prefix. The mode is explicit because
+ *  ssh2 also defaults to 0o666 (bypassing umask) and fchmods unconditionally,
+ *  which widened an existing 0600 file on overwrite. */
+export function uploadStreamOptions(offset: number): {
+  flags?: 'r+'
+  start?: number
+  mode: number
+} {
+  return offset > 0 ? { flags: 'r+', start: offset, mode: 0o644 } : { mode: 0o644 }
+}
+
 /** Picks the remote extraction command for an archive file (zip → unzip, else tar). */
 export function buildExtractCommand(remoteDir: string, archiveFileName: string): string {
   const lower = archiveFileName.toLowerCase()

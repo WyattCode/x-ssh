@@ -18,6 +18,7 @@ import { hasLiveConnectedPane, closeOthersNeedsConfirm } from '../lib/snapshotGu
 import { closeAllNeedsConfirm } from '../lib/tabCloseGuard'
 
 import { formatTransferName } from '../lib/transferFormat'
+import { toPlain } from '../lib/plain'
 import { connectFailureMessage, sessionEventMessage } from '../lib/connectFailure'
 import {
   buildFlatTree,
@@ -107,19 +108,6 @@ export interface ForwardGroup {
   rows: ForwardRow[]
 }
 
-/** Recursively unwraps Vue reactive proxies into a plain, cloneable object.
- *  Pinia wraps store arrays/objects (snapshots, transfer history, queues) in
- *  Proxies; Electron's IPC structured-clone rejects them with "An object could
- *  not be cloned", so they must be stripped before `settings.set`. */
-function toPlain<T>(value: T): T {
-  const raw = toRaw(value)
-  if (raw === null || typeof raw !== 'object') return raw as T
-  if (raw instanceof Date) return raw as T
-  if (Array.isArray(raw)) return raw.map((v) => toPlain(v)) as unknown as T
-  const out: Record<string, unknown> = {}
-  for (const key of Object.keys(raw)) out[key] = toPlain((raw as Record<string, unknown>)[key])
-  return out as T
-}
 
 // Panes with a connect currently in flight. Guards against overlapping connects
 // (double-clicked "reconnect", a manual retry racing a scheduled one) which
@@ -773,7 +761,8 @@ export const useSessions = defineStore('sessions', {
       }
     },
     async saveSnippet(snippet: Snippet): Promise<void> {
-      this.snippets = await window.api.snippets.save(snippet)
+      // Same rule as saveHost: nothing reactive crosses IPC.
+      this.snippets = await window.api.snippets.save(toPlain(snippet))
     },
     async deleteSnippet(id: string): Promise<void> {
       this.snippets = await window.api.snippets.delete(id)

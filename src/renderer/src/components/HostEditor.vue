@@ -9,6 +9,7 @@ import { useConfirm } from '../composables/confirm'
 import { isImeKey } from '../lib/ime'
 import { keyErrorMessage } from '../lib/keyError'
 import { jumpSelectBlocked, jumpSelectOptions, jumpUsedBy } from '../lib/jumpCandidates'
+import { toPlain } from '../lib/plain'
 import Icon from './Icon.vue'
 import OsIcon from './OsIcon.vue'
 import { PRESETS } from '../lib/terminalThemes'
@@ -75,6 +76,22 @@ const form = reactive({
 const proxyPassCleared = ref(false)
 const password = ref('')
 const passphrase = ref('')
+/** Why the last save failed; cleared on every new attempt. */
+const saveError = ref('')
+
+/** Toggling the clear flag must also drop whatever was typed over it. */
+function toggleProxyPassCleared(): void {
+  proxyPassCleared.value = !proxyPassCleared.value
+  form.proxyPass = ''
+}
+// Typing a new password cancels a pending clear, so Save never discards what
+// the user just entered.
+watch(
+  () => form.proxyPass,
+  (v) => {
+    if (v) proxyPassCleared.value = false
+  }
+)
 /** Guards against a second save (Enter / Save) while hosts.save is in flight. */
 const saving = ref(false)
 /** Which 更多选项 rows are open (each opens in place under its row). */
@@ -99,7 +116,11 @@ function formSnapshot(): string {
   return JSON.stringify({
     f: form,
     password: password.value,
-    passphrase: passphrase.value
+    passphrase: passphrase.value,
+    // Otherwise "clear the saved proxy password" counts as no change and Esc
+    // discards it without the "unsaved changes" prompt, despite the hint
+    // saying it takes effect on save.
+    proxyPassCleared: proxyPassCleared.value
   })
 }
 let cleanSnapshot = ''
@@ -159,6 +180,9 @@ watch(
     password.value = ''
     passphrase.value = ''
     proxyPassCleared.value = false
+    // The panel is a persistent component, so a failure banner from the last
+    // host would otherwise still be on screen for the next one.
+    saveError.value = ''
     Object.assign(sections, { keys: false, proxy: false, forwards: false, onConnect: false, appearance: false })
     nextTick(() => labelEl.value?.focus())
     // Baseline for the unsaved-changes guard: capture after the form is
@@ -506,8 +530,13 @@ async function save(): Promise<void> {
   const pw = form.auth === 'password' && password.value ? password.value : undefined
   const pp = form.auth === 'key' && passphrase.value ? passphrase.value : undefined
   saving.value = true
+  saveError.value = ''
   try {
-    store.hosts = await window.api.hosts.save(host, pw, pp)
+    // `props.host.os` is a Pinia proxy. Passing it straight to `invoke` throws
+    // "An object could not be cloned" before the main process ever runs, which
+    // surfaced as a bare "保存失败" and wrote nothing to disk. Everything that
+    // crosses IPC goes through toPlain.
+    store.hosts = await window.api.hosts.save(toPlain(host), pw, pp)
   } catch (e) {
     // Main rejects when the hosts file cannot be written (disk full, unreadable
     // file) — and now also when a typed password could not be written to the
@@ -515,6 +544,12 @@ async function save(): Promise<void> {
     // a password that had in fact been stored, while the real problem was the
     // vault (no OS encryption / unreadable secrets.bin).
     const msg = (e as Error)?.message ?? ''
+    // Keep the raw reason in the console: "保存失败" alone is unactionable, and
+    // IPC/clone errors carry no user-facing wording of their own.
+    console.error('host save failed:', msg)
+    saveError.value = msg.includes('secrets-')
+      ? t('ed.saveFailSecret')
+      : `${t('ed.saveFail')}${msg ? ` — ${msg}` : ''}`
     toast(
       msg.includes('secrets-') ? t('ed.saveFailSecret') : t('ed.saveFail'),
       'error'
@@ -634,6 +669,7 @@ async function remove(): Promise<void> {
                   v-model="password"
                   class="r-input"
                   type="password"
+                  autocomplete="off"
                   :placeholder="host?.hasSavedPassword ? t('host.passwordSaved') : t('host.passwordAsk')"
                 />
               </label>
@@ -671,6 +707,7 @@ async function remove(): Promise<void> {
                     v-model="passphrase"
                     class="r-input"
                     type="password"
+                    autocomplete="off"
                     :placeholder="host?.hasSavedPassphrase ? t('host.passphraseSaved') : t('host.passphraseAsk')"
                   />
                 </label>
@@ -797,14 +834,19 @@ async function remove(): Promise<void> {
                       "
                       autocomplete="off"
                     />
+                    <!-- Only when something is actually stored: on a new host
+                         there is nothing to clear, and offering it would let a
+                         stray click throw away the password being typed. -->
                     <button
-                      v-if="host?.hasSavedProxyPassword || form.proxyPass"
+                      v-if="host?.hasSavedProxyPassword"
                       type="button"
                       class="btn sm"
-                      :title="t('host.proxyPassClear')"
-                      @click="proxyPassCleared = true; form.proxyPass = ''"
+                      :class="{ on: proxyPassCleared }"
+                      :title="proxyPassCleared ? t('host.proxyPassUndo') : t('host.proxyPassClear')"
+                      :aria-pressed="proxyPassCleared"
+                      @click="toggleProxyPassCleared"
                     >
-                      {{ t('host.proxyPassClear') }}
+                      {{ proxyPassCleared ? t('host.proxyPassUndo') : t('host.proxyPassClear') }}
                     </button>
                   </div>
                 </template>
@@ -883,6 +925,10 @@ async function remove(): Promise<void> {
           </section>
         </div>
 
+        <!-- Stays on screen after the toast fades: the panel itself must show
+             that the save failed and why, or it looks like nothing happened. -->
+        <div v-if="saveError" class="save-error" role="alert">{{ saveError }}</div>
+
         <footer class="p-foot">
           <button v-if="host" type="button" class="btn btn-danger" @click="remove">{{ t('host.delete') }}</button>
           <span class="spacer" />
@@ -910,7 +956,7 @@ async function remove(): Promise<void> {
               </div>
               <label class="row">
                 <span class="r-label">{{ t('host.passphrase') }}</span>
-                <input v-model="keyModal.passphrase" class="r-input" type="password" :placeholder="t('host.passphraseAsk')" :disabled="keyModal.busy" @keydown.enter.stop="generateKey($event)" />
+                <input v-model="keyModal.passphrase" class="r-input" type="password" autocomplete="off" :placeholder="t('host.passphraseAsk')" :disabled="keyModal.busy" @keydown.enter.stop="generateKey($event)" />
               </label>
             </div>
             <p v-if="keyModal.error" class="err">{{ keyModal.error }}</p>
@@ -1276,6 +1322,13 @@ input[type='number']::-webkit-inner-spin-button {
   align-items: center;
   gap: 8px;
 }
+/* The proxy row's inline action. This file had no `.btn.sm`, so the button
+   rendered at the default 32px next to 28px inputs and looked out of place. */
+.btn.sm {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+}
 .grow {
   flex: 1;
   min-width: 0;
@@ -1503,6 +1556,18 @@ input[type='number']::-webkit-inner-spin-button {
   padding: 14px 24px;
   border-top: 1px solid var(--border);
   background: var(--bg);
+}
+.save-error {
+  flex: none;
+  margin: 0 24px 12px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.55;
+  word-break: break-word;
 }
 .spacer {
   flex: 1;

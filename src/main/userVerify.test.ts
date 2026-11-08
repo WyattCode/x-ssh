@@ -46,6 +46,40 @@ function makeRunner(opts: { verify?: string; avail?: string } = {}) {
   return { run, calls }
 }
 
+describe('UserVerify availability probe', () => {
+  it('does not cache an inconclusive probe', async () => {
+    // The first call fails (timeout / PowerShell blocked) and must not be
+    // remembered: caching it made the next minute look "Hello unavailable".
+    let calls = 0
+    let fail = true
+    const run: RunPowerShell = async (script) => {
+      calls++
+      if (script.includes('CheckAvailabilityAsync') && fail) throw new Error('timeout')
+      return { code: 0, stdout: 'AVAIL:Available\r\n', stderr: '' }
+    }
+    const uv = new UserVerify({ settings: makeSettings(), platform: 'win32', runPowerShell: run })
+
+    expect(await uv.availability()).toBe('unavailable')
+    expect(calls).toBe(1)
+
+    fail = false
+    expect(await uv.availability()).toBe('available')
+    expect(calls).toBe(2)
+  })
+
+  it('caches a definitive answer', async () => {
+    let calls = 0
+    const run: RunPowerShell = async () => {
+      calls++
+      return { code: 0, stdout: 'AVAIL:Available\r\n', stderr: '' }
+    }
+    const uv = new UserVerify({ settings: makeSettings(), platform: 'win32', runPowerShell: run })
+    expect(await uv.availability()).toBe('available')
+    expect(await uv.availability()).toBe('available')
+    expect(calls).toBe(1)
+  })
+})
+
 describe('UserVerify 平台支持', () => {
   it('linux 上 supported=false，enabled=false，ensureForKeyUse 直接放行且不调用 PowerShell', async () => {
     const { run, calls } = makeRunner()

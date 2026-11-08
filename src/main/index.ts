@@ -11,8 +11,13 @@ import { readLaunchTarget, targetFromUrl, PROTOCOL, compareVersions } from '../s
 import { isRendererSettableKey } from '../shared/settingsKeys'
 import { resolveLang, type LangPref, type UiLang } from '../shared/lang'
 import { resolveDir, resolveInside } from '../shared/localPaths'
+import { extractBackupHosts } from '../shared/backup'
+import { parseSshConfig, type SshConfigHost } from './sshConfigParse'
+import { expandIncludes } from './sshConfigInclude'
 import { SshManager } from './ssh'
+import { createImeTrace } from './imeTrace'
 import { probeHosts } from './reachability'
+import { isTrustedFrame } from './ipcGuard'
 import { OS_PROBE_COMMAND, parseOsProbe } from '../shared/hostOs'
 import { HostStore } from './store'
 import { KnownHosts, KnownHostsCorruptError } from './knownHosts'
@@ -31,6 +36,7 @@ const store = new HostStore()
 const knownHosts = new KnownHosts()
 const settings = new SettingsStore()
 const keyManager = new KeyManager(app.getPath('userData'))
+const imeTrace = createImeTrace(app.getPath('userData'))
 const masterLock = new MasterLock(settings)
 const userVerify = registerUserVerifyIpc({ settings, lang: uiLang, isTrusted: isTrustedIpcSender })
 const activeEdits = new Set<string>()
@@ -85,7 +91,10 @@ let mainWindow: BrowserWindow | null = null
  *  `sandbox: false` means filesystem and credential access. */
 function isTrustedIpcSender(e: IpcMainInvokeEvent | IpcMainEvent): boolean {
   const w = mainWindow
-  return !!w && !w.isDestroyed() && e.senderFrame === w.webContents.mainFrame
+  if (!w || w.isDestroyed()) return false
+  // The comparison itself is pure and unit-tested (ipcGuard.test.ts): identity,
+  // not URL, so a same-origin iframe cannot get through.
+  return isTrustedFrame(e.senderFrame, w.webContents.mainFrame)
 }
 
 /** Registers an invoke handler behind the sender check. `any` keeps the dozens
@@ -555,7 +564,7 @@ async function buildBackupPayload(): Promise<string> {
       app: 'x-ssh',
       version: 2,
       exportedAt: new Date().toISOString(),
-      hosts: await store.exportJson(),
+      hosts: JSON.parse(await store.exportJson()),
       snippets: (await settings.get<Snippet[]>('snippets')) ?? [],
       snapshots: (await settings.get<unknown[]>('snapshots')) ?? [],
       transferHistory: (await settings.get<unknown[]>('sftpTransferHistory')) ?? [],
@@ -769,140 +778,55 @@ async function deleteSnippet(id: string): Promise<Snippet[]> {
 }
 
 // ---- OpenSSH ~/.ssh/config import ----
-interface SshConfigHost {
-  host: string
-  hostname?: string
-  user?: string
-  port?: number
-  identityFile?: string
-  proxyJump?: string
-  /** Conditional keywords forwarded/imported when present. */
-  agentForward?: boolean
-  x11Forward?: boolean
-  forwards?: HostForward[]
-}
-/** Minimal single-pass parser for the common OpenSSH `Host` blocks. */
-function parseSshConfig(raw: string): SshConfigHost[] {
-  const out: SshConfigHost[] = []
-  let current: SshConfigHost | null = null
-  let inHost = false
-  const lines = raw.split(/\r?\n/)
-  for (const line of lines) {
-    const t = line.replace(/#.*$/, '').trim()
-    if (!t) continue
-    // Line-continuation is rare; treat a trailing backslash-wrapped line as part
-    // of the previous (OpenSSH allows it, but we only need the common cases).
-    const m = /^([\w]+)\s+(.*)$/.exec(t)
-    if (!m) continue
-    const [, key, rest] = m
-    if (key.toLowerCase() === 'host') {
-      if (current) out.push(current)
-      // A Host line may name several patterns; we take the first literal name.
-      const first = rest.split(/\s+/)[0]
-      current = { host: first }
-      inHost = !first.startsWith('!')
-      continue
-    }
-    if (!current || !inHost) continue
-    const val = rest.trim()
-    switch (key.toLowerCase()) {
-      case 'hostname':
-        current.hostname = val
-        break
-      case 'user':
-        current.user = val
-        break
-      case 'port':
-        current.port = Number(val) || 22
-        break
-      case 'identityfile':
-        current.identityFile = val.replace(/^~/, homedir())
-        break
-      case 'proxyjump':
-        current.proxyJump = val.split(',')[0]
-        break
-      case 'forwardagent':
-        // OpenSSH accepts "yes/no" (also optional host list); only a leading
-        // `yes` enables it — `no`, `none` and a host list all disable.
-        current.agentForward = /^yes/i.test(val)
-        break
-      case 'forwardx11':
-        current.x11Forward = /^yes/i.test(val)
-        break
-      case 'localforward':
-        // "LocalForward [bind:]port host:port". The optional bind address is
-        // ignored (we always listen on localhost for safety).
-        {
-          const parts = val.split(/\s+/)
-          const listen = parts[0]
-          const target = parts[1]
-          if (!target) break
-          const lp = Number(listen.split(':').pop()) || 0
-          const tm = /^(.*?):(\d+)$/.exec(target)
-          if (!lp || !tm) break
-          current.forwards = current.forwards || []
-          current.forwards.push({
-            mode: 'local',
-            localPort: lp,
-            remoteHost: tm[1] || '',
-            remotePort: Number(tm[2])
-          })
-        }
-        break
-    }
-  }
-  if (current) out.push(current)
-  return out
-}
-
 /** Imports hosts from the user's OpenSSH config, skipping ones already present. */
-async function importSshConfig(): Promise<{ ok: boolean; count: number; error?: string }> {
+async function importSshConfig(): Promise<{
+  ok: boolean
+  count: number
+  /** Host blocks found (Include expanded) — lets the UI explain a zero result. */
+  parsed?: number
+  /** Blocks already present, which is the common reason for "imported 0". */
+  skipped?: number
+  error?: string
+}> {
   const cfgPath = join(homedir(), '.ssh', 'config')
   let raw: string
   try {
     raw = await readFile(cfgPath, 'utf8')
   } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return { ok: false, count: 0, error: 'missing-config' }
-    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return { ok: false, count: 0, error: 'ssh-config-missing' }
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
+      return { ok: false, count: 0, error: 'ssh-config-missing' }
+    }
     return { ok: false, count: 0, error: friendlyError((e as Error).message) }
   }
-  const parsed = parseSshConfig(raw)
-  const existing = new Set((await store.list()).map((h) => `${h.host}:${h.port}:${h.username}`))
-
-  // Resolve a `ProxyJump` alias to an imported Host id. The jump target may not
-  // be a Host block of its own (e.g. a bare hostname), so create one lazily.
-  let jumpCounter = 0
-  async function jumpHostId(spec: string): Promise<string | undefined> {
-    // "user@host" or "host" (a connect-time command string is not supported).
-    const jm = /^(?:([^@]+)@)?([^:]+)(?::(\d+))?$/.exec(spec.trim())
-    if (!jm) return undefined
-    const jhost = jm[2]
-    const jport = Number(jm[3]) || 22
-    const juser = jm[1] || 'root'
-    const existingJump = (await store.list()).find(
-      (h) => h.host === jhost && h.port === jport && h.group === 'OpenSSH'
-    )
-    if (existingJump) return existingJump.id
-    const jump: Host = {
-      id: `host-jump-${Date.now()}-${jumpCounter++}`,
-      label: jhost,
-      host: jhost,
-      port: jport,
-      username: juser,
-      auth: 'password',
-      group: 'OpenSSH'
-    }
-    await store.save(jump)
-    return jump.id
-  }
+  // `Include config.d/*` is the layout ssh recommends; without this, hosts
+  // living in included files silently failed to import.
+  raw = await expandIncludes(raw, dirname(cfgPath))
+  const parsed = parseSshConfig(raw, homedir())
+  // Keyed by ALIAS, not address: two aliases for the same machine are two
+  // legitimate entries (one may route through a bastion), and deduping on the
+  // address silently dropped the second one along with its ProxyJump.
+  const before = await store.list()
+  const existing = new Set(before.map((h) => `${h.label}:${h.port}:${h.username}`))
+  // Every Host block, by alias, so a `ProxyJump bastion` can be resolved to the
+  // block it actually names instead of being treated as a hostname.
+  const byAlias = new Map(parsed.map((c) => [c.host, c]))
+  /** alias → saved host id, filled as blocks are imported. */
+  const savedByAlias = new Map<string, string>()
 
   let count = 0
+  const pendingJump: { hostId: string; spec: string }[] = []
   for (const c of parsed) {
-    if (c.host.startsWith('!') || c.host === '*') continue
     const user = c.user || 'root'
     const port = c.port || 22
-    const key = `${c.hostname || c.host}:${port}:${user}`
-    if (existing.has(key)) continue
+    const key = `${c.host}:${port}:${user}`
+    if (existing.has(key)) {
+      // Already imported before: remember its id so a jump can point at it.
+      const prev = before.find(
+        (h) => h.label === c.host && (h.port || 22) === port && h.username === user
+      )
+      if (prev) savedByAlias.set(c.host, prev.id)
+      continue
+    }
     const host: Host = {
       id: `host-import-${Date.now()}-${count}`,
       label: c.host,
@@ -916,17 +840,74 @@ async function importSshConfig(): Promise<{ ok: boolean; count: number; error?: 
       x11Forward: c.x11Forward || undefined,
       portForwards: c.forwards?.length ? c.forwards : undefined
     }
-    // Map ProxyJump to a jump host entry so the tunnel is actually established
-    // (previously it was parsed but dropped).
-    if (c.proxyJump) {
-      const jid = await jumpHostId(c.proxyJump)
-      if (jid) host.jumpHostId = jid
-    }
     await store.save(host)
+    savedByAlias.set(c.host, host.id)
     existing.add(key)
     count++
+    if (c.proxyJump) pendingJump.push({ hostId: host.id, spec: c.proxyJump })
   }
-  return { ok: true, count }
+
+  // Second pass: `ProxyJump` may name a block that appears later in the file,
+  // so jumps are resolved once every host has an id.
+  let jumpCounter = 0
+  for (const { hostId, spec } of pendingJump) {
+    const jid = await resolveJump(spec, byAlias, savedByAlias, () => jumpCounter++)
+    if (!jid) continue
+    const target = (await store.list()).find((h) => h.id === hostId)
+    if (target) await store.save({ ...target, jumpHostId: jid })
+  }
+  return { ok: true, count, parsed: parsed.length, skipped: Math.max(0, parsed.length - count) }
+}
+
+/**
+ * Resolves a `ProxyJump` spec to a saved host id.
+ *
+ * The spec names a *config alias*, but the imported Host stores the address in
+ * `host` and the alias in `label` — comparing the two never matched, so every
+ * jump silently became a bogus host literally named after the alias. Now the
+ * alias is looked up in the parsed blocks first, and the jump host is created
+ * from that block's real address/user/port.
+ */
+async function resolveJump(
+  spec: string,
+  byAlias: Map<string, SshConfigHost>,
+  savedByAlias: Map<string, string>,
+  nextId: () => number
+): Promise<string | undefined> {
+  const jm = /^(?:([^@]+)@)?([^:]+)(?::(\d+))?$/.exec(spec.trim())
+  if (!jm) return undefined
+  const name = jm[2]
+  // `ProxyJump none` means "do not use a jump host at all".
+  if (/^none$/i.test(name)) return undefined
+
+  // 1) The alias is one of the blocks we just imported (or had already).
+  const alreadySaved = savedByAlias.get(name)
+  if (alreadySaved) return alreadySaved
+  const ref = byAlias.get(name)
+  const address = ref?.hostname || name
+  const port = Number(jm[3]) || ref?.port || 22
+  const user = jm[1] || ref?.user || 'root'
+
+  // 2) A host for that address is already on file.
+  const found = (await store.list()).find(
+    (h) => h.host === address && (h.port || 22) === port && h.group === 'OpenSSH'
+  )
+  if (found) return found.id
+
+  // 3) Nothing matches: a bare hostname in ProxyJump. Create it, using the
+  //    referenced block's identity so it is actually connectable.
+  const jump: Host = {
+    id: `host-jump-${Date.now()}-${nextId()}`,
+    label: ref?.host || name,
+    host: address,
+    port,
+    username: user,
+    auth: ref?.identityFile ? 'key' : 'password',
+    keyPath: ref?.identityFile,
+    group: 'OpenSSH'
+  }
+  await store.save(jump)
+  return jump.id
 }
 
 /** Reads the connected host's OS (read-only, own exec channel — never the
@@ -1419,7 +1400,7 @@ function registerIpc(): void {
         app: 'x-ssh',
         version: 2,
         exportedAt: new Date().toISOString(),
-      hosts: await store.exportJson(),
+        hosts: JSON.parse(await store.exportJson()),
         snippets: (await settings.get<Snippet[]>('snippets')) ?? [],
         snapshots: (await settings.get<unknown[]>('snapshots')) ?? [],
         transferHistory: (await settings.get<unknown[]>('sftpTransferHistory')) ?? [],
@@ -1441,8 +1422,9 @@ function registerIpc(): void {
     try {
       const buf = await readFile(res.filePaths[0], 'utf8')
       const data = JSON.parse(buf)
-      if (!Array.isArray(data.hosts)) return { ok: false, error: 'invalid-backup' }
-      await store.importJson(JSON.stringify(data.hosts))
+      const hosts = extractBackupHosts(data.hosts)
+      if (!hosts) return { ok: false, error: 'invalid-backup' }
+      await store.importJson(JSON.stringify({ hosts }))
       if (Array.isArray(data.snippets)) await settings.set('snippets', data.snippets)
       if (Array.isArray(data.snapshots)) await settings.set('snapshots', data.snapshots)
       if (Array.isArray(data.transferHistory)) await settings.set('sftpTransferHistory', data.transferHistory)
@@ -1929,6 +1911,11 @@ function registerIpc(): void {
   // ---- SSH stream (fire-and-forget) ----
   on(IPC.sshInput, (_e, sessionId: string, data: string) => {
     sshManager?.write(sessionId, data)
+  })
+  // Voice-input diagnostics (see imeTrace.ts): off unless a fresh flag file exists.
+  handle(IPC.imeTraceEnabled, () => imeTrace.enabled())
+  on(IPC.imeTrace, (_e, line: unknown) => {
+    if (typeof line === 'string') imeTrace.write(line)
   })
   on(IPC.sshResize, (_e, sessionId: string, cols: number, rows: number) => {
     sshManager?.resize(sessionId, cols, rows)

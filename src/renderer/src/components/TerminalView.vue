@@ -25,7 +25,7 @@ import { pasteLineCount } from '../lib/pasteLines'
 import { isMac } from '../composables/platform'
 
 const modKey = isMac ? '⌘' : 'Ctrl'
-import { createImeMirror, createPassthroughMirror, isPlainText } from '../lib/imeSync'
+import { attachImeBridge } from '../lib/imeBridge'
 import Icon from './Icon.vue'
 
 const props = withDefaults(
@@ -305,13 +305,26 @@ const searchEl = ref<HTMLInputElement>()
 /** Match position reported by the addon: 1 of N, or 0 of 0 when nothing matches. */
 const searchHits = reactive({ index: 0, count: 0 })
 
+/** Highlight colours for matches. The addon only fires `onDidChangeResults`
+ *  when `decorations` is present, so this is also what makes the counter work. */
+const SEARCH_DECORATIONS = {
+  matchBackground: 'rgba(110, 168, 254, 0.22)',
+  matchBorder: 'rgba(110, 168, 254, 0.55)',
+  matchOverviewRuler: 'rgba(110, 168, 254, 0.65)',
+  activeMatchBackground: 'rgba(255, 176, 32, 0.55)',
+  activeMatchBorder: 'rgba(255, 176, 32, 0.95)',
+  activeMatchColorOverviewRuler: 'rgba(255, 176, 32, 0.95)'
+} as const
+
 function runSearch(forward: boolean): void {
   if (!search || !searchBar.query) {
+    // Clearing the box must also clear the highlights and the count.
+    search?.clearDecorations?.()
     searchHits.index = 0
     searchHits.count = 0
     return
   }
-  const opts = { caseSensitive: searchBar.caseSensitive }
+  const opts = { caseSensitive: searchBar.caseSensitive, decorations: SEARCH_DECORATIONS }
   if (forward) search.findNext(searchBar.query, opts)
   else search.findPrevious(searchBar.query, opts)
 }
@@ -335,6 +348,8 @@ function openSearch(): void {
 function closeSearch(): void {
   searchBar.open = false
   search?.clearDecorations?.()
+  searchHits.index = 0
+  searchHits.count = 0
   // findNext() scrolls the viewport, which flips `scrolledUp` on. Leaving it
   // set meant new output stopped following the prompt after closing search —
   // it looked like the terminal had frozen.
@@ -587,20 +602,7 @@ onMounted(() => {
 
   // IME text (pinyin, and especially voice input that rewrites its own
   // draft) goes through a mirror of xterm's hidden textarea rather than
-  // straight from xterm — see lib/imeSync. The textarea is the source of
-  // truth; the flags below say which part of it is settled.
-  const ta = term.textarea
-  // Escape hatch for A/B diagnosis on a machine with a misbehaving IME:
-  //   localStorage['xssh.imeMirror'] = '0'  (then reload the window)
-  // sends xterm's bytes verbatim, i.e. the pre-mirror behaviour.
-  const useMirror = ((): boolean => {
-    try {
-      return window.localStorage.getItem('xssh.imeMirror') !== '0'
-    } catch {
-      return true
-    }
-  })()
-  const ime = useMirror ? createImeMirror() : createPassthroughMirror()
+  // straight from xterm — see lib/imeSync and lib/imeBridge.
   /** Large payloads are split. One multi-kilobyte write lands in the main
    *  process stream buffer as a single burst; cutting it keeps memory bounded
    *  and lets the remote shell read it in order. Cut on a code-point boundary
@@ -620,108 +622,10 @@ onMounted(() => {
       i = Math.max(end, i + 1)
     }
   }
-  let composing = false
-  let compStart = 0
-  /** A commit whose deferred flush was skipped because the next composition
-   *  started within the same tick — sent before that new draft is mirrored. */
-  let pendingCommit: string | null = null
-  /** A keystroke's own character was just sent; its input event (if the
-   *  browser still inserts it) must not be sent a second time. */
-  let keyTextSent = false
-  if (ta) {
-    const signal = imeAbort.signal
-    const flushCommit = (snapshot: string): void => {
-      const out = ime.sync(snapshot)
-      if (out) send(out)
-    }
-    ta.addEventListener('compositionstart', () => {
-      composing = true
-      // A reconversion starts at the replaced range, not at the end.
-      compStart = ta.selectionStart ?? ta.value.length
-      // The textarea already holds the new draft, so the previous commit's
-      // deferred flush would see `composing === true` and be dropped. Send it
-      // against the snapshot taken at its own compositionend instead.
-      if (pendingCommit !== null) {
-        const snapshot = pendingCommit
-        pendingCommit = null
-        flushCommit(snapshot)
-      }
-    }, { signal })
-    // Catch up after each commit in case xterm emitted nothing for it (see
-    // ImeMirror.sync). Deferred so xterm's own timer-based send runs first;
-    // whatever it mirrors makes this a no-op.
-    ta.addEventListener('compositionend', () => {
-      composing = false
-      const snapshot = ta.value
-      setTimeout(() => {
-        if (signal.aborted) return
-        if (composing) {
-          // A new composition began before this timer ran. Keep the committed
-          // text for compositionstart to flush: dropping it lost every commit
-          // that happened to be followed by another one in the same tick.
-          pendingCommit = snapshot
-          return
-        }
-        flushCommit(snapshot)
-      }, 0)
-    }, { signal })
-    // Same for text committed without a composition (voice input). xterm's
-    // capture listener has already handled — or silently dropped — it.
-    ta.addEventListener('input', (e) => {
-      const kind = (e as InputEvent).inputType
-      if (composing || kind === 'insertCompositionText') return
-      if ((kind === 'insertText' || kind === 'insertReplacementText') && !keyTextSent) {
-        const out = ime.sync(ta.value)
-        if (out) send(out)
-        return
-      }
-      // Anything else lands text xterm already sent or that isn't typing at
-      // all: a native paste (xterm sends it, empties the textarea, then the
-      // browser inserts it anyway), a drop, an undo, a keystroke's own
-      // character. Account for it without sending it again.
-      ime.adopt(ta.value)
-    }, { signal })
-    // Every time xterm itself rewrites the textarea — emptying it on Enter,
-    // Ctrl+C, blur and after a paste, or filling it with the selection on
-    // right-click — that text is not something the IME typed. Catch all of
-    // them at the one place they share (the value setter; IME edits never go
-    // through it) instead of listing xterm's code paths one by one.
-    const native = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')
-    if (native?.get && native.set) {
-      const { get, set } = native
-      Object.defineProperty(ta, 'value', {
-        configurable: true,
-        get(this: HTMLTextAreaElement) {
-          return get.call(this)
-        },
-        set(this: HTMLTextAreaElement, v: string) {
-          set.call(this, v)
-          ime.adopt(get.call(this))
-        }
-      })
-    }
-  }
+  attachImeBridge(term, send, imeAbort.signal)
   term.onKey(() => {
     lastAppCopy = null
   })
-  term.onData((data) => {
-    let out = data
-    if (ta) {
-      const eventType = (window.event as Event | undefined)?.type
-      // A non-IME key during composition makes xterm finish it on the spot,
-      // so the whole textarea counts as settled then.
-      const settled = composing && eventType !== 'keydown' ? ta.value.slice(0, compStart) : ta.value
-      out = ime.input(data, { settled, eventType })
-      if ((eventType === 'keydown' || eventType === 'keypress') && isPlainText(data)) {
-        // The browser inserts a key's character (if at all) within the same
-        // task, so this only covers that key.
-        keyTextSent = true
-        setTimeout(() => { keyTextSent = false }, 0)
-      }
-    }
-    if (out) send(out)
-  })
-
   offData = window.api.ssh.onData((payload) => {
     if (payload.sessionId === props.sessionId) {
       term?.write(payload.data)
@@ -872,8 +776,12 @@ onBeforeUnmount(() => {
         @keydown.esc="onSearchEsc($event)"
         @input="runSearch(true)"
       />
-      <span v-if="searchBar.query" class="sb-count" :class="{ none: searchHits.count === 0 }">
-        {{ searchHits.count ? `${searchHits.index + 1}/${searchHits.count}` : '0/0' }}
+      <span v-if="searchBar.query" class="sb-count" :class="{ none: searchHits.count === 0 }" role="status" aria-live="polite">
+        {{
+          searchHits.count
+            ? `${searchHits.index >= 0 ? searchHits.index + 1 : '?'}/${searchHits.count}`
+            : '0/0'
+        }}
       </span>
       <button class="sb-btn case" :class="{ on: searchBar.caseSensitive }" :title="t('term.caseTip')" @click="toggleCase">Aa</button>
       <button class="sb-btn" :title="t('term.prevTip')" @click="runSearch(false)"><Icon name="chevron-up" :size="15" /></button>
@@ -932,6 +840,8 @@ onBeforeUnmount(() => {
   position: absolute;
   top: 10px;
   right: 16px;
+  /* Never wider than the pane: at ~355px it was clipped on any split. */
+  max-width: calc(100% - 32px);
   z-index: 60;
   display: flex;
   align-items: center;
@@ -943,7 +853,9 @@ onBeforeUnmount(() => {
   box-shadow: var(--shadow);
 }
 .sb-input {
+  flex: 1 1 auto;
   width: 180px;
+  min-width: 60px;
   height: 26px;
   padding: 0 8px;
   background: var(--bg);
@@ -960,7 +872,7 @@ onBeforeUnmount(() => {
   border-color: var(--danger);
 }
 .sb-count {
-  min-width: 40px;
+  min-width: 48px;
   padding: 0 2px;
   text-align: center;
   font-size: 11.5px;

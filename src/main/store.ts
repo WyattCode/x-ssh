@@ -2,6 +2,7 @@ import { app, safeStorage } from 'electron'
 import { join } from 'node:path'
 import { mkdir, copyFile } from 'node:fs/promises'
 import { parseJson, readDurable, writeDurable } from './durableFile'
+import { buildSshConfig } from '../shared/sshConfigExport'
 import type { Host, HostOs } from '../shared/types'
 
 /**
@@ -515,42 +516,13 @@ export class HostStore {
   }
 
   /** Builds an OpenSSH `~/.ssh/config` block from the saved hosts. Secrets are
-   *  NOT exported (identity files / agent are referenced, never embedded). */
+   *  NOT exported (identity files / agent are referenced, never embedded).
+   *  Aliases are made unique and values quoted in shared/sshConfigExport.ts —
+   *  duplicates used to collide (ProxyJump pointed at the wrong machine) and a
+   *  space in a path made ssh reject the entire file. */
   async exportSshConfig(): Promise<string> {
     await this.ensureLoaded()
     if (this.locked) throw new Error('app-locked')
-    const byId = new Map(this.hosts.map((h) => [h.id, h]))
-    const blocks = this.hosts.map((h) => {
-      const lines: string[] = [`Host ${this.configAlias(h)}`]
-      lines.push(`\tHostName ${h.host}`)
-      lines.push(`\tPort ${h.port || 22}`)
-      lines.push(`\tUser ${h.username}`)
-      if (h.auth === 'key' && h.keyPath) lines.push(`\tIdentityFile ${h.keyPath}`)
-      if (h.agentForward) lines.push(`\tForwardAgent yes`)
-      if (h.x11Forward) lines.push(`\tForwardX11 yes`)
-      if (h.jumpHostId) {
-        const j = byId.get(h.jumpHostId)
-        if (j) lines.push(`\tProxyJump ${this.configAlias(j)}`)
-      }
-      if (h.proxy && h.proxy.type === 'http') {
-        // Proxy credentials are NOT exported either — the config file gets
-        // shared/committed far more casually than the secrets store, and the
-        // comment above promises no secrets in here.
-        lines.push(`\t# ProxyCommand needs the proxy's credentials: fill in user:password yourself`)
-        lines.push(`\t# ProxyCommand connect-proxy -H user:password@${h.proxy.host}:${h.proxy.port} %h %p`)
-      }
-      if (h.onConnect) lines.push(`\tRemoteCommand ${h.onConnect.split('\n').join(' && ')}`)
-      if (h.group) lines.push(`\t# group: ${h.group}`)
-      return lines.join('\n')
-    })
-    return blocks.join('\n\n') + '\n'
-  }
-
-  /** A stable, unique alias for a host used in `Host` blocks / ProxyJump. Falls
-   *  back to `user@host` then the host itself when empty/duplicate. */
-  private configAlias(h: Host): string {
-    const base = h.label.trim() || (h.username ? `${h.username}@${h.host}` : h.host)
-    // Collapse to a single token; OpenSSH Host patterns are space-separated.
-    return base.replace(/[ \t]+/g, '-')
+    return buildSshConfig(this.hosts)
   }
 }

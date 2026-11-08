@@ -863,9 +863,15 @@ async function importSshConfig(): Promise<void> {
   }
   await store.loadHosts()
   await store.loadKnownHosts()
-  if (r.count > 0) toast(t('set.sec.importSshOk', { n: r.count }), 'success')
-  else toast(t('set.sec.importSshNone'), 'info')
-  toast(`${t('set.sec.imported')} ${r.count ?? 0} ${t('set.sec.hosts')}`, 'success')
+  if (r.count > 0) {
+    toast(t('set.sec.importSshOk', { n: r.count }), 'success')
+  } else if (!r.parsed) {
+    // "Imported 0" has two very different causes; naming them saves a support
+    // round-trip when the user just wrote ten hosts.
+    toast(t('set.sec.importSshNoHost'), 'info')
+  } else {
+    toast(t('set.sec.importSshAllKnown', { n: r.parsed }), 'info')
+  }
 }
 /** Maps the machine codes main returns for backup/restore into UI wording. */
 function backupErr(err: string | undefined, fallbackKey: 'set.sec.exportFail' | 'set.sec.importFail'): string {
@@ -1644,7 +1650,7 @@ function onLockPassEnter(e: KeyboardEvent): void {
                 <template v-if="store.lockEnabled">
                   <label class="row">
                     <div class="r-text"><span class="r-title">{{ t('lock.current') }}</span></div>
-                    <input v-model="currentPass" type="password" class="box text-in" autocomplete="current-password" :placeholder="t('lock.placeholder')" @keydown.enter="onLockPassEnter" />
+                    <input v-model="currentPass" type="password" class="box text-in" autocomplete="off" :placeholder="t('lock.placeholder')" @keydown.enter="onLockPassEnter" />
                   </label>
                   <div class="row actions-row">
                     <button v-if="store.lockLocked" class="btn sm btn-primary" :disabled="lockBusy" @click="unlockNow">{{ t('lock.unlock') }}</button>
@@ -1656,7 +1662,7 @@ function onLockPassEnter(e: KeyboardEvent): void {
                 </template>
                 <label v-else class="row">
                   <div class="r-text"><span class="r-title">{{ t('lock.new') }}</span></div>
-                  <input v-model="lockNewPass" type="password" class="box text-in" autocomplete="new-password" :placeholder="t('lock.placeholder')" @keydown.enter="onLockPassEnter" />
+                  <input v-model="lockNewPass" type="password" class="box text-in" autocomplete="off" :placeholder="t('lock.placeholder')" @keydown.enter="onLockPassEnter" />
                   <button class="btn sm btn-primary" :disabled="lockBusy" @click="saveMasterLock">{{ t('lock.save') }}</button>
                 </label>
               </div>

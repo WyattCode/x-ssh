@@ -1,328 +1,642 @@
 import { describe, it, expect } from 'vitest'
-import { createImeMirror, IME_MAX_UNDO } from './imeSync'
+import { createImeMirror, isImeText } from './imeSync'
 
 /**
- * Drives a mirror the way TerminalView does, and replays everything it sends
- * through a minimal line editor standing in for the remote input box.
+ * Replays the real chain:
+ *   - `xterm()` is `term.onData` → the mirror decides what to write, and the
+ *     app writes exactly that. (xterm does NOT send by itself; a revision of
+ *     this module assumed it did and swallowed every keystroke.)
+ *   - `sync()` is the DOM input / compositionend catch-up.
+ * Everything sent is replayed through a minimal line editor standing in for the
+ * remote shell.
  */
 function harness() {
   const mirror = createImeMirror()
+  const wire: string[] = []
   let value = ''
-  const sent: string[] = []
-  const emit = (data: string, eventType: string | undefined, settled = value): void => {
-    const out = mirror.input(data, { settled, eventType })
-    if (out) sent.push(out)
-  }
-  const remote = (): string => {
-    let line: string[] = []
-    for (const raw of sent) {
-      // Escape sequences (e.g. a cursor-position reply) never land in the line.
-      const s = raw.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
-      for (const ch of Array.from(s)) {
-        if (ch === '\x7f') line.pop()
-        else if (ch === '\r') line = []
-        else if (ch >= ' ') line.push(ch)
-      }
-    }
-    return line.join('')
+  const push = (s: string): void => {
+    if (s) wire.push(s)
   }
   return {
     mirror,
-    sent,
-    remote,
-    emit,
-    /** The IME committed text: the textarea now holds `v`, xterm emits `data`. */
-    commit(v: string, data: string, eventType: string | undefined = undefined) {
-      value = v
-      emit(data, eventType)
+    wire,
+    /** `term.onData`: the app sends whatever the mirror returns. */
+    xterm(data: string, opts: { eventType?: string; settled?: string } = {}): void {
+      push(
+        mirror.input(data, {
+          settled: opts.settled ?? value,
+          eventType: opts.eventType ?? 'input'
+        })
+      )
+    },
+    /** The input/compositionend catch-up path. */
+    sync(textarea = value): void {
+      push(mirror.sync(textarea))
+    },
+    remote(): string {
+      let line: string[] = []
+      for (const raw of wire) {
+        // A terminal consumes every escape sequence (CSI, OSC, ESC+char such as
+        // SS3 arrow keys, legacy mouse reports); none of them becomes line text.
+        const s = raw.replace(
+          /\x1b\[M[\s\S]{3}|\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1bO[\s\S]|\x1b[\s\S]/g,
+          ''
+        )
+        for (const ch of Array.from(s)) {
+          if (ch === '\x7f') line.pop()
+          else if (ch === '\r') line = []
+          else if (ch >= ' ' || ch === '\n') line.push(ch)
+        }
+      }
+      return line.join('')
     },
     set value(v: string) {
       value = v
     },
-    get value() {
+    get value(): string {
       return value
     }
   }
 }
 
-/** Deterministic PRNG so a failure is reproducible. */
-function rng(seed: number): (n: number) => number {
-  let s = seed >>> 0
-  return (n) => {
-    s = (Math.imul(s, 1664525) + 1013904223) >>> 0
-    return s % n
-  }
-}
-const ALPHABET = Array.from('ab你好，。😀')
-
-describe('createImeMirror (randomised)', () => {
-  it('never erases a character it did not send itself', () => {
-    for (let seed = 1; seed <= 300; seed++) {
-      const r = rng(seed)
-      const mirror = createImeMirror()
-      let ta = '' // xterm's textarea
-      const remote: { ch: string; mine: boolean }[] = []
-      const word = (): string =>
-        Array.from({ length: 1 + r(4) }, () => ALPHABET[r(ALPHABET.length)]).join('')
-      const apply = (out: string, mine: boolean): void => {
-        // Escape sequences (a query reply) are consumed, never part of the line.
-        for (const ch of Array.from(out.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, ''))) {
-          if (ch === '\x7f') {
-            const gone = remote.pop()
-            if (mine && gone && !gone.mine) {
-              throw new Error(`seed ${seed}: mirror erased ${JSON.stringify(gone.ch)} it never sent`)
-            }
-          } else {
-            remote.push({ ch, mine })
-          }
-        }
-      }
-      for (let step = 0; step < 40; step++) {
-        const op = r(10)
-        const chars = Array.from(ta)
-        if (op < 5) {
-          // The IME edits committed text: append, or replace any range.
-          const from = r(chars.length + 1)
-          const to = from + r(chars.length - from + 1)
-          ta = [...chars.slice(0, from), ...Array.from(word()), ...chars.slice(to)].join('')
-          const out = r(2)
-            ? mirror.input(word(), { settled: ta, eventType: r(2) ? 'input' : undefined })
-            : mirror.sync(ta)
-          apply(out, true)
-        } else if (op === 5) {
-          apply(mirror.input(word(), { settled: ta, eventType: 'keydown' }), false)
-        } else if (op === 6) {
-          apply(mirror.input('\x7f', { settled: ta, eventType: 'keydown' }), false)
-        } else if (op === 7) {
-          ta = word() // xterm writes the selection on right-click
-          mirror.adopt(ta)
-        } else if (op === 8) {
-          ta = '' // blur / Enter / paste
-          mirror.adopt(ta)
-        } else {
-          apply(mirror.input('\x1b[1;1R', { settled: ta, eventType: undefined }), false)
-        }
-      }
-    }
-  })
-
-  it('keeps the remote exactly equal to the textarea under pure IME editing', () => {
-    for (let seed = 1; seed <= 300; seed++) {
-      const r = rng(seed)
-      const mirror = createImeMirror()
-      let ta = ''
-      let line: string[] = []
-      for (let step = 0; step < 30; step++) {
-        const chars = Array.from(ta)
-        const from = r(chars.length + 1)
-        const to = from + r(chars.length - from + 1)
-        const ins = Array.from({ length: r(4) }, () => ALPHABET[r(ALPHABET.length)])
-        ta = [...chars.slice(0, from), ...ins, ...chars.slice(to)].join('')
-        const out = r(2) ? mirror.sync(ta) : mirror.input(ins.join('') || 'x', { settled: ta, eventType: 'input' })
-        for (const ch of Array.from(out)) {
-          if (ch === '\x7f') line.pop()
-          else line = [...line, ch]
-        }
-        expect(line.join(''), `seed ${seed} step ${step}`).toBe(ta)
-      }
-    }
-  })
-})
-
 describe('createImeMirror', () => {
-  it('sends an ordinary pinyin commit once', () => {
+  it('sends every plain keystroke', () => {
+    // The regression this guards: a revision returned '' for all plain text,
+    // so typing English produced nothing at all.
+    const m = createImeMirror()
+    // xterm cancels a plain key, so the textarea stays empty.
+    expect(m.input('a', { settled: '', eventType: 'keydown' })).toBe('a')
+    expect(m.input('hello', { settled: 'hello', eventType: 'input' })).toBe('hello')
+
     const h = harness()
-    h.commit('你', '你')
-    expect(h.sent).toEqual(['你'])
+    h.xterm('a', { eventType: 'keydown' })
+    h.xterm('b', { eventType: 'keydown' })
+    expect(h.remote()).toBe('ab')
   })
 
-  it('drops the second of xterm’s two emits for the same commit', () => {
+  it('sends control keys unchanged', () => {
+    const m = createImeMirror()
+    expect(m.input('\x1b[A', { settled: '', eventType: 'keydown' })).toBe('\x1b[A')
+    expect(m.input('\t', { settled: '', eventType: 'keydown' })).toBe('\t')
+    expect(m.input('\x03', { settled: '', eventType: 'keydown' })).toBe('\x03')
+    expect(m.input('\r', { settled: '', eventType: 'keydown' })).toBe('\r')
+  })
+
+  it('sends a typed word exactly once', () => {
     const h = harness()
-    h.commit('你好', '你好', 'input') // input-event path
-    h.emit('你好', undefined) // compositionend timer path, same text
+    h.value = 'ls'
+    h.xterm('l')
+    h.xterm('s')
+    h.xterm('\r', { eventType: 'keydown' })
+    expect(h.remote()).toBe('')
+    expect(h.wire.join('')).toBe('ls\r')
+  })
+
+  it('commits a dictated sentence once, not twice', () => {
+    const h = harness()
+    h.value = '你好'
+    h.xterm('你好')
+    // compositionend for the same text must not add a second copy.
+    h.sync('你好')
     expect(h.remote()).toBe('你好')
+    expect(h.wire).toEqual(['你好'])
   })
 
-  it('replaces a voice draft with its correction instead of appending it', () => {
+  it('does not duplicate consecutive dictated sentences', () => {
     const h = harness()
-    h.commit('我排查一下为什么这个', '我排查一下为什么这个')
-    // The IME rewrites the committed range; xterm emits the whole correction.
-    h.commit('我排查一下，为什么这个', '我排查一下，为什么这个', 'input')
-    expect(h.remote()).toBe('我排查一下，为什么这个')
-    // Only the changed tail was erased and resent.
-    expect(h.sent[1]).toBe('\x7f'.repeat(5) + '，为什么这个')
-  })
-
-  it('handles reconversion, where xterm emits only a fragment', () => {
-    const h = harness()
-    h.commit('我排查一下为什么这个', '我排查一下为什么这个')
-    h.commit('我排查一下，为什么这个', '个') // xterm's substring from the old length
-    expect(h.remote()).toBe('我排查一下，为什么这个')
-  })
-
-  it('appends consecutive dictated sentences', () => {
-    const h = harness()
-    h.commit('第一句。', '第一句。', 'input')
-    h.commit('第一句。第二句。', '第二句。', 'input')
+    // xterm never empties its textarea between commits: it accumulates.
+    h.value = '第一句。'
+    h.xterm('第一句。')
+    h.sync('第一句。')
+    h.value = '第一句。第二句。'
+    h.xterm('第二句。')
+    h.sync('第一句。第二句。')
     expect(h.remote()).toBe('第一句。第二句。')
   })
 
-  it('never erases text that was dictated before a manual keystroke', () => {
+  it('sends text xterm never emitted for the commit', () => {
+    // Some voice IMEs write straight into the textarea without an onData.
     const h = harness()
-    h.commit('hello', 'hello')
-    h.emit('x', 'keydown') // typed on the remote, not in the textarea
-    h.commit('Hello', 'Hello', 'input') // late correction of the earlier draft
-    expect(h.remote().startsWith('hellox')).toBe(true)
-    expect(h.sent.join('')).not.toContain('\x7f')
+    h.value = '接着说'
+    h.sync('接着说')
+    expect(h.remote()).toBe('接着说')
   })
 
-  it('keeps the untouchable prefix protected after a change that crossed it', () => {
+  it('does not resend a long dictation when the catch-up fires late', () => {
     const h = harness()
-    // Text the remote got some other way (e.g. right-click copy), kept in the
-    // textarea but never sent by the mirror.
-    h.value = 'abcdef'
-    h.mirror.adopt(h.value)
-    h.emit('Z', 'keydown') // something on the remote after it
-    // The IME rewrites inside the protected text, then rewrites its start.
-    h.commit('abXdef', 'abXdef', 'input')
-    h.commit('ABXdef', 'ABXdef', 'input')
-    // Only what the mirror itself sent ("Xdef") may ever be erased.
-    const erased = h.sent.join('').split('\x7f').length - 1
-    expect(erased).toBeLessThanOrEqual('Xdef'.length)
-    expect(h.remote().startsWith('Z')).toBe(true)
+    const sentence = '默认把 API key 写进去'
+    h.value = sentence
+    h.xterm(sentence)
+    h.value = sentence
+    h.sync(sentence)
+    expect(h.remote()).toBe(sentence)
   })
 
-  it('keeps correcting text dictated after a manual keystroke', () => {
+  it('starts a fresh line after Enter', () => {
     const h = harness()
-    h.commit('ab', 'ab')
-    h.emit('\x7f', 'keydown') // Backspace on the remote
-    h.commit('ab cd', ' cd', 'input')
-    h.commit('ab CD', 'ab CD', 'input')
-    expect(h.remote()).toBe('a CD')
+    h.value = '发送'
+    h.xterm('发送')
+    h.value = ''
+    h.xterm('\r', { eventType: 'keydown' })
+    h.value = '下一条'
+    h.xterm('下一条')
+    expect(h.remote()).toBe('下一条')
   })
 
-  it('starts fresh after Enter', () => {
+  it('tracks backspace so the catch-up sends only the new tail', () => {
     const h = harness()
-    h.commit('发送', '发送')
-    h.value = '' // xterm clears the textarea on Enter before emitting \r
-    h.emit('\r', 'keydown')
-    h.commit('下一条', '下一条')
-    expect(h.sent).toEqual(['发送', '\r', '下一条'])
+    h.value = '你好'
+    h.xterm('你好')
+    // A real backspace shortens the textarea too.
+    h.value = '你'
+    h.xterm('\x7f', { eventType: 'keydown' })
+    h.value = '你世'
+    h.sync('你世')
+    expect(h.remote()).toBe('你世')
+    expect(h.wire).toEqual(['你好', '\x7f', '世'])
   })
 
-  it('still corrects a draft after a timer-driven reply to a terminal query', () => {
-    // TUIs like opencode poll the cursor position constantly; xterm answers
-    // from a timer. That reply must not freeze the draft against correction.
-    const h = harness()
-    h.commit('我排查一下为什么这个', '我排查一下为什么这个')
-    h.emit('\x1b[5;10R', undefined)
-    h.commit('我排查一下，为什么这个', '我排查一下，为什么这个', 'input')
-    expect(h.remote()).toBe('我排查一下，为什么这个')
-    // The correction erased the draft tail rather than being appended whole.
-    expect(h.sent[2]).toBe('\x7f'.repeat(5) + '，为什么这个')
-  })
-
-  it('ignores the open composition when a reply arrives mid-composition', () => {
-    const h = harness()
-    h.commit('第一句', '第一句')
-    h.value = '第一句第二' // composition still open; settled is just 第一句
-    h.emit('\x1b[5;10R', undefined, '第一句')
-    h.commit('第一句第二句', '第二句')
-    expect(h.remote()).toBe('第一句第二句')
-  })
-
-  it('never sends text xterm wrote into the textarea on right-click', () => {
+  it('does not send text xterm wrote into the textarea on right-click', () => {
     const h = harness()
     h.value = 'selected output'
-    h.mirror.adopt(h.value)
-    // Typing over the selection replaces it.
-    h.commit('新', '新', 'input')
-    expect(h.sent).toEqual(['新'])
-    // Or, if the selection was lost, the IME appends to it.
-    const g = harness()
-    g.value = 'selected output'
-    g.mirror.adopt(g.value)
-    g.commit('selected output新', '新', 'input')
-    expect(g.sent).toEqual(['新'])
+    h.mirror.adopt('selected output')
+    h.value = 'selected output新'
+    h.xterm('新')
+    h.sync('selected output新')
+    expect(h.remote()).toBe('新')
   })
 
-  it('does not erase remote text after the textarea is emptied on blur', () => {
+  it('forgets the line after Ctrl+C', () => {
     const h = harness()
-    h.commit('第一段', '第一段')
-    h.value = ''
-    h.mirror.clear()
-    h.commit('第二段', '第二段')
-    expect(h.remote()).toBe('第一段第二段')
+    h.value = '输到一半'
+    h.xterm('输到一半')
+    h.xterm('\x03', { eventType: 'keydown' })
+    h.value = '新命令'
+    h.xterm('新命令')
+    h.value = '新命令补'
+    h.sync('新命令补')
+    expect(h.wire).not.toContain('新命令补')
   })
 
-  it('counts an astral character as one DEL', () => {
+  it('does not swallow a sentence that shares the previous ending', () => {
     const h = harness()
-    h.commit('好😀', '好😀')
-    h.commit('好🎉', '好🎉', 'input')
-    expect(h.sent[1]).toBe('\x7f🎉')
-    expect(h.remote()).toBe('好🎉')
+    h.value = '。'
+    h.xterm('。')
+    // A keystroke ends the dictation run, so the next sentence is not a
+    // correction of the previous one.
+    h.xterm('\r', { eventType: 'keydown' })
+    h.value = '第二句。'
+    h.sync('第二句。')
+    expect(h.remote()).toBe('第二句。')
   })
 
-  it('does not drop repeated keystrokes', () => {
+  it('appends a second dictation after the run was closed by typing', () => {
     const h = harness()
-    for (let i = 0; i < 3; i++) h.emit('a', 'keydown')
-    expect(h.remote()).toBe('aaa')
+    h.value = '检查一下磁盘'
+    h.sync('检查一下磁盘')
+    h.xterm(' ', { eventType: 'keydown' }) // the textarea is untouched by a typed key
+    h.value = '检查一下磁盘重启服务'
+    h.sync('检查一下磁盘重启服务')
+    expect(h.remote()).toBe('检查一下磁盘 重启服务')
   })
 
-  it('sync corrects a reconversion that got shorter, which xterm emits nothing for', () => {
+  it('replaces each intermediate draft a voice IME posts', () => {
+    // Real report: saying "对的，谢谢你" produced "对对对，谢谢你" because every
+    // intermediate draft ("对", "对对") was appended to the previous one.
     const h = harness()
-    h.commit('我排查一下为什么这个', '我排查一下为什么这个')
-    h.value = '我排查一下为何' // xterm's substring from the old length is empty
-    const out = h.mirror.sync(h.value)
-    h.sent.push(out)
-    expect(h.remote()).toBe('我排查一下为何')
-  })
-
-  it('sync sends voice text that xterm dropped', () => {
-    const h = harness()
-    h.value = '接着说' // committed, but xterm emitted nothing
-    h.sent.push(h.mirror.sync(h.value))
-    expect(h.remote()).toBe('接着说')
-    // If xterm does emit it afterwards, it is not sent twice.
-    h.emit('接着说', 'input')
-    expect(h.remote()).toBe('接着说')
-  })
-
-  it('sync is a no-op once xterm’s own emit has been mirrored', () => {
-    const h = harness()
-    h.commit('你好', '你好')
-    expect(h.mirror.sync('你好')).toBe('')
-  })
-
-  it('bounds the backspace burst when a long draft is rewritten', () => {
-    const h = harness()
-    const draft = '字'.repeat(2000)
-    h.commit(draft, draft)
-    // Rewriting the very first character would naively be 1999 DELs — the
-    // "it breaks once the dictation gets long" failure.
-    const fixed = '词' + draft.slice(1)
-    h.commit(fixed, fixed, 'input')
-    const out = h.sent[1]
-    const dels = out.split('\x7f').length - 1
-    expect(dels).toBeLessThanOrEqual(IME_MAX_UNDO)
-    expect(out.length).toBeLessThanOrEqual(IME_MAX_UNDO + fixed.length)
-  })
-
-  it('sends a long dictation one chunk at a time', () => {
-    const h = harness()
-    let value = ''
-    for (let i = 0; i < 200; i++) {
-      value += '字'
-      h.commit(value, '字', 'input')
+    for (const text of ['对', '对对', '对的，谢谢你']) {
+      h.value = text
+      h.sync(text)
     }
-    for (const out of h.sent) expect(out.length).toBeLessThanOrEqual(2)
-    expect(h.remote()).toBe(value)
+    expect(h.remote()).toBe('对的，谢谢你')
   })
 
-  it('passes control sequences through unchanged', () => {
+  it('never erases pasted text when a correction follows', () => {
     const h = harness()
-    h.emit('\x1b[A', 'keydown')
-    h.emit('\x03', 'keydown')
-    expect(h.sent).toEqual(['\x1b[A', '\x03'])
+    h.value = 'npm run build'
+    h.xterm('npm run build', { eventType: 'paste' })
+    // xterm empties the textarea after a paste.
+    h.mirror.clear()
+    h.value = 'npm run test'
+    h.sync('npm run test')
+    // The paste is not a dictation draft; it must survive.
+    expect(h.remote()).toBe('npm run buildnpm run test')
+  })
+
+  it('removes one character per backspace even for a surrogate pair', () => {
+    const h = harness()
+    h.value = '你好😀'
+    h.xterm('你好😀')
+    h.value = '你好'
+    h.xterm('\x7f', { eventType: 'keydown' })
+    h.value = '你好世界'
+    h.sync('你好世界')
+    // A stray DEL here would eat a character that belongs to the user.
+    expect(h.remote()).toBe('你好世界')
+  })
+
+  it('keeps the tracked line bounded during a very long line', () => {
+    const h = harness()
+    const chunk = '字'.repeat(1000)
+    for (let i = 0; i < 20; i++) {
+      h.value = chunk
+      h.xterm(chunk)
+    }
+    h.value = '尾巴'
+    h.sync('尾巴')
+    expect(h.remote().endsWith('尾巴')).toBe(true)
+  })
+
+  it('ignores a timer-driven reply instead of treating it as an edit', () => {
+    const h = harness()
+    h.value = '草稿'
+    h.xterm('\x1b[5;10R', { eventType: undefined, settled: '' })
+    h.value = '草稿完成'
+    h.xterm('草稿完成')
+    expect(h.remote()).toBe('草稿完成')
+  })
+
+  it('replaces the previous draft when the IME re-reads the audio', () => {
+    // Real report, screenshot 3: Doubao/WeChat re-read the whole sentence and
+    // post it again through onData. Both versions ended up on the line because
+    // the correction path only existed for the textarea catch-up.
+    const h = harness()
+    const draft = '二次审查代码检查 ui 细节检查'
+    const final = '审查代码二次审查代码，检查UI细节，检查Bug。'
+    h.value = draft
+    h.xterm(draft)
+    h.value = final
+    h.xterm(final)
+    expect(h.remote()).toBe(final)
+  })
+
+  it('sends only the new tail when the IME extends what it already sent', () => {
+    const h = harness()
+    h.value = '把日志'
+    h.xterm('把日志')
+    h.value = '把日志清理一下'
+    h.xterm('把日志清理一下')
+    expect(h.remote()).toBe('把日志清理一下')
+    expect(h.wire).toEqual(['把日志', '清理一下'])
+  })
+
+  it('appends when two dictations share no phrase', () => {
+    const h = harness()
+    h.value = '重启服务'
+    h.xterm('重启服务')
+    h.value = '重启服务查看磁盘'
+    h.xterm('查看磁盘')
+    // Nothing in common beyond a character → a new sentence, not a rewrite.
+    expect(h.remote()).toBe('重启服务查看磁盘')
+  })
+
+  it('replaces a draft that only changed punctuation', () => {
+    // Real report, screenshot 4 (plain shell): the second pass added a full
+    // stop and a comma, which is not a prefix of the first — it was appended.
+    const h = harness()
+    const draft = '你好，我今天希望吃饭，吃了饭之后再吃，首先其一'
+    const final = '你好，我今天希望吃饭，吃了饭之后再吃。首先，其一。'
+    h.value = draft
+    h.xterm(draft)
+    h.value = final
+    h.xterm(final)
+    expect(h.remote()).toBe(final)
+  })
+
+  it('only erases the part that differs', () => {
+    const h = harness()
+    h.value = 'abcdef中文结尾'
+    h.xterm('abcdef中文结尾')
+    h.value = 'abcdef中文收尾'
+    h.xterm('abcdef中文收尾')
+    expect(h.remote()).toBe('abcdef中文收尾')
+    // One erasure pair, not the whole sentence re-typed.
+    expect(h.wire[1]).toBe('\x7f\x7f收尾')
+  })
+
+  it('does not end the dictation when an arrow key is pressed', () => {
+    // TUI editing is full of arrow keys; clearing the draft on them made the
+    // next voice commit look like new text.
+    const h = harness()
+    h.value = '第一版'
+    h.xterm('第一版')
+    h.xterm('\x1b[A', { eventType: 'keydown' })
+    h.value = '第一版改'
+    h.xterm('第一版改')
+    expect(h.remote()).toBe('第一版改')
+  })
+
+  it('keeps a long dictation in step as it grows', () => {
+    const h = harness()
+    let line = ''
+    for (let i = 0; i < 60; i++) {
+      line += '字'
+      // Each commit is the whole draft, one character longer than the last.
+      h.value = line
+      h.xterm(line)
+    }
+    expect(h.remote()).toBe(line)
+    // Only the character that was actually new goes on the wire.
+    expect(h.wire.every((s) => s === '字')).toBe(true)
+  })
+
+  // ---- voice IME corrections: the draft is REPLACED, not appended ----
+
+  it('replaces a voice draft the IME rewrote', () => {
+    // Real report, screenshot 1.
+    const h = harness()
+    h.value = '杀青的时候四 g 卡片页有时候会位移修'
+    h.sync(h.value)
+    expect(h.remote()).toBe('杀青的时候四 g 卡片页有时候会位移修')
+
+    h.value = '刷新的时候，4G卡片页有时候会位移，修复一下。'
+    h.sync(h.value)
+    // Before the fix this was draft + final on one line.
+    expect(h.remote()).toBe('刷新的时候，4G卡片页有时候会位移，修复一下。')
+  })
+
+  it('replaces a draft that was committed through onData', () => {
+    // Same failure, but xterm emitted the draft before the correction arrived.
+    const h = harness()
+    const draft = '刷新的时候四 g 卡片页会位移偶尔会位移的问题检查修复'
+    h.value = draft
+    h.xterm(draft)
+    h.value = '刷新的时候，4G卡片页会位移。偶尔位移的问题，检查修复一下。'
+    h.sync('刷新的时候，4G卡片页会位移。偶尔位移的问题，检查修复一下。')
+    expect(h.remote()).toBe('刷新的时候，4G卡片页会位移。偶尔位移的问题，检查修复一下。')
+  })
+
+  it('handles repeated corrections of the same draft', () => {
+    const h = harness()
+    for (const text of ['你好世界这是草稿', '你好世界这是最终的句子', '你好世界，这是最终句。']) {
+      h.value = text
+      h.sync(text)
+    }
+    expect(h.remote()).toBe('你好世界，这是最终句。')
+  })
+
+  it('never erases hand-typed text when a correction follows', () => {
+    const h = harness()
+    for (const ch of 'ls /var/log') h.xterm(ch, { eventType: 'keydown', settled: '' })
+    // A new dictation run starts after keyboard input.
+    h.value = '看看最近的错误'
+    h.sync('看看最近的错误')
+    h.value = '看看最近的报错'
+    h.sync('看看最近的报错')
+    expect(h.remote()).toBe('ls /var/log看看最近的报错')
+  })
+
+  it('appends when the IME extends the same draft', () => {
+    const h = harness()
+    h.value = '默认把 API key'
+    h.sync('默认把 API key')
+    h.value = '默认把 API key 写进去'
+    h.sync('默认把 API key 写进去')
+    expect(h.remote()).toBe('默认把 API key 写进去')
+  })
+})
+
+// The textarea is NOT the remote line: xterm leaves it alone between commits, so
+// it accumulates every version a voice IME posts. These replay the sequences
+// real Chromium produced (see scripts/ime-e2e) — the earlier tests above model
+// a textarea that only ever holds the current draft, which is why six fixes
+// passed them and still duplicated on a real machine.
+describe('createImeMirror with an accumulating textarea', () => {
+  const V1 = '你好，我今天希望吃饭，吃了饭之后再吃，首先其一'
+  const V2 = '你好，我今天希望吃饭，吃了饭之后再吃。首先，其一。'
+
+  it('does not undo a correction when the catch-up reports the whole textarea', () => {
+    // The bug: onData(V2) rewrote V1 → V2, then the input/compositionend
+    // catch-up saw the textarea "V1V2" and "corrected" the line into V1+V2.
+    const h = harness()
+    h.value = V1
+    h.xterm(V1)
+    h.sync(V1)
+    h.value = V1 + V2
+    h.xterm(V2)
+    h.sync(V1 + V2)
+    h.sync(V1 + V2) // compositionend fires too
+    expect(h.remote()).toBe(V2)
+  })
+
+  it('applies a correction exactly once however many events report it', () => {
+    const h = harness()
+    h.value = V1
+    h.sync(V1)
+    h.value = V1 + V2
+    h.sync(V1 + V2)
+    h.sync(V1 + V2)
+    h.xterm(V2) // xterm's own timer-driven report arrives last
+    expect(h.remote()).toBe(V2)
+  })
+
+  it('follows an in-place edit of the textarea instead of appending', () => {
+    const h = harness()
+    h.value = V1
+    h.xterm(V1)
+    h.value = V2
+    // xterm's payload for a composition that replaced text in place is an
+    // arbitrary fragment of the new value; the textarea is what counts.
+    h.xterm(V2.slice(V1.length - 4), { eventType: undefined })
+    h.sync(V2)
+    expect(h.remote()).toBe(V2)
+  })
+
+  it('keeps the draft when the IME deletes the textarea before re-inserting', () => {
+    const h = harness()
+    h.value = V1
+    h.xterm(V1)
+    h.value = ''
+    h.mirror.track('') // an IME deletion must not end the dictation run
+    h.value = V2
+    h.xterm(V2)
+    h.sync(V2)
+    expect(h.remote()).toBe(V2)
+  })
+
+  it('resolves 对 / 对对 / 对的，谢谢你 when the IME edits its draft in place', () => {
+    const h = harness()
+    for (const text of ['对', '对对', '对的，谢谢你']) {
+      h.value = text
+      h.xterm(text)
+      h.sync(text)
+    }
+    expect(h.remote()).toBe('对的，谢谢你')
+  })
+
+  it('leaves the line alone when xterm empties the textarea', () => {
+    const h = harness()
+    h.value = '第一句。'
+    h.xterm('第一句。')
+    h.mirror.clear() // Enter / blur
+    h.value = '第二句。'
+    h.sync('第二句。')
+    expect(h.remote()).toBe('第一句。第二句。')
+  })
+
+  it('does not resend the textarea after a Ctrl+U that left it intact', () => {
+    const h = harness()
+    h.value = '清空这一行'
+    h.xterm('清空这一行')
+    h.xterm('', { eventType: 'keydown' })
+    h.value = '清空这一行新的内容'
+    h.sync('清空这一行新的内容')
+    // (the line editor stand-in ignores Ctrl+U, so look at the wire)
+    expect(h.wire).toEqual(['清空这一行', '', '新的内容'])
+  })
+
+  it('counts a surrogate pair as one character when erasing a replaced tail', () => {
+    const h = harness()
+    h.value = '今天天气好😀'
+    h.sync('今天天气好😀')
+    h.value = '今天天气好呀'
+    h.sync('今天天气好呀')
+    expect(h.remote()).toBe('今天天气好呀')
+  })
+})
+
+describe('createImeMirror with a tidied-up (multi-line) dictation', () => {
+  // Doubao "智能文字整理": a model restructures the draft into lines and lists.
+  const V1 = '你好啊，我有三个想法，第一呢吃个饭，第二呢吃冰棍，第三呢再吃'
+  const V2 = '你好啊，我有三个想法：\n1. 吃个饭。\n2. 吃冰棍。\n3. 再吃个饭。'
+
+  it('replaces the draft with the restructured text instead of stacking both', () => {
+    // Real report: V1 stayed on the line and V2 (with its line breaks) was
+    // appended, because a payload containing a line break was treated as a
+    // control key.
+    const h = harness()
+    h.value = V1
+    h.xterm(V1)
+    h.value = V1 + V2
+    h.xterm(V2)
+    h.sync(V1 + V2)
+    expect(h.remote()).toBe(V2)
+  })
+
+  it('replaces it when the IME edits the textarea in place', () => {
+    const h = harness()
+    h.value = V1
+    h.xterm(V1)
+    h.value = V2
+    h.xterm(V2)
+    h.sync(V2)
+    expect(h.remote()).toBe(V2)
+  })
+
+  it('does not re-apply the later lines of one multi-line insertion', () => {
+    // Chromium writes the whole text into the textarea at once, then fires one
+    // input event per line; xterm reports each line as its own payload while the
+    // textarea already holds everything. Real trace: the 2nd line used to be
+    // treated as new text and cost 27 backspaces plus a stray copy.
+    const h = harness()
+    h.value = V1
+    h.xterm(V1)
+    h.value = V1 + V2
+    const lines = V2.split('\n')
+    h.xterm(lines[0])
+    for (const line of lines.slice(1)) h.xterm(line)
+    h.sync(V1 + V2)
+    expect(h.remote()).toBe(V2)
+    expect(h.wire.join('').match(/\x7f/g)?.length).toBe(Array.from(V1).length - Array.from('你好啊，我有三个想法').length)
+  })
+
+  it('still sends a bare Enter as a key', () => {
+    const h = harness()
+    expect(h.mirror.input('\r', { settled: '', eventType: 'keydown' })).toBe('\r')
+    expect(h.mirror.input('\r', { settled: '', eventType: undefined })).toBe('\r')
+  })
+})
+
+describe('createImeMirror with the real Doubao flow', () => {
+  // Device trace: a fake key (keyCode 252) mid-dictation makes xterm finish the
+  // composition and send the UNTIDIED draft as eventType 'keydown'; later the
+  // tidied text replaces it in the textarea and arrives from a timer.
+  const DRAFT = '今天我要吃个饭，第一我要吃米饭，第二，我要吃土豆，第三我要吃水饺，第四我要吃番茄，第五我要吃'
+  const TIDY = '今天我要吃个饭：\n1. 米饭\n2. 土豆\n3. 水饺\n4. 番茄\n5. 猪肉'
+
+  it('erases a draft that went out as keydown text when the tidy-up replaces it', () => {
+    // Without a line-based erase check this was "append the new tail, keep the old
+    // one": the keydown path ends the dictation run, so the draft looked hand-typed.
+    const h = harness()
+    h.value = DRAFT
+    h.xterm(DRAFT, { eventType: 'keydown' })
+    h.value = TIDY
+    h.xterm(TIDY, { eventType: undefined })
+    h.sync(TIDY) // compositionend catch-up
+    expect(h.remote()).toBe(TIDY)
+    const dels = h.wire.join('').match(/\x7f/g)?.length
+    expect(dels).toBe(Array.from(DRAFT).length - Array.from('今天我要吃个饭').length)
+  })
+
+  it('still erases it after mouse and focus reports arrived in between', () => {
+    // A TUI with mouse tracking reports every pointer move through onData. Their
+    // printable tails ("[<35;12;5M") used to be recorded as line text, so the
+    // line no longer ended with the draft and the correction was only appended.
+    const h = harness()
+    h.value = DRAFT
+    h.xterm(DRAFT, { eventType: 'keydown' })
+    for (const report of ['\x1b[<35;12;5M', '\x1b[<35;13;6M', '\x1b[I', '\x1b[12;40R', '\x1b]10;rgb:e6e6/e8e8/ecec\x1b\\'])
+      h.xterm(report, { eventType: 'mousemove' })
+    h.value = TIDY
+    h.xterm(TIDY, { eventType: undefined })
+    expect(h.remote()).toBe(TIDY)
+  })
+
+  it('does not record arrow keys as text, and does not end the run for them', () => {
+    const h = harness()
+    h.value = V1x
+    h.xterm(V1x)
+    h.xterm('\x1b[A', { eventType: 'keydown' })
+    h.xterm('\x1bOD', { eventType: 'keydown' })
+    h.value = V1x + '补充一句'
+    h.xterm('补充一句')
+    expect(h.remote()).toBe(V1x + '补充一句')
+  })
+})
+
+const V1x = '把日志目录清理一下'
+
+describe('createImeMirror telling dictation from paste', () => {
+  it('never takes a multi-line paste for dictation (CR is a paste, LF is dictation)', () => {
+    expect(isImeText('第一行\n第二行')).toBe(true)
+    expect(isImeText('第一行\r第二行')).toBe(false)
+    expect(isImeText('\x1b[<35;1;1M')).toBe(false)
+    expect(isImeText('\r')).toBe(false)
+  })
+
+  it('does not let a pasted line that resembles the draft erase the draft', () => {
+    const h = harness()
+    h.value = '你好世界这是草稿'
+    h.xterm('你好世界这是草稿')
+    // The app's own paste arrives with eventType 'paste' (the bridge forces it).
+    h.xterm('你好世界这是粘贴', { eventType: 'paste' })
+    expect(h.remote()).toBe('你好世界这是草稿你好世界这是粘贴')
+    expect(h.wire.join('')).not.toContain('\x7f')
+  })
+
+  it('ends the line for a paste that carries a line break, so nothing later erases across it', () => {
+    const h = harness()
+    h.value = '先说一句话'
+    h.xterm('先说一句话')
+    h.xterm('echo a\recho b', { eventType: 'paste' })
+    h.value = '先说一句话新的内容'
+    h.sync('先说一句话新的内容')
+    expect(h.wire.join('')).not.toContain('\x7f')
+  })
+})
+
+describe('createImeMirror erasing a replaced tail', () => {
+  it('erases even when the draft record was reset by a paste in between', () => {
+    // Real report: the front of the line survived, the old tail stayed, and the
+    // new tail was appended after it — the replacement was seen but not applied.
+    const h = harness()
+    const V1 = '你好啊，现在说话你会觉得我会可能产生重复吗'
+    const V2 = '你好啊，现在说话，你会觉得我会可能产生重复吗？'
+    h.value = V1
+    h.xterm(V1)
+    h.xterm('', { eventType: 'paste' }) // clears the draft record, line is unchanged
+    h.value = V2
+    h.sync(V2)
+    expect(h.remote()).toBe(V2)
   })
 })

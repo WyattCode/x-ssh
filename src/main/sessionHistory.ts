@@ -33,17 +33,21 @@ export const TRUNCATION_MARK = '\n…(older output omitted)\n'
  */
 export function trimEntry(text: string, maxBytes = HISTORY_ENTRY_BYTES): string {
   if (Buffer.byteLength(text, 'utf8') <= maxBytes) return text
-  const budget = Math.max(0, maxBytes - Buffer.byteLength(TRUNCATION_MARK, 'utf8'))
-  // Assume the best case (1 byte per UTF-16 unit) and walk forward until the
-  // tail fits. The old `maxBytes / 4` guess silently kept a quarter of the
-  // budget for ASCII text — the most common case — so 64 KB became 16 KB.
-  let start = Math.max(0, text.length - budget)
-  while (start < text.length && Buffer.byteLength(text.slice(start), 'utf8') > budget) start++
-  // Never start in the middle of a surrogate pair (an emoji would render as
-  // U+FFFD and the JSON round-trip would keep the replacement char).
-  const unit = text.charCodeAt(start)
-  if (start > 0 && unit >= 0xdc00 && unit <= 0xdfff) start++
-  return TRUNCATION_MARK + text.slice(start)
+  const markBytes = Buffer.byteLength(TRUNCATION_MARK, 'utf8')
+  const budget = Math.max(0, maxBytes - markBytes)
+  // Work on bytes, not UTF-16 units. The previous version advanced one
+  // character at a time and re-measured the whole tail each time — O(n²):
+  // a 256 KB Chinese buffer took ~44k iterations and over a second, which is
+  // what froze the main process for tens of seconds while trimming history at
+  // startup and on quit.
+  const buf = Buffer.from(text, 'utf8')
+  if (buf.length <= budget) return TRUNCATION_MARK + text
+  let start = buf.length - budget
+  // Step forward to a UTF-8 character boundary (continuation bytes match
+  // 10xxxxxx). That also keeps surrogate pairs intact, since it never lands
+  // inside a multi-byte sequence.
+  while (start < buf.length && (buf[start] & 0xc0) === 0x80) start++
+  return TRUNCATION_MARK + buf.subarray(start).toString('utf8')
 }
 
 /**

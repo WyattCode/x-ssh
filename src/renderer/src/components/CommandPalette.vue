@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, toRaw, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useFocusTrap } from '../composables/focusTrap'
 const trapEl = ref<HTMLElement>()
 useFocusTrap(trapEl, () => store.paletteOpen)
 import { useSessions } from '../stores/sessions'
 import { fuzzyScore, fuzzyMatch } from '../lib/fuzzy'
+import { toPlain } from '../lib/plain'
 import { paletteHostScore } from '../lib/paletteHostScore'
 import { parseTarget } from '../lib/target'
 import { isImeKey } from '../lib/ime'
@@ -287,7 +288,7 @@ async function importSshConfig(): Promise<void> {
   const res = await window.api.hosts.importSshConfig()
   if (!res.ok) {
     toast(
-      res.error === 'missing-config' ? t('set.sec.importSshMissing') : (res.error ?? t('set.sec.importFail')),
+      res.error === 'ssh-config-missing' ? t('set.sec.importSshMissing') : (res.error ?? t('set.sec.importFail')),
       'error'
     )
     return
@@ -295,8 +296,13 @@ async function importSshConfig(): Promise<void> {
   store.togglePalette(false)
   await store.loadHosts()
   await store.loadKnownHosts()
-  if (res.count > 0) toast(t('set.sec.importSshOk', { n: res.count }), 'success')
-  else toast(t('set.sec.importSshNone'), 'info')
+  if (res.count > 0) {
+    toast(t('set.sec.importSshOk', { n: res.count }), 'success')
+  } else if (!res.parsed) {
+    toast(t('set.sec.importSshNoHost'), 'info')
+  } else {
+    toast(t('set.sec.importSshAllKnown', { n: res.parsed }), 'info')
+  }
 }
 watch(
   () => store.paletteOpen,
@@ -399,7 +405,7 @@ async function submitPassword(): Promise<void> {
       const h = store.hosts.find((x) => x.id === params.hostId)
       if (h) {
         try {
-          store.hosts = await window.api.hosts.save({ ...toRaw(h) }, password.value)
+          store.hosts = await window.api.hosts.save(toPlain(h), password.value)
         } catch {
           // Remembering it is a convenience; connect anyway and say why it
           // wasn't saved instead of dropping the connect on the floor.
@@ -530,6 +536,7 @@ function onKey(e: KeyboardEvent): void {
           v-model="password"
           type="password"
           class="search"
+          autocomplete="off"
           :placeholder="t('pal.pwPlaceholder')"
         />
         <label v-if="pending.params.hostId" class="pw-remember">

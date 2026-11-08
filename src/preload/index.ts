@@ -66,8 +66,15 @@ const api = {
     save: (host: Host, password?: string, passphrase?: string): Promise<Host[]> =>
       ipcRenderer.invoke(IPC.hostsSave, host, password, passphrase),
     delete: (id: string): Promise<Host[]> => ipcRenderer.invoke(IPC.hostsDelete, id),
-    importSshConfig: (): Promise<{ ok: boolean; count: number; error?: string }> =>
-      ipcRenderer.invoke(IPC.hostsImportSshConfig),
+    importSshConfig: (): Promise<{
+      ok: boolean
+      count: number
+      /** Host blocks found in the config (after Include expansion). */
+      parsed?: number
+      /** Blocks skipped because they were already in the list. */
+      skipped?: number
+      error?: string
+    }> => ipcRenderer.invoke(IPC.hostsImportSshConfig),
     exportJson: (): Promise<{ ok: boolean; count?: number; canceled?: boolean; error?: string }> =>
       ipcRenderer.invoke(IPC.hostsExportJson),
     exportSshConfig: (): Promise<{ ok: boolean; canceled?: boolean; error?: string }> =>
@@ -155,6 +162,11 @@ const api = {
       ipcRenderer.invoke(IPC.localReadText, path),
     pickFile: (): Promise<{ ok: boolean; path?: string; canceled?: boolean; error?: string }> =>
       ipcRenderer.invoke(IPC.localPickFile)
+  },
+  /** Voice-input diagnostics (off by default; see main/imeTrace.ts). */
+  ime: {
+    traceEnabled: (): Promise<boolean> => ipcRenderer.invoke(IPC.imeTraceEnabled),
+    trace: (line: string): void => ipcRenderer.send(IPC.imeTrace, line)
   },
   ssh: {
     connect: (params: ConnectParams): Promise<ConnectResult> =>

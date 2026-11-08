@@ -14,6 +14,7 @@ import {
 } from '../lib/transferFormat'
 import { sftpErrorText } from '../lib/sftpError'
 import { globMatch } from '../lib/glob'
+import { toPlain } from '../lib/plain'
 import { isImeKey } from '../lib/ime'
 import { pruneSelection } from '../lib/selectionPrune'
 import { useFocusTrap } from '../composables/focusTrap'
@@ -388,85 +389,101 @@ function fmtLocalTime(ms?: number): string {
 }
 
 // ---- interrupted-transfer resume queue ----
-const showResume = ref(false)
+/** Guards both resume buttons: a long queue takes many seconds, and a second
+ *  click used to re-send the whole batch. */
+const resuming = ref(false)
 async function resumePending(): Promise<void> {
-  if (!props.sessionId) return
-  const ops = [...store.transferQueue]
+  if (!props.sessionId || resuming.value) return
+  // Spread only unwraps the OUTER array: each element is still a Pinia proxy,
+  // and so are its `localPaths`. Electron's structured clone rejects proxies,
+  // so the resume button did nothing at all (the promise rejected in the
+  // renderer, before main ever saw the call).
+  const ops = toPlain([...store.transferQueue])
   const keep: TransferOp[] = []
   let failed = 0
-  let lastErr = ''
-  for (const op of ops) {
-    const r = await window.api.sftp.uploadPaths(props.sessionId, op.remoteDir, op.localPaths, store.transferConcurrency)
-    if (!r.ok && !r.canceled) {
-      // Don't abort the whole resume on the first failure — skip this op and
-      // keep trying the remaining queued uploads. Failed ops stay queued so a
-      // later resume can retry (same policy as resumeDownloads).
-      failed++
-      lastErr = r.error ?? tt('sfp.uploadFail')
-      keep.push(op)
-      lastErr = sftpErr(r.error, 'sfp.uploadFail')
-      continue
+  resuming.value = true
+  try {
+    for (const op of ops) {
+      const r = await window.api.sftp.uploadPaths(props.sessionId, op.remoteDir, op.localPaths, store.transferConcurrency)
+      if (!r.ok && !r.canceled) {
+        // Don't abort the whole resume on the first failure — skip this op and
+        // keep trying the remaining queued uploads. Failed ops stay queued so a
+        // later resume can retry (same policy as resumeDownloads).
+        failed++
+        keep.push(op)
+      }
     }
-  }
-  if (keep.length) await store.setTransferQueue(keep)
-  else await store.clearTransferQueue()
-  showResume.value = store.transferQueue.length > 0 || store.downloadQueue.length > 0
-  if (failed > 0) {
-    error.value = tt('sfp.resumePartial', { n: failed })
-    if (lastErr) toast(lastErr, 'error')
+    if (keep.length) await store.setTransferQueue(keep)
+    else await store.clearTransferQueue()
+    // Report through a toast: writing to `error` replaced the remote file list
+    // with a red banner that looked like the directory had failed to load.
+    if (failed > 0) toast(tt('sfp.resumePartial', { n: failed }), 'error')
+    else if (ops.length) toast(tt('sfp.resumeDone', { n: ops.length }), 'success')
+  } finally {
+    resuming.value = false
   }
 }
 async function resumeDownloads(): Promise<void> {
-  if (!props.sessionId) return
-  const ops = [...store.downloadQueue]
+  if (!props.sessionId || resuming.value) return
+  // Same as resumePending: the elements (and their `items`) are proxies.
+  const ops = toPlain([...store.downloadQueue])
   const keep: DownloadQueueOp[] = []
   let failed = 0
-  // A reconnect gives the pane a new session id, so ops map through hostId to
-  // whichever session that host has live now; ops whose host is still offline
-  // stay queued instead of being silently dropped.
-  const liveSidFor = (hostId?: string): string | undefined => {
-    if (!hostId) return undefined
-    for (const t of store.tabs) {
-      const pane = t.panes.find((x) => x.params.hostId === hostId && x.sshSessionId)
-      if (pane) return pane.sshSessionId
-    }
-    return undefined
-  }
-  for (const op of ops) {
-    let sid = op.sessionId
-    if (!store.paneBySession(sid)) {
-      const mapped = liveSidFor(op.hostId)
-      if (!mapped) {
-        keep.push(op)
-        continue
+  /** Ops that actually ran — a queue kept because its host is offline is not
+   *  a success, and reporting one made the banner look broken. */
+  let resumed = 0
+  resuming.value = true
+  try {
+    // A reconnect gives the pane a new session id, so ops map through hostId to
+    // whichever session that host has live now; ops whose host is still offline
+    // stay queued instead of being silently dropped.
+    const liveSidFor = (hostId?: string): string | undefined => {
+      if (!hostId) return undefined
+      for (const t of store.tabs) {
+        const pane = t.panes.find((x) => x.params.hostId === hostId && x.sshSessionId)
+        if (pane) return pane.sshSessionId
       }
-      sid = mapped
+      return undefined
     }
-    // Resumes into the recorded local directory; partial files are picked up by
-    // downloadJob. A per-op failure is skipped, not fatal to the rest. The user
-    // already chose to download these, so a second overwrite prompt (which also
-    // blocked the resume forever when nobody was at the keyboard) is skipped.
-    const r = await window.api.sftp.downloadTo(sid, op.items, op.localDir, store.transferConcurrency, true)
-    if (!r.ok && !r.canceled) {
-      failed++
-      keep.push(op)
+    for (const op of ops) {
+      let sid = op.sessionId
+      if (!store.paneBySession(sid)) {
+        const mapped = liveSidFor(op.hostId)
+        if (!mapped) {
+          keep.push(op)
+          continue
+        }
+        sid = mapped
+      }
+      // Resumes into the recorded local directory; partial files are picked up
+      // by downloadJob. A per-op failure is skipped, not fatal to the rest. The
+      // user already chose to download these, so a second overwrite prompt
+      // (which also blocked the resume forever when nobody was at the keyboard)
+      // is skipped.
+      const r = await window.api.sftp.downloadTo(sid, op.items, op.localDir, store.transferConcurrency, true)
+      resumed++
+      if (!r.ok && !r.canceled) {
+        failed++
+        keep.push(op)
+      }
     }
+    if (keep.length) await store.setDownloadQueue(keep)
+    else await store.clearDownloadQueue()
+    // Only the ops that ran count; the rest are waiting for their host.
+    if (failed > 0) toast(tt('sfp.resumeDownloadPartial', { n: failed }), 'error')
+    else if (resumed > 0) toast(tt('sfp.resumeDone', { n: resumed }), 'success')
+  } finally {
+    resuming.value = false
   }
-  if (keep.length) await store.setDownloadQueue(keep)
-  else await store.clearDownloadQueue()
-  showResume.value = store.downloadQueue.length > 0
-  if (failed > 0) toast(tt('sfp.resumeDownloadPartial', { n: failed }), 'error')
 }
-// Discarding a queue is a settings write: if main refuses it the store rolls
-// the queue back, so the bar must be recomputed from the queues afterwards
-// instead of being hidden optimistically.
+/** Discarding drops the record of what is unfinished — it cannot be undone. */
 async function discardTransferQueue(): Promise<void> {
+  if (!(await confirm(tt('sfp.discardConfirm')))) return
   await store.clearTransferQueue()
-  showResume.value = store.transferQueue.length > 0 || store.downloadQueue.length > 0
 }
 async function discardDownloadQueue(): Promise<void> {
+  if (!(await confirm(tt('sfp.discardConfirm')))) return
   await store.clearDownloadQueue()
-  showResume.value = store.transferQueue.length > 0 || store.downloadQueue.length > 0
 }
 // dragenter/leave bubble from child rows; count depth so the drop highlight
 // doesn't flicker off while the pointer crosses children.
@@ -725,7 +742,6 @@ watch(
   }
 )
 onMounted(() => {
-  showResume.value = store.transferQueue.length > 0 || store.downloadQueue.length > 0
   // Tracking/notification/history are handled globally in the store so they run
   // even when this drawer is closed. Idempotent, so calling it here too is safe.
   store.initSftpProgress()
@@ -1626,7 +1642,9 @@ async function retryHistory(h: TransferHistoryItem): Promise<void> {
   // (mirrors resumeDownloads; partials resume inside downloadJob).
   const r = await window.api.sftp.downloadTo(
     props.sessionId,
-    buildRetryItems(h),
+    // A multi-file history entry hands back the reactive `items` array, which
+    // cannot cross IPC — the retry silently rejected with no toast.
+    toPlain(buildRetryItems(h)),
     h.localDir,
     store.transferConcurrency,
     true
@@ -1813,7 +1831,7 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
                visible instead of being clipped without an ellipsis. -->
           <div v-else class="crumbs" :title="path" @dblclick="startPathEdit">
             <template v-for="(c, i) in crumbs" :key="c.full">
-              <button class="crumb" :class="{ last: i === crumbs.length - 1 }" @click="load(c.full)">{{ c.label }}</button>
+              <button class="crumb" :class="{ last: i === crumbs.length - 1 }" :title="c.full" @click="load(c.full)">{{ c.label }}</button>
               <Icon v-if="i < crumbs.length - 1" name="chevron-right" :size="12" class="sep" />
             </template>
           </div>
@@ -1834,18 +1852,24 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
       </div>
     </header>
 
-    <div v-if="showResume && (store.transferQueue.length || store.downloadQueue.length)" class="resume-bar">
+    <!-- Driven by the queues themselves: the old cached flag was only set on mount,
+       so an upload that failed later never showed this bar. -->
+    <div v-if="store.transferQueue.length || store.downloadQueue.length" class="resume-bar">
       <template v-if="store.transferQueue.length">
         <Icon name="upload" :size="14" />
         <span class="grow">{{ tt('sfp.resumeHint', { n: store.transferQueue.length }) }}</span>
-        <button class="btn sm btn-primary" @click="resumePending">{{ tt('sfp.resume') }}</button>
-        <button class="btn sm" @click="discardTransferQueue">{{ tt('sfp.discard') }}</button>
+        <button class="btn sm btn-primary" :disabled="resuming" @click="resumePending">
+          {{ resuming ? tt('sfp.resuming') : tt('sfp.resume') }}
+        </button>
+        <button class="btn sm" :disabled="resuming" @click="discardTransferQueue">{{ tt('sfp.discard') }}</button>
       </template>
       <template v-if="store.downloadQueue.length">
         <Icon name="download" :size="14" />
         <span class="grow">{{ tt('sfp.resumeDownloadHint', { n: store.downloadQueue.length }) }}</span>
-        <button class="btn sm btn-primary" @click="resumeDownloads">{{ tt('sfp.resumeDownload') }}</button>
-        <button class="btn sm" @click="discardDownloadQueue">{{ tt('sfp.discard') }}</button>
+        <button class="btn sm btn-primary" :disabled="resuming" @click="resumeDownloads">
+          {{ resuming ? tt('sfp.resuming') : tt('sfp.resumeDownload') }}
+        </button>
+        <button class="btn sm" :disabled="resuming" @click="discardDownloadQueue">{{ tt('sfp.discard') }}</button>
       </template>
     </div>
 
@@ -1989,7 +2013,10 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
             <button class="ib sm" :title="tt('sfp.home')" :disabled="localLoading" @click="localGoHome"><Icon name="home" :size="14" /></button>
           </template>
           <template v-else>
-            <span class="pb-title">{{ tt('sfp.localTitle') }}</span>
+            <!-- An icon instead of the word: this bar is already tight, and
+                 adding the home button pushed the path (and the last toolbar
+                 button) out of the pane. -->
+            <span class="pb-ic" :title="tt('sfp.localTitle')"><Icon name="monitor" :size="14" /></span>
             <button class="ib sm" :title="tt('sfp.upLevel')" :disabled="localLoading" @click="localGoUp"><Icon name="arrow-up" :size="14" /></button>
             <button class="ib sm" :title="tt('sfp.home')" :disabled="localLoading" @click="localGoHome"><Icon name="home" :size="14" /></button>
             <span class="local-path" :title="localPath">{{ localPath }}</span>
@@ -2406,6 +2433,9 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
   display: flex;
   align-items: center;
   overflow: hidden;
+  /* Deep paths overflow at the right edge; anchoring to the end keeps the
+     current directory visible instead of clipping it. */
+  justify-content: flex-end;
 }
 .crumb {
   flex: 0 1 auto;
@@ -2432,6 +2462,10 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
   min-width: 56px;
   color: var(--text);
   font-weight: 600;
+}
+/* Older segments give up their width first, so the tail stays readable. */
+.crumb:not(.last) {
+  flex-shrink: 99;
 }
 .crumbs .sep {
   flex: none;
@@ -2495,6 +2529,9 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
 .resume-bar {
   flex: none;
   display: flex;
+  /* Wraps instead of overflowing: the drawer can be dragged narrow, and the
+     longest locale plus four buttons did not fit on one line. */
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   padding: 8px 10px 8px 14px;
@@ -2663,6 +2700,12 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
   font-size: 13px;
   font-weight: 600;
 }
+.pb-ic {
+  flex: none;
+  display: flex;
+  align-items: center;
+  color: var(--text-dim);
+}
 .up-btn {
   margin-left: 6px;
 }
@@ -2725,7 +2768,9 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
 }
 .local-path {
   flex: 1;
-  min-width: 0;
+  /* Keep a readable slice visible in a narrow drawer instead of collapsing to
+     zero width (the home button made the bar overflow). */
+  min-width: 56px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
