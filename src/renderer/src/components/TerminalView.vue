@@ -836,8 +836,16 @@ onBeforeUnmount(() => {
 .term {
   width: 100%;
   height: 100%;
-  padding: 8px 4px 8px 12px;
   background: var(--bg);
+}
+/* The breathing room belongs on xterm's own element, not on .term. The fit
+   addon sizes the grid from its PARENT's computed height/width and subtracts
+   only the padding of the element itself. With the padding on the parent
+   (border-box, so it is included in that height) it over-counted by 16px in
+   each direction: the last row stuck out below the pane and was cut off by
+   the status bar, and the last column ran under the scrollbar. */
+.term :deep(.xterm) {
+  padding: 8px 4px 8px 12px;
 }
 .search-bar {
   position: absolute;
