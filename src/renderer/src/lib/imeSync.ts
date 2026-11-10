@@ -253,9 +253,17 @@ export function createImeMirror(): ImeMirror {
         const n = lastCharLength(line)
         line = line.slice(0, line.length - n)
         runLen = Math.max(0, runLen - n)
-      } else if (ch === '\x15' || ch === '\x03') {
-        // Ctrl+U clears the line; Ctrl+C cancels it (readline discards the
-        // buffer). Either way the remote line is empty afterwards.
+      } else if (ch === '\x15') {
+        // Ctrl+U kills back to the START of the line, not the whole line: with
+        // the cursor mid-line, everything to its right survives and the cursor
+        // lands at column 0. Clearing `line` is right, but claiming the cursor
+        // is at the end again would let the next correction erase the wrong
+        // text. `exact` is therefore left untouched (a trustworthy cursor
+        // stays trustworthy; a moved one stays suspect).
+        line = ''
+        runLen = 0
+      } else if (ch === '\x03') {
+        // Ctrl+C cancels the line and prints a fresh prompt.
         line = ''
         runLen = 0
         exact = true
@@ -288,10 +296,17 @@ export function createImeMirror(): ImeMirror {
     // ("对" then "对": two words, not a re-read), so it is never a revision.
     if (countChars(d) >= REWRITE_RUN) {
       // The same version again, or a longer take on it: only the tail is new.
+      // Safe even with a moved cursor — nothing is erased.
       if (text.startsWith(d)) return { out: text.slice(d.length), run: text.length }
       // A re-read of the same audio. A terminal has no replace, so erase the
       // differing tail of the draft and retype the rest.
-      if (longestSharedRun(d, text) >= REWRITE_RUN) {
+      //
+      // Erasing is only safe while the cursor is known to sit at the end of the
+      // line. `plan()` already refuses to erase for that reason, but this path
+      // is reached from the same commit — without the guard here, pressing the
+      // left arrow and then correcting still emitted DELs at the cursor,
+      // deleting characters to its left.
+      if (exact && longestSharedRun(d, text) >= REWRITE_RUN) {
         return { out: rewriteBytes(d, text), run: text.length }
       }
     }

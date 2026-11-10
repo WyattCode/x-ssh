@@ -173,6 +173,11 @@ export function attachImeBridge(
     ta.addEventListener('focus', refreshTracing, { signal })
 
     const flushCommit = (snapshot: string): void => {
+      // Consume the deferred slot, whichever path got here. Leaving it set
+      // meant a snapshot that was parked for the *next* compositionstart
+      // survived a normal flush as well, and the composition after that
+      // replayed it — erasing the sentence that had just been committed.
+      pendingCommit = null
       const out = ime.sync(snapshot)
       trace('flush', () => ({ snapshot: vis(scrub(snapshot)), out: vis(out) }))
       if (out) sendIme(out)

@@ -728,6 +728,22 @@ describe('createImeMirror after the cursor moved or the line was edited', () => 
     })
   }
 
+  it('never erases after the cursor moved, even when the new draft overlaps', () => {
+    // The regression this pins: plan() refuses to erase when `exact` is false,
+    // but it falls through to append(), and append() had its own erasing branch
+    // with no such guard — so pressing Left and then correcting still emitted
+    // DELs at the cursor, deleting characters to its left.
+    const h = harness()
+    const v1 = '把日志重启一下'
+    h.value = v1
+    h.xterm(v1)
+    h.xterm('\x1b[D', { eventType: 'keydown' })
+    const v2 = '把服务重启一下'
+    h.value = v2
+    h.xterm(v2)
+    expect(h.wire.join('')).not.toContain('\x7f')
+  })
+
   it('trusts the line again once Enter empties it', () => {
     const h = harness()
     h.value = V1
