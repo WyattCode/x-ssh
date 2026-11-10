@@ -15,24 +15,51 @@ const DEL = '\x7f'
 const BRACKETED_PASTE_START = '\x1b[200~'
 const BRACKETED_PASTE_END = '\x1b[201~'
 
-/** Shows control characters so a trace line is readable ("\x7f", not an invisible byte). */
-const vis = (s: string | null | undefined): string | null | undefined =>
-  typeof s === 'string'
-    ? s.replace(/[\x00-\x1f\x7f]/g, (c) =>
-        c === '\n' ? '\\n' : c === '\r' ? '\\r' : '\\x' + c.charCodeAt(0).toString(16).padStart(2, '0')
-      )
-    : s
+/** Stable short hash, used to tell "same text as last time" apart from "new text"
+ *  without keeping the text itself. */
+function shortHash(s: string): string {
+  let h = 5381
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h) ^ s.charCodeAt(i)
+  return (h >>> 0).toString(36).padStart(6, '0').slice(0, 6)
+}
+
+/**
+ * The SHAPE of a piece of text, never its content.
+ *
+ * Tracing exists to answer "how many commits did the IME make, how long was
+ * each, did we erase and how much" — none of which needs the characters. Keeping
+ * the characters meant that with tracing on, a password typed into a Chinese IME
+ * at a `sudo` prompt (the pinyin string lands in the textarea first) was written
+ * to `ime-trace.log` in plain text. `redactForTrace` only covered single keys,
+ * pastes and escape sequences, so any multi-character IME commit went through
+ * verbatim.
+ *
+ * The hash keeps the one property the log genuinely needs: two entries with the
+ * same id are the same text.
+ */
+export function traceShape(text: string | null | undefined): unknown {
+  if (typeof text !== 'string') return text
+  let dels = 0
+  let breaks = 0
+  let esc = false
+  for (const ch of text) {
+    if (ch === DEL) dels++
+    else if (ch === '\n' || ch === '\r') breaks++
+    else if (ch === '\x1b') esc = true
+  }
+  return { chars: Array.from(text).length, dels, breaks, esc, id: shortHash(text) }
+}
 
 /**
  * What a trace line may show of an xterm payload. Typed keys, terminal reports
  * and pasted text never go into the log: with tracing on, a password typed at a
  * prompt or a token pasted from the clipboard must not end up in a file.
  */
-export function redactForTrace(data: string, eventType: string | undefined): string | null | undefined {
+export function redactForTrace(data: string, eventType: string | undefined): unknown {
   if (data.startsWith('\x1b')) return '(esc)'
   if (eventType === 'paste' || eventType === 'drop') return `(paste, ${data.length} chars)`
   if ((eventType === 'keydown' || eventType === 'keypress') && data.length <= 2 && data !== DEL) return '(key)'
-  return vis(data)
+  return traceShape(data)
 }
 
 /**
@@ -98,16 +125,11 @@ export function attachImeBridge(
       .catch(() => undefined)
   }
   refreshTracing()
-  /** Text xterm itself wrote into the textarea (a right-click selection): terminal
-   *  output, never the user's dictation, so it is masked in the log. */
-  let xtermText = ''
-  const scrub = (s: string): string =>
-    xtermText && s.includes(xtermText) ? s.split(xtermText).join('(xterm text)') : s
   const t0 = performance.now()
   const trace = (kind: string, info: () => Record<string, unknown> = () => ({})): void => {
     if (!tracing || !diag) return
     try {
-      const snap = ta ? { ta: vis(scrub(ta.value)), sel: [ta.selectionStart, ta.selectionEnd] } : {}
+      const snap = ta ? { ta: traceShape(ta.value), sel: [ta.selectionStart, ta.selectionEnd] } : {}
       diag.trace(JSON.stringify({ t: Math.round(performance.now() - t0), kind, ...info(), ...snap }))
     } catch {
       /* diagnostics only */
@@ -144,7 +166,7 @@ export function attachImeBridge(
 
   if (ta) {
     for (const type of ['compositionstart', 'compositionupdate', 'compositionend'] as const) {
-      ta.addEventListener(type, (e) => trace(type, () => ({ data: vis(scrub((e as CompositionEvent).data ?? '')) })), {
+      ta.addEventListener(type, (e) => trace(type, () => ({ data: traceShape((e as CompositionEvent).data ?? '') })), {
         capture: true,
         signal
       })
@@ -154,7 +176,7 @@ export function attachImeBridge(
         type,
         (e) => {
           const ie = e as InputEvent
-          trace(type, () => ({ inputType: ie.inputType, data: vis(ie.data), composing: ie.isComposing }))
+          trace(type, () => ({ inputType: ie.inputType, data: traceShape(ie.data), composing: ie.isComposing }))
         },
         { capture: true, signal }
       )
@@ -179,7 +201,7 @@ export function attachImeBridge(
       // replayed it — erasing the sentence that had just been committed.
       pendingCommit = null
       const out = ime.sync(snapshot)
-      trace('flush', () => ({ snapshot: vis(scrub(snapshot)), out: vis(out) }))
+      trace('flush', () => ({ snapshot: traceShape(snapshot), out: traceShape(out) }))
       if (out) sendIme(out)
     }
     ta.addEventListener('compositionstart', () => {
@@ -224,7 +246,7 @@ export function attachImeBridge(
         !keyTextSent
       ) {
         const out = ime.sync(ta.value)
-        trace('input-sync', () => ({ out: vis(out) }))
+        trace('input-sync', () => ({ out: traceShape(out) }))
         if (out) sendIme(out)
         return
       }
@@ -261,14 +283,12 @@ export function attachImeBridge(
           set.call(this, v)
           if (v === '') {
             // xterm emptied the box: the textarea no longer holds the draft.
-            xtermText = ''
             ime.clear()
             trace('clear')
           } else if (!composing) {
             // During a composition the textarea holds the IME's *draft*, which
             // is not the remote line. Only a real write of text (right-click
             // copy, paste) should be recorded.
-            xtermText = v
             ime.adopt(get.call(this))
             trace('adopt')
           }
@@ -299,7 +319,7 @@ export function attachImeBridge(
     trace('onData', () => ({
       data: redactForTrace(data, eventType),
       eventType: eventType ?? '(timer)',
-      settled: eventType === 'paste' || eventType === 'drop' ? '(paste)' : vis(scrub(settled)),
+      settled: eventType === 'paste' || eventType === 'drop' ? '(paste)' : traceShape(settled),
       out: redactForTrace(out, eventType)
     }))
     const fromKey = eventType === 'keydown' || eventType === 'keypress'

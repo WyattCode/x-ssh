@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { bracketMultiline, redactForTrace } from './imeBridge'
+import { bracketMultiline, redactForTrace, traceShape } from './imeBridge'
 
 const DEL = '\x7f'
 
@@ -36,8 +36,8 @@ describe('redactForTrace', () => {
     expect(redactForTrace('é', 'keypress')).toBe('(key)')
   })
 
-  it('shows backspace (it reveals length, not content)', () => {
-    expect(redactForTrace(DEL, 'keydown')).toBe('\\x7f')
+  it('records backspace as a shape (length, not content)', () => {
+    expect(redactForTrace(DEL, 'keydown')).toMatchObject({ chars: 1, dels: 1 })
   })
 
   it('never shows terminal reports or escape sequences', () => {
@@ -51,10 +51,47 @@ describe('redactForTrace', () => {
     expect(redactForTrace('/home/me/key.pem', 'drop')).toBe('(paste, 16 chars)')
   })
 
-  it('shows IME text, which is what the trace exists for', () => {
-    expect(redactForTrace('今天要吃饭', undefined)).toBe('今天要吃饭')
-    expect(redactForTrace('一\n二', 'input')).toBe('一\\n二')
+  it('records the shape of an IME commit, never its text', () => {
+    // Tracing exists to answer "how many commits, how long, did we erase" —
+    // never "what did they type". The text used to be logged verbatim, which
+    // put a password typed into a Chinese IME at a sudo prompt into the file.
+    const out = JSON.stringify(redactForTrace('今天要吃饭', undefined))
+    expect(out).not.toContain('今天')
+    expect(out).toContain('"chars":5')
+
+    const multi = JSON.stringify(redactForTrace('一\n二', 'input'))
+    expect(multi).not.toContain('一')
+    expect(multi).toContain('"breaks":1')
+
     // A composition forced out by a fake key is long: a hand cannot type that.
-    expect(redactForTrace('今天要吃饭，第一吃西瓜', 'keydown')).toBe('今天要吃饭，第一吃西瓜')
+    const forced = JSON.stringify(redactForTrace('今天要吃饭，第一吃西瓜', 'keydown'))
+    expect(forced).not.toContain('西瓜')
+    expect(forced).toContain('"chars":11')
+  })
+})
+
+describe('traceShape', () => {
+  it('keeps the shape and drops the content', () => {
+    const shape = traceShape('hunter2密码') as Record<string, unknown>
+    expect(shape).toMatchObject({ chars: 9, dels: 0, breaks: 0, esc: false })
+    expect(JSON.stringify(shape)).not.toContain('hunter2')
+    expect(JSON.stringify(shape)).not.toContain('密码')
+  })
+
+  it('counts what the log needs: erasures, line breaks, escapes', () => {
+    expect(traceShape(`${DEL}${DEL}abc`)).toMatchObject({ chars: 5, dels: 2 })
+    expect(traceShape('a\nb\r\nc')).toMatchObject({ chars: 6, breaks: 3 })
+    expect(traceShape('\x1b[200~x\x1b[201~')).toMatchObject({ esc: true })
+  })
+
+  it('gives the same text the same id and different text a different one', () => {
+    const id = (t: string): unknown => (traceShape(t) as Record<string, unknown>).id
+    expect(id('同一句话')).toBe(id('同一句话'))
+    expect(id('同一句话')).not.toBe(id('另一句话'))
+  })
+
+  it('passes null through', () => {
+    expect(traceShape(null)).toBeNull()
+    expect(traceShape(undefined)).toBeUndefined()
   })
 })
