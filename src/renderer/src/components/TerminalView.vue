@@ -394,6 +394,7 @@ function doFit(): void {
   if (!fit || !term || !props.visible) return
   try {
     fit.fit()
+    clampRows()
     const size = `${props.sessionId}:${term.cols}x${term.rows}`
     if (size !== sentSize) {
       sentSize = size
@@ -401,6 +402,31 @@ function doFit(): void {
     }
   } catch {
     /* container not measurable yet */
+  }
+}
+
+/**
+ * Drops a row when the painted grid is taller than the space available.
+ *
+ * FitAddon divides by the measured cell height and floors, which is correct
+ * arithmetic but not always correct on screen: sub-pixel line heights, the
+ * font's own ascent/descent rounding and the container's padding can leave the
+ * grid a pixel or two over. The overflow is invisible here (the pane clips it)
+ * but the program inside — a TUI like Codex — still believes those rows exist
+ * and paints its bottom line into the clipped strip.
+ *
+ * Dropping one row is the safe direction: a little empty space beats losing
+ * half a line of output.
+ */
+function clampRows(): void {
+  const host = term?.element
+  const screen = host?.querySelector('.xterm-screen') as HTMLElement | null
+  if (!host || !screen || term!.rows <= 1) return
+  const style = getComputedStyle(host)
+  const padY = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0)
+  const available = host.clientHeight - padY
+  if (screen.clientHeight > available + 0.5) {
+    term!.resize(term!.cols, term!.rows - 1)
   }
 }
 
@@ -417,7 +443,12 @@ onMounted(() => {
   if (!el.value) return
   term = new Terminal({
     fontFamily: fontFamilyFor(hostFontFamily.value || store.terminalFontFamily),
-    lineHeight: 1.25,
+    // A fractional cell height accumulates into a few pixels at the bottom of
+    // the grid (13px × 1.25 = 16.25px), and the last row ended up clipped —
+    // Codex's status line was cut in half by the window's status bar, and
+    // nudging the window taller by a few pixels fixed it. Round the row to whole
+    // pixels so `rows × height` fits the container exactly.
+    lineHeight: Math.max(1, Math.round(fontSize.value * 1.25)) / fontSize.value,
     letterSpacing: 0,
     cursorBlink: true,
     cursorStyle: store.terminalCursor,
@@ -711,6 +742,9 @@ watch([() => store.terminalTheme, hostThemeId], () => {
 watch(fontSize, (s) => {
   if (term) {
     term.options.fontSize = s
+    // Keep the whole-pixel row height in step with the size, or the same
+    // bottom-row clipping comes back at the new size.
+    term.options.lineHeight = Math.max(1, Math.round(s * 1.25)) / s
     webgl?.clearTextureAtlas()
     doFit()
   }
