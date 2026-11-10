@@ -561,6 +561,35 @@ def write(path, data, mode="w"):
     print("wrote", os.path.relpath(path, ROOT))
 
 
+# macOS 菜单栏图标(Template Image):只有形状和透明度,系统按菜单栏的明暗自己上色(浅色菜单栏黑、深色菜单栏白),
+# 所以这里画纯黑 + alpha,不能带任何颜色、渐变、阴影。画布 18pt(菜单栏 22pt 高,图标不能超过它),
+# 图案可见宽约 16pt、高约 13pt,两根条合成一个实心 X,和 Android 状态栏小图标同一套形状。
+# 输出 build/trayTemplate.png(18px)和 trayTemplate@2x.png(36px):文件名以 Template 结尾,Electron 会自动当模板图。
+MAC_TRAY_PT = 18
+MAC_TRAY_GLYPH_PT = 19.6   # 倒圆角会削掉尖角,所以按这个值画出来的可见宽度约 16pt
+
+
+def mac_tray_template(px):
+    pt_per_px = MAC_TRAY_PT / px
+    k = MAC_TRAY_GLYPH_PT / (SHIFT + W)          # 1024 画布单位 → pt
+    fr, bk = bar_polys(cx=0, cy=0)
+    mask = np.zeros((px, px), np.float32)
+    for poly in (bk, fr):
+        pts, _, _ = rounded(poly, R)
+        mask = np.maximum(mask, poly_mask_px([(MAC_TRAY_PT / 2 + x * k, MAC_TRAY_PT / 2 + y * k) for x, y in pts], px, MAC_TRAY_PT))
+    a = (mask * 255 + 0.5).astype(np.uint8)
+    out = np.zeros((px, px, 4), np.uint8)
+    out[..., 3] = a                              # RGB 全 0 = 纯黑,颜色由系统决定
+    return Image.fromarray(out, "RGBA")
+
+
+def poly_mask_px(pts_pt, px, canvas_pt, ss=8):
+    f = px * ss / canvas_pt
+    img = Image.new("L", (px * ss, px * ss), 0)
+    ImageDraw.Draw(img).polygon([(x * f, y * f) for x, y in pts_pt], fill=255)
+    return np.asarray(img.resize((px, px), Image.LANCZOS), dtype=np.float32) / 255.0
+
+
 def main():
     # macOS 26 / 27:Icon Composer 文档
     ic = os.path.join(BUILD, "icon.icon")
@@ -573,6 +602,12 @@ def main():
     write(os.path.join(HERE, "xssh-light.svg"), svg_full("light", masked=False))
     write(os.path.join(HERE, "xssh-dark.svg"), svg_full("dark", masked=False))
     write(os.path.join(BUILD, "icon.svg"), svg_full("dark", masked=True))
+
+    # macOS 菜单栏:模板图(纯黑 + alpha)
+    for px, name in ((MAC_TRAY_PT, "trayTemplate.png"), (MAC_TRAY_PT * 2, "trayTemplate@2x.png")):
+        buf = io.BytesIO()
+        mac_tray_template(px).save(buf, "PNG")
+        write(os.path.join(BUILD, name), buf.getvalue(), "wb")
 
     # Windows / Linux / 托盘 / 窗口:夜间配色的圆角方块
     big = tile(1024, "dark")
