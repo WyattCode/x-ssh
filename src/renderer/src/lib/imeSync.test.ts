@@ -604,6 +604,15 @@ describe('createImeMirror telling dictation from paste', () => {
     expect(isImeText('\r')).toBe(false)
   })
 
+  it('accepts a Windows line break, which IMEs emit as CRLF', () => {
+    // Rejecting CR outright sent CRLF dictation down the plain-send path, where
+    // each CR was Enter and every line ran as its own command.
+    expect(isImeText('第一行\r\n第二行')).toBe(true)
+    expect(isImeText('a\r\n')).toBe(true)
+    // A lone CR is still "paste", not dictation.
+    expect(isImeText('a\rb\r\n')).toBe(false)
+  })
+
   it('does not let a pasted line that resembles the draft erase the draft', () => {
     const h = harness()
     h.value = '你好世界这是草稿'

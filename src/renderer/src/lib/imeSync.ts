@@ -54,12 +54,18 @@ export const isPlainText = (data: string): boolean => data !== '' && !CONTROL.te
 
 /**
  * Text an IME can commit: at least one printable character, and no control
- * characters other than tab and LF. A restructured dictation contains line
- * breaks, but a CR is what xterm turns a *paste's* line breaks into, so CR
- * never counts — pasted text must not be mistaken for dictation.
+ * characters other than tab, LF, and a CR that is part of a CRLF pair.
+ *
+ * A restructured dictation contains line breaks. Windows IMEs deliver them as
+ * CRLF, and rejecting CR outright meant such a commit skipped the multi-line
+ * handling entirely and sent its CRs as Enter — every line ran as a command.
+ * A LONE CR still does not count: that is what xterm turns a pasted line break
+ * into, and pasted text must not be mistaken for dictation.
  */
 export const isImeText = (data: string): boolean =>
-  /[^\x00-\x1f\x7f]/.test(data) && !/[\x00-\x08\x0b-\x1f\x7f]/.test(data)
+  /[^\x00-\x1f\x7f]/.test(data) &&
+  !/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(data) &&
+  !/\r(?!\n)/.test(data)
 
 /**
  * One escape sequence: legacy mouse report (ESC [ M + 3 raw bytes), CSI, OSC, or

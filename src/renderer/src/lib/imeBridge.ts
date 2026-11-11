@@ -199,7 +199,9 @@ export function attachImeBridge(
         // was still recoverable from the log even after payloads were reduced
         // to shapes. keyCode + isComposing answers every diagnostic question
         // this entry exists for.
-        if (e.keyCode === 229 || e.keyCode === 252 || e.isComposing) {
+        // `key === 'Process'` is redundant in Chromium (it maps to 229), but it
+        // costs one comparison and covers a platform that reports 0 instead.
+        if (e.keyCode === 229 || e.keyCode === 252 || e.isComposing || e.key === 'Process') {
           trace('keydown', () => ({ keyCode: e.keyCode, composing: e.isComposing }))
         }
       },

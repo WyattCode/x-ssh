@@ -810,7 +810,7 @@ onBeforeUnmount(() => {
          on `.term` was invisible to it: rows were computed for the full height
          while the grid had 16px less, and the last row was clipped. With the
          padding outside, the measured height and the usable height agree. -->
-    <div class="term-pad">
+    <div class="term-pad" :style="{ background: currentTheme().background }">
       <div ref="el" class="term" />
     </div>
 
@@ -885,7 +885,10 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 100%;
   padding: 8px 4px 8px 12px;
-  background: var(--bg);
+  /* The background comes from the inline style (the current terminal theme).
+     `--bg` is the app background, which differs from a preset theme's own
+     colour: with the row count now exact, the band under the last row is up to
+     a full line tall, so it was a visible stripe of the wrong colour. */
 }
 .term {
   width: 100%;
