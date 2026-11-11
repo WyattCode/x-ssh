@@ -408,21 +408,21 @@ function doFit(): void {
 /**
  * Drops rows when the painted grid is taller than the space available.
  *
- * Measured against OUR container (`el`, the padded `.term`), not
- * `term.element`. xterm's own root (`.xterm`) sizes itself to the screen — its
- * viewport is absolutely positioned and contributes nothing — so comparing the
- * two is always equal and the guard never fired.
+ * `.term` carries no padding any more (it moved to `.term-pad`), so its
+ * clientHeight IS the usable height and it matches what FitAddon measures.
+ * Before, padding sat on `.term`: FitAddon subtracts only the padding of
+ * xterm's own root, so it computed rows for the full box while the grid had
+ * 16px less — the grid overflowed and the last row was clipped.
  *
- * FitAddon divides by the measured cell height and floors, which is correct
- * arithmetic but not always correct on screen: the font's ascent/descent
- * rounding and the sub-pixel cell height can leave the grid a pixel or two
- * over after the first fit (which may run before the web font is applied). The
- * overflow is invisible here (the pane clips it) but the program inside — a TUI
- * like Codex — still believes those rows exist and paints its bottom line into
- * the clipped strip.
+ * What is left for this guard is the sub-pixel case: the cell height comes from
+ * the measured glyph, rounded per device pixel, so `rows × cellHeight` can still
+ * exceed the box by a fraction after the first fit (which may run before the web
+ * font is applied). The overflow is invisible here (the pane clips it) but the
+ * program inside — a TUI like Codex — still believes those rows exist and paints
+ * its bottom line into the clipped strip.
  *
- * Dropping one row is the safe direction: a little empty space beats losing
- * half a line of output.
+ * Dropping one row is the safe direction: a little empty space beats losing half
+ * a line of output.
  */
 function clampRows(): void {
   const host = el.value
@@ -805,7 +805,14 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="term-wrap" @contextmenu="onContextMenu" @auxclick="onAuxClick">
-    <div ref="el" class="term" />
+    <!-- Padding lives on this wrapper, NOT on `.term`. FitAddon measures
+         `.term` and subtracts only the padding of xterm's own root, so padding
+         on `.term` was invisible to it: rows were computed for the full height
+         while the grid had 16px less, and the last row was clipped. With the
+         padding outside, the measured height and the usable height agree. -->
+    <div class="term-pad">
+      <div ref="el" class="term" />
+    </div>
 
     <div v-if="searchBar.open" class="search-bar" @mousedown.stop>
       <input
@@ -874,11 +881,15 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 100%;
 }
-.term {
+.term-pad {
   width: 100%;
   height: 100%;
   padding: 8px 4px 8px 12px;
   background: var(--bg);
+}
+.term {
+  width: 100%;
+  height: 100%;
 }
 .search-bar {
   position: absolute;

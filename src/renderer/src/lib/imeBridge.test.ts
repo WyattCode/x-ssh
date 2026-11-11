@@ -14,8 +14,19 @@ describe('bracketMultiline', () => {
     expect(bracketMultiline(DEL.repeat(7) + tidy, true)).toBe(`${DEL.repeat(7)}\x1b[200~${tidy}\x1b[201~`)
   })
 
-  it('leaves the text alone when bracketed paste is off (a raw LF is all there is)', () => {
-    expect(bracketMultiline(tidy, false)).toBe(tidy)
+  it('joins the lines into one when bracketed paste is off', () => {
+    // A raw LF is Enter: without bracketed paste every line would run as its own
+    // command. Joined with spaces instead, and the substitution is 1:1 in UTF-16
+    // units so the mirror's character-count arithmetic stays valid.
+    const joined = bracketMultiline(tidy, false)
+    expect(joined).toBe('今天我要吃个饭： 1. 米饭 2. 土豆')
+    expect(joined).not.toContain('\n')
+    expect(joined.length).toBe(tidy.length)
+
+    // CRLF is two units, replaced by two spaces, not one.
+    const crlf = bracketMultiline('a\r\nb', false)
+    expect(crlf).toBe('a  b')
+    expect(crlf.length).toBe('a\r\nb'.length)
   })
 
   it('leaves single-line text and a bare line break alone', () => {

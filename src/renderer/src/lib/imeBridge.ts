@@ -64,13 +64,20 @@ export function redactForTrace(data: string, eventType: string | undefined): unk
 
 /**
  * A multi-line IME commit (a tidied-up dictation) must not reach a shell as raw
- * LF: that is Enter, so every line would execute. When the application has
- * switched bracketed paste on, deliver the text as a paste — erase part first,
- * outside the markers — so it is inserted, not run. A bare line break is a key
- * and is left alone.
+ * LF: that is Enter, so every line would execute.
+ *
+ * With bracketed paste on, deliver it as a paste — erase part first, outside the
+ * markers — so it is inserted, not run.
+ *
+ * With it off (bash 3.2, network-device CLIs, some TUIs), the lines cannot be
+ * inserted as a block, so they are joined into ONE line by replacing each break
+ * with a space. The substitution is 1:1 in UTF-16 units on purpose: the mirror
+ * erases by counting characters, and a shorter string would make every later
+ * correction erase one character too few.
  */
 export function bracketMultiline(out: string, bracketed: boolean): string {
-  if (!bracketed || !out.includes('\n')) return out
+  if (!out.includes('\n')) return out
+  if (!bracketed) return out.replace(/\r?\n/g, (m) => ' '.repeat(m.length))
   const m = /^(\x7f*)([\s\S]*)$/.exec(out)
   if (!m || !/[^\x00-\x1f\x7f]/.test(m[2])) return out
   return m[1] + BRACKETED_PASTE_START + m[2] + BRACKETED_PASTE_END
@@ -184,10 +191,16 @@ export function attachImeBridge(
     ta.addEventListener(
       'keydown',
       (e) => {
-        // Plain keys are not interesting; IME-driven ones (keyCode 229 / "Process")
-        // and anything while composing are — their `key` is a name, never a letter.
-        if (e.keyCode === 229 || e.key === 'Process' || e.isComposing || e.keyCode === 252) {
-          trace('keydown', () => ({ key: e.key, code: e.code, keyCode: e.keyCode, composing: e.isComposing }))
+        // Only IME-driven presses matter (keyCode 229 is "composing", 252 is the
+        // fake key Doubao sends mid-dictation) — and only their NUMBERS.
+        //
+        // `e.key`/`e.code` must not be logged: `code` is the physical key
+        // ("KeyM", "KeyI", …), so a password typed in pinyin at a sudo prompt
+        // was still recoverable from the log even after payloads were reduced
+        // to shapes. keyCode + isComposing answers every diagnostic question
+        // this entry exists for.
+        if (e.keyCode === 229 || e.keyCode === 252 || e.isComposing) {
+          trace('keydown', () => ({ keyCode: e.keyCode, composing: e.isComposing }))
         }
       },
       { capture: true, signal }
