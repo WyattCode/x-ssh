@@ -36,7 +36,7 @@ targets:
         embed: false
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.wyatt.xssh
+        PRODUCT_BUNDLE_IDENTIFIER: com.wyatt.ssh
         TARGETED_DEVICE_FAMILY: "1"
         GENERATE_INFOPLIST_FILE: YES
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
@@ -53,5 +53,5 @@ targets:
       - target: XSSH
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.wyatt.xssh.tests
+        PRODUCT_BUNDLE_IDENTIFIER: com.wyatt.ssh.tests
         GENERATE_INFOPLIST_FILE: YES
