@@ -2563,12 +2563,18 @@ function registerIpc(): void {
   // the link allows, and if the user releases first the dragend message
   // clears the live-drags slot and the finished files get reported back
   // ("ready — drag once more") instead of vanishing silently.
+  // [drag-diag]: every decision below is mirrored to ime-trace.log (only when
+  // the flag file is fresh) so a real failure reproduces as evidence.
   const liveDrags = new Map<number, string>()
+  const dtrace = (line: string): void => imeTrace.write('drag: ' + line)
   on(
     IPC.sftpStartDrag,
     async (e, sessionId: string, items: DragItem[]) => {
       const key = dragKey(sessionId, items)
       liveDrags.set(e.sender.id, key)
+      dtrace(
+        `startDrag recv n=${items.length} names=${items.map((i) => i.name.length + ':' + (i.isDir ? 'd' : 'f')).join(',')} stagedHit=${dragStaged.has(key)}`
+      )
       const send = (msg: { ready: boolean }): void => {
         if (!e.sender.isDestroyed()) e.sender.send(IPC.sftpDragNotice, msg)
       }
@@ -2576,12 +2582,20 @@ function registerIpc(): void {
       if (stagedNow) {
         // Straight to startDrag — no await in front of it, so a re-drag of
         // already-staged items takes the gesture with console-level latency.
-        e.sender.startDrag({ file: stagedNow.local, icon: stagedNow.icon })
+        dtrace(`cache-hit exists=${existsSync(stagedNow.local)} -> startDrag`)
+        try {
+          e.sender.startDrag({ file: stagedNow.local, icon: stagedNow.icon })
+          dtrace('cache-hit startDrag returned')
+        } catch (err) {
+          dtrace(`cache-hit startDrag THREW ${(err as Error).message}`)
+        }
         liveDrags.delete(e.sender.id)
         return
       }
+      const t0 = Date.now()
       try {
         const staged = await prefetchDrag(sessionId, items)
+        dtrace(`prefetch done in ${Date.now() - t0}ms gesture=${liveDrags.get(e.sender.id) === key}`)
         if (liveDrags.get(e.sender.id) !== key) {
           // Released before staging finished. The files are ready NOW and
           // stay in the cache for a minute, so one more drag drops instantly.
@@ -2589,8 +2603,10 @@ function registerIpc(): void {
           return
         }
         e.sender.startDrag({ file: staged.local, icon: staged.icon })
-      } catch {
+        dtrace('async startDrag returned')
+      } catch (err) {
         /* download failed — say so instead of eating the drag */
+        dtrace(`prefetch FAILED in ${Date.now() - t0}ms: ${(err as Error).message}`)
         send({ ready: false })
       } finally {
         if (liveDrags.get(e.sender.id) === key) liveDrags.delete(e.sender.id)
@@ -2598,6 +2614,7 @@ function registerIpc(): void {
     }
   )
   on(IPC.sftpDragEnd, (e) => {
+    if (liveDrags.has(e.sender.id)) dtrace('dragEnd (gesture released)')
     liveDrags.delete(e.sender.id)
   })
 
