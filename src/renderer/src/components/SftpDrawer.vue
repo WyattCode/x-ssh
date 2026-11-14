@@ -753,13 +753,16 @@ onMounted(() => {
   // drops on the desktop and nothing arrives. Main says so here; the staged
   // files live in its cache for a minute, so the guidance is actionable.
   offDragNotice = window.api.sftp.onDragNotice((n) => {
-    // downloading: fired at grab-time, while the eyes are on the window —
-    // this is the one hint that teaches the "hold until the icon" gesture.
-    // ready/failed: late news; linger long enough to read after a confused
-    // release (default 3.2s vanishes unnoticed).
-    if (n.state === 'downloading') toast(tt('sfp.dragDownloading'), 'info', 2500)
-    else if (n.state === 'ready') toast(tt('sfp.dragReady'), 'info', 6000)
-    else toast(n.error || tt('sfp.dragFail'), 'error', 6000)
+    // A big folder needs its download finished before the OS can be handed a
+    // file, and nothing survives a one-minute mouse hold. So the flow is
+    // two-step and says so plainly: this drag prepares, the next one drops.
+    if (n.state === 'downloading') {
+      toast(tt('sfp.dragDownloading', { name: n.name ?? '' }), 'info', 7000)
+    } else if (n.state === 'ready') {
+      toast(tt('sfp.dragReady', { name: n.name ?? '' }), 'info', 8000)
+    } else {
+      toast(n.error || tt('sfp.dragFail'), 'error', 8000)
+    }
   })
 })
 onBeforeUnmount(() => {

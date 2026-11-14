@@ -322,8 +322,8 @@ const api = {
       ipcRenderer.send(IPC.sftpStartDrag, sessionId, items),
     prefetchDrag: (sessionId: string, items: { remotePath: string; name: string; isDir: boolean }[]): void =>
       ipcRenderer.send(IPC.sftpPrefetchDrag, sessionId, items),
-    onDragNotice: (cb: (n: { state: 'downloading' | 'ready' | 'failed'; error?: string }) => void): (() => void) => {
-      const listener = (_e: unknown, n: { state: 'downloading' | 'ready' | 'failed'; error?: string }): void => cb(n)
+    onDragNotice: (cb: (n: { state: 'downloading' | 'ready' | 'failed'; name?: string; error?: string }) => void): (() => void) => {
+      const listener = (_e: unknown, n: { state: 'downloading' | 'ready' | 'failed'; name?: string; error?: string }): void => cb(n)
       ipcRenderer.on(IPC.sftpDragNotice, listener)
       return () => ipcRenderer.removeListener(IPC.sftpDragNotice, listener)
     },

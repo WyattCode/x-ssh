@@ -2560,27 +2560,26 @@ function registerIpc(): void {
     }
   })
 
-  // Drag out (dragstart): hand the OS a real file. The Chromium gesture
-  // stays claimable for as long as the user HOLDS the button (upstream-
-  // verified: the documented workaround for slow startDrag is literally
-  // "keep holding until the drag icon appears"), so a late completion is
-  // not a lost case — call startDrag when ready and let Chromium decide:
-  // held → the icon appears mid-hold; released → harmless no-op and the
-  // staged file answers the next drag from the 5-minute cache.
-  // [drag-diag]: every decision mirrors to ime-trace.log (fresh-flag only).
-  // There is deliberately NO gesture bookkeeping here: the earlier
-  // liveDrags map keyed one slot per webContents, so two concurrent waits
-  // on one download cleared each other's entry and read "released" for a
-  // gesture still being held — the trace showed completed downloads that
-  // refused to startDrag for exactly that reason. dragend cannot help
-  // either: it never arrives once startDrag takes the gesture.
+  // Drag out (dragstart): hand the OS a real file. Chromium keeps the
+  // gesture claimable while the button is held, so a short staging rides
+  // the held gesture (icon appears under the cursor). But a big folder can
+  // take a minute — no gesture survives that — so the contract is:
+  //   grab an unstaged item -> cancel this drag, stage in the background,
+  //   say so, and tell the user to drag again when 'ready' arrives (the
+  //   staged copy lives 5 minutes, so that second drag is instant).
+  // [drag-diag]: every decision mirrors to ime-trace.log (fresh flag only).
   const dtrace = (line: string): void => imeTrace.write('drag: ' + line)
   on(
     IPC.sftpStartDrag,
     async (e, sessionId: string, items: DragItem[]) => {
       const key = dragKey(sessionId, items)
+      const name = items.length === 1 ? items[0].name : `${items.length} items`
       dtrace(`startDrag recv n=${items.length} stagedHit=${dragStaged.has(key)}`)
-      const send = (msg: { state: 'downloading' | 'ready' | 'failed'; error?: string }): void => {
+      const send = (msg: {
+        state: 'downloading' | 'ready' | 'failed'
+        name?: string
+        error?: string
+      }): void => {
         if (!e.sender.isDestroyed()) e.sender.send(IPC.sftpDragNotice, msg)
       }
       const stagedNow = dragStaged.get(key)
@@ -2595,21 +2594,23 @@ function registerIpc(): void {
         }
         return
       }
-      // Not staged: the user grabbed a still-remote item. Say "downloading"
-      // NOW (their eyes are on the cursor at this moment) — the guidance
-      // "hold until the icon appears" is only useful while it's being read.
-      send({ state: 'downloading' })
+      send({ state: 'downloading', name })
       const t0 = Date.now()
       try {
         const staged = await prefetchDrag(sessionId, items)
+        // The window can be closed mid-staging (a minute is long enough that
+        // users do) — startDrag would throw "Object has been destroyed".
+        if (e.sender.isDestroyed()) {
+          dtrace(`prefetch done in ${Date.now() - t0}ms but sender gone; cache kept`)
+          return
+        }
         dtrace(`prefetch done in ${Date.now() - t0}ms -> startDrag`)
         e.sender.startDrag({ file: staged.local, icon: staged.icon })
-        // Also after a release: files are staged NOW; one more drag is instant.
-        send({ state: 'ready' })
+        send({ state: 'ready', name })
       } catch (err) {
         const raw = (err as Error).message || ''
         dtrace(`prefetch FAILED in ${Date.now() - t0}ms: ${raw}`)
-        send({ state: 'failed', error: friendlyError(raw) })
+        send({ state: 'failed', name, error: friendlyError(raw) })
       }
     }
   )
