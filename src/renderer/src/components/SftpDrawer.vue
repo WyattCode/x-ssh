@@ -743,31 +743,13 @@ watch(
     if (open) nextTick(() => localInput.value?.focus())
   }
 )
-let offDragNotice: (() => void) | null = null
 onMounted(() => {
   // Tracking/notification/history are handled globally in the store so they run
   // even when this drawer is closed. Idempotent, so calling it here too is safe.
   store.initSftpProgress()
   window.addEventListener('resize', onWindowResize)
-  // A drag-out whose download lost the gesture is otherwise silent: the user
-  // drops on the desktop and nothing arrives. Main says so here; the staged
-  // files live in its cache for a minute, so the guidance is actionable.
-  offDragNotice = window.api.sftp.onDragNotice((n) => {
-    // A big folder needs its download finished before the OS can be handed a
-    // file, and nothing survives a one-minute mouse hold. So the flow is
-    // two-step and says so plainly: this drag prepares, the next one drops.
-    if (n.state === 'downloading') {
-      toast(tt('sfp.dragDownloading', { name: n.name ?? '' }), 'info', 7000)
-    } else if (n.state === 'ready') {
-      toast(tt('sfp.dragReady', { name: n.name ?? '' }), 'info', 8000)
-    } else {
-      toast(n.error || tt('sfp.dragFail'), 'error', 8000)
-    }
-  })
 })
 onBeforeUnmount(() => {
-  offDragNotice?.()
-  offDragNotice = null
   if (uploadReloadTimer) clearTimeout(uploadReloadTimer)
   // A continuous sync (esp. with delete-extra-files) must not keep running
   // with the drawer gone — the watch state lives in main and would otherwise
@@ -1217,35 +1199,18 @@ function openWith(entry: FileEntry): void {
   const payload = { path: posixJoin(path.value, entry.name), name: entry.name, ext: fileExt(entry.name) }
   emit('open-with', payload)
 }
-function onRemoteMouseDown(e: MouseEvent, entry: FileEntry): void {
-  // A native startDrag can only hand the OS a file that is ALREADY on disk,
-  // so the drag succeeds on download speed. Start staging the moment the row
-  // is pressed: selecting a row (almost always the step before a drag) buys
-  // seconds of head start and turns the drag itself into a cache hit. An
-  // earlier movement-threshold version never fired — Chromium begins the
-  // drag before mousemove can report 6px — so big files always started their
-  // download at dragstart and lost the gesture. A double-click's first click
-  // also stages the row; harmless, and often exactly where the user is going.
-  if (!props.sessionId || e.button !== 0) return
-  const sel = selected.value.has(entry.name) ? selectedEntries() : [entry]
-  const items = sel.map((x) => ({ remotePath: posixJoin(path.value, x.name), name: x.name, isDir: x.isDir }))
-  window.api.sftp.prefetchDrag(props.sessionId, items)
-}
-function onDragStart(e: DragEvent, entry: FileEntry): void {
-  if (!props.sessionId) return
-  // Every drag from the remote pane is a native OS drag-out: desktop,
-  // Explorer, or our own local pane (which copies real file drops). Once
-  // startDrag() takes the gesture the OS owns it, so there is nothing left
-  // to distinguish "over our window" from "over the desktop". Multi-selection
-  // drags all selected rows; folders and several items stage into one temp
-  // directory. The placeholder setData keeps the gesture claimable in the
-  // shape Electron's own drag-out example uses.
-  e.preventDefault()
-  e.dataTransfer?.setData('text/plain', entry.name)
-  const sel = selected.value.has(entry.name) ? selectedEntries() : [entry]
-  const items = sel.map((x) => ({ remotePath: posixJoin(path.value, x.name), name: x.name, isDir: x.isDir }))
-  window.api.sftp.startDrag(props.sessionId, items)
-}
+// ---- Drag-out is DISABLED (2026-11-15, Wyatt) ----
+// Dragging rows to the desktop is off: every file has a hover download button
+// and every folder a row action, so the gesture went unused — and it could
+// never be made fully reliable anyway, because the OS can only be handed a
+// file that ALREADY exists locally, which made big items a two-step dance
+// ("preparing… ready, drag again"). Uploads still work: dragging files from
+// the desktop or the local pane onto this pane drops them in (onDrop), and
+// local→remote row drags keep their x-ssh-local MIME. To re-enable, restore
+// `draggable="true"`, `@mousedown="onRemoteMouseDown($event, entry)"` and
+// `@dragstart="onDragStart($event, entry)"` on the remote row, and rebuild
+// the handlers on top of window.api.sftp.prefetchDrag/startDrag (the main
+// process side and its 5-minute staging cache are still in place).
 async function uploadPick(): Promise<void> {
   if (!props.sessionId || busy.value) return
   busy.value = true
@@ -1938,12 +1903,9 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
               :class="{ dir: entry.isDir, sel: selected.has(entry.name) }"
               :data-name="entry.name"
               :title="permTitle(entry)"
-              draggable="true"
-              @mousedown="onRemoteMouseDown($event, entry)"
               @click="onRowClick(entry, $event)"
               @dblclick="onRowDblClick(entry)"
               @contextmenu="openMenu($event, entry)"
-              @dragstart="onDragStart($event, entry)"
             >
               <span class="ic" :class="'k-' + kindOf(entry)"><Icon :name="KIND_ICON[kindOf(entry)]" :size="15" /></span>
               <input
