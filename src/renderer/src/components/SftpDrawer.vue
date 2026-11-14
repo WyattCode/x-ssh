@@ -1213,20 +1213,33 @@ function openWith(entry: FileEntry): void {
   emit('open-with', payload)
 }
 function onRemoteMouseDown(e: MouseEvent, entry: FileEntry): void {
-  // Drag-out is native, so the file has to be on disk by the time dragstart
-  // fires — pre-download it on press. But a plain click must not pull
-  // gigabytes over the wire, so only a held press (past Chromium's ~4px /
-  // few-frame drag threshold) starts the prefetch; releasing early cancels it.
+  // Drag-out is native, so the file has to be on disk by the time the drag
+  // reaches main — pre-download it once the press turns into a DRAG. The
+  // trigger is movement past Chromium's drag threshold (~4px): a click or a
+  // double-click to enter a folder never moves enough, so a plain pointer
+  // action never pulls bytes over the wire. (A 150ms hold timer was the first
+  // attempt and was wrong: slow clicks and folder double-clicks held long
+  // enough started downloads nobody asked for.)
   if (!props.sessionId || e.button !== 0) return
   const sid = props.sessionId
-  const sel = selected.value.has(entry.name) ? selectedEntries() : [entry]
-  const items = sel.map((x) => ({ remotePath: posixJoin(path.value, x.name), name: x.name, isDir: x.isDir }))
-  const hold = setTimeout(() => window.api.sftp.prefetchDrag(sid, items), 150)
-  const cancel = (): void => {
-    clearTimeout(hold)
-    window.removeEventListener('mouseup', cancel)
+  const x0 = e.clientX
+  const y0 = e.clientY
+  let done = false
+  const stop = (): void => {
+    done = true
+    window.removeEventListener('mousemove', onMove)
+    window.removeEventListener('mouseup', stop)
   }
-  window.addEventListener('mouseup', cancel)
+  const onMove = (ev: MouseEvent): void => {
+    if (done) return
+    if (Math.abs(ev.clientX - x0) + Math.abs(ev.clientY - y0) <= 6) return
+    stop()
+    const sel = selected.value.has(entry.name) ? selectedEntries() : [entry]
+    const items = sel.map((x) => ({ remotePath: posixJoin(path.value, x.name), name: x.name, isDir: x.isDir }))
+    window.api.sftp.prefetchDrag(sid, items)
+  }
+  window.addEventListener('mousemove', onMove)
+  window.addEventListener('mouseup', stop)
 }
 function onDragStart(e: DragEvent, entry: FileEntry): void {
   if (!props.sessionId) return
