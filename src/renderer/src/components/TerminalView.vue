@@ -380,78 +380,23 @@ function scheduleFit(): void {
 let sentSize = ''
 
 /**
- * Fits the terminal, clamping the proposed row count to what actually paints.
+ * Fits the grid to its container and pushes the size to the server if it moved.
  *
- * This replaces `fit.fit()` plus a separate `clampRows()` pass. Two reasons:
+ * `fit.fit()` is enough — no extra row clamp. FitAddon measures `.term` (which
+ * carries no CSS padding any more; that lives on `.term-pad`), reads the cell
+ * height xterm already rounded per DEVICE pixel, and FLOORS `available / cell`
+ * into a row count. `rows × cellHeight` is therefore always ≤ available, so a
+ * hand-written clamp on top of it can only ever be a no-op (its condition can
+ * never be true under the same measurement). The clipped last row was padding
+ * sitting on the measured element, which is gone — not something a clamp fixes.
  *
- *  - FitAddon only looks at the container height; it does not know that the
- *    cell height comes from the measured glyph rounded per DEVICE pixel, so
- *    `rows × cellHeight` can exceed the box by a fraction and the TUI inside
- *    (Codex) paints its bottom line into the clipped strip. The clamp now
- *    happens INSIDE the proposal, before the resize — the old two-step
- *    (fit to N, clamp back to N-1) re-proposed N on every later fit, so each
- *    one did a pointless N-1→N→N-1 double reflow with two clears.
- *  - `.term` (xterm's root, `term.element`) carries no CSS padding — it lives
- *    on `.term-pad`. FitAddon subtracts only the root's own padding, so
- *    measured and usable height are the same box; the clamp below repeats
- *    that subtraction defensively in case padding ever returns.
- *
- * Dropping a row is the safe direction: a little empty space beats losing
- * half a line of output.
+ * fit.fit() also clears the renderer before resizing, so the old-sized frame
+ * never flashes stretched over the new grid.
  */
 function doFit(): void {
   if (!fit || !term || !props.visible) return
   try {
-    // Same private surfaces FitAddon itself reads (viewport.scrollBarWidth,
-    // _renderService.dimensions); if a future xterm renames either, the
-    // optional chaining takes the "no clamp available" path, which is the
-    // pre-clamp behaviour, not a crash.
-    const core = (
-      term as unknown as {
-        _core?: {
-          viewport?: { scrollBarWidth?: number }
-          _renderService?: {
-            dimensions?: { css?: { cell?: { width?: number; height?: number } } }
-            clear?: () => void
-          }
-        }
-      }
-    )._core
-    const sbw = core?.viewport?.scrollBarWidth
-    const proposed = fit.proposeDimensions()
-    // Same bail-outs as FitAddon.fit(): no measurement, no resize.
-    if (!proposed || Number.isNaN(proposed.cols) || Number.isNaN(proposed.rows)) return
-    let rows = proposed.rows
-    if (rows > 1) {
-      const host = el.value
-      const dims = core?._renderService?.dimensions
-      const cellH = dims?.css?.cell?.height
-      const cellW = dims?.css?.cell?.width
-      if (host && cellH && cellW) {
-        const style = getComputedStyle(host)
-        const padY = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0)
-        const padX = (parseFloat(style.paddingRight) || 0) + (parseFloat(style.paddingLeft) || 0)
-        // clientHeight/clientWidth are the real painted box (fractional CSS
-        // heights included — the case that clipped a row), which is exactly
-        // what the old post-hoc clampRows() measured. FitAddon divides these
-        // same numbers by the cell size and floors, so the loops below are
-        // usually no-ops; they bite when the metrics changed between
-        // proposeDimensions() and now (font swap mid-fit, DPR change) or the
-        // fractional box rounds against the floor.
-        const availH = host.clientHeight - padY
-        const availW = host.clientWidth - padX - (typeof sbw === 'number' ? sbw : 0)
-        while (rows > 1 && rows * cellH > availH + 0.5) rows--
-        let cols = proposed.cols
-        while (cols > 2 && cols * cellW > availW + 0.5) cols--
-        proposed.cols = cols
-      }
-    }
-    if (term.rows !== rows || term.cols !== proposed.cols) {
-      // What FitAddon.fit() does before resizing: drop the old-sized frame so
-      // it never flashes stretched over the new grid.
-      core?._renderService?.clear?.()
-      term.resize(proposed.cols, rows)
-    }
+    fit.fit()
     const size = `${props.sessionId}:${term.cols}x${term.rows}`
     if (size !== sentSize) {
       sentSize = size
@@ -486,9 +431,9 @@ function watchDpr(): void {
 }
 function onDprChange(): void {
   // Some Chromium versions deliver the change event one beat before
-  // devicePixelRatio reports the new value; fitting then would clamp with
-  // stale metrics, and the guard would suppress the real event that follows.
-  // Re-poll until the ratio we see actually moves.
+  // devicePixelRatio reports the new value; fitting then would use stale
+  // metrics, and re-arming on the OLD ratio would suppress the real event
+  // that follows. Re-poll until the ratio we see actually moves.
   if (window.devicePixelRatio === dprSeen) {
     setTimeout(() => {
       if (!unmounted) watchDpr()
@@ -497,7 +442,14 @@ function onDprChange(): void {
   }
   dprSeen = window.devicePixelRatio
   watchDpr()
-  doFit()
+  // Defer the re-fit a macro task. xterm listens for the DPR change on its
+  // OWN MediaQueryList and recomputes cell metrics synchronously there; the
+  // order of two independent MediaQueryList listeners is not specified, so if
+  // ours happened to run first, fit.fit() would still read the pre-change
+  // height. A timeout runs after both listeners' synchronous work has landed.
+  setTimeout(() => {
+    if (!unmounted) doFit()
+  }, 0)
 }
 
 /** Opens a link clicked in the output. Main restricts this to http/https, so a
@@ -517,8 +469,10 @@ onMounted(() => {
     // the MEASURED glyph height (floor(glyphHeight × lineHeight)), not from
     // fontSize, so "round it to whole pixels via fontSize" changes nothing at
     // 13px (floor(15.6 × 1.25) and floor(15.6 × 1.2308) are both 19) while
-    // shifting the row ratio at other sizes. The clipped last row is handled by
-    // the row clamp in doFit(), which measures the real cell metrics.
+    // shifting the row ratio at other sizes. FitAddon floors available/cell
+    // into the row count, so the last row is not clipped as long as nothing
+    // steals height off the measured box (the padding that used to do that now
+    // lives on .term-pad, outside it).
     lineHeight: 1.25,
     letterSpacing: 0,
     cursorBlink: true,
