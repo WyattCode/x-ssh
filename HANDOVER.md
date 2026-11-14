@@ -77,9 +77,10 @@ UniFFI 的 panic 跨边界会变成 `InternalException`(一个 `kotlin.Exception
 
 - 工作区里那两处安卓改动**拆成两半**:
   - 「光晕被滚动容器切平」已由另一条线用 `a114d9d` 重做并提交(`Identity` 顶部留 `HaloOvershoot`,平板传 `haloRoom = false`)。
-  - 「连接中页的『取消』加正文色 + 细边」是它独有的那半,由本会话提交在分支 **`fix/android-cancel-outline`**
-    (`802a3a8`,**未推**):`CapsuleButton(outlined)` 画 1dp 玻璃细边,`GateButtons(secondaryProminent)` 在
-    堆叠 / 横排两种布局都生效,连接中那页传 `true`。`:app:compileDebugKotlin` 通过(gradle 9.7.1),**真机未验**。
+  - 「连接中页的『取消』加正文色 + 细边」是它独有的那半,由本会话提交(`802a3a8`),已合入本地 `main`(`1d76da0`),
+    并随 **0.2.1**(`ad256b2`,`versionCode 3`)一起备好包:`mobile/android/release/xssh-android-0.2.1-debug.apk`
+    (18,402,258 B,sha256 `3f02b1c6…7ce6271`)。`:app:assembleDebug` + `:app:testDebugUnitTest` 全绿,
+    包内 `.so` 查得到 `<redacted>`;已覆盖装到 Fold,**真机行为仍未验**。
     移动端交接文档原本写着这半"不归安卓线管";用户这轮确认入库,所以是**授权例外**,不是越界。
 - 未跟踪的 `arm64`(25 字节,内容 `=== Rust core - .so ===`)已按用户确认删除;`git status` 现在干净。
 - `CHANGELOG.md` 的 `[Unreleased]` 仍是空的:这四天没有面向用户的桌面前端行为改动(托盘图标 / 包 ID 另说),记不记待定。
@@ -90,7 +91,7 @@ UniFFI 的 panic 跨边界会变成 `InternalException`(一个 `kotlin.Exception
 1. `cargo test --workspace` 本机已过(58 个);`cargo clippy -- -D warnings` 只在 CI 跑过,本地补一次。
 2. Android 真机验加固:超长 OSC 标题、组合符洪水、上传中途断开、目标是符号链接(清单见 `mobile/HANDOVER.md`)。
 3. iOS 先在 Mac 上重编 Core,否则 iOS 还是旧核心。
-4. 分支 `fix/android-cancel-outline` 待推 / 待真机看一眼「取消」的细边(它不影响逻辑,可以并进下一次安卓发版)。
+4. 0.2.1 已备好包并装到 Fold,**真机把 `mobile/HANDOVER.md` §5 的清单走一遍**;通过后再打 `android-v0.2.1` 标签、建 GitHub Release。
 
 ---
 
