@@ -1,8 +1,8 @@
 import { app, shell, BrowserWindow, ipcMain, dialog, nativeImage, nativeTheme, screen, Menu, Notification, Tray, globalShortcut, powerMonitor, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron'
-import { join, dirname, basename, isAbsolute } from 'node:path'
+import { join, dirname, basename, isAbsolute, sep } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { tmpdir, homedir } from 'node:os'
-import { mkdtemp, rm, readFile, stat, readdir, mkdir, unlink, rename, writeFile, access } from 'node:fs/promises'
+import { mkdtemp, rm, readFile, stat, readdir, mkdir, unlink, rename, writeFile, access, cp } from 'node:fs/promises'
 import { existsSync, watchFile, unwatchFile } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { IPC, PREFS_ARG } from '../shared/ipc'
@@ -342,11 +342,25 @@ export interface DragItem {
   isDir: boolean
 }
 
-function prefetchDrag(sessionId: string, items: DragItem[]): Promise<{ dir: string; local: string }> {
-  const key = `${sessionId}:${items.map((i) => i.remotePath).join('|')}`
+interface DragStaged {
+  dir: string
+  local: string
+}
+
+const dragKey = (sessionId: string, items: DragItem[]): string =>
+  `${sessionId}:${items.map((i) => i.remotePath).join('|')}`
+
+/** Completed stagings, keyed like dragCache. A startDrag can only take over a
+ *  LIVE gesture, so it must fire within a beat of dragstart: the synchronous
+ *  lookup here is what makes a second drag of the same (already downloaded)
+ *  items succeed instantly, while the first one only arms the fetch. */
+const dragStaged = new Map<string, DragStaged>()
+
+function prefetchDrag(sessionId: string, items: DragItem[]): Promise<DragStaged> {
+  const key = dragKey(sessionId, items)
   let p = dragCache.get(key)
   if (!p) {
-    p = (async () => {
+    p = (async (): Promise<DragStaged> => {
       const dir = await mkdtemp(join(tmpdir(), 'xssh-drag-'))
       try {
         for (const it of items) {
@@ -357,7 +371,9 @@ function prefetchDrag(sessionId: string, items: DragItem[]): Promise<{ dir: stri
         const local = items.length === 1 && !items[0].isDir
           ? join(dir, items[0].name)
           : dir
-        return { dir, local }
+        const staged = { dir, local }
+        dragStaged.set(key, staged)
+        return staged
       } catch (e) {
         // Drop a half-downloaded tree immediately so a retry is not blocked by
         // a poisoned cache entry and so temp dirs do not accumulate.
@@ -371,13 +387,19 @@ function prefetchDrag(sessionId: string, items: DragItem[]): Promise<{ dir: stri
     void cached.catch(() => {
       if (dragCache.get(key) === cached) dragCache.delete(key)
     })
-    // Expire the cache and delete the temp dir after a minute (success path).
-    setTimeout(() => {
-      if (dragCache.get(key) === cached) dragCache.delete(key)
-      void cached
-        .then(({ dir }) => rm(dir, { recursive: true, force: true }))
-        .catch(() => undefined)
-    }, 60_000)
+    // Keep a STAGED drag droppable for a minute after it finished preparing —
+    // the timer starts on completion. Sweeping 60s after the request instead
+    // deleted the temp dir out from under any download slower than a minute,
+    // so a big file or deep folder could never finish dragging out.
+    void cached
+      .then(({ dir }) => {
+        setTimeout(() => {
+          if (dragCache.get(key) === cached) dragCache.delete(key)
+          dragStaged.delete(key)
+          void rm(dir, { recursive: true, force: true }).catch(() => undefined)
+        }, 60_000)
+      })
+      .catch(() => undefined)
   }
   return p
 }
@@ -1661,6 +1683,59 @@ function registerIpc(): void {
     }
   )
 
+  /** Local pane drop target: copy files the user dragged in (from the
+   *  desktop, Explorer, or our own remote pane's native drag-out) into the
+   *  pane's current directory. Sources are absolute paths the renderer read
+   *  off real dropped File objects; the DESTINATION is the guarded side —
+   *  only a directory this pane has listed, names resolved one segment at a
+   *  time, and an existing entry is never overwritten (a ` (n)` suffix is
+   *  picked instead, the same rule a file manager follows on copy). */
+  handle(
+    IPC.localCopyIn,
+    async (_e, dir: unknown, sources: unknown) => {
+      const base = resolveDir(dir)
+      if (!base || !localListed.has(base)) return { ok: false, error: 'dir-not-listed' }
+      if (!Array.isArray(sources) || sources.length === 0 || sources.length > 500) {
+        return { ok: false, error: 'bad-input' }
+      }
+      try {
+        for (const srcRaw of sources) {
+          if (typeof srcRaw !== 'string' || !isAbsolute(srcRaw) || srcRaw.includes('\u0000')) {
+            return { ok: false, error: 'bad-input' }
+          }
+          const info = await stat(srcRaw)
+          // Refuse to copy a directory into itself (or a dragged temp dir on
+          // top of its own staged parent would recurse while reading).
+          if (info.isDirectory() && (srcRaw === base || srcRaw.startsWith(base + sep))) {
+            return { ok: false, error: 'copy-into-self' }
+          }
+          const name = basename(srcRaw)
+          if (!name) return { ok: false, error: 'bad-input' }
+          let target = resolveInside(base, name)
+          if (!target) return { ok: false, error: 'invalid-name' }
+          // Never overwrite: bump to `name (1).ext`, `name (2).ext`, …
+          for (let n = 1; existsSync(target); n++) {
+            const dot = name.lastIndexOf('.')
+            const stem = dot > 0 ? name.slice(0, dot) : name
+            const ext = dot > 0 ? name.slice(dot) : ''
+            target = resolveInside(base, `${stem} (${n})${ext}`)
+            if (!target || n > 999) return { ok: false, error: 'invalid-name' }
+          }
+          await cp(srcRaw, target, {
+            recursive: true,
+            // Preserve timestamps where the platform can; a copy that lands
+            // "newer" on a sync-aware workflow is worse than losing owner bits.
+            force: false,
+            errorOnExist: true
+          })
+        }
+        return { ok: true }
+      } catch (e) {
+        return { ok: false, error: friendlyError((e as Error).message) }
+      }
+    }
+  )
+
   // ---- Command snippets ----
   handle(IPC.snippetsList, () => listSnippets())
   handle(IPC.snippetsSave, (_e, snippet: Snippet) => saveSnippet(snippet))
@@ -2461,24 +2536,55 @@ function registerIpc(): void {
     }
   })
 
-  // Drag out (dragstart): start the native drag with the (pre)downloaded file.
+  // Drag out (dragstart): hand the OS a real file. startDrag() only takes
+  // over the CURRENT gesture — Chromium checks whether the renderer still
+  // holds one — so after any await it may already be gone. Two rules fall
+  // out of that: a staging that finished earlier is grabbed SYNCHRONOUSLY
+  // (no await before startDrag; this is what makes the second drag of slow
+  // items work), and a gesture lost mid-download is reported back instead of
+  // failing silently ("I dragged, nothing arrived, no word").
+  const liveDrags = new Map<number, string>()
   on(
     IPC.sftpStartDrag,
     async (e, sessionId: string, items: DragItem[]) => {
+      const key = dragKey(sessionId, items)
+      liveDrags.set(e.sender.id, key)
+      const send = (msg: { ready: boolean }): void => {
+        if (!e.sender.isDestroyed()) e.sender.send(IPC.sftpDragNotice, msg)
+      }
+      const iconOf = async (file: string): Promise<typeof DRAG_ICON> => {
+        try {
+          return await app.getFileIcon(file, { size: 'normal' })
+        } catch {
+          return DRAG_ICON
+        }
+      }
+      const stagedNow = dragStaged.get(key)
+      if (stagedNow) {
+        e.sender.startDrag({ file: stagedNow.local, icon: await iconOf(stagedNow.local) })
+        if (liveDrags.get(e.sender.id) === key) liveDrags.delete(e.sender.id)
+        return
+      }
       try {
         const { local } = await prefetchDrag(sessionId, items)
-        let icon = DRAG_ICON
-        try {
-          icon = await app.getFileIcon(local, { size: 'normal' })
-        } catch {
-          /* fall back to the placeholder icon */
+        if (liveDrags.get(e.sender.id) !== key) {
+          // Released before staging finished. The files are ready NOW and
+          // stay in the cache for a minute, so one more drag drops instantly.
+          send({ ready: true })
+          return
         }
-        e.sender.startDrag({ file: local, icon })
+        e.sender.startDrag({ file: local, icon: await iconOf(local) })
       } catch {
-        /* download failed or the drag gesture already ended */
+        /* download failed — say so instead of eating the drag */
+        send({ ready: false })
+      } finally {
+        if (liveDrags.get(e.sender.id) === key) liveDrags.delete(e.sender.id)
       }
     }
   )
+  on(IPC.sftpDragEnd, (e) => {
+    liveDrags.delete(e.sender.id)
+  })
 
   // Pre-fetch the drag-out download on mousedown so the (mostly asynchronous,
   // network-bound) download is ready by the time the drag gesture reaches

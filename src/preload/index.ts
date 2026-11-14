@@ -158,6 +158,8 @@ const api = {
       ipcRenderer.invoke(IPC.localRename, dir, oldName, newName),
     del: (dir: string, name: string, isDir: boolean): Promise<SftpResult> =>
       ipcRenderer.invoke(IPC.localDelete, dir, name, isDir),
+    copyIn: (dir: string, sources: string[]): Promise<SftpResult> =>
+      ipcRenderer.invoke(IPC.localCopyIn, dir, sources),
     readText: (path: string): Promise<{ ok: boolean; content?: string; error?: string }> =>
       ipcRenderer.invoke(IPC.localReadText, path),
     pickFile: (): Promise<{ ok: boolean; path?: string; canceled?: boolean; error?: string }> =>
@@ -318,8 +320,14 @@ const api = {
       ipcRenderer.invoke(IPC.sftpOpenWith, sessionId, path, name, program),
     startDrag: (sessionId: string, items: { remotePath: string; name: string; isDir: boolean }[]): void =>
       ipcRenderer.send(IPC.sftpStartDrag, sessionId, items),
+    endDrag: (): void => ipcRenderer.send(IPC.sftpDragEnd),
     prefetchDrag: (sessionId: string, items: { remotePath: string; name: string; isDir: boolean }[]): void =>
       ipcRenderer.send(IPC.sftpPrefetchDrag, sessionId, items),
+    onDragNotice: (cb: (n: { ready: boolean }) => void): (() => void) => {
+      const listener = (_e: unknown, n: { ready: boolean }): void => cb(n)
+      ipcRenderer.on(IPC.sftpDragNotice, listener)
+      return () => ipcRenderer.removeListener(IPC.sftpDragNotice, listener)
+    },
     cancel: (id: string): void => ipcRenderer.send(IPC.sftpCancel, id),
     pause: (id: string, paused: boolean): void => ipcRenderer.send(IPC.sftpPause, id, paused),
     pauseAll: (paused: boolean): void => ipcRenderer.send(IPC.sftpPauseAll, paused),

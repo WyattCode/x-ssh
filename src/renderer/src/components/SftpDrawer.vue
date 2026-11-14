@@ -170,17 +170,17 @@ function localDragStart(e: DragEvent, entry: LocalEntry): void {
 }
 async function onLocalDrop(e: DragEvent): Promise<void> {
   endDrag()
-  const custom = e.dataTransfer?.getData('application/x-ssh-remote')
-  if (!custom || !props.sessionId || !localPath.value) return
-  let items: { path: string; name: string; isDir: boolean }[]
-  try {
-    items = JSON.parse(custom)
-  } catch {
-    return
-  }
-  if (!items.length) return
-  const r = await window.api.sftp.downloadTo(props.sessionId, items, localPath.value, store.transferConcurrency)
-  if (!r.ok && !r.canceled) toast(sftpErr(r.error, 'sfp.downloadFail'), 'error')
+  if (!localPath.value) return
+  // Since remote rows drag out natively, their drops arrive as real files —
+  // including a release over our own local pane. The renderer can read each
+  // dropped file's source path; main copies them into the pane's directory.
+  // This also serves plain desktop→pane drops, no session required.
+  const paths = Array.from(e.dataTransfer?.files ?? [])
+    .map((f) => window.api.getPathForFile(f))
+    .filter((p): p is string => !!p)
+  if (!paths.length) return
+  const r = await window.api.local.copyIn(localPath.value, paths)
+  if (!r.ok) toast(sftpErr(r.error, 'sfp.copyInFail'), 'error')
   else await refreshLocal()
 }
 
@@ -497,6 +497,10 @@ function onDragEnter(e: DragEvent): void {
 function endDrag(): void {
   dragDepth = 0
   dragOver.value = false
+  // Tell main the gesture is over. If a drag-out's download was still
+  // running, this is what lets main answer with "ready — drag again"
+  // instead of calling startDrag into a dead gesture, which does nothing.
+  window.api.sftp.endDrag()
 }
 function onDragLeave(): void {
   if (!dragDepth) return
@@ -743,13 +747,22 @@ watch(
     if (open) nextTick(() => localInput.value?.focus())
   }
 )
+let offDragNotice: (() => void) | null = null
 onMounted(() => {
   // Tracking/notification/history are handled globally in the store so they run
   // even when this drawer is closed. Idempotent, so calling it here too is safe.
   store.initSftpProgress()
   window.addEventListener('resize', onWindowResize)
+  // A drag-out whose download lost the gesture is otherwise silent: the user
+  // drops on the desktop and nothing arrives. Main says so here; the staged
+  // files live in its cache for a minute, so the guidance is actionable.
+  offDragNotice = window.api.sftp.onDragNotice((n) => {
+    toast(n.ready ? tt('sfp.dragReady') : tt('sfp.dragFail'), n.ready ? 'info' : 'error')
+  })
 })
 onBeforeUnmount(() => {
+  offDragNotice?.()
+  offDragNotice = null
   if (uploadReloadTimer) clearTimeout(uploadReloadTimer)
   // A continuous sync (esp. with delete-extra-files) must not keep running
   // with the drawer gone — the watch state lives in main and would otherwise
@@ -1200,39 +1213,35 @@ function openWith(entry: FileEntry): void {
   emit('open-with', payload)
 }
 function onRemoteMouseDown(e: MouseEvent, entry: FileEntry): void {
-  // Alt+mousedown pre-fetches the drag-out download into the main-process cache
-  // so that startDrag (called from onDragStart) can complete near-instantly and
-  // actually drive the native OS drag gesture instead of missing it.
-  if (!props.sessionId || !e.altKey) return
+  // Drag-out is native, so the file has to be on disk by the time dragstart
+  // fires — pre-download it on press. But a plain click must not pull
+  // gigabytes over the wire, so only a held press (past Chromium's ~4px /
+  // few-frame drag threshold) starts the prefetch; releasing early cancels it.
+  if (!props.sessionId || e.button !== 0) return
+  const sid = props.sessionId
   const sel = selected.value.has(entry.name) ? selectedEntries() : [entry]
   const items = sel.map((x) => ({ remotePath: posixJoin(path.value, x.name), name: x.name, isDir: x.isDir }))
-  window.api.sftp.prefetchDrag(props.sessionId, items)
+  const hold = setTimeout(() => window.api.sftp.prefetchDrag(sid, items), 150)
+  const cancel = (): void => {
+    clearTimeout(hold)
+    window.removeEventListener('mouseup', cancel)
+  }
+  window.addEventListener('mouseup', cancel)
 }
 function onDragStart(e: DragEvent, entry: FileEntry): void {
   if (!props.sessionId) return
-  // Alt+drag initiates a native OS drag-out (to the desktop / Explorer).
-  // If the dragged row is part of a multi-selection, all selected items are
-  // carried; the main process downloads them (a single file drags out as that
-  // file, multiple items / folders into a temp directory) and startDrags it.
-  // Regular drag keeps carrying the in-app MIME for the dual-pane drop.
-  if (e.altKey) {
-    const sel = selected.value.has(entry.name) ? selectedEntries() : [entry]
-    e.preventDefault()
-    const items = sel.map((x) => ({ remotePath: posixJoin(path.value, x.name), name: x.name, isDir: x.isDir }))
-    window.api.sftp.startDrag(props.sessionId, items)
-    return
-  }
-  // In-app drag (dual-panel): carry the remote path(s) so the local pane can
-  // accept them as a drop target and download into its current directory.
-  // If the dragged row is part of a multi-selection, drag them all.
-  const items = (selected.value.has(entry.name) ? selectedEntries() : [entry]).map((x) => ({
-    path: posixJoin(path.value, x.name),
-    name: x.name,
-    isDir: x.isDir
-  }))
-  e.dataTransfer?.setData('application/x-ssh-remote', JSON.stringify(items))
-  e.dataTransfer?.setData('text/plain', items.map((i) => i.path).join('\n'))
-  if (e.dataTransfer) e.dataTransfer.effectAllowed = 'copy'
+  // Every drag from the remote pane is a native OS drag-out: desktop,
+  // Explorer, or our own local pane (which copies real file drops). Once
+  // startDrag() takes the gesture the OS owns it, so there is nothing left
+  // to distinguish "over our window" from "over the desktop". Multi-selection
+  // drags all selected rows; folders and several items stage into one temp
+  // directory. The placeholder setData keeps the gesture claimable in the
+  // shape Electron's own drag-out example uses.
+  e.preventDefault()
+  e.dataTransfer?.setData('text/plain', entry.name)
+  const sel = selected.value.has(entry.name) ? selectedEntries() : [entry]
+  const items = sel.map((x) => ({ remotePath: posixJoin(path.value, x.name), name: x.name, isDir: x.isDir }))
+  window.api.sftp.startDrag(props.sessionId, items)
 }
 async function uploadPick(): Promise<void> {
   if (!props.sessionId || busy.value) return
