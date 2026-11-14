@@ -2035,14 +2035,29 @@ export class SshManager {
     this.jobSession.set(jobId, sessionId)
     if (quiet) this.quietJobs.add(jobId)
     if (rateBytesPerSec > 0) this.jobRate.set(jobId, rateBytesPerSec)
+    // Release every mapping this method registers. All the exit paths use it:
+    // the old per-throw cleanup missed entries (the session-failure path
+    // deleted only jobSession, sync-list-failed only cancelled+paused), and a
+    // continuous-sync watcher calls this every pass while swallowing the
+    // throw — each failed pass grew the sets without bound.
+    const releaseJob = (): void => {
+      this.cancelledJobs.delete(jobId)
+      this.pausedJobs.delete(jobId)
+      this.jobRate.delete(jobId)
+      this.lastProgressAt.delete(jobId)
+      this.jobSession.delete(jobId)
+      this.quietJobs.delete(jobId)
+    }
     const conc = clampConcurrency(concurrency ?? SshManager.CONCURRENCY, SshManager.CONCURRENCY)
     const sftp = await this.getSftp(sessionId).catch((e) => {
-      this.jobSession.delete(jobId)
+      releaseJob()
       throw e
     })
 
     const localMap = new Map<string, { size: number; mtimeMs: number }>()
     const remoteMap = new Map<string, { size: number; mtimeMs: number }>()
+    // Neither walk rejects (readdir/stat failures become `false`), so this
+    // await needs no release-on-throw path of its own.
     const [localOk, remoteOk] = await Promise.all([
       this.walkLocalTree(localDir, '', localMap),
       this.walkRemoteTree(sftp, remoteDir, '', remoteMap)
@@ -2050,8 +2065,7 @@ export class SshManager {
     // A partial snapshot (unreadable dir / file) would turn "absent on this
     // side" into a deletion — refuse to run the sync off one at all.
     if (!localOk || !remoteOk) {
-      this.cancelledJobs.delete(jobId)
-      this.pausedJobs.delete(jobId)
+      releaseJob()
       throw new Error('sync-list-failed')
     }
     // Plan: each entry is a transfer (dir up/down) or a deletion.
@@ -2059,31 +2073,38 @@ export class SshManager {
     const plan: FilePlan[] = []
     const deletions: { rel: string; dir: 'up' | 'down' }[] = []
     const all = new Set<string>([...localMap.keys(), ...remoteMap.keys()])
-    for (const rel of all) {
-      const L = localMap.get(rel)
-      const R = remoteMap.get(rel)
-      const lp = this.safeLocalJoin(localDir, rel)
-      const rp = this.posixJoin(remoteDir, rel)
-      const newer = (a: { mtimeMs: number }, b: { mtimeMs: number }): boolean => a.mtimeMs > b.mtimeMs
-      if (mode === 'up') {
-        // Local is the source of truth: push local when it's absent/mismatched/newer.
-        if (L && (!R || L.size !== R.size || newer(L, R))) plan.push({ dir: 'up', local: lp, remote: rp, rel, size: L.size })
-        if (deleteExtras && !L && R) deletions.push({ rel, dir: 'up' })
-      } else if (mode === 'down') {
-        // Remote is the source of truth.
-        if (R && (!L || R.size !== L.size || newer(R, L))) plan.push({ dir: 'down', local: lp, remote: rp, rel, size: R.size })
-        if (deleteExtras && !R && L) deletions.push({ rel, dir: 'down' })
-      } else if (mode === 'both') {
-        // Newer side wins per file; equal mtime (with different size) falls back
-        // to the local side, so a divergent file isn't left silently in sync.
-        if (L && !R) plan.push({ dir: 'up', local: lp, remote: rp, rel, size: L.size })
-        else if (!L && R) plan.push({ dir: 'down', local: lp, remote: rp, rel, size: R.size })
-        else if (L && R) {
-          if (newer(L, R)) plan.push({ dir: 'up', local: lp, remote: rp, rel, size: L.size })
-          else if (newer(R, L)) plan.push({ dir: 'down', local: lp, remote: rp, rel, size: R.size })
-          else if (L.size !== R.size) plan.push({ dir: 'up', local: lp, remote: rp, rel, size: L.size })
+    try {
+      for (const rel of all) {
+        const L = localMap.get(rel)
+        const R = remoteMap.get(rel)
+        const lp = this.safeLocalJoin(localDir, rel)
+        const rp = this.posixJoin(remoteDir, rel)
+        const newer = (a: { mtimeMs: number }, b: { mtimeMs: number }): boolean => a.mtimeMs > b.mtimeMs
+        if (mode === 'up') {
+          // Local is the source of truth: push local when it's absent/mismatched/newer.
+          if (L && (!R || L.size !== R.size || newer(L, R))) plan.push({ dir: 'up', local: lp, remote: rp, rel, size: L.size })
+          if (deleteExtras && !L && R) deletions.push({ rel, dir: 'up' })
+        } else if (mode === 'down') {
+          // Remote is the source of truth.
+          if (R && (!L || R.size !== L.size || newer(R, L))) plan.push({ dir: 'down', local: lp, remote: rp, rel, size: R.size })
+          if (deleteExtras && !R && L) deletions.push({ rel, dir: 'down' })
+        } else if (mode === 'both') {
+          // Newer side wins per file; equal mtime (with different size) falls back
+          // to the local side, so a divergent file isn't left silently in sync.
+          if (L && !R) plan.push({ dir: 'up', local: lp, remote: rp, rel, size: L.size })
+          else if (!L && R) plan.push({ dir: 'down', local: lp, remote: rp, rel, size: R.size })
+          else if (L && R) {
+            if (newer(L, R)) plan.push({ dir: 'up', local: lp, remote: rp, rel, size: L.size })
+            else if (newer(R, L)) plan.push({ dir: 'down', local: lp, remote: rp, rel, size: R.size })
+            else if (L.size !== R.size) plan.push({ dir: 'up', local: lp, remote: rp, rel, size: L.size })
+          }
         }
       }
+    } catch (e) {
+      // safeLocalJoin refuses a remote name that traverses: release the job
+      // before the throw reaches the IPC layer.
+      releaseJob()
+      throw e
     }
 
     let bytesDone = 0
@@ -2171,12 +2192,7 @@ export class SshManager {
     // that lost files used to answer "ok" and looked like a success. A cancelled
     // job keeps its old answer (cancel handling is a separate concern).
     const errorsCount = this.cancelledJobs.has(jobId) ? 0 : errors
-    this.cancelledJobs.delete(jobId)
-    this.pausedJobs.delete(jobId)
-    this.jobRate.delete(jobId)
-    this.lastProgressAt.delete(jobId)
-    this.jobSession.delete(jobId)
-    this.quietJobs.delete(jobId)
+    releaseJob()
     return { cancelled, errors: errorsCount }
   }
 
@@ -2437,10 +2453,19 @@ export class SshManager {
   }> {
     this.jobSession.set(jobId, sessionId)
     if (rateBytesPerSec > 0) this.jobRate.set(jobId, rateBytesPerSec)
+    // Release every mapping registered above on any early exit (see syncJob's
+    // releaseJob for why partial cleanup is not enough).
+    const releaseJob = (): void => {
+      this.cancelledJobs.delete(jobId)
+      this.pausedJobs.delete(jobId)
+      this.jobRate.delete(jobId)
+      this.jobSession.delete(jobId)
+      this.lastProgressAt.delete(jobId)
+    }
     // If the SFTP channel can't be opened the job never emits a terminal event,
     // so drop the mapping here to avoid leaking it.
     const sftp = await this.getSftp(sessionId).catch((e) => {
-      this.jobSession.delete(jobId)
+      releaseJob()
       throw e
     })
     const conc = clampConcurrency(concurrency ?? SshManager.CONCURRENCY, SshManager.CONCURRENCY)
@@ -2457,8 +2482,7 @@ export class SshManager {
       // Fail closed: if the target folder can't be created, every file write
       // would fail anyway — clean up the job mappings and let the IPC report
       // ok:false instead of a silent empty success.
-      this.jobSession.delete(jobId)
-      this.jobRate.delete(jobId)
+      releaseJob()
       throw e
     }
     let bytesDone = 0
@@ -2905,6 +2929,10 @@ export class SshManager {
         this.cancelledJobs.delete(jobId)
       }
     } finally {
+      // Also the cancelled flag: a cancel can land between the jobSession
+      // registration and the getSftp rejection, before the inner finally
+      // (which only runs once workers start) ever gets there.
+      this.cancelledJobs.delete(jobId)
       this.pausedJobs.delete(jobId)
       this.jobRate.delete(jobId)
       this.jobSession.delete(jobId)
