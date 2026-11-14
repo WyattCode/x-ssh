@@ -1257,11 +1257,13 @@ async function onDrop(e: DragEvent): Promise<void> {
     }
     if (!paths.length) return
   } else {
+    // Every real drop is a path the user chose. (A filter dropped paths living
+    // in our own xssh-drag staging dir — that existed only while row drag-out
+    // was enabled, and it silently swallowed any user file whose path merely
+    // contained "xssh-drag-". Drag-out is gone, so the filter went with it.)
     paths = Array.from(e.dataTransfer?.files ?? [])
       .map((f) => window.api.getPathForFile(f))
-      // Ignore files that came from our own drag-out (dragging a file out and
-      // releasing back over the panel) — they live in the xssh-drag temp dir.
-      .filter((p): p is string => !!p && !p.includes('xssh-drag-'))
+      .filter((p): p is string => !!p)
     if (!paths.length) return
   }
   // Don't gate on `busy` here — dropping a second folder mid-upload is fine —
