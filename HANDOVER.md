@@ -1,3 +1,99 @@
+# 会话记录:M3.192(2026-11-14,补记 11-10 → 11-14:交接文档漏掉的这四天)
+
+> 上一节 M3.191 停在 v0.6.30(11-08),之后的工作没有现场记录,这一节是**事后补写的**
+> (依据 `git log` 与提交正文,取舍理由可能没留下),基线是 `0e2e9f2`。
+> 移动端那半边——Android 0.2.0 发布、界面踩坑、没在真机验过的清单——**不在本节重复**,
+> 见 `mobile/HANDOVER.md` 11-14 新增的「Android 0.2.0 现状与交接」一节。
+> 桌面版本号仍是 **0.6.30**(`package.json` 未改),这四天**没有新 tag**。
+> 补写时踩了一次自己的坑:本地 `main` 落后远端 2 个提交,其中 `a114d9d` 已经把"光晕"那半修了,
+> 差点把别人的提交重做一遍——**写文档前先 `git fetch` 并确认基线**。
+
+## 一句话
+
+Rust 核心做了一轮安全加固(不可信终端输出 / SFTP 上传 / 凭据 Debug / 运行时与转发收尾 / PTY 尺寸),
+Android 在 FFI 边界兜住 panic;三端 Bundle ID 统一成 `com.wyatt.ssh`,macOS 托盘改单色 template 图。
+**加固提交时这台机器编不了 Rust** —— 应用控制策略拦 cargo build script(`os error 4551`),
+只能开 PR 让 CI 编译测试(PR #41,`rust-core` + `test-build` 绿,run 175)。
+**11-14 用户关掉智能应用控制之后**,本机 `cargo test --workspace` 全过(核心库 58 个用例),`.so` 也重打了。
+
+## 一、Rust 核心加固(PR #41:`55bd5f8` 主体、`d579e1d` 收尾、`e4b41c3` 修测试)
+
+`55bd5f8` 的提交信息开头就写着 **NOT COMPILED, NOT TESTED**。第一次 push 的 CI 在 `cargo test` 就挂了:
+`ssh.rs` 的测试模块没有 `use super::*`、新测试用到 `Auth` / `Target` 却没 import(lib-test 整个编译不过),
+`iter::repeat().take()` 又触发 `clippy::manual_repeat_n`。`e4b41c3` 修完才绿。
+
+| 位置 | 问题 | 改法 |
+|---|---|---|
+| `terminal.rs` / OSC | vte 带 `std` 时 OSC 缓冲无界;标题栈会把标题 clone 最多 4096 次 | `OscGuard` 在字节进 vte 前数字节,超过 8 KiB 发 CAN 并丢弃到终止符 |
+| `terminal.rs` / 组合符 | 单个单元格可塞无限组合符,每帧渲染全量走 | `feed()` 按 4 KiB 切片,切片后光标旁单格 >32 个组合符丢弃多余;渲染最多 32 |
+| `terminal.rs` / 网格 | 1 列网格上宽字符索引越界 | 最小宽 2 |
+| `terminal.rs` / 滚动 | alacritty 的 `scroll()` 不做饱和 | 参数 clamp |
+| `terminal.rs` / CSI 14t | 单元格像素尺寸溢出 u16 | clamp,保证 `cols*cell_width` 放得进 u16 |
+| `terminal.rs` / 事件队列 | 锁中毒后**每帧** panic | 恢复,不再每帧炸 |
+| `sftp.rs` / 上传 | 旧 `create` 跟随符号链接、会截断、临时名固定、权限事后才恢复 | 临时文件 `CREATE\|EXCLUDE` + 唯一名,**创建时**就带原权限位 |
+| `sftp.rs` / 替换 | 先删后 rename,失败即丢原文件 | 先解析目标符号链接;旧文件改名备份 → 新文件 rename → 成功后才删备份,失败回滚 |
+| `Auth` / `AuthMethod` | 自动派生的 `Debug` 会打印密码 / 私钥文本 / 口令 | 手写 `Debug`,一律 `<redacted>` |
+| `ssh.rs` / 运行时 | host 销毁 `Ssh` 时 poll 线程正在 `block_on(timeout(..))`,tokio panic(“… is being shutdown”) | `Shell` 改持 `Arc<Runtime>`(与 `Sftp` 一致) |
+| `ssh.rs` / 转发 | 半死连接让 disconnect 等 keepalive 放弃(30–45 s) | 取消远端转发整批 3 s 上界,`remove_forward` / `close_all_forwards` 共用一个 helper |
+| `ssh.rs` | `close_all_forwards` 持锁等网络,`forwards()` 调用方被一起卡住 | 先清表放锁,再等网络 |
+| `ssh.rs` | `tcpip_forward` 没有 `STEP_TIMEOUT` | 补上,与其他步骤一致 |
+| `xssh-ffi` | `as u16` 截断:70000 变 4464,远端与本地网格不一致 | cols `2..=1000` / rows `1..=1000` clamp,加单测 |
+
+## 二、Android:在 FFI 边界兜 panic(`a93e2f5`)
+
+UniFFI 的 panic 跨边界会变成 `InternalException`(一个 `kotlin.Exception`,和 `FfiException` 同级),
+而 session 循环只 catch `IllegalStateException`、所在 scope 又没有异常处理器 ——
+**服务端一条恶意 / 畸形输出就能把整个 App 崩掉**。
+
+- `LiveTerminal.pump` 捕获 `Exception`,只结束这一条会话(记日志)
+- 回写给服务端的应答(CPR / DA…)`runCatching`:写失败 / 超时只是丢一次应答,不再算 poll 失败
+- `publishFrame` `runCatching`
+- `MIN_COLS = 2`(UI 与 `LiveTerminal.resizeGrid`)
+
+**这一版只兜了 Kotlin 侧**;Rust 侧的缺陷靠上面那个 `.so` 修,两者要一起发才有意义。
+
+## 三、绑定与产物
+
+- `713d46c` 重新生成 UniFFI 绑定:唯一差异是 `AuthMethod` 的 KDoc(新的脱敏说明),无 API / 校验和变化。
+- 本机 `jniLibs/arm64-v8a/libxssh_ffi.so` 已是 11-14 05:43 重出的(二进制里有 `<redacted>` 字样,
+  确认是加固后的代码);`jniLibs/` 被 `mobile/android/.gitignore` 忽略,**换机器要重出**。
+- **0.2.0 的 APK 里是加固之前的旧 `.so`**。新库装到 Fold 后只确认了"应用能启动、日志里没有原生库加载 /
+  UniFFI 校验报错",**还没用它真连过任何服务器**——终端输出走新的 OSC 闸 / 切片、SFTP 上传,都要单独验。
+  下一次发版应是 **0.2.1**。
+- **iOS 没有这轮加固**:`mobile/ios/Core/` 是 gitignore 的本机产物,这台机器上不存在。
+  要在 Mac 上重跑 `mobile/tools/build-ios-core.sh` 才带得上。
+
+## 四、Bundle ID 与图标(11-11,三个 PR)
+
+- **iOS** `com.wyatt.ssh`(#39),测试 target `com.wyatt.ssh.tests`。
+- **macOS** `build.mac.appId = "com.wyatt.ssh"`(#40):只覆盖 macOS 的 `CFBundleIdentifier` 和 helper,
+  **Windows 的 appId / AppUserModelID 仍是 `com.x-ssh.app`**,不要顺手改。
+- **托盘图标**(#38):以前是把彩色 App 图标缩到 16pt。现在 macOS 用 `build/trayTemplate.png` + `@2x`
+  (纯黑 + alpha,18pt 画布,lib 里再 `setTemplateImage(true)`),由 `build/icon-src/make_icons.py` 生成;
+  `package.json` 的 `build.files` 已加这两个 png,**漏了打包就会缺文件**。Linux 仍走 24px。
+  **未验**:亮 / 暗菜单栏下的实际着色 —— 这台机器打不出 mac 包。
+
+## 五、未提交 / 未验证
+
+- 工作区里那两处安卓改动**拆成两半**:
+  - 「光晕被滚动容器切平」已由另一条线用 `a114d9d` 重做并提交(`Identity` 顶部留 `HaloOvershoot`,平板传 `haloRoom = false`)。
+  - 「连接中页的『取消』加正文色 + 细边」是它独有的那半,由本会话提交在分支 **`fix/android-cancel-outline`**
+    (`802a3a8`,**未推**):`CapsuleButton(outlined)` 画 1dp 玻璃细边,`GateButtons(secondaryProminent)` 在
+    堆叠 / 横排两种布局都生效,连接中那页传 `true`。`:app:compileDebugKotlin` 通过(gradle 9.7.1),**真机未验**。
+    移动端交接文档原本写着这半"不归安卓线管";用户这轮确认入库,所以是**授权例外**,不是越界。
+- 未跟踪的 `arm64`(25 字节,内容 `=== Rust core - .so ===`)已按用户确认删除;`git status` 现在干净。
+- `CHANGELOG.md` 的 `[Unreleased]` 仍是空的:这四天没有面向用户的桌面前端行为改动(托盘图标 / 包 ID 另说),记不记待定。
+- 桌面端 `src/` 只动了 `main/index.ts`(托盘),渲染层没动;`vitest` 没有复跑。
+
+## 六、下一步
+
+1. `cargo test --workspace` 本机已过(58 个);`cargo clippy -- -D warnings` 只在 CI 跑过,本地补一次。
+2. Android 真机验加固:超长 OSC 标题、组合符洪水、上传中途断开、目标是符号链接(清单见 `mobile/HANDOVER.md`)。
+3. iOS 先在 Mac 上重编 Core,否则 iOS 还是旧核心。
+4. 分支 `fix/android-cancel-outline` 待推 / 待真机看一眼「取消」的细边(它不影响逻辑,可以并进下一次安卓发版)。
+
+---
+
 # 会话记录:M3.191(2026-11-08,**已合并并发版 v0.6.30**:二次复核(v0.6.28..v0.6.29)的 9 条发现全部处理)
 
 > 分支 `fix/ime-review-round2` → **PR → CI 全绿后合并 → 在合并后的 `main` 上打 tag `v0.6.30`**(用户说“合并,推送,发版”)。
