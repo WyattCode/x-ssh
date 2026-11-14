@@ -75,13 +75,28 @@ const statusColor = (s: string): string =>
 
 // Per-tab right-click menu.
 const menu = reactive({ open: false, x: 0, y: 0, tabId: '' })
+const layoutMenuEl = ref<HTMLElement | null>(null)
+const menuEl = ref<HTMLElement | null>(null)
+
+/** Pull a just-opened fixed menu fully inside the window using its real
+ *  rendered size. The tab menu used to clamp with a guessed 168px width and
+ *  never touched y at all: a wide locale ("Close others…") overflowed right,
+ *  and on a short window the last items sat off-screen. Same approach as the
+ *  terminal's context menu. */
+function clampMenu(pos: { x: number; y: number }, el: HTMLElement | null): void {
+  const r = el?.getBoundingClientRect()
+  if (!r) return
+  pos.x = Math.max(8, Math.min(pos.x, window.innerWidth - r.width - 8))
+  pos.y = Math.max(8, Math.min(pos.y, window.innerHeight - r.height - 8))
+}
 
 function openTabMenu(e: MouseEvent, id: string): void {
   e.preventDefault()
   menu.tabId = id
-  menu.x = Math.min(e.clientX, window.innerWidth - 168)
+  menu.x = e.clientX
   menu.y = e.clientY
   menu.open = true
+  void nextTick(() => clampMenu(menu, menuEl.value))
 }
 function run(action: (id: string) => void): void {
   action(menu.tabId)
@@ -106,6 +121,7 @@ function openLayoutMenu(e: MouseEvent): void {
   layoutMenu.x = Math.max(8, b.right - 184)
   layoutMenu.y = b.bottom + 12
   layoutMenu.open = true
+  void nextTick(() => clampMenu(layoutMenu, layoutMenuEl.value))
 }
 function doSplit(dir: 'row' | 'col'): void {
   layoutMenu.open = false
@@ -245,7 +261,7 @@ function cancelRename(): void {
   </div>
 
   <div v-if="layoutMenu.open" class="ctx-overlay" @mousedown="layoutMenu.open = false" @contextmenu.prevent="layoutMenu.open = false">
-    <div class="ctx layout-menu" :style="{ left: layoutMenu.x + 'px', top: layoutMenu.y + 'px' }" @mousedown.stop>
+    <div ref="layoutMenuEl" class="ctx layout-menu" :style="{ left: layoutMenu.x + 'px', top: layoutMenu.y + 'px' }" @mousedown.stop>
       <button :disabled="!canLayout" @click="doSplit('row')">{{ t('tabbar.splitAction') }}</button>
       <button :disabled="!canLayout" @click="doSplit('col')">{{ t('tabbar.splitColAction') }}</button>
       <div class="sep" />
@@ -256,7 +272,7 @@ function cancelRename(): void {
   </div>
 
   <div v-if="menu.open" class="ctx-overlay" @mousedown="menu.open = false" @contextmenu.prevent="menu.open = false">
-    <div class="ctx" :style="{ left: menu.x + 'px', top: menu.y + 'px' }" @mousedown.stop>
+    <div ref="menuEl" class="ctx" :style="{ left: menu.x + 'px', top: menu.y + 'px' }" @mousedown.stop>
       <button @click="run(store.reconnectTab)">{{ t('tabbar.reconnect') }}</button>
       <button @click="run(store.duplicate)">{{ t('tabbar.duplicate') }}</button>
       <button @click="startRename">{{ t('tabbar.rename') }}</button>

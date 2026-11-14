@@ -2810,9 +2810,14 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
 
 /* Column header and rows share one grid: icon · name · size · modified. */
 .cols,
+/* Name gets a hard floor (72px) and the date column shrinks first: at the
+   drawer's narrowest the old fixed 148px date left the name a few pixels —
+   useless exactly when only one pane fits. .size / .mtime already clip with
+   ellipsis, so the squeezed column degrades visibly instead of crushing the
+   name. */
 .row {
   display: grid;
-  grid-template-columns: 22px minmax(0, 1fr) 84px 148px;
+  grid-template-columns: 22px minmax(72px, 1fr) 84px minmax(0, 148px);
   align-items: center;
   column-gap: 10px;
 }

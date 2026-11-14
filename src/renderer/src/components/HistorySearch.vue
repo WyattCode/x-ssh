@@ -294,18 +294,33 @@ function onKey(e: KeyboardEvent): void {
   background: var(--bg-elev-2);
   color: var(--text);
 }
+/* Keep the native popup (its keyboard behaviour is free), but draw the
+   control itself like the rest of the toolbar: appearance:none plus a stock
+   chevron, the same radius/height as the buttons beside it. The old
+   `outline: none` also killed the global select:focus-visible ring —
+   scoped specificity beat it — so keyboard users had no focus cue here. */
 .hostsel {
   max-width: 170px;
-  height: 28px;
-  padding: 0 8px;
-  background: var(--bg);
+  height: 26px;
+  padding: 0 24px 0 8px;
+  background-color: var(--bg);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23888' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: 5px;
   color: var(--text);
   font-size: 12px;
   outline: none;
-  appearance: auto;
+  appearance: none;
   cursor: pointer;
+}
+.hostsel:hover {
+  border-color: var(--border-strong);
+}
+.hostsel:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent);
 }
 .list {
   overflow-y: auto;
