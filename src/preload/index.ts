@@ -320,11 +320,10 @@ const api = {
       ipcRenderer.invoke(IPC.sftpOpenWith, sessionId, path, name, program),
     startDrag: (sessionId: string, items: { remotePath: string; name: string; isDir: boolean }[]): void =>
       ipcRenderer.send(IPC.sftpStartDrag, sessionId, items),
-    endDrag: (): void => ipcRenderer.send(IPC.sftpDragEnd),
     prefetchDrag: (sessionId: string, items: { remotePath: string; name: string; isDir: boolean }[]): void =>
       ipcRenderer.send(IPC.sftpPrefetchDrag, sessionId, items),
-    onDragNotice: (cb: (n: { ready: boolean }) => void): (() => void) => {
-      const listener = (_e: unknown, n: { ready: boolean }): void => cb(n)
+    onDragNotice: (cb: (n: { state: 'downloading' | 'ready' | 'failed'; error?: string }) => void): (() => void) => {
+      const listener = (_e: unknown, n: { state: 'downloading' | 'ready' | 'failed'; error?: string }): void => cb(n)
       ipcRenderer.on(IPC.sftpDragNotice, listener)
       return () => ipcRenderer.removeListener(IPC.sftpDragNotice, listener)
     },

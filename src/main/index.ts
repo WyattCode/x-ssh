@@ -2560,67 +2560,59 @@ function registerIpc(): void {
     }
   })
 
-  // Drag out (dragstart): hand the OS a real file. startDrag() only takes
-  // over the gesture the user is CURRENTLY making — it fails once they have
-  // released — so speed decides success: a completed staging is grabbed
-  // without any await (dragStaged), a still-downloading one runs as fast as
-  // the link allows, and if the user releases first the dragend message
-  // clears the live-drags slot and the finished files get reported back
-  // ("ready — drag once more") instead of vanishing silently.
-  // [drag-diag]: every decision below is mirrored to ime-trace.log (only when
-  // the flag file is fresh) so a real failure reproduces as evidence.
-  const liveDrags = new Map<number, string>()
+  // Drag out (dragstart): hand the OS a real file. The Chromium gesture
+  // stays claimable for as long as the user HOLDS the button (upstream-
+  // verified: the documented workaround for slow startDrag is literally
+  // "keep holding until the drag icon appears"), so a late completion is
+  // not a lost case — call startDrag when ready and let Chromium decide:
+  // held → the icon appears mid-hold; released → harmless no-op and the
+  // staged file answers the next drag from the 5-minute cache.
+  // [drag-diag]: every decision mirrors to ime-trace.log (fresh-flag only).
+  // There is deliberately NO gesture bookkeeping here: the earlier
+  // liveDrags map keyed one slot per webContents, so two concurrent waits
+  // on one download cleared each other's entry and read "released" for a
+  // gesture still being held — the trace showed completed downloads that
+  // refused to startDrag for exactly that reason. dragend cannot help
+  // either: it never arrives once startDrag takes the gesture.
   const dtrace = (line: string): void => imeTrace.write('drag: ' + line)
   on(
     IPC.sftpStartDrag,
     async (e, sessionId: string, items: DragItem[]) => {
       const key = dragKey(sessionId, items)
-      liveDrags.set(e.sender.id, key)
-      dtrace(
-        `startDrag recv n=${items.length} names=${items.map((i) => i.name.length + ':' + (i.isDir ? 'd' : 'f')).join(',')} stagedHit=${dragStaged.has(key)}`
-      )
-      const send = (msg: { ready: boolean }): void => {
+      dtrace(`startDrag recv n=${items.length} stagedHit=${dragStaged.has(key)}`)
+      const send = (msg: { state: 'downloading' | 'ready' | 'failed'; error?: string }): void => {
         if (!e.sender.isDestroyed()) e.sender.send(IPC.sftpDragNotice, msg)
       }
       const stagedNow = dragStaged.get(key)
       if (stagedNow) {
         // Straight to startDrag — no await in front of it, so a re-drag of
         // already-staged items takes the gesture with console-level latency.
-        dtrace(`cache-hit exists=${existsSync(stagedNow.local)} -> startDrag`)
+        dtrace(`cache-hit exists=${existsSync(stagedNow.local)}`)
         try {
           e.sender.startDrag({ file: stagedNow.local, icon: stagedNow.icon })
-          dtrace('cache-hit startDrag returned')
         } catch (err) {
           dtrace(`cache-hit startDrag THREW ${(err as Error).message}`)
         }
-        liveDrags.delete(e.sender.id)
         return
       }
+      // Not staged: the user grabbed a still-remote item. Say "downloading"
+      // NOW (their eyes are on the cursor at this moment) — the guidance
+      // "hold until the icon appears" is only useful while it's being read.
+      send({ state: 'downloading' })
       const t0 = Date.now()
       try {
         const staged = await prefetchDrag(sessionId, items)
-        dtrace(`prefetch done in ${Date.now() - t0}ms gesture=${liveDrags.get(e.sender.id) === key}`)
-        if (liveDrags.get(e.sender.id) !== key) {
-          // Released before staging finished. The files are ready NOW and
-          // stay in the cache for a minute, so one more drag drops instantly.
-          send({ ready: true })
-          return
-        }
+        dtrace(`prefetch done in ${Date.now() - t0}ms -> startDrag`)
         e.sender.startDrag({ file: staged.local, icon: staged.icon })
-        dtrace('async startDrag returned')
+        // Also after a release: files are staged NOW; one more drag is instant.
+        send({ state: 'ready' })
       } catch (err) {
-        /* download failed — say so instead of eating the drag */
-        dtrace(`prefetch FAILED in ${Date.now() - t0}ms: ${(err as Error).message}`)
-        send({ ready: false })
-      } finally {
-        if (liveDrags.get(e.sender.id) === key) liveDrags.delete(e.sender.id)
+        const raw = (err as Error).message || ''
+        dtrace(`prefetch FAILED in ${Date.now() - t0}ms: ${raw}`)
+        send({ state: 'failed', error: friendlyError(raw) })
       }
     }
   )
-  on(IPC.sftpDragEnd, (e) => {
-    if (liveDrags.has(e.sender.id)) dtrace('dragEnd (gesture released)')
-    liveDrags.delete(e.sender.id)
-  })
 
   // Pre-fetch the drag-out download on mousedown so the (mostly asynchronous,
   // network-bound) download is ready by the time the drag gesture reaches

@@ -497,10 +497,6 @@ function onDragEnter(e: DragEvent): void {
 function endDrag(): void {
   dragDepth = 0
   dragOver.value = false
-  // Tell main the gesture is over. If a drag-out's download was still
-  // running, this is what lets main answer with "ready — drag again"
-  // instead of calling startDrag into a dead gesture, which does nothing.
-  window.api.sftp.endDrag()
 }
 function onDragLeave(): void {
   if (!dragDepth) return
@@ -757,9 +753,13 @@ onMounted(() => {
   // drops on the desktop and nothing arrives. Main says so here; the staged
   // files live in its cache for a minute, so the guidance is actionable.
   offDragNotice = window.api.sftp.onDragNotice((n) => {
-    // 6s, not the default 3.2: this appears right after a failed drag, when
-    // the user is already looking away wondering what went wrong.
-    toast(n.ready ? tt('sfp.dragReady') : tt('sfp.dragFail'), n.ready ? 'info' : 'error', 6000)
+    // downloading: fired at grab-time, while the eyes are on the window —
+    // this is the one hint that teaches the "hold until the icon" gesture.
+    // ready/failed: late news; linger long enough to read after a confused
+    // release (default 3.2s vanishes unnoticed).
+    if (n.state === 'downloading') toast(tt('sfp.dragDownloading'), 'info', 2500)
+    else if (n.state === 'ready') toast(tt('sfp.dragReady'), 'info', 6000)
+    else toast(n.error || tt('sfp.dragFail'), 'error', 6000)
   })
 })
 onBeforeUnmount(() => {

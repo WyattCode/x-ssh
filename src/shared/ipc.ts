@@ -95,8 +95,7 @@ export const IPC = {
   sftpRevealLocal: 'sftp:revealLocal', // show a finished download in the OS file manager
   sftpStartDrag: 'sftp:startDrag', // renderer -> main (drag out)
   sftpPrefetchDrag: 'sftp:prefetchDrag', // renderer -> main : pre-fetch for drag-out
-  sftpDragEnd: 'sftp:dragEnd', // renderer -> main: the OS drag gesture ended
-  sftpDragNotice: 'sftp:dragNotice', // main -> renderer: a drag-out did not take
+  sftpDragNotice: 'sftp:dragNotice', // main -> renderer: drag-out progress (downloading/ready/failed)
   sftpProgress: 'sftp:progress', // main -> renderer
   sftpPackDownload: 'sftp:packDownload', // remote tar.zip -> download
   sftpExtract: 'sftp:extract', // extract uploaded archive on remote
