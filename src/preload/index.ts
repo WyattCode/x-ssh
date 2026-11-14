@@ -188,7 +188,7 @@ const api = {
     /** Call right after onData(): main flushes the output buffered since the
      *  shell opened, which would otherwise have been dropped. */
     attach: (sessionId: string): void => ipcRenderer.send(IPC.sshAttach, sessionId),
-    startLog: (sessionId: string): Promise<{ ok: boolean; canceled?: boolean; path?: string }> =>
+    startLog: (sessionId: string): Promise<{ ok: boolean; canceled?: boolean; path?: string; error?: string }> =>
       ipcRenderer.invoke(IPC.sessionLogStart, sessionId),
     stopLog: (sessionId: string): void => ipcRenderer.send(IPC.sessionLogStop, sessionId),
     /** Fires when a live log stream fails mid-write (disk full, dir removed);
