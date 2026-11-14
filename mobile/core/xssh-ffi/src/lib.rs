@@ -67,12 +67,35 @@ pub struct ForwardInfo {
 }
 
 /// 认证方式。
-#[derive(Debug, Clone, uniffi::Enum)]
+///
+/// `Debug` 手写,密码 / 私钥内容 / 口令打成 `<redacted>`(原来是派生的,`HostConfig` / `JumpHost`
+/// 的 `Debug` 也会带着它们一起打出来)。
+/// 注意:UniFFI 生成的 Kotlin `data class` 自带 `toString`,**Kotlin 那边也不要把它们记进日志**。
+#[derive(Clone, uniffi::Enum)]
 pub enum AuthMethod {
     Password { password: String },
     KeyFile { path: String, passphrase: Option<String> },
     /// 私钥内容(导入后加密存在应用里,连接时在内存里解密传过来)。
     KeyData { pem: String, passphrase: Option<String> },
+}
+
+impl std::fmt::Debug for AuthMethod {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        const HIDDEN: &str = "<redacted>";
+        match self {
+            AuthMethod::Password { .. } => f.debug_struct("Password").field("password", &HIDDEN).finish(),
+            AuthMethod::KeyFile { path, passphrase } => f
+                .debug_struct("KeyFile")
+                .field("path", path)
+                .field("passphrase", &passphrase.as_ref().map(|_| HIDDEN))
+                .finish(),
+            AuthMethod::KeyData { passphrase, .. } => f
+                .debug_struct("KeyData")
+                .field("pem", &HIDDEN)
+                .field("passphrase", &passphrase.as_ref().map(|_| HIDDEN))
+                .finish(),
+        }
+    }
 }
 
 /// 服务端消息。

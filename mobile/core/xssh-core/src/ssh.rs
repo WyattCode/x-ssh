@@ -35,7 +35,10 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const STEP_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// 认证方式。
-#[derive(Debug, Clone)]
+///
+/// `Debug` 是手写的,密码 / 私钥内容 / 口令一律打成 `<redacted>`:原来是派生的,
+/// 任何一处 `{:?}`(日志、断言失败、`Target` 的 `Debug` 里带着它)都会把明文打出来。
+#[derive(Clone)]
 pub enum Auth {
     /// 密码认证。
     Password(String),
@@ -44,6 +47,25 @@ pub enum Auth {
     /// 私钥内容认证(OpenSSH / PEM 文本)。移动端把导入的私钥加密存在应用里,
     /// 连接时只在内存里解密交过来,磁盘上不落明文文件。
     KeyData { pem: String, passphrase: Option<String> },
+}
+
+impl std::fmt::Debug for Auth {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        const HIDDEN: &str = "<redacted>";
+        match self {
+            Auth::Password(_) => f.debug_tuple("Password").field(&HIDDEN).finish(),
+            Auth::KeyFile { path, passphrase } => f
+                .debug_struct("KeyFile")
+                .field("path", path)
+                .field("passphrase", &passphrase.as_ref().map(|_| HIDDEN))
+                .finish(),
+            Auth::KeyData { passphrase, .. } => f
+                .debug_struct("KeyData")
+                .field("pem", &HIDDEN)
+                .field("passphrase", &passphrase.as_ref().map(|_| HIDDEN))
+                .finish(),
+        }
+    }
 }
 
 /// 导入私钥时要给用户看的信息。
@@ -1175,5 +1197,35 @@ dioxMPLPFmeyBOpHWcVTyesLJHbIA37SLvbIV0s0xJX2B2Es0mLxalNy7d
         // 空行 / 首尾空白不影响。
         let spaced = "  SHA256:aaa  \n\n  SHA256:bbb  ";
         assert_eq!(verify_host_key(Some(spaced), "SHA256:bbb"), HostKeyVerdict::Trusted);
+    }
+
+    /// 凭据不能出现在 `Debug` 输出里 —— 包括整个 `Target`(它的 `Debug` 会带着 `auth`)。
+    #[test]
+    fn debug_output_never_contains_credentials() {
+        let target = Target {
+            host: "h".into(),
+            port: 22,
+            username: "u".into(),
+            auth: Auth::Password("hunter2-secret".into()),
+            known_key: None,
+            jump: Some(Box::new(Target {
+                host: "j".into(),
+                port: 22,
+                username: "u".into(),
+                auth: Auth::KeyData {
+                    pem: "-----BEGIN OPENSSH PRIVATE KEY-----\nSECRETKEYBODY".into(),
+                    passphrase: Some("pass-secret".into()),
+                },
+                known_key: None,
+                jump: None,
+            })),
+        };
+        let text = format!("{target:?}");
+        for secret in ["hunter2-secret", "SECRETKEYBODY", "pass-secret", "BEGIN OPENSSH"] {
+            assert!(!text.contains(secret), "Debug 输出里不该有 {secret}: {text}");
+        }
+        assert!(text.contains("<redacted>"));
+        let file = format!("{:?}", Auth::KeyFile { path: "/k".into(), passphrase: Some("kf-secret".into()) });
+        assert!(!file.contains("kf-secret") && file.contains("/k"), "{file}");
     }
 }
