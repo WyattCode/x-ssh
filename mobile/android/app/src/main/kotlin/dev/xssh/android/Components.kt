@@ -579,6 +579,8 @@ fun CapsuleButton(
     enabled: Boolean = true,
     /** 只对 [ButtonKind.Ghost] 有效:改文字色(删除 / 断开用危险色,但不画成实心红块)。 */
     color: Color? = null,
+    /** 只对 [ButtonKind.Ghost] 有效:画一圈细边,让它看得出是个按钮(连接中的「取消」:唯一能按的东西,不能像一行说明文字)。 */
+    outlined: Boolean = false,
     onClick: () -> Unit,
 ) {
     val p = LocalXssh.current
@@ -603,6 +605,7 @@ fun CapsuleButton(
             .heightIn(min = if (solid) 50.dp else 48.dp)
             .clip(CircleShape)
             .background(if (enabled) background else background.copy(alpha = background.alpha * 0.35f))
+            .then(if (outlined && !solid) Modifier.border(1.dp, p.glassBorder, CircleShape) else Modifier)
             .pointerHoverIcon(PointerIcon.Hand)
             .clickable(interactionSource = interaction, indication = null, enabled = enabled, role = androidx.compose.ui.semantics.Role.Button) {
                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
