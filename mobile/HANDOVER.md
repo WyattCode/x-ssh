@@ -1,6 +1,7 @@
 # X-SSH 移动端交接文档
 
 > **最新(2026-11-01,M3.183)**:桌面已发 **0.6.0**;仓库转 **public**;iOS **壳层已能跑**(模拟器验过,真折叠未接);Rust 夹具私钥已换。**先读文末「M3.183 移动端/仓库现状」一节**,那里才是当前状态。
+> **Android(2026-11-14)**:已发 **0.2.0**(标签 `android-v0.2.0`,整套界面按 iPhone Duo 重做并经多轮审查),Rust 核心加固已合并;**现状、踩坑、没验证的清单、下一步见「Android 0.2.0 现状与交接」一节(在 M3.183 之前)**。
 > 设备: Xiaomi 18 Fold(`2608BPX34C`,折叠屏,主测)、Xiaomi 17 Ultra(`25128PNA1C`,直板机)、
 > **Xiaomi Pad 9 Pro Max**(`M367FC`,平板,带键盘套/触控板/手写笔,见 M3.24)。
 > 最新提交以 `git log` 为准;§0/§1/§6/§7 是 2026-10-30 的现状快照,§2 起是按时间记的过程与原因(改代码前先读相关小节)。
@@ -2843,13 +2844,87 @@ M3.51 已有「用生物识别解锁」开关,连私钥密文(`lockedKeyData` / 
 
 ---
 
+# Android 0.2.0 现状与交接(2026-11-14)
+
+> 本节是 **2026-11-02 之后 Android 这条线的状态速查**(Duo 界面重做、发 0.2.0、Rust 核心加固)。逐项变更以 `mobile/android/CHANGELOG.md` 和 `git log -- mobile/android mobile/core` 为准;这里只写"接手的人必须知道、从代码里读不出来"的东西。
+
+## 一、版本与发布
+
+- Android **0.2.0**(`versionName 0.2.0` / `versionCode 2`),标签 **`android-v0.2.0`**(指向 `64d182d`)。标签名**不以 `v` 开头**:CI 只对 `v*` 标签触发桌面端的构建发布,这样不会误触发。
+- 更新日志:`mobile/android/CHANGELOG.md`(Android 专属,桌面的在仓库根目录 `CHANGELOG.md`)。下次发版:升版本号 + 在那里加一节 + 打 `android-vX.Y.Z` 标签。
+- **安装包是 debug 签名**(仓库里没有发布签名钥匙)。`mobile/android/release/xssh-android-0.2.0-debug.apk`(+ `.sha256`)在本机,**被 `.gitignore` 的 `release` 规则忽略,不在仓库里**。已装 0.1.0 的设备同签名可 `adb install -r` 覆盖;**别的电脑的 debug 签名必须卸载重装,卸载会连同 Keystore 里的密钥一起删,已加密保存的密码全部作废**。
+- **GitHub Release 页面没建**(这台没有 `gh`,也没有别的凭据)。要发布 APK:在 GitHub 网页的 Releases 里选 `android-v0.2.0` 新建并上传 APK 和校验文件;`CHANGELOG.md` 的 `[0.2.0]` 一节可直接当发布说明。
+- **0.2.0 标签里的 APK 带的是旧 `.so`**(Rust 加固之前)。0.2.0 之后 `main` 上又有:`a93e2f5`(Kotlin 兜底 Rust panic)、`8734149`(合并 PR #41:Rust 加固)、`713d46c`(同步绑定注释)、`a114d9d`(光晕修复)。**下一次发版应是 0.2.1,带新 `.so`。**
+- 仓库根目录有个**不是我们提交的未跟踪文件 `arm64`**,没动过,别 `git add -A`。
+
+## 二、界面(Duo 重做之后,别再踩的点)
+
+照 iOS「iPhone Duo」重做:终端风格、只有深色。内屏 = 主机抽屉 + 会话右栏(`Duo.kt`),外屏 = 单栏,半折并排。
+
+- **状态在右栏、行上同步显示**:`DuoStatus { None, Connecting, Confirm, Failed, Needs, Live }` 由 `TerminalScreen` 上报给 `DuoApp` 的 `gate`,再映射到主机行的 `RowStatus`。`Needs`(缺密码 / 私钥 / 口令 / **跳板机凭据**)是中性的"需要…"页,**不是红色失败**,主按钮直达对应编辑页(跳板机缺凭据时直达**跳板机**的编辑页,`onEditJump`)。上报只认**当前打开的那台**(`currentTermId`),淡出中的旧页面的上报会被忽略。
+- **连上后抽屉自动收起**(平摊时;半折不收):`connect()` 里置 `collapseWhenLive`,`gate` 变 `Live` 时收。排查时加过一行日志确认过这条链路是通的,没有已知问题;**曾有过一次没收起、没复现**。
+- **连接 / 确认 / 失败页(`ConnectGate.kt`)**:固定在页底的按钮栏(`PinnedActions`)+ 在上面滚动的正文。**`PinnedActions` 量出来的高度已经包含它自己的底部留白,正文的底部 padding 不能再加一遍**(曾让指纹卡片在离按钮很远处被硬切断,`b11fb13`);正文从按钮栏上方 28dp 的渐变底下滚过去,滚到底再补一个同高的 Spacer;按钮栏高度要下一帧才量得出,量出来之前正文先不画(第一帧会错位 35–90dp)。`inline` 的页(需要凭据)没有按钮栏,底部留白用 `bottomReserve`。
+- **图标光晕(`IconRing`)比图标本身多伸出约 25dp**:放在会滚动的列里会被滚动容器裁成平顶。`Identity()` 顶部先留 `HaloOvershoot`(26dp)的空;平板卡片自带 28dp 内边距,传 `haloRoom = false`。
+- **动画与过渡**:
+  - 右栏换页用"新页在旧页**上面**淡入、旧页保持不透明到新页盖住"(`ExitTransition.KeepUntilTransitionsFinished`)。**"旧页先淡出、新页再淡入"看着像 fade-through,其实中间几帧两页都近乎透明、露出底色,试过,更糟**。
+  - 抽屉位置和右栏让出的宽度**都要夹住**(弹簧会过冲,只夹一个就在两者之间露出一条底色);侧栏开关**骑在抽屉右边缘上**(`max(下限, 边缘 − 64dp)`,拖拽位移算进夹之前),不要给它单独起一条动画。
+  - 终端画布的**宽度和高度都等停稳 120ms 再跟**(抽屉开合、键盘升起时整屏文字每帧重画会掉帧);光标闪烁在后台暂停。
+  - 滑动行(`SwipeActions`)里 `pointerInput(Unit)` 只在第一次组合时建一次:里面用到的 `open` / `onOpenChange` / `onDragStart` 要经 `rememberUpdatedState` 取,否则状态过期(`openId` 卡在一行上、下一次点击不连接)。
+  - 主机行右边那一格是三选一(点 / 转圈 / 盾牌)的 `AnimatedContent`,目标值必须是三选一的枚举,里面只按 lambda 参数分支。
+- **所有玻璃按钮 / 滑出圆钮 ≥ 48dp**(原来 45/46dp)。
+- **会话与凭据**:`TerminalSession.host`(对外暴露的)**不带明文密码 / 私钥 / 口令**,自动重连用的完整凭据只在内部的 `credentials`。`MainActivity.hostOf` 先用屏幕自己带着的主机,再退到会话里清掉明文的那份。**UniFFI 生成的 Kotlin data class 自带 `toString`,会把凭据打出来:别把 `HostConfig` / `JumpHost` / `AuthMethod` 记进日志。**
+- **Rust 的 panic 过 FFI 回到 Kotlin 是 `InternalException`**(和 `FfiException` 一样是 `kotlin.Exception`,不是 `IllegalStateException`)。会话循环跑在没装异常处理器的协程里,`LiveTerminal.pump()` 现在接住所有异常、只结束这一条会话;终端对远端查询的应答(`shell.write`)和 `publishFrame()` 也都单独保护。终端网格**至少 2 列**(`MIN_COLS`;1 列时一个宽字符会让 Rust 的终端越界 panic)。
+- **折叠时的残留**:内屏正在连接时折上,外屏回主机页的同时要清掉 `termHostId`,否则再展开会为残留的 id 重新拨号。
+- 新增 / 修改的行为(详见 CHANGELOG):断线后手机底部胶囊和内屏竖条上有「重新连接」按钮;终端右缘滚动条;输入法一次提交的多行 / 含控制字符的文字走粘贴路径(剔控制字符 + 括号粘贴),末尾恰好一个换行的仍当"打字 + 回车";文件页路径折叠 `.` / `..` 并支持 `~/`。
+
+## 三、Rust 核心加固(PR #41,合并提交 `8734149`)
+
+- **终端**:OSC 字符串超过 8KiB 就取消并丢弃剩余部分(`OscGuard`,启用 `std` 的 vte 把 OSC 攒在**无上限**的 `Vec` 里);`feed` 切 4KiB 小片,每片后看光标附近的单元格,组合字符超过 32 个就丢它的附加块(渲染也最多取 32 个);网格至少 2 列;`scroll` 参数先夹;CSI 14t 的应答把单元格像素夹到乘起来不溢出 `u16`;事件队列锁被毒化时恢复而不是 panic。
+- **SFTP 上传(`sftp.rs`)**:临时文件改为**独占创建**(`CREATE | EXCLUDE`)、名字带随机后缀、**创建时就带上原文件的权限位**(原来用 `create`:会跟着符号链接走、截断已有文件,名字固定,权限要等改名后才补回);目标是符号链接时先解析成真实路径;覆盖时**先把旧文件改名成备份、新文件改名过去、成功才删备份**(失败改回),不再是"先删再改名"。这个库没暴露 `posix-rename`。
+- **其他**:`Auth` / `AuthMethod` 手写 `Debug`,凭据打成 `<redacted>`;`Shell` 持有 `Arc<Runtime>`(销毁 `Ssh` 时不再因运行时关闭而 panic);断开 / 拆远程转发整批最多等 3 秒,`close_all_forwards` 不再握着锁等网络,`tcpip_forward` 有超时;交给远端 PTY 的列 / 行夹到 2–1000 / 1–1000(原来 `as u16` 截断)。
+- **验证**:核心库 58 个单元测试(含新写的)本机全过;CI 在拉取请求上跑 `cargo test --workspace` + `cargo clippy -D warnings`,run 175 全过。**SFTP 上传的真实服务器验证没做**(覆盖 0600 文件、目标是符号链接、上传中取消这几种),见下面"没验证"。
+- **审查里确认、但这次没修的 Rust 问题**(想继续做的从这里挑):没有**键盘交互式登录**(只允许密码 / 公钥的服务器会一直 `AuthFailed`);服务端数据队列 `mpsc::unbounded`、`poll` 一次取空;SFTP 列表里服务器给的名字里的 `/` 没校验(Kotlin 侧 `localSafe` 已防住本地路径);主机指纹没做规范化(带 `=` 填充 / 缺 `SHA256:` 前缀会误报"密钥变了"),`HostKeyChanged.expected` 把整个信任列表放进消息;`add_forward` 查重和插入不是原子的;SOCKS 握手没超时;`remove_forward` 不断已建立的连接;转发监听在 `127.0.0.1`,手机上别的应用也能用(SOCKS 无认证);密钥 / 密码是普通 `String`,用完不抹。
+
+## 四、构建 / 环境(这台电脑,2026-11-14)
+
+- **Windows 智能应用控制曾拦住所有 Rust 构建**:报 `应用程序控制策略已阻止此文件 (os error 4551)`,被拦的是 cargo 即时编出来的没签名的 `build-script-build.exe` 和 `cargo-ndk.exe`。**它没有按目录放行的选项,只能整体开关;用户 2026-11-14 把它关了,之后 Rust 才能在本机编译。** 以后 cargo 突然报 4551,就是这个——那是用户的安全设置,别绕。没法本机构建时,**开拉取请求让 CI 的 `rust-core` 去编译和测试**(这次就是这么验证的)。
+- 安卓应用本身(Kotlin / Gradle)在这台电脑上一直能编:`gradle-9.7.1`(`%LOCALAPPDATA%\gradle-dist\`,仓库里没有 `gradlew`),`:app:assembleDebug :app:testDebugUnitTest --console=plain -q`,**无输出 = 成功**,看 `app/build/test-results`。
+- **重打 `.so`**(改了 Rust 就必须做,否则 APK 里还是旧库):在 `mobile/core` 里 `ANDROID_NDK_HOME=$LOCALAPPDATA/Android/Sdk/ndk/28.2.13676358 cargo ndk -t arm64-v8a -P 26 -o ../android/app/src/main/jniLibs build -p xssh-ffi --release`(PATH 要有 `~/.cargo/bin`;约 35 秒)。`jniLibs` 被 gitignore。改了对外接口才要重新生成绑定:`cargo run -q -p xssh-ffi --bin uniffi-bindgen -- generate --library <.so> --language kotlin --out-dir <tmp>`,把生成的 `xssh_ffi.kt` **转成 CRLF** 后覆盖 `app/src/main/kotlin/uniffi/xssh_ffi/xssh_ffi.kt`(这次只多了一段注释)。
+- **要打一个不含别人未提交改动的包**:`git worktree add --detach <目录> main`,把 `.so` 拷进 `<目录>/mobile/android/app/src/main/jniLibs/arm64-v8a/`,在那里跑 gradle。
+- 设备:**Fold(`2608BPX34C`)无线调试会自己关**,装机前要请用户重开;`adb` 一律带 `-s <序列号>`,**另一部手机 `25128PNA1C`(17 Ultra)没有用户同意不要装**。Git Bash 会把 `/sdcard/...` 参数改写成 `C:/Program Files/Git/sdcard/...`:传设备路径时设 `MSYS_NO_PATHCONV=1`。设备上的临时文件**按全名删,不要用通配符**。截图:`adb exec-out screencap -d <物理显示 id> -p`(内屏 `4639175402683733248`,外屏 `4639175068132267009`;不带 `-d` 会把一行警告写进 PNG 里);点击用 `input -d 0 tap`。屏幕会自动锁,装机验证前要用户唤醒 / 解锁。
+- GitHub:这台没有 `gh`;匿名接口一小时只有 60 次,别循环轮询(轮询 Actions 列表页的公开 HTML 或用内置浏览器读页面;**日志要登录,是用户的账号,别登**)。推 `main` 时 GitHub 会提示"绕过规则:`test-build` 未跑"——用户直接推 `main` 是日常做法,这条提示是预期的。
+
+## 五、没在真机上验证的(都只过了编译 / 单测 / 读代码)
+
+- 断线后的「重新连接」按钮(手机底部胶囊 / 内屏竖条);重连撞上"密钥变了"时主机行显示"等待确认";跳板机缺凭据的"需要跳板机凭据"页与直达跳板机编辑页的按钮;重连撞上"跳板机已被删"的失败页。
+- 换主机(A 直接切到 B)的页面过渡;拖拽收起抽屉后侧栏开关的位置;连接页第一帧不再错位(只抓到过之后的帧)。
+- 密钥库"密钥永久失效就重建"的探针(`Secrets.ensureLockKey`)。
+- 输入法多行提交走粘贴、惯性滑动进入备用屏时取消、滚动条不再白闪、光标后台不闪。
+- **新 `.so` 下的真实 SSH / SFTP**:新库(2026-11-14 重打)装到 Fold 之后**只验证了应用能启动、日志里没有原生库加载 / UniFFI 校验的报错**;**还没用它真连过任何服务器**(之前点 HK-VPS 看欢迎语是在装新库之前,用的是旧库)。终端输出走新的 OSC 闸 / 切片是否一切正常、**SFTP 上传**,都没在真机上走过。要验时用一台不重要的服务器:先连上看登录提示和颜色是否正常;再新建测试目录,传新文件;覆盖一个权限为 0600 的文件,确认传输期间和之后都是 0600;目标是符号链接的;上传到一半取消;最后清理。**生产机不要碰。**
+
+## 六、协作约定
+
+- 提交署名:`WyattCode <WyattCode@users.noreply.github.com>`,用 `git -c user.name=… -c user.email=…` 按命令传(不写进 git 配置);提交说明写到文件里用 `git commit -F`,结尾带 `Co-Authored-By`。**`git add` 一律按文件名,不要 `-A` / 整个目录。**
+- 推 `main` 前先 `git fetch`;远端有新提交就合并 `origin/main`(项目历史里是合并提交,不是变基),并确认上游那部分没碰 `mobile/android` 和共享的 Rust 核心。桌面端(`src/`)直接在 `main` 上开发,所以 `main` 会在你脚下前进。
+- **另一个 Claude 会话("JARVIS")曾直接改过 `Components.kt` / `ConnectGate.kt` 并留下未提交的改动,用户明确说那部分不归这条线管:** 别提交、别还原、别装机、别评审。其中"光晕"那一半已由 `a114d9d` 自己重做并提交;它独有的"连接中页的「取消」加细边(`CapsuleButton(outlined = …)`)"仍在工作区里未提交。**从工作区打出来的 APK 会带着它**,要发干净的包就用上面的干净检出办法。
+- 用户的工作习惯:每轮"审查 → 修 → 提交",**说推送才推送**;装机只装到他指定的那台;要在真机上看的东西,他会解锁手机并开着无线调试。
+
+## 七、下一步建议顺序
+
+1. 在 Fold 上把第五节的几项过一遍(尤其 **SFTP 上传**和断线重连按钮),有问题就修。
+2. 发 **0.2.1**(带新 `.so`):升版本号 + `CHANGELOG.md` 加一节 + `android-v0.2.1` 标签;在 GitHub 网页上建 Release 并上传 APK。
+3. 视需要补 Rust 里第三节列的几项(键盘交互式登录最影响可用性)。
+4. 把 `gate` 页之间的切换(确认 → 连接中 → 失败)也做成淡入过渡:现在是硬切,因为各页都读外层变量、直接包 `AnimatedContent` 会让淡出的那一份读到新状态而闪错内容,需要先把各页读的状态固定成快照。
+
+---
+
 # M3.183 移动端/仓库现状(2026-11-01)
 
 > 本节是**当前状态速查**;上面 §0–§7 与 M3.70–M3.75 是当时的过程记录,部分描述已过时(例如 §0 里"还没有端口转发/快照"的说法)。
 
 ## 一、版本与分支
 
-- 桌面版已发 **0.6.0**(`v0.6.0` tag)。Android / iOS **没有独立版本号**,跟随仓库走。
+- 桌面版已发 **0.6.0**(`v0.6.0` tag)。iOS **没有独立版本号**,跟随仓库走。**Android 自 2026-11-14 有独立版本**:`0.2.0`,标签 `android-v0.2.0`(见下一节「Android 0.2.0 现状与交接」)。
 - 仓库已转 **public**(`https://github.com/WyattCode/x-ssh`),目的是解锁 GitHub Actions 免费额度。私有仓库时代 CI 长期是"4 秒假失败"。
 - `main` 已开分支保护:必须过 `test-build`,禁强推禁删除。**强推前必须临时 `DELETE /branches/main/protection`,推完立刻 PUT 恢复。**
 - 全历史敏感信息已清零(文件内容 / 提交消息 / 邮箱 / 引用四类都查过)。详见根目录 `HANDOVER.md` 的 M3.183 一节。
@@ -2977,3 +3052,4 @@ M3.51 已有「用生物识别解锁」开关,连私钥密文(`lockedKeyData` / 
 - **不再触发系统的「保存 / 更新密码」**:编辑页的用户名 / 密码栏不标 `textContentType(.username/.password)`(标了系统当登录表单,同一用户名换密码就弹更新)。密码只存 App 自己的钥匙串(每台一条)。若真机上仍弹,备用方案:密码栏改成普通文本框自己遮盖。
 - **TestFlight(2026-11-07)**:Bundle ID 由 `dev.xssh.ios` 改为 `com.wyatt.xssh`(`dev.xssh.ios` 被旧团队 9JS88R79AG 占着,新团队 U94V7JWVGH 登记不了);发布团队 `U94V7JWVGH`。上传流程:`xcodebuild archive -destination generic/platform=iOS DEVELOPMENT_TEAM=U94V7JWVGH -allowProvisioningUpdates`,再 `xcodebuild -exportArchive` 用 `method=app-store-connect`、`destination=upload`、`manageAppVersionAndBuildNumber=true`(Xcode 里要登着该团队的 Apple ID)。Keychain service / 日志 subsystem 仍是字符串 `dev.xssh.ios`,不是 Bundle ID。出口合规在 App Store Connect 网页上回答。
 - **隐私清单**:`XSSH/PrivacyInfo.xcprivacy`(不追踪、不收集数据;`@AppStorage` 用了 UserDefaults,理由 CA92.1)。以后新增读文件时间戳、开机时间、磁盘空间等「需声明理由的 API」要同步更新它。项目文件由 `xcodegen generate` 生成并提交。
+- **Bundle ID 再改(2026-11-11)**:iOS Bundle ID 由 `com.wyatt.xssh` 改为 `com.wyatt.ssh`(测试 target `com.wyatt.ssh.tests`),团队不变 `U94V7JWVGH`。旧的 App Store Connect 记录已删,`com.wyatt.xssh` 的 App ID 仍挂在开发者账号里删不掉(提示被 App Store 占用),不要再动它。TestFlight 版本号固定 0.1.0,只加构建号;不要擅自上传构建。

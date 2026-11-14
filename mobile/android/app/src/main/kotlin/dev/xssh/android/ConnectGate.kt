@@ -333,7 +333,7 @@ private fun GatePage(host: Host, content: GateContent, tablet: Boolean, inDrawer
                     .verticalScroll(rememberScrollState())
                     .padding(28.dp),
             ) {
-                Identity(host, content)
+                Identity(host, content, haloRoom = false)
                 Spacer(Modifier.height(24.dp))
                 content.body(this)
                 Spacer(Modifier.height(28.dp))
@@ -443,9 +443,13 @@ private fun GatePage(host: Host, content: GateContent, tablet: Boolean, inDrawer
 }
 /** 图标块 + 大标题 + 这是哪台主机(+ 需要注意的一句),整块居中。 */
 @Composable
-private fun Identity(host: Host, content: GateContent) {
+private fun Identity(host: Host, content: GateContent, haloRoom: Boolean = true) {
     val p = LocalXssh.current
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+        // 图标的光晕画在图标块**外面**,而这一块放在会滚动的列里:滚动容器按自己的边界裁剪,
+        // 光晕上沿就被切成一条直线。给它让出光晕伸出去的这一截,上沿才是完整的圆。
+        // 平板的卡片自带 28dp 的内边距,够了,不再多留一份(`haloRoom = false`)。
+        if (haloRoom) Spacer(Modifier.height(HaloOvershoot))
         IconRing(content.icon, content.tint, size = 56.dp)
         Spacer(Modifier.height(14.dp))
         Text(

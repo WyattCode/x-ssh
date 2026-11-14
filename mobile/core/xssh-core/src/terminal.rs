@@ -19,6 +19,134 @@ use alacritty_terminal::vte::ansi::{Color, CursorShape, NamedColor, Processor, R
 /// 回滚缓冲上限(行)。
 pub const DEFAULT_SCROLLBACK: usize = 10_000;
 
+/// 一次喂给 vte 的字节数上限。切小片是为了能在片与片之间检查"单元格上叠了多少组合字符"。
+const FEED_SLICE: usize = 4096;
+
+/// 一个单元格最多保留(也最多渲染)多少个组合字符。正常文字(带声调的拉丁字母、泰文、梵文、
+/// 复杂 emoji 序列)远用不到这么多。
+const MAX_ZEROWIDTH: usize = 32;
+
+/// 一条 OSC 字符串(标题、超链接、剪贴板……)最长多少字节,超过就整条丢掉。
+/// 取 8 KiB:标题栈会把当前标题克隆最多 4096 份,上限 8 KiB 时最坏约 32 MiB。
+const MAX_OSC_LEN: usize = 8 * 1024;
+
+/// ASCII CAN:在任何转义序列里都表示"取消",vte 收到就回到初始状态。
+const CAN: u8 = 0x18;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OscState {
+    /// 不在任何转义序列里。
+    Ground,
+    /// 刚收到 ESC。
+    Esc,
+    /// 在 OSC 字符串里(`ESC ]` 之后)。
+    Osc,
+    /// OSC 字符串里收到 ESC。
+    OscEsc,
+    /// 这条 OSC 太长,已经让 vte 取消;丢掉剩下的字节直到它的结束符。
+    Drop,
+    /// 丢弃状态里收到 ESC。
+    DropEsc,
+}
+
+/// OSC 字符串长度闸:在字节进入 vte **之前**数 OSC 的长度,超过 [`MAX_OSC_LEN`] 就塞一个 CAN 让 vte
+/// 取消这条序列,并丢掉后面的内容直到结束符(BEL 或 `ESC \`)。
+///
+/// 为什么要自己数:启用 `std` 时 vte 把 OSC 内容攒在 `Vec<u8>` 里,**没有上限**(只有 no_std 才有)。
+/// 状态跨 [`Terminal::feed`] 调用保留,所以序列被任意切分也数得对。
+///
+/// 只认 7 位的 `ESC ]`:vte 在 UTF-8 模式下把单独的 8 位 C1 字节(0x9d 之类)当普通控制字符执行,
+/// 不会进入 OSC 状态。
+#[derive(Debug)]
+struct OscGuard {
+    state: OscState,
+    len: usize,
+}
+
+impl OscGuard {
+    fn new() -> Self {
+        Self { state: OscState::Ground, len: 0 }
+    }
+
+    /// 把 `input` 过一遍,该放行的追加到 `out`。
+    fn filter(&mut self, input: &[u8], out: &mut Vec<u8>) {
+        for &b in input {
+            match self.state {
+                OscState::Ground => {
+                    if b == 0x1b {
+                        self.state = OscState::Esc;
+                    }
+                    out.push(b);
+                }
+                OscState::Esc => {
+                    match b {
+                        b']' => {
+                            self.state = OscState::Osc;
+                            self.len = 0;
+                        }
+                        0x1b => {} // ESC ESC:还在"刚收到 ESC"
+                        _ => self.state = OscState::Ground,
+                    }
+                    out.push(b);
+                }
+                OscState::Osc => match b {
+                    0x07 | CAN | 0x1a => {
+                        self.state = OscState::Ground;
+                        out.push(b);
+                    }
+                    0x1b => {
+                        self.state = OscState::OscEsc;
+                        out.push(b);
+                    }
+                    _ => {
+                        self.len += 1;
+                        if self.len > MAX_OSC_LEN {
+                            // 让 vte 取消这条 OSC,这个字节和后面的都不再放行。
+                            out.push(CAN);
+                            self.state = OscState::Drop;
+                        } else {
+                            out.push(b);
+                        }
+                    }
+                },
+                OscState::OscEsc => {
+                    // vte 在 OSC 里收到 ESC 就结束这条 OSC 并进入"转义"状态,下一个字节决定去向。
+                    match b {
+                        b']' => {
+                            self.state = OscState::Osc;
+                            self.len = 0;
+                        }
+                        0x1b => self.state = OscState::Esc,
+                        _ => self.state = OscState::Ground, // `\`(ST)或别的转义
+                    }
+                    out.push(b);
+                }
+                OscState::Drop => match b {
+                    0x07 | CAN | 0x1a => self.state = OscState::Ground,
+                    0x1b => self.state = OscState::DropEsc,
+                    _ => {}
+                },
+                OscState::DropEsc => match b {
+                    b'\\' => self.state = OscState::Ground, // ST:这条被丢掉的 OSC 到此结束
+                    b']' => {
+                        // 紧接着又是一条新的 OSC:补上被我们吞掉的 ESC,让它正常开始。
+                        out.push(0x1b);
+                        out.push(b);
+                        self.state = OscState::Osc;
+                        self.len = 0;
+                    }
+                    0x1b => {} // ESC ESC:仍然在等
+                    _ => {
+                        out.push(0x1b);
+                        out.push(b);
+                        self.state = OscState::Ground;
+                    }
+                },
+            }
+        }
+    }
+}
+
 /// 终端尺寸(列 × 行)。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Size {
@@ -165,9 +293,9 @@ struct EventQueue(Arc<Mutex<VecDeque<Event>>>);
 
 impl EventListener for EventQueue {
     fn send_event(&self, event: Event) {
-        if let Ok(mut queue) = self.0.lock() {
-            queue.push_back(event);
-        }
+        // 毒化的锁也照常入队(见 `poll_events`):静默丢事件会让远端永远等不到应答。
+        let mut queue = self.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        queue.push_back(event);
     }
 }
 
@@ -197,6 +325,8 @@ pub struct Terminal {
     base16: [u32; 16],
     /// 单元格像素尺寸,回答 CSI 14t / 16t 这类"窗口多大"的查询。
     cell_px: (u16, u16),
+    /// 喂给 vte 之前先过一遍的 OSC 长度闸(见 [`OscGuard`])。
+    osc_guard: OscGuard,
 }
 
 impl Terminal {
@@ -206,10 +336,15 @@ impl Terminal {
     /// allocation failure aborts the process — uncatchable through FFI.
     const MAX_COLS: usize = 1000;
     const MAX_ROWS: usize = 1000;
+    /// At least two columns, like alacritty's own `MIN_COLUMNS`: on a one-column
+    /// grid a wide character (CJK, emoji) wraps and then writes to column 1 of a
+    /// one-cell row, which indexes out of range and panics — and a panic crossing
+    /// the FFI boundary takes the whole app down.
+    const MIN_COLS: usize = 2;
 
     fn clamp_size(cols: usize, rows: usize) -> Size {
         Size::new(
-            cols.clamp(1, Self::MAX_COLS),
+            cols.clamp(Self::MIN_COLS, Self::MAX_COLS),
             rows.clamp(1, Self::MAX_ROWS),
         )
     }
@@ -232,6 +367,7 @@ impl Terminal {
             theme: Theme::default(),
             base16: DEFAULT_BASE16,
             cell_px: (10, 20),
+            osc_guard: OscGuard::new(),
         }
     }
 
@@ -275,8 +411,34 @@ impl Terminal {
     }
 
     /// 喂入远程输出。分片不敏感,可任意切分。
+    ///
+    /// 远端的输出是不可信的,这里给两种"无限增长"各设一道闸:
+    /// - OSC 字符串(标题、超链接、剪贴板……):启用 `std` 的 vte 把它攒在一个**没有上限**的 `Vec` 里,
+    ///   `printf '\e]0;'; yes` 就能把内存吃光;标题栈还会把当前标题克隆最多 4096 份。见 [`OscGuard`]。
+    /// - 同一个单元格上叠的组合字符(U+0301 之类):alacritty 往单元格的 `Vec<char>` 里无限 push。
+    ///   所以切成小片喂,每片之后看一眼光标附近的单元格,超过上限就把它的附加内容整个丢掉。
     pub fn feed(&mut self, bytes: &[u8]) {
-        self.parser.advance(&mut self.term, bytes);
+        let mut filtered = Vec::with_capacity(FEED_SLICE.min(bytes.len()) + 8);
+        for slice in bytes.chunks(FEED_SLICE) {
+            filtered.clear();
+            self.osc_guard.filter(slice, &mut filtered);
+            self.parser.advance(&mut self.term, &filtered);
+            self.trim_cursor_cells();
+        }
+    }
+
+    /// 光标所在和前面两格(宽字符占位)里,组合字符叠得超过 [`MAX_ZEROWIDTH`] 的丢掉。
+    /// 组合字符总是并进光标前一个单元格(行尾待折行时是光标所在格),所以只需要看这几格。
+    fn trim_cursor_cells(&mut self) {
+        let point = self.term.grid().cursor.point;
+        for back in 0..=2usize {
+            let Some(col) = point.column.0.checked_sub(back) else { break };
+            let cell = &mut self.term.grid_mut()[Point::new(point.line, Column(col))];
+            if cell.zerowidth().is_some_and(|marks| marks.len() > MAX_ZEROWIDTH) {
+                // 整个附加块一起丢(含这格的超链接 / 下划线色):一个叠了几十个组合字符的格子本来就是病态的。
+                cell.extra = None;
+            }
+        }
     }
 
     /// 尺寸变化(折叠、旋转、软键盘弹出)。
@@ -309,7 +471,10 @@ impl Terminal {
     /// 翻上去之后**新输出不会把视口拽回底部** —— alacritty 的网格在滚动时会同步抬高
     /// 显示偏移,视口锚在原处。看日志时这是刚需,否则远端一有输出就被弹走。
     pub fn scroll(&mut self, lines: i32) {
-        self.term.scroll_display(Scroll::Delta(lines));
+        // 先夹再交给 alacritty:它内部是 `display_offset as i32 + count`,不饱和,
+        // 宿主传个 i32::MAX 进来在开了溢出检查的构建里会直接 panic。
+        let limit = (self.history_len() + self.size.rows) as i32;
+        self.term.scroll_display(Scroll::Delta(lines.clamp(-limit, limit)));
     }
 
     /// 回到底部(贴着最新输出)。用户一敲键盘就该回到这里。
@@ -436,7 +601,7 @@ impl Terminal {
             } else {
                 let mut t = String::from(cell.c);
                 if let Some(zero_width) = cell.zerowidth() {
-                    t.extend(zero_width);
+                    t.extend(zero_width.iter().take(MAX_ZEROWIDTH));
                 }
                 t
             };
@@ -530,7 +695,7 @@ impl Terminal {
                 current.push(cell.c);
             }
             if let Some(zero_width) = cell.zerowidth() {
-                current.extend(zero_width);
+                current.extend(zero_width.iter().take(MAX_ZEROWIDTH));
             }
         }
         if current_row.is_some() {
@@ -556,7 +721,9 @@ impl Terminal {
     /// 取出自上次调用以来产生的事件(写回应答、标题、蜂鸣等)。
     pub fn poll_events(&mut self) -> Vec<TerminalEvent> {
         let mut out = Vec::new();
-        let mut queue = self.events.0.lock().expect("terminal event queue poisoned");
+        // 锁被毒化(持锁时别处 panic 过)也照常取:队列本身没坏。`expect` 的话,之后每一帧都 panic,
+        // 而 `send_event` 又在静默丢事件 —— 远端等不到应答就挂住。
+        let mut queue = self.events.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         while let Some(event) = queue.pop_front() {
             match event {
                 Event::PtyWrite(text) => out.push(TerminalEvent::Write(text.into_bytes())),
@@ -573,11 +740,16 @@ impl Terminal {
                 }
                 // 程序问窗口多大(CSI 14t / 18t 等)。
                 Event::TextAreaSizeRequest(format) => {
+                    // alacritty 回答 CSI 14t 时会算 `num_cols * cell_width`(u16 × u16):
+                    // 300 列 × 250 像素就溢出,在开了溢出检查的构建里 panic,还发生在持着事件队列的锁的时候。
+                    // 单元格像素夹到"乘起来不超过 u16::MAX"。
+                    let cols = self.size.cols.max(1);
+                    let rows = self.size.rows.max(1);
                     let size = WindowSize {
-                        num_lines: self.size.rows as u16,
-                        num_cols: self.size.cols as u16,
-                        cell_width: self.cell_px.0,
-                        cell_height: self.cell_px.1,
+                        num_lines: rows as u16,
+                        num_cols: cols as u16,
+                        cell_width: self.cell_px.0.min((u16::MAX as usize / cols) as u16).max(1),
+                        cell_height: self.cell_px.1.min((u16::MAX as usize / rows) as u16).max(1),
                     };
                     out.push(TerminalEvent::Write(format(size).into_bytes()));
                 }
@@ -1013,5 +1185,137 @@ mod tests {
         t.feed(b"\x1b[?1l\x1b[?1049l\x1b[?1000l\x1b[?1006l\x1b[?2004l");
         let m = t.input_modes();
         assert!(!m.app_cursor && !m.alt_screen && !m.mouse_report && !m.sgr_mouse && !m.bracketed_paste);
+    }
+
+    // ---- 对不可信输出的防护(见 `Terminal::feed` / `OscGuard`)----
+
+    /// 过一遍闸,返回放行的字节。
+    fn guarded(chunks: &[&[u8]]) -> Vec<u8> {
+        let mut guard = OscGuard::new();
+        let mut out = Vec::new();
+        for chunk in chunks {
+            guard.filter(chunk, &mut out);
+        }
+        out
+    }
+
+    #[test]
+    fn osc_guard_leaves_normal_sequences_alone() {
+        for stream in [
+            &b"plain text"[..],
+            b"\x1b]0;a title\x07after",
+            b"\x1b]8;;http://example.com\x1b\\link\x1b]8;;\x1b\\",
+            b"\x1b[31mred\x1b[0m\x1b]2;x\x07",
+        ] {
+            assert_eq!(guarded(&[stream]), stream, "正常序列不该被动");
+        }
+    }
+
+    #[test]
+    fn osc_guard_cancels_an_endless_osc_and_drops_the_rest_until_the_terminator() {
+        let mut stream = b"\x1b]0;".to_vec();
+        stream.resize(stream.len() + MAX_OSC_LEN * 3, b'a');
+        stream.extend_from_slice(b"\x07tail");
+        let out = guarded(&[&stream]);
+        assert!(out.len() <= MAX_OSC_LEN + 16, "放行的不该超过上限太多,实际 {}", out.len());
+        assert!(out.contains(&CAN), "要塞一个 CAN 让 vte 取消");
+        assert!(out.ends_with(b"tail"), "结束符之后的正常内容要放行");
+    }
+
+    #[test]
+    fn osc_guard_counts_across_chunk_boundaries() {
+        let mut stream = b"\x1b]0;".to_vec();
+        stream.resize(stream.len() + MAX_OSC_LEN * 2, b'a');
+        stream.extend_from_slice(b"\x07ok");
+        let whole = guarded(&[&stream]);
+        let pieces: Vec<&[u8]> = stream.chunks(7).collect();
+        assert_eq!(guarded(&pieces), whole, "怎么切分结果都该一样");
+    }
+
+    #[test]
+    fn osc_guard_a_new_osc_right_after_a_dropped_one_still_starts() {
+        let mut stream = b"\x1b]0;".to_vec();
+        stream.resize(stream.len() + MAX_OSC_LEN + 10, b'a');
+        stream.extend_from_slice(b"\x1b]2;next\x07");
+        let out = guarded(&[&stream]);
+        assert!(out.ends_with(b"\x1b]2;next\x07"), "紧接着的下一条 OSC 要原样放行");
+    }
+
+    #[test]
+    fn an_endless_osc_does_not_grow_memory_and_the_screen_still_works_afterwards() {
+        let mut term = Terminal::new(20, 4);
+        let mut stream = b"\x1b]0;".to_vec();
+        stream.resize(stream.len() + 5 * 1024 * 1024, b'x');
+        term.feed(&stream);
+        term.feed(b"\x07hello");
+        // 被取消的标题不会作为事件出来;之后的普通文字照常显示。
+        let titles: Vec<usize> = term
+            .poll_events()
+            .into_iter()
+            .filter_map(|event| match event {
+                TerminalEvent::Title(title) => Some(title.len()),
+                _ => None,
+            })
+            .collect();
+        assert!(titles.iter().all(|len| *len <= MAX_OSC_LEN), "标题不会超过上限: {titles:?}");
+        assert!(term.text().contains("hello"));
+    }
+
+    #[test]
+    fn a_flood_of_combining_marks_stays_bounded() {
+        let mut term = Terminal::new(20, 4);
+        let mut stream = b"a".to_vec();
+        for _ in 0..200_000 {
+            stream.extend_from_slice("\u{0301}".as_bytes());
+        }
+        term.feed(&stream);
+        let first = term.screen_lines().remove(0);
+        assert!(first.chars().count() <= 1 + MAX_ZEROWIDTH, "一个格子最多叠 {MAX_ZEROWIDTH} 个,实际 {}", first.chars().count());
+        // 正常的少量组合字符(带声调的字母)不受影响。
+        let mut term = Terminal::new(20, 4);
+        term.feed("e\u{0301}x".as_bytes());
+        assert_eq!(term.screen_lines()[0], "e\u{0301}x");
+    }
+
+    #[test]
+    fn the_grid_never_gets_narrower_than_two_columns_so_wide_characters_cannot_panic() {
+        let mut term = Terminal::new(1, 4);
+        assert_eq!(term.size().cols, 2);
+        term.feed("你好🙂".as_bytes());
+        term.resize(1, 4);
+        assert_eq!(term.size().cols, 2);
+        term.feed("你好🙂".as_bytes());
+    }
+
+    #[test]
+    fn scrolling_by_an_extreme_amount_does_not_overflow() {
+        let mut term = Terminal::new(20, 4);
+        for i in 0..20 {
+            term.feed(format!("line{i}\r\n").as_bytes());
+        }
+        term.scroll(5);
+        term.scroll(i32::MAX);
+        assert_eq!(term.scroll_offset(), term.history_len());
+        term.scroll(i32::MIN);
+        assert_eq!(term.scroll_offset(), 0);
+    }
+
+    #[test]
+    fn a_window_size_query_with_huge_cell_pixels_does_not_overflow() {
+        let mut term = Terminal::new(300, 40);
+        term.set_cell_pixels(250, 250);
+        term.feed(b"\x1b[14t");
+        let replies: Vec<Vec<u8>> = term
+            .poll_events()
+            .into_iter()
+            .filter_map(|event| match event {
+                TerminalEvent::Write(bytes) => Some(bytes),
+                _ => None,
+            })
+            .collect();
+        assert!(!replies.is_empty(), "该照常回答窗口大小");
+        // 之后队列还能用(没被毒化)。
+        term.feed(b"\x1b[5n");
+        assert!(!term.poll_events().is_empty());
     }
 }

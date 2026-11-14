@@ -532,6 +532,13 @@ fun Modifier.cardChrome(radius: Dp = 16.dp): Modifier {
         .border(1.dp, line, shape)
 }
 
+/**
+ * 56dp 的 [IconRing] 的光晕比图标块**多伸出去**的距离:光晕半径是图标半径的 1.9 倍,
+ * 28 × 1.9 − 28 ≈ 25.2dp。放在会滚动的容器里时,要在图标上方留出这么多空,
+ * 否则滚动容器按自己的边界裁剪,光晕的上沿就被切成一条直线(像一块方的)。
+ */
+val HaloOvershoot = 26.dp
+
 /** 标题前的细圆环图标(钥匙 / 警告 / 断网),带一点同色的光晕(iOS 版 `CardIconRing`)。 */
 @Composable
 fun IconRing(icon: ImageVector, tint: Color, modifier: Modifier = Modifier, size: Dp = 46.dp) {
