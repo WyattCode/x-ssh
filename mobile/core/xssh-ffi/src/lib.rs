@@ -12,6 +12,34 @@ use xssh_core::terminal::{self, TerminalEvent as CoreTerminalEvent};
 
 uniffi::setup_scaffolding!();
 
+/// 交给远端 PTY 的列数 / 行数:和本地终端([`terminal::Terminal`])用同一个范围(列 2..=1000、行 1..=1000)。
+/// 原来是 `cols as u16` 直接截断:宿主给个 70000 就变成 4464;而本地终端自己夹到 1000,
+/// 两边的网格大小对不上,远端全屏程序(vim、tmux)按它认为的宽度排版,本地却在别的列折行,整屏错乱。
+fn pty_cols(cols: u32) -> u16 {
+    cols.clamp(2, 1000) as u16
+}
+
+fn pty_rows(rows: u32) -> u16 {
+    rows.clamp(1, 1000) as u16
+}
+
+#[cfg(test)]
+mod size_tests {
+    use super::{pty_cols, pty_rows};
+
+    #[test]
+    fn pty_sizes_never_truncate_or_collapse() {
+        assert_eq!(pty_cols(80), 80);
+        assert_eq!(pty_cols(0), 2);
+        assert_eq!(pty_cols(1), 2);
+        assert_eq!(pty_cols(70_000), 1000, "u16 截断会得到 4464");
+        assert_eq!(pty_cols(u32::MAX), 1000);
+        assert_eq!(pty_rows(0), 1);
+        assert_eq!(pty_rows(24), 24);
+        assert_eq!(pty_rows(1_000_000), 1000);
+    }
+}
+
 /// 连接目标。
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct HostConfig {
@@ -422,7 +450,7 @@ impl Session {
     /// 打开交互式 PTY shell。
     pub fn open_shell(&self, cols: u32, rows: u32, term: String) -> Result<Arc<Shell>, FfiError> {
         let mut guard = self.lock();
-        let shell = guard.open_shell(cols as u16, rows as u16, &term)?;
+        let shell = guard.open_shell(pty_cols(cols), pty_rows(rows), &term)?;
         Ok(Arc::new(Shell { inner: Mutex::new(shell) }))
     }
 
@@ -435,7 +463,7 @@ impl Session {
         command: String,
     ) -> Result<Arc<Shell>, FfiError> {
         let mut guard = self.lock();
-        let shell = guard.open_exec(cols as u16, rows as u16, &term, &command)?;
+        let shell = guard.open_exec(pty_cols(cols), pty_rows(rows), &term, &command)?;
         Ok(Arc::new(Shell { inner: Mutex::new(shell) }))
     }
 
@@ -530,7 +558,7 @@ impl Shell {
 
     /// 通知远端新的窗口尺寸。
     pub fn resize(&self, cols: u32, rows: u32) -> Result<(), FfiError> {
-        self.lock().resize(cols as u16, rows as u16)?;
+        self.lock().resize(pty_cols(cols), pty_rows(rows))?;
         Ok(())
     }
 

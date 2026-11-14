@@ -34,6 +34,9 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 /// 界面就永远停在「正在连接」,只有杀进程才能恢复。
 const STEP_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// 断开 / 拆转发时,等服务端确认"取消远程转发"的总时长上限(和 `disconnect` 的 3 秒一致)。
+const FORWARD_CLEANUP_TIMEOUT: Duration = Duration::from_secs(3);
+
 /// 认证方式。
 ///
 /// `Debug` 是手写的,密码 / 私钥内容 / 口令一律打成 `<redacted>`:原来是派生的,
@@ -764,7 +767,7 @@ impl Ssh {
         let (mut reader, writer) = channel.split();
         self.runtime.spawn(async move { while reader.wait().await.is_some() {} });
 
-        Ok(Shell { runtime: self.runtime.handle().clone(), channel: writer, events })
+        Ok(Shell { runtime: self.runtime.clone(), channel: writer, events })
     }
 
     /// 开一条端口转发(本机 / 远端 / SOCKS)。失败不伤终端通道。
@@ -809,12 +812,27 @@ impl Ssh {
             if let Ok(mut map) = self.forwards.remote_dests.lock() {
                 map.remove(&port);
             }
-            let handle = self.handle.clone();
-            self.runtime.block_on(async {
-                let _ = handle.cancel_tcpip_forward("127.0.0.1", port).await;
-            });
+            self.cancel_remote_forwards(vec![port]);
         }
         Ok(())
+    }
+
+    /// 让服务端取消这些远程转发。连接已经悄悄断了时服务端不会回话,原来这里没有超时,
+    /// 一次拆转发 / 断开要等到保活放弃(三四十秒)。整批最多等 [`FORWARD_CLEANUP_TIMEOUT`]。
+    fn cancel_remote_forwards(&self, ports: Vec<u32>) {
+        if ports.is_empty() {
+            return;
+        }
+        let handle = self.handle.clone();
+        // 计时器要在 async 块里面构造(见 `disconnect` 里的说明)。
+        self.runtime.block_on(async move {
+            let _ = tokio::time::timeout(FORWARD_CLEANUP_TIMEOUT, async {
+                for port in ports {
+                    let _ = handle.cancel_tcpip_forward("127.0.0.1", port).await;
+                }
+            })
+            .await;
+        });
     }
 
     /// 当前这条连接上开着的转发。
@@ -824,20 +842,24 @@ impl Ssh {
 
     /// 拆掉全部转发(断开前调用)。
     pub fn close_all_forwards(&self) {
-        let mut live = self.forwards.live.lock().unwrap_or_else(|e| e.into_inner());
-        for (_, lf) in live.drain() {
+        // 先把表清空、放掉锁,再去等网络:原来是握着 `live` 的锁一路 `block_on`,
+        // 这期间任何调 `forwards()` 的线程都跟着卡住。
+        let drained: Vec<LiveForward> = {
+            let mut live = self.forwards.live.lock().unwrap_or_else(|e| e.into_inner());
+            live.drain().map(|(_, lf)| lf).collect()
+        };
+        let mut remote_ports = Vec::new();
+        for lf in drained {
             lf.abort.abort();
             if lf.spec.mode == ForwardMode::Remote {
                 let port = u32::from(lf.spec.local_port);
                 if let Ok(mut map) = self.forwards.remote_dests.lock() {
                     map.remove(&port);
                 }
-                let handle = self.handle.clone();
-                self.runtime.block_on(async {
-                    let _ = handle.cancel_tcpip_forward("127.0.0.1", port).await;
-                });
+                remote_ports.push(port);
             }
         }
+        self.cancel_remote_forwards(remote_ports);
     }
 
     fn spawn_local_listener(&self, spec: &ForwardSpec) -> Result<AbortHandle, SshError> {
@@ -879,12 +901,15 @@ impl Ssh {
         let handle = self.handle.clone();
         self.runtime
             .block_on(async {
-                handle
-                    .tcpip_forward("127.0.0.1", port)
-                    .await
-                    .map_err(|e| ForwardError::Denied {
+                // 服务端不回话(连接悄悄断了)时别一直等:和其他每一步一样有上限。
+                match tokio::time::timeout(STEP_TIMEOUT, handle.tcpip_forward("127.0.0.1", port)).await {
+                    Ok(result) => result.map_err(|e| ForwardError::Denied {
                         reason: e.to_string(),
-                    })
+                    }),
+                    Err(_) => Err(ForwardError::Denied {
+                        reason: "timed out".to_owned(),
+                    }),
+                }
             })?;
         let dest = (
             dest_host(&spec.remote_host).to_string(),
@@ -1033,7 +1058,10 @@ impl Drop for Ssh {
 
 /// 一个已开启的通道(shell 或 exec)。
 pub struct Shell {
-    runtime: tokio::runtime::Handle,
+    // 持有运行时的**强引用**(和 [`crate::sftp::Sftp`] 一样),不是只借一个 `Handle`:
+    // 宿主销毁 `Ssh`(拿着运行时的所有者)的同时,轮询线程可能正停在这里的 `block_on(timeout(..))` 里;
+    // 运行时一关,那个计时器被轮询时 tokio 直接 panic("... is being shutdown")。
+    runtime: Arc<tokio::runtime::Runtime>,
     channel: russh::ChannelWriteHalf<client::Msg>,
     events: mpsc::UnboundedReceiver<ServerMsg>,
 }
