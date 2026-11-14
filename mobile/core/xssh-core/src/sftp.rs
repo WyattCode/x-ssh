@@ -44,6 +44,21 @@ fn sftp_err(err: impl std::fmt::Display) -> SshError {
     SshError::Sftp(err.to_string())
 }
 
+/// 临时文件 / 备份文件名里的后缀:进程号 + 时间 + 递增计数。不是为了"猜不到"
+/// (独占创建本身就挡住了抢先放符号链接的人),只是让两次上传、两个进程不会互相踩到。
+fn unique_suffix() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let nanos = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    format!(
+        "{:x}{:x}{:x}",
+        std::process::id(),
+        nanos & 0xffff_ffff_ffff,
+        COUNTER.fetch_add(1, Ordering::Relaxed)
+    )
+}
+
 /// 拼路径:SFTP 路径总是 `/` 分隔,不管服务器是什么系统。
 pub fn join(dir: &str, name: &str) -> String {
     if dir.ends_with('/') {
@@ -136,6 +151,32 @@ impl Sftp {
         })
     }
 
+    /// 在 [target] 旁边**独占创建**一个临时文件(`CREATE | EXCLUDE`),并在创建时就带上 [permissions]
+    /// (去掉文件类型位)。返回打开的文件和它的路径;创建不了返回 None,由调用方退回直写。
+    ///
+    /// 独占很关键:原来用的是 `create`(`CREATE | TRUNCATE`),它会**跟着符号链接走**并截断已有文件 ——
+    /// 在别人也能写的目录里,有人预先放一个同名符号链接指向你的文件,你的上传就会把那个文件覆盖掉。
+    /// 独占创建遇到任何已存在的东西(包括符号链接)都会失败,换个名字再试。
+    async fn create_temp(
+        &self,
+        target: &str,
+        permissions: Option<u32>,
+    ) -> Option<(russh_sftp::client::fs::File, String)> {
+        use russh_sftp::protocol::{FileAttributes, OpenFlags};
+        for _ in 0..4 {
+            let temp = format!("{target}.xssh-part-{}", unique_suffix());
+            let attributes = FileAttributes {
+                permissions: permissions.map(|p| p & 0o7777),
+                ..Default::default()
+            };
+            let flags = OpenFlags::CREATE | OpenFlags::EXCLUDE | OpenFlags::WRITE;
+            if let Ok(file) = self.session.open_with_flags_and_attributes(temp.clone(), flags, attributes).await {
+                return Some((file, temp));
+            }
+        }
+        None
+    }
+
     /// 上传:[input] 的内容写到远端 [path](已存在就覆盖)。[total] 只用于进度显示,不知道就传 0。
     ///
     /// **先写同目录下的临时文件,整个传完再改名盖过去。**
@@ -155,8 +196,7 @@ impl Sftp {
         progress: &mut dyn FnMut(u64, u64) -> bool,
     ) -> Result<u64, SshError> {
         // 临时文件必须和目标**同一个目录**:改名只在同一个文件系统内才保证是原子的,
-        // 放 /tmp 再改名可能跨设备失败。
-        let temp = format!("{path}.xssh-part");
+        // 放 /tmp 再改名可能跨设备失败。名字带随机后缀、用独占方式创建,见 `create_temp`。
         self.block(async {
             // 目标原来的权限位:改名之后要照原样补回去。
             //
@@ -164,13 +204,20 @@ impl Sftp {
             // 落地的是一个**新建**的文件,权限按服务端 umask 走 —— 覆盖一次
             // `~/.ssh/authorized_keys`,0600 就变成 0644,sshd 直接不认那个文件了;
             // 可执行脚本也会掉 +x。
-            let previous = self.session.metadata(path).await.ok();
-            // 先开临时文件。**开不出来就退回直接写目标**:目录不可写、而文件本身可写的情况
+            //
+            // 目标要是一个符号链接(用链接管理的点文件),先解析成真实路径再操作:
+            // 否则"改名盖过去"会把链接本身换成一个普通文件。解析不了(新文件、悬空链接)就用原路径。
+            let target = self.session.canonicalize(path).await.unwrap_or_else(|_| path.to_owned());
+            let previous = self.session.metadata(target.clone()).await.ok();
+            // 先开临时文件,**创建的那一刻就带上原来的权限位**:原来是等改名之后才补回去,
+            // 整个上传期间 0600 的私钥 / 凭据文件的新内容是按服务端默认(通常 0644)躺在磁盘上的。
+            //
+            // **开不出来就退回直接写目标**:目录不可写、而文件本身可写的情况
             // (别人家目录下一个 group-writable 的文件)本来传得动,不能因为多了这道保护就传不了。
             // 退回的那条路没有"传完再换"的保护,和以前一样。
-            let (mut file, staged) = match self.session.create(&temp).await {
-                Ok(file) => (file, true),
-                Err(_) => (self.session.create(path).await.map_err(sftp_err)?, false),
+            let (mut file, temp) = match self.create_temp(&target, previous.as_ref().and_then(|m| m.permissions)).await {
+                Some((file, temp)) => (file, Some(temp)),
+                None => (self.session.create(target.clone()).await.map_err(sftp_err)?, None),
             };
 
             let outcome = async {
@@ -198,31 +245,45 @@ impl Sftp {
                 Err(err) => {
                     // 取消、写失败、读本地失败:只收拾自己的临时文件,目标不动。
                     // 退回直写的那条路上没有临时文件可收 —— 目标已经被截断了,无能为力。
-                    if staged {
-                        let _ = self.session.remove_file(&temp).await;
+                    if let Some(temp) = &temp {
+                        let _ = self.session.remove_file(temp.clone()).await;
                     }
                     return Err(err);
                 }
             };
 
-            if !staged {
+            let Some(temp) = temp else {
                 return Ok(done);
-            }
+            };
 
-            // 盖过去。SFTP v3 的 rename 在目标已存在时会失败,所以先删一下;
-            // 删和改名之间有一道很窄的缝,但比"取消就把原文件删掉"小得多。
-            // 改名要是失败了,内容还在临时文件里,报错时把它的名字带出去,用户不至于两头空。
-            let _ = self.session.remove_file(path).await;
-            self.session.rename(&temp, path).await.map_err(|err| {
-                SshError::Sftp(format!("{}(内容已上传到 {temp})", sftp_err(err)))
-            })?;
-            // 权限补回去(拿不到原来的就随服务端默认,总比把 0600 变成 0644 强)。
+            // 盖过去。SFTP v3 的 rename 在目标已存在时会失败(这个库也没暴露 posix-rename 扩展),
+            // 原来是先删目标再改名 —— 中间掉线或改名失败,原文件就没了。
+            // 现在是**先把旧文件改名成备份、新文件改名过去、成功了才删备份**;
+            // 新文件没能就位就把备份改回来,原文件任何时候都找得回。
+            let backup = format!("{target}.xssh-old-{}", unique_suffix());
+            let had_target = previous.is_some();
+            let moved_aside = had_target && self.session.rename(target.clone(), backup.clone()).await.is_ok();
+            if had_target && !moved_aside {
+                // 旧文件挪不开:退回原来的办法(先删再改名),总比整个上传失败强。
+                let _ = self.session.remove_file(target.clone()).await;
+            }
+            if let Err(err) = self.session.rename(temp.clone(), target.clone()).await {
+                if moved_aside {
+                    let _ = self.session.rename(backup.clone(), target.clone()).await;
+                }
+                // 内容还在临时文件里,报错时把它的名字带出去,用户不至于两头空。
+                return Err(SshError::Sftp(format!("{}(内容已上传到 {temp})", sftp_err(err))));
+            }
+            if moved_aside {
+                let _ = self.session.remove_file(backup).await;
+            }
+            // 权限再核一遍(创建时已经带上了;服务端要是忽略了那个属性,这里补上。拿不到原来的就随服务端默认)。
             if let Some(permissions) = previous.and_then(|before| before.permissions) {
                 let keep = russh_sftp::protocol::FileAttributes {
-                    permissions: Some(permissions),
+                    permissions: Some(permissions & 0o7777),
                     ..Default::default()
                 };
-                let _ = self.session.set_metadata(path, keep).await;
+                let _ = self.session.set_metadata(target, keep).await;
             }
             Ok(done)
         })
@@ -253,7 +314,13 @@ impl Sftp {
 
 #[cfg(test)]
 mod tests {
-    use super::{join, parent};
+    use super::{join, parent, unique_suffix};
+
+    #[test]
+    fn temp_and_backup_names_do_not_collide() {
+        let names: std::collections::HashSet<String> = (0..1000).map(|_| unique_suffix()).collect();
+        assert_eq!(names.len(), 1000, "连着生成的后缀不该重复");
+    }
 
     #[test]
     fn paths_join_and_go_up() {
