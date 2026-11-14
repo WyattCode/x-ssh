@@ -47,8 +47,9 @@ async function load(): Promise<void> {
     }
     lines.value = flat
     loadFailed.value = false
-    // Keep the host filter choice in sync with the (re)loaded session set.
-    const available = new Set(flat.map((l) => l.label))
+    // Keep the host filter choice in sync with the (re)loaded session set
+    // (the filter holds the displayed text — see hostLabels).
+    const available = new Set(flat.map((l) => displayLabel(l.label)))
     if (hostFilter.value && !available.has(hostFilter.value)) hostFilter.value = ''
   } catch {
     // Main could not read the history file (missing, half-written, locked).
@@ -59,9 +60,14 @@ async function load(): Promise<void> {
   }
 }
 
-/** Unique host lineages represented in the loaded history. */
+/** Unique host lineages represented in the loaded history, keyed by the text
+ *  actually shown. Raw labels '' and '会话' (legacy) both display as the same
+ *  localized "untitled": keying the filter by the raw value produced two
+ *  identical-looking options, and the '' option collided with the "all hosts"
+ *  option's value — picking it silently showed everything. Filtering compares
+ *  the displayed text, so the choice always matches what the user read. */
 const hostLabels = computed(() => {
-  const set = new Set(lines.value.map((l) => l.label))
+  const set = new Set(lines.value.map((l) => displayLabel(l.label)))
   return [...set]
 })
 
@@ -100,7 +106,7 @@ const results = computed<Hit[]>(() => {
   const host = hostFilter.value
   const out: Hit[] = []
   for (const l of lines.value) {
-    if (host && l.label !== host) continue
+    if (host && displayLabel(l.label) !== host) continue
     if (q && !l.line.toLowerCase().includes(q)) continue
     out.push(l)
     if (out.length >= MAX_RESULTS) break
@@ -148,7 +154,14 @@ function onKey(e: KeyboardEvent): void {
   // list: picking a word out of it would otherwise jump to that session and
   // close this dialog mid-typing.
   if (isImeKey(e)) return
+  // The handler is on the whole panel, so a focused <select> or the export /
+  // close buttons bubbled their keys here too: preventDefault() then killed
+  // the select's own arrow-key behaviour while the highlight moved instead,
+  // and Enter on the select picked a session and closed the dialog. Only the
+  // search field gets the list shortcuts; Esc still closes from anywhere.
+  const fromInput = e.target instanceof HTMLInputElement
   if (e.key === 'Escape') store.toggleHistory(false)
+  else if (!fromInput) return
   else if (e.key === 'ArrowDown') {
     e.preventDefault()
     active.value = Math.min(active.value + 1, results.value.length - 1)

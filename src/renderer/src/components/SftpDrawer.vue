@@ -688,8 +688,10 @@ async function load(p?: string): Promise<void> {
     if (res.path !== '/') void store.addSftpRecent(res.path)
   } catch (e) {
     if (seq !== loadSeq || sidAtCall !== props.sessionId) return
-    error.value = sftpErr((e as Error).message || undefined, 'sfp.readDirFail')
-    const msg = (e as Error).message || tt('sfp.readDirFail')
+    // One localized message for both the banner and the toast. This used to
+    // assign sftpErr(...) and then overwrite it with the RAW error text, so a
+    // machine code (`files-failed:2`, `unsafe-filename`) reached the toast.
+    const msg = sftpErr((e as Error).message || undefined, 'sfp.readDirFail')
     error.value = msg
     toast(msg, 'error')
   } finally {
@@ -1121,10 +1123,9 @@ async function diffWithLocal(entry: FileEntry): Promise<void> {
   if (!props.sessionId) return
   const remote = await window.api.sftp.readText(props.sessionId, posixJoin(path.value, entry.name))
   if (!remote.ok) {
-    error.value =
-      remote.error === 'file-too-large' ? tt('sfp.fileTooLarge') : (remote.error ?? tt('sfp.diffFail'))
-    error.value = sftpErr(remote.error, 'sfp.diffFail')
-    const msg = remote.error ?? tt('sfp.diffFail')
+    // sftpErr already maps `file-too-large` / `path-invalid`; the two earlier
+    // assignments here were merge leftovers that a raw code then overwrote.
+    const msg = sftpErr(remote.error, 'sfp.diffFail')
     error.value = msg
     toast(msg, 'error')
     return
@@ -1133,11 +1134,9 @@ async function diffWithLocal(entry: FileEntry): Promise<void> {
   if (!picked.ok || !picked.path) return
   const local = await window.api.local.readText(picked.path)
   if (!local.ok || local.content === undefined) {
-    error.value =
-      local.error === 'file-too-large' ? tt('sfp.fileTooLarge') : (local.error ?? tt('sfp.diffFail'))
-      local.error === 'path-invalid' ? tt('sfp.pathInvalid') : (local.error ?? tt('sfp.diffFail'))
-    error.value = sftpErr(local.error, 'sfp.diffFail')
-    const msg = local.error ?? tt('sfp.diffFail')
+    // The middle line here used to be a bare ternary statement (no assignment)
+    // left by a stacked merge — syntactically valid, semantically nothing.
+    const msg = sftpErr(local.error, 'sfp.diffFail')
     error.value = msg
     toast(msg, 'error')
     return
@@ -1184,10 +1183,10 @@ async function runDeploy(): Promise<void> {
       toast(tt('sfp.deployDone'), 'success')
       deploy.open = false
     } else if (!up.canceled) {
-      // The drawer's banner sits behind this dialog — report the failure here.
-      deploy.error = up.error ?? tt('sfp.deployFail')
-      error.value = sftpErr(up.error, 'sfp.deployFail')
-      const msg = up.error ?? tt('sfp.deployFail')
+      // The drawer's banner sits behind this dialog — report the failure here
+      // (localized), and in the banner for when the dialog is closed again.
+      const msg = sftpErr(up.error, 'sfp.deployFail')
+      deploy.error = msg
       error.value = msg
       toast(msg, 'error')
     }
@@ -1240,9 +1239,10 @@ async function uploadPick(): Promise<void> {
   busy.value = true
   try {
     const r = await window.api.sftp.upload(props.sessionId, path.value, store.transferConcurrency)
-    if (!r.ok && !r.canceled) error.value = sftpErr(r.error, 'sfp.uploadFail')
     if (!r.ok && !r.canceled) {
-      const msg = r.error ?? tt('sfp.uploadFail')
+      // Localized text, not the raw code: a stacked merge had left a second
+      // block that overwrote sftpErr()'s result with `files-failed:2`.
+      const msg = sftpErr(r.error, 'sfp.uploadFail')
       error.value = msg
       toast(msg, 'error')
     }
@@ -1255,9 +1255,8 @@ async function uploadDirPick(): Promise<void> {
   busy.value = true
   try {
     const r = await window.api.sftp.uploadDir(props.sessionId, path.value, store.transferConcurrency)
-    if (!r.ok && !r.canceled) error.value = sftpErr(r.error, 'sfp.uploadFail')
     if (!r.ok && !r.canceled) {
-      const msg = r.error ?? tt('sfp.uploadFail')
+      const msg = sftpErr(r.error, 'sfp.uploadFail')
       error.value = msg
       toast(msg, 'error')
     }
@@ -1291,9 +1290,8 @@ async function onDrop(e: DragEvent): Promise<void> {
   // Don't gate on `busy` here — dropping a second folder mid-upload is fine —
   // but do surface failures, or a drop that never starts looks like a no-op.
   const r = await window.api.sftp.uploadPaths(props.sessionId, path.value, paths, store.transferConcurrency)
-  if (!r.ok && !r.canceled) error.value = sftpErr(r.error, 'sfp.uploadFail')
   if (!r.ok && !r.canceled) {
-    const msg = r.error ?? tt('sfp.uploadFail')
+    const msg = sftpErr(r.error, 'sfp.uploadFail')
     error.value = msg
     toast(msg, 'error')
   }
