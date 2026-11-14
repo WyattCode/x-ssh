@@ -4468,6 +4468,10 @@ public object FfiConverterTypeViewSelection: FfiConverterRustBuffer<ViewSelectio
 
 /**
  * 认证方式。
+ *
+ * `Debug` 手写,密码 / 私钥内容 / 口令打成 `<redacted>`(原来是派生的,`HostConfig` / `JumpHost`
+ * 的 `Debug` 也会带着它们一起打出来)。
+ * 注意:UniFFI 生成的 Kotlin `data class` 自带 `toString`,**Kotlin 那边也不要把它们记进日志**。
  */
 sealed class AuthMethod {
     
