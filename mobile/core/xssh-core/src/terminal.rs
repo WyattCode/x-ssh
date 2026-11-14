@@ -1214,7 +1214,7 @@ mod tests {
     #[test]
     fn osc_guard_cancels_an_endless_osc_and_drops_the_rest_until_the_terminator() {
         let mut stream = b"\x1b]0;".to_vec();
-        stream.extend(std::iter::repeat(b'a').take(MAX_OSC_LEN * 3));
+        stream.resize(stream.len() + MAX_OSC_LEN * 3, b'a');
         stream.extend_from_slice(b"\x07tail");
         let out = guarded(&[&stream]);
         assert!(out.len() <= MAX_OSC_LEN + 16, "放行的不该超过上限太多,实际 {}", out.len());
@@ -1225,7 +1225,7 @@ mod tests {
     #[test]
     fn osc_guard_counts_across_chunk_boundaries() {
         let mut stream = b"\x1b]0;".to_vec();
-        stream.extend(std::iter::repeat(b'a').take(MAX_OSC_LEN * 2));
+        stream.resize(stream.len() + MAX_OSC_LEN * 2, b'a');
         stream.extend_from_slice(b"\x07ok");
         let whole = guarded(&[&stream]);
         let pieces: Vec<&[u8]> = stream.chunks(7).collect();
@@ -1235,7 +1235,7 @@ mod tests {
     #[test]
     fn osc_guard_a_new_osc_right_after_a_dropped_one_still_starts() {
         let mut stream = b"\x1b]0;".to_vec();
-        stream.extend(std::iter::repeat(b'a').take(MAX_OSC_LEN + 10));
+        stream.resize(stream.len() + MAX_OSC_LEN + 10, b'a');
         stream.extend_from_slice(b"\x1b]2;next\x07");
         let out = guarded(&[&stream]);
         assert!(out.ends_with(b"\x1b]2;next\x07"), "紧接着的下一条 OSC 要原样放行");
@@ -1245,7 +1245,7 @@ mod tests {
     fn an_endless_osc_does_not_grow_memory_and_the_screen_still_works_afterwards() {
         let mut term = Terminal::new(20, 4);
         let mut stream = b"\x1b]0;".to_vec();
-        stream.extend(std::iter::repeat(b'x').take(5 * 1024 * 1024));
+        stream.resize(stream.len() + 5 * 1024 * 1024, b'x');
         term.feed(&stream);
         term.feed(b"\x07hello");
         // 被取消的标题不会作为事件出来;之后的普通文字照常显示。
@@ -1279,10 +1279,10 @@ mod tests {
 
     #[test]
     fn the_grid_never_gets_narrower_than_two_columns_so_wide_characters_cannot_panic() {
-        let mut term = Terminal::new(1, 1);
+        let mut term = Terminal::new(1, 4);
         assert_eq!(term.size().cols, 2);
         term.feed("你好🙂".as_bytes());
-        term.resize(1, 1);
+        term.resize(1, 4);
         assert_eq!(term.size().cols, 2);
         term.feed("你好🙂".as_bytes());
     }

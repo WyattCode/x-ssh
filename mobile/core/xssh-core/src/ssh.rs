@@ -1090,7 +1090,7 @@ impl Shell {
 
 #[cfg(test)]
 mod tests {
-    use super::{inspect_private_key, verify_host_key, HostKeyVerdict, SshError};
+    use super::{inspect_private_key, verify_host_key, Auth, HostKeyVerdict, SshError, Target};
 
     // 测试夹具:一把从生成起就公开的密钥,从未用于任何服务器。
     // 它在这份源码里明文可见是有意为之——公开的东西不是秘密。
