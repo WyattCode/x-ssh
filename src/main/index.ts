@@ -44,7 +44,7 @@ const activeEdits = new Set<string>()
 const editCleanups = new Map<string, () => void>()
 // Cache of drag-out downloads keyed by session:paths, so files prefetched on
 // mousedown are ready by the time the drag gesture reaches startDrag.
-const dragCache = new Map<string, Promise<{ dir: string; local: string }>>()
+const dragCache = new Map<string, Promise<DragStaged>>()
 let sshManager: SshManager | null = null
 
 /**
@@ -345,6 +345,10 @@ export interface DragItem {
 interface DragStaged {
   dir: string
   local: string
+  /** Fetched while staging, NOT on the drag: the cache-hit path must reach
+   *  startDrag() without a single await, because the gesture dies the moment
+   *  the user releases. */
+  icon: ReturnType<typeof nativeImage.createFromDataURL>
 }
 
 const dragKey = (sessionId: string, items: DragItem[]): string =>
@@ -371,7 +375,16 @@ function prefetchDrag(sessionId: string, items: DragItem[]): Promise<DragStaged>
         const local = items.length === 1 && !items[0].isDir
           ? join(dir, items[0].name)
           : dir
-        const staged = { dir, local }
+        // Fetch the drag icon NOW so the cache-hit drag needs no awaits at
+        // gesture time. getFileIcon on a network-staged path is local disk
+        // work; failure just means the placeholder rides along.
+        let icon = DRAG_ICON
+        try {
+          icon = await app.getFileIcon(local, { size: 'normal' })
+        } catch {
+          /* placeholder icon */
+        }
+        const staged = { dir, local, icon }
         dragStaged.set(key, staged)
         return staged
       } catch (e) {
@@ -2537,12 +2550,12 @@ function registerIpc(): void {
   })
 
   // Drag out (dragstart): hand the OS a real file. startDrag() only takes
-  // over the CURRENT gesture — Chromium checks whether the renderer still
-  // holds one — so after any await it may already be gone. Two rules fall
-  // out of that: a staging that finished earlier is grabbed SYNCHRONOUSLY
-  // (no await before startDrag; this is what makes the second drag of slow
-  // items work), and a gesture lost mid-download is reported back instead of
-  // failing silently ("I dragged, nothing arrived, no word").
+  // over the gesture the user is CURRENTLY making — it fails once they have
+  // released — so speed decides success: a completed staging is grabbed
+  // without any await (dragStaged), a still-downloading one runs as fast as
+  // the link allows, and if the user releases first the dragend message
+  // clears the live-drags slot and the finished files get reported back
+  // ("ready — drag once more") instead of vanishing silently.
   const liveDrags = new Map<number, string>()
   on(
     IPC.sftpStartDrag,
@@ -2552,28 +2565,23 @@ function registerIpc(): void {
       const send = (msg: { ready: boolean }): void => {
         if (!e.sender.isDestroyed()) e.sender.send(IPC.sftpDragNotice, msg)
       }
-      const iconOf = async (file: string): Promise<typeof DRAG_ICON> => {
-        try {
-          return await app.getFileIcon(file, { size: 'normal' })
-        } catch {
-          return DRAG_ICON
-        }
-      }
       const stagedNow = dragStaged.get(key)
       if (stagedNow) {
-        e.sender.startDrag({ file: stagedNow.local, icon: await iconOf(stagedNow.local) })
-        if (liveDrags.get(e.sender.id) === key) liveDrags.delete(e.sender.id)
+        // Straight to startDrag — no await in front of it, so a re-drag of
+        // already-staged items takes the gesture with console-level latency.
+        e.sender.startDrag({ file: stagedNow.local, icon: stagedNow.icon })
+        liveDrags.delete(e.sender.id)
         return
       }
       try {
-        const { local } = await prefetchDrag(sessionId, items)
+        const staged = await prefetchDrag(sessionId, items)
         if (liveDrags.get(e.sender.id) !== key) {
           // Released before staging finished. The files are ready NOW and
           // stay in the cache for a minute, so one more drag drops instantly.
           send({ ready: true })
           return
         }
-        e.sender.startDrag({ file: local, icon: await iconOf(local) })
+        e.sender.startDrag({ file: staged.local, icon: staged.icon })
       } catch {
         /* download failed — say so instead of eating the drag */
         send({ ready: false })
@@ -2589,7 +2597,7 @@ function registerIpc(): void {
   // Pre-fetch the drag-out download on mousedown so the (mostly asynchronous,
   // network-bound) download is ready by the time the drag gesture reaches
   // sftpStartDrag. startDrag must effectively run during the drag gesture, so
-  // warming the cache here is what makes Alt+drag reliable for larger files.
+  // warming the cache here is what makes a drag-out reliable for larger files.
   on(
     IPC.sftpPrefetchDrag,
     async (_e, sessionId: string, items: DragItem[]) => {
