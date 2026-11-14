@@ -377,11 +377,12 @@ function prefetchDrag(sessionId: string, items: DragItem[]): Promise<DragStaged>
         for (const it of items) {
           await requireSshManager().downloadTree(sessionId, it.remotePath, dir, it.name, it.isDir)
         }
-        // A single file drags out as that file; multiple items (or a folder)
-        // land in a temporary directory, which Explorer accepts as a drop.
-        const local = items.length === 1 && !items[0].isDir
-          ? join(dir, items[0].name)
-          : dir
+        // A single item — file OR folder — drags out as that item. The old
+        // branch treated every single DIRECTORY as "multiple items" and handed
+        // startDrag the bare temp parent (`xssh-drag-XXXX`), so dragging a
+        // folder either copied a garbage-named directory or took nothing at
+        // all. Only genuine multi-item stagings drag the shared directory.
+        const local = items.length === 1 ? join(dir, items[0].name) : dir
         // Fetch the drag icon NOW so the cache-hit drag needs no awaits at
         // gesture time. getFileIcon on a network-staged path is local disk
         // work; failure just means the placeholder rides along.
@@ -407,17 +408,20 @@ function prefetchDrag(sessionId: string, items: DragItem[]): Promise<DragStaged>
     void cached.catch(() => {
       if (dragCache.get(key) === cached) dragCache.delete(key)
     })
-    // Keep a STAGED drag droppable for a minute after it finished preparing —
-    // the timer starts on completion. Sweeping 60s after the request instead
-    // deleted the temp dir out from under any download slower than a minute,
-    // so a big file or deep folder could never finish dragging out.
+    // Keep a STAGED drag droppable for FIVE MINUTES after it finished
+    // preparing — the timer starts on completion. Sweeping 60s after the
+    // REQUEST deleted the temp dir out from under any download slower than a
+    // minute, and 60s after COMPLETION would expire mid-workflow: the answer
+    // to a lost gesture is "drag once more", which only works while the
+    // staged file is still there. Big transfers hold temp disk a while
+    // longer; the sweep-on-startup guard below covers what a quit skips.
     void cached
       .then(({ dir }) => {
         setTimeout(() => {
           if (dragCache.get(key) === cached) dragCache.delete(key)
           dragStaged.delete(key)
           void rm(dir, { recursive: true, force: true }).catch(() => undefined)
-        }, 60_000)
+        }, 300_000)
       })
       .catch(() => undefined)
   }

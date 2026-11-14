@@ -757,7 +757,9 @@ onMounted(() => {
   // drops on the desktop and nothing arrives. Main says so here; the staged
   // files live in its cache for a minute, so the guidance is actionable.
   offDragNotice = window.api.sftp.onDragNotice((n) => {
-    toast(n.ready ? tt('sfp.dragReady') : tt('sfp.dragFail'), n.ready ? 'info' : 'error')
+    // 6s, not the default 3.2: this appears right after a failed drag, when
+    // the user is already looking away wondering what went wrong.
+    toast(n.ready ? tt('sfp.dragReady') : tt('sfp.dragFail'), n.ready ? 'info' : 'error', 6000)
   })
 })
 onBeforeUnmount(() => {
@@ -1213,33 +1215,18 @@ function openWith(entry: FileEntry): void {
   emit('open-with', payload)
 }
 function onRemoteMouseDown(e: MouseEvent, entry: FileEntry): void {
-  // Drag-out is native, so the file has to be on disk by the time the drag
-  // reaches main — pre-download it once the press turns into a DRAG. The
-  // trigger is movement past Chromium's drag threshold (~4px): a click or a
-  // double-click to enter a folder never moves enough, so a plain pointer
-  // action never pulls bytes over the wire. (A 150ms hold timer was the first
-  // attempt and was wrong: slow clicks and folder double-clicks held long
-  // enough started downloads nobody asked for.)
+  // A native startDrag can only hand the OS a file that is ALREADY on disk,
+  // so the drag succeeds on download speed. Start staging the moment the row
+  // is pressed: selecting a row (almost always the step before a drag) buys
+  // seconds of head start and turns the drag itself into a cache hit. An
+  // earlier movement-threshold version never fired — Chromium begins the
+  // drag before mousemove can report 6px — so big files always started their
+  // download at dragstart and lost the gesture. A double-click's first click
+  // also stages the row; harmless, and often exactly where the user is going.
   if (!props.sessionId || e.button !== 0) return
-  const sid = props.sessionId
-  const x0 = e.clientX
-  const y0 = e.clientY
-  let done = false
-  const stop = (): void => {
-    done = true
-    window.removeEventListener('mousemove', onMove)
-    window.removeEventListener('mouseup', stop)
-  }
-  const onMove = (ev: MouseEvent): void => {
-    if (done) return
-    if (Math.abs(ev.clientX - x0) + Math.abs(ev.clientY - y0) <= 6) return
-    stop()
-    const sel = selected.value.has(entry.name) ? selectedEntries() : [entry]
-    const items = sel.map((x) => ({ remotePath: posixJoin(path.value, x.name), name: x.name, isDir: x.isDir }))
-    window.api.sftp.prefetchDrag(sid, items)
-  }
-  window.addEventListener('mousemove', onMove)
-  window.addEventListener('mouseup', stop)
+  const sel = selected.value.has(entry.name) ? selectedEntries() : [entry]
+  const items = sel.map((x) => ({ remotePath: posixJoin(path.value, x.name), name: x.name, isDir: x.isDir }))
+  window.api.sftp.prefetchDrag(props.sessionId, items)
 }
 function onDragStart(e: DragEvent, entry: FileEntry): void {
   if (!props.sessionId) return
