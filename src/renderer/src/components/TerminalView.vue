@@ -429,27 +429,35 @@ function watchDpr(): void {
   dprMql = window.matchMedia(`screen and (resolution: ${window.devicePixelRatio}dppx)`)
   dprMql.addEventListener('change', onDprChange)
 }
-function onDprChange(): void {
-  // Some Chromium versions deliver the change event one beat before
-  // devicePixelRatio reports the new value; fitting then would use stale
-  // metrics, and re-arming on the OLD ratio would suppress the real event
-  // that follows. Re-poll until the ratio we see actually moves.
-  if (window.devicePixelRatio === dprSeen) {
-    setTimeout(() => {
-      if (!unmounted) watchDpr()
-    }, 150)
-    return
-  }
+/** The change has landed and the ratio is readable: record it, re-arm on the
+ *  new value, and re-fit. The fit is deferred a macro task because xterm
+ *  recomputes its cell metrics in its OWN MediaQueryList listener and the
+ *  order between independent lists is not specified — a timeout runs after
+ *  both listeners' synchronous work has landed. */
+function refitForDpr(): void {
   dprSeen = window.devicePixelRatio
   watchDpr()
-  // Defer the re-fit a macro task. xterm listens for the DPR change on its
-  // OWN MediaQueryList and recomputes cell metrics synchronously there; the
-  // order of two independent MediaQueryList listeners is not specified, so if
-  // ours happened to run first, fit.fit() would still read the pre-change
-  // height. A timeout runs after both listeners' synchronous work has landed.
   setTimeout(() => {
     if (!unmounted) doFit()
   }, 0)
+}
+function onDprChange(): void {
+  // Some Chromium versions deliver the change event one beat before
+  // devicePixelRatio reports the new value. Re-check shortly — and the retry
+  // itself has to do the work: if the property settles without a second
+  // event (the old query already fired and a re-arm on the current value
+  // would match from the start), this poll is the only discovery path, and
+  // fitting nothing would let the clipped row survive until some unrelated
+  // resize.
+  if (window.devicePixelRatio === dprSeen) {
+    setTimeout(() => {
+      if (unmounted) return
+      if (window.devicePixelRatio !== dprSeen) refitForDpr()
+      else watchDpr()
+    }, 150)
+    return
+  }
+  refitForDpr()
 }
 
 /** Opens a link clicked in the output. Main restricts this to http/https, so a
