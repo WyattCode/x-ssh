@@ -234,6 +234,7 @@ fun ConnectGate(
                     onPrimary = {},
                     secondary = stringResource(R.string.host_cancel),
                     onSecondary = onExit,
+                    secondaryProminent = true,
                 )
             },
         )
@@ -692,6 +693,8 @@ private fun GateButtons(
     onSecondary: () -> Unit,
     tertiary: Pair<String, () -> Unit>? = null,
     edit: Pair<String, () -> Unit>? = null,
+    /** 次要按钮就是页面上唯一能按的东西(连接中的「取消」):正文色、带细边,不当一行淡字。 */
+    secondaryProminent: Boolean = false,
 ) {
     // iOS 版状态卡片的按钮:胶囊形的实心主按钮 + 无底色的文字按钮(取消 / 返回)。
     if (stacked) {
@@ -699,11 +702,27 @@ private fun GateButtons(
             if (primary != null) CapsuleButton(primary, Modifier.fillMaxWidth(), kind = primaryKind) { onPrimary() }
             tertiary?.let { (label, run) -> CapsuleButton(label, Modifier.fillMaxWidth(), kind = ButtonKind.Ghost) { run() } }
             edit?.let { (label, run) -> CapsuleButton(label, Modifier.fillMaxWidth(), kind = ButtonKind.Ghost) { run() } }
-            if (secondary != null) CapsuleButton(secondary, Modifier.fillMaxWidth(), kind = ButtonKind.Ghost) { onSecondary() }
+            if (secondary != null) {
+                CapsuleButton(
+                    secondary,
+                    Modifier.fillMaxWidth(),
+                    kind = ButtonKind.Ghost,
+                    color = if (secondaryProminent) LocalXssh.current.text else null,
+                    outlined = secondaryProminent,
+                ) { onSecondary() }
+            }
         }
     } else {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(GapItem)) {
-            if (secondary != null) CapsuleButton(secondary, Modifier.weight(1f), kind = ButtonKind.Ghost) { onSecondary() }
+            if (secondary != null) {
+                CapsuleButton(
+                    secondary,
+                    Modifier.weight(1f),
+                    kind = ButtonKind.Ghost,
+                    color = if (secondaryProminent) LocalXssh.current.text else null,
+                    outlined = secondaryProminent,
+                ) { onSecondary() }
+            }
             tertiary?.let { (label, run) -> CapsuleButton(label, Modifier.weight(1f), kind = ButtonKind.Ghost) { run() } }
             edit?.let { (label, run) -> CapsuleButton(label, Modifier.weight(1f), kind = ButtonKind.Ghost) { run() } }
             if (primary != null) CapsuleButton(primary, Modifier.weight(1f), kind = primaryKind) { onPrimary() }
