@@ -175,7 +175,8 @@ class TerminalSession(
 
             val pumped = withContext(Dispatchers.IO) {
                 val p = live.pump()
-                if (p.changed && watched) publishFrame()
+                // 取整屏画面也要跨 FFI,panic 回来是异常:这一帧取不到就算了,别让它把整个会话循环带崩。
+                if (p.changed && watched) runCatching { publishFrame() }
                 p
             }
             // 传输断了(网络换了、服务器没了):先自己连回去。连回来就接着转,屏幕原样留着。

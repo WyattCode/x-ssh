@@ -26,6 +26,9 @@ private val sessionCleanup = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 /** logcat 标签。连接卡住时用 `adb logcat -s xssh` 看停在哪一步。 */
 const val TAG = "xssh"
 
+/** 终端网格的最小列数(见 [LiveTerminal.resizeGrid]):1 列时一个宽字符就会让 Rust 的终端越界 panic。 */
+const val MIN_COLS = 2
+
 /**
  * 一帧的结果:连接是否还在、屏幕内容有没有变过。
  *
@@ -103,6 +106,13 @@ class LiveTerminal(
             pumpOnce()
         } catch (e: IllegalStateException) {
             // 和 close() 撞上了:对象刚被释放。按"连接已断"处理 —— 是我们自己关的,不算掉线。
+            Pumped(alive = false, changed = false)
+        } catch (e: Exception) {
+            // Rust 那边的 panic 过 FFI 回来是 InternalException(和 FfiException 一样都是 kotlin.Exception,
+            // 不是 IllegalStateException)。这个循环跑在没装异常处理器的协程里:不接的话,
+            // 一段恶意 / 写坏的服务端输出就能让整个应用崩掉(而不是只断这一条会话)。
+            // 终端状态可能已经不可信:按"这条会话结束"处理,界面显示已断开,其他会话不受影响。
+            Log.w(TAG, "pump failed: ${e.javaClass.simpleName} ${e.message}")
             Pumped(alive = false, changed = false)
         }
     }
@@ -223,7 +233,10 @@ class LiveTerminal(
         if (term.tick()) changed = true
         for (event in term.takeEvents()) {
             if (event is TerminalEvent.Write) {
-                shell.write(event.data)
+                // 终端对远端查询(光标位置、设备属性……)的应答。连接已断 / 通道窗口耗尽时 write 会抛
+                // (超时要等 10 秒):这只是"这条应答没发出去",不能让整个轮询带着异常炸掉。
+                // 断没断由上面的 linkOutcome 报。
+                runCatching { shell.write(event.data) }
             }
         }
         if (dirty) {
@@ -297,11 +310,15 @@ class LiveTerminal(
 
     fun resizeGrid(cols: Int, rows: Int, cellWidthPx: Int, cellHeightPx: Int) {
         if (closed) return
-        this.cols = cols
-        this.rows = rows
-        runCatching { shell.resize(cols.toUInt(), rows.toUInt()) }
-        runCatching { term.resize(cols.toUInt(), rows.toUInt()) }
-        recording?.resize(cols, rows)
+        // 至少 2 列:Rust 里的终端允许 1 列,但一个宽字符(中文 / emoji)落在 1 列的网格上会越界 panic
+        // (alacritty 自己的下限也是 2 列)。抽屉动画 / 分屏 / 超大字号时界面算出来的列数会短暂到 1。
+        val c = cols.coerceAtLeast(MIN_COLS)
+        val r = rows.coerceAtLeast(1)
+        this.cols = c
+        this.rows = r
+        runCatching { shell.resize(c.toUInt(), r.toUInt()) }
+        runCatching { term.resize(c.toUInt(), r.toUInt()) }
+        recording?.resize(c, r)
         // 回答"窗口多大(像素)"这类查询时要用。
         runCatching { term.setCellPixels(cellWidthPx.toUInt(), cellHeightPx.toUInt()) }
         // 行列变了,即使没有新数据,整屏的折行结果也不一样了。

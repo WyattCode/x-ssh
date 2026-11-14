@@ -2246,7 +2246,7 @@ private fun TerminalCanvas(
                 width = liveWidth
             }
         }
-        val cols = (width / cell.first).toInt().coerceAtLeast(1)
+        val cols = (width / cell.first).toInt().coerceAtLeast(MIN_COLS)
         val gridRows = (height / cell.second).toInt().coerceAtLeast(1)
         // 行列也等停下来再改:原来每变一行就让核心重排一次、给服务端发一次窗口大小
         // (远端全屏程序跟着整屏重画)。LaunchedEffect 换了键就会取消上一次,天然就是防抖。
