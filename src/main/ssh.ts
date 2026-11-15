@@ -2958,52 +2958,160 @@ export class SshManager {
     return `\\\\?\\${resolve(p)}`
   }
 
-  /** Silent recursive download (no progress) into localBase; used for drag-out.
-   *  Best-effort: one unreadable entry doesn't leave the folder undownloaded
-   *  (and thus undraggable), but a folder that could not be read at all — or
-   *  whose every child failed — throws instead of resolving to an empty dir,
-   *  so the caller never reports a silent empty-folder success. */
+  /** Silent recursive download (no progress) into localBase; used for drag-out
+   *  and by the external-editor / open-with staging paths, which await it.
+   *
+   *  Producer/consumer like downloadJob: the walk stays serial over directories
+   *  (one readdir per dir) while files stream through a worker pool, because a
+   *  serial walk capped the whole folder at one file per round-trip — ~60 s for a
+   *  folder at ~5 MB/s, where the link could saturate several times over.
+   *
+   *  The walk is depth-capped and the best-effort semantics are unchanged: one
+   *  unreadable entry doesn't leave the folder undownloaded (and thus
+   *  undraggable), but a folder that could not be read at all — or whose every
+   *  child failed — throws instead of resolving to an empty dir, so the caller
+   *  never reports a silent empty-folder success. */
   async downloadTree(
     sessionId: string,
     remotePath: string,
     localBase: string,
     name: string,
     isDir: boolean,
-    depth = 0
+    concurrency?: number
   ): Promise<string> {
     const sftp = await this.getSftp(sessionId)
-    const local = this.safeLocalJoin(localBase, name)
-    if (isDir) {
-      if (depth > 64) return local // guard against server-reported cyclic dirs
+    const top = this.safeLocalJoin(localBase, name)
+    // A bare file needs no pool: it used to be the whole (serial) method.
+    if (!isDir) {
+      await this.pipeStream(randomUUID(), sftp.createReadStream(remotePath), createWriteStream(this.longPath(top)), () => undefined, this.longPath(top))
+      return top
+    }
+
+    const conc = clampConcurrency(concurrency ?? SshManager.CONCURRENCY, SshManager.CONCURRENCY)
+    const queue: { remote: string; local: string; key: string }[] = []
+    let walkDone = false
+    let cancelled = false
+    // The root's key can't be its local path — a same-named nested dir would
+    // collide with it — so it gets a marker no path can spell.
+    const ROOT = '\u0000'
+    // The tree's shape, recorded during the walk; the "did this folder come out
+    // empty" verdict is computed once, AFTER the workers drain.
+    //
+    // The first version of this pool counted each dir's children and decremented
+    // as transfers landed. That raced: a nested dir settled inside its own walk
+    // — which the parent awaits — before the parent had registered that child in
+    // its count, so the parent's tally went negative, its entry was deleted as
+    // "fully settled", and the loop re-registered it afterwards with a count
+    // nothing would ever decrement again. Every failure below the top level was
+    // dropped, and a folder whose only subfolder lost all its files resolved as
+    // a success with an empty directory on disk. Recording the shape and deciding
+    // at the end removes the ordering problem instead of trying to survive it.
+    const kids = new Map<string, string[]>([[ROOT, []]])
+    const dirKids = new Set<string>()
+    /** A nested dir whose readdir failed: a lost child, not fatal by itself. */
+    const brokenDirs = new Set<string>()
+    /** File children, by local path: did the bytes land? */
+    const fileLanded = new Map<string, boolean>()
+
+    /** A dir is lost when it had children and none of them survived. A dir that
+     *  is empty on the remote is legitimately empty, so that is not a loss. */
+    const dirLost = (key: string): boolean => {
+      const list = kids.get(key) ?? []
+      if (list.length === 0) return false
+      return list.every((k) =>
+        dirKids.has(k) ? brokenDirs.has(k) || dirLost(k) : fileLanded.get(k) === false
+      )
+    }
+
+    const walk = async (remote: string, local: string, key: string, depth: number): Promise<void> => {
+      // A branch the depth cap cut off counts as fine, as it always did: that cap
+      // guards against server-reported cyclic dirs, it is not a download failure.
+      if (cancelled || depth > 64) return
       await mkdir(this.longPath(local), { recursive: true })
       let list: { filename: string; attrs: { size: number; isDirectory(): boolean } }[]
       try {
-        list = await this.readdirFull(sftp, remotePath)
+        list = await this.readdirFull(sftp, remote)
       } catch (e) {
-        // A failed readdir must not look like an empty folder: the caller
-        // (prefetchDrag) treats a resolved promise as a complete download and
-        // hands Explorer an empty directory with no error. Rethrow so the
-        // caller's failure path (cleanup / eviction) runs.
-        throw e instanceof Error ? e : new Error(String(e))
+        // The folder the caller asked for could not be read at all: resolving
+        // would hand the caller an empty directory with no error, and a caller
+        // like prefetchDrag reads a resolved promise as a complete download.
+        // Below the top level one unreadable dir stays best-effort.
+        if (key === ROOT) throw e instanceof Error ? e : new Error(String(e))
+        brokenDirs.add(key)
+        return
       }
-      let skipped = 0
+      const mine = kids.get(key) ?? []
+      kids.set(key, mine)
       for (const it of list) {
-        try {
-          await this.downloadTree(sessionId, this.posixJoin(remotePath, it.filename), local, it.filename, it.attrs.isDirectory(), depth + 1)
-        } catch {
-          // Best-effort: one unreadable entry must not block the whole drag.
-          skipped++
+        if (cancelled) return
+        const childLocal = this.safeLocalJoin(local, it.filename)
+        const childRemote = this.posixJoin(remote, it.filename)
+        mine.push(childLocal)
+        kids.set(childLocal, [])
+        if (it.attrs.isDirectory()) {
+          dirKids.add(childLocal)
+          await walk(childRemote, childLocal, childLocal, depth + 1)
+        } else {
+          // Don't let the walk run unboundedly ahead of the transfers.
+          while (queue.length > SshManager.QUEUE_MAX && !cancelled) {
+            await new Promise((r) => setTimeout(r, 15))
+          }
+          if (cancelled) return
+          queue.push({ remote: childRemote, local: childLocal, key: childLocal })
         }
       }
-      // If every child failed, the result is an empty folder that would still
-      // be reported as success — surface it instead.
-      if (list.length > 0 && skipped === list.length) {
-        throw new Error(`download-tree-empty:${name}`)
-      }
-    } else {
-      await this.pipeStream(randomUUID(), sftp.createReadStream(remotePath), createWriteStream(this.longPath(local)), () => undefined, this.longPath(local))
     }
-    return local
+
+    const worker = async (): Promise<void> => {
+      for (;;) {
+        if (cancelled) return
+        const item = queue.shift()
+        if (!item) {
+          if (walkDone) return
+          await new Promise((r) => setTimeout(r, 15))
+          continue
+        }
+        let read: Readable | undefined
+        let write: Writable | undefined
+        try {
+          read = sftp.createReadStream(item.remote)
+          write = createWriteStream(this.longPath(item.local))
+          await this.pipeStream(randomUUID(), read, write, () => undefined, this.longPath(item.local))
+          fileLanded.set(item.key, true)
+        } catch {
+          read?.destroy()
+          write?.destroy()
+          if (cancelled) return
+          // Best-effort: one unreadable entry must not block the whole download.
+          fileLanded.set(item.key, false)
+        }
+      }
+    }
+
+    try {
+      // Promise.all up front: awaiting the walk first would leave a worker
+      // rejection unhandled until we got there (same reason as uploadJob).
+      const workers = Promise.all(Array.from({ length: conc }, () => worker()))
+      try {
+        await walk(remotePath, top, ROOT, 0)
+      } finally {
+        walkDone = true
+      }
+      await workers
+      // A cancelled run isn't judged: files still queued never reported in, and
+      // the caller is tearing this staging down anyway.
+      if (cancelled) return top
+      if (dirLost(ROOT)) throw new Error(`download-tree-empty:${name}`)
+    } catch (e) {
+      // Stop the pool and drain what's queued: a worker rejection must not
+      // become an unhandled rejection after this method already settled.
+      cancelled = true
+      queue.length = 0
+      throw e instanceof Error ? e : new Error(String(e))
+    } finally {
+      walkDone = true
+    }
+    return top
   }
 
   /** Silent single-file upload (no progress); used for external-editor save-back. */
