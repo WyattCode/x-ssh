@@ -62,6 +62,7 @@ const { toast } = useToast()
 function openErr(err?: string): string {
   if (err === 'invalid-name') return t('sfp.invalidName')
   if (err === 'program-not-allowed') return t('sfp.programNotAllowed')
+  if (err === 'editor-missing') return t('sfp.editorMissing')
   return err ?? t('sfp.openFail')
 }
 

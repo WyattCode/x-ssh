@@ -2966,11 +2966,15 @@ export class SshManager {
    *  serial walk capped the whole folder at one file per round-trip — ~60 s for a
    *  folder at ~5 MB/s, where the link could saturate several times over.
    *
-   *  The walk is depth-capped and the best-effort semantics are unchanged: one
-   *  unreadable entry doesn't leave the folder undownloaded (and thus
-   *  undraggable), but a folder that could not be read at all — or whose every
-   *  child failed — throws instead of resolving to an empty dir, so the caller
-   *  never reports a silent empty-folder success. */
+   *  The walk is depth-capped and best-effort: an entry that cannot be brought
+   *  down — unreadable, a name the local filesystem cannot hold, a directory
+   *  that cannot be created — costs that one entry, not the folder, and is
+   *  counted in the returned `skipped` so a caller can say "3 items were not
+   *  copied" instead of handing over a quiet hole. What still throws: the
+   *  requested folder itself being unreadable, a failure to create the top
+   *  directory, and a folder whose EVERY child was lost (`download-tree-empty`),
+   *  because an empty skeleton read back as a complete download is worse than an
+   *  error. */
   async downloadTree(
     sessionId: string,
     remotePath: string,
@@ -2978,19 +2982,23 @@ export class SshManager {
     name: string,
     isDir: boolean,
     concurrency?: number
-  ): Promise<string> {
+  ): Promise<{ path: string; skipped: number }> {
     const sftp = await this.getSftp(sessionId)
     const top = this.safeLocalJoin(localBase, name)
     // A bare file needs no pool: it used to be the whole (serial) method.
     if (!isDir) {
       await this.pipeStream(randomUUID(), sftp.createReadStream(remotePath), createWriteStream(this.longPath(top)), () => undefined, this.longPath(top))
-      return top
+      return { path: top, skipped: 0 }
     }
 
     const conc = clampConcurrency(concurrency ?? SshManager.CONCURRENCY, SshManager.CONCURRENCY)
     const queue: { remote: string; local: string; key: string }[] = []
     let walkDone = false
     let cancelled = false
+    /** Entries this folder could not bring down (see the method's doc comment). */
+    let skipped = 0
+    /** Sequences the ghost keys standing in for names the local FS rejects. */
+    let ghostSeq = 0
     // The root's key can't be its local path — a same-named nested dir would
     // collide with it — so it gets a marker no path can spell.
     const ROOT = '\u0000'
@@ -3044,20 +3052,44 @@ export class SshManager {
       kids.set(key, mine)
       for (const it of list) {
         if (cancelled) return
-        const childLocal = this.safeLocalJoin(local, it.filename)
+        let childLocal: string
+        try {
+          childLocal = this.safeLocalJoin(local, it.filename)
+        } catch {
+          // A name the local filesystem cannot hold (a traversal, or a server
+          // reporting a path separator inside a filename). Losing one row must
+          // not abandon the folder — but it does have to be counted, or the
+          // "everything failed" check below would see an empty dir and call it
+          // a success. The ghost key is never a real path.
+          mine.push(`\u0001ghost${ghostSeq++}`)
+          fileLanded.set(mine[mine.length - 1], false)
+          skipped++
+          continue
+        }
         const childRemote = this.posixJoin(remote, it.filename)
         mine.push(childLocal)
         kids.set(childLocal, [])
-        if (it.attrs.isDirectory()) {
-          dirKids.add(childLocal)
-          await walk(childRemote, childLocal, childLocal, depth + 1)
-        } else {
-          // Don't let the walk run unboundedly ahead of the transfers.
-          while (queue.length > SshManager.QUEUE_MAX && !cancelled) {
-            await new Promise((r) => setTimeout(r, 15))
+        const childIsDir = it.attrs.isDirectory()
+        try {
+          if (childIsDir) {
+            dirKids.add(childLocal)
+            await walk(childRemote, childLocal, childLocal, depth + 1)
+          } else {
+            // Don't let the walk run unboundedly ahead of the transfers.
+            while (queue.length > SshManager.QUEUE_MAX && !cancelled) {
+              await new Promise((r) => setTimeout(r, 15))
+            }
+            if (cancelled) return
+            queue.push({ remote: childRemote, local: childLocal, key: childLocal })
           }
+        } catch {
           if (cancelled) return
-          queue.push({ remote: childRemote, local: childLocal, key: childLocal })
+          // Reached when the child's own mkdir failed — a reserved Windows name
+          // (`CON`, `NUL`), a read-only volume, disk full — or a traversal threw
+          // deeper in. Same rule: lose the child, keep the folder.
+          if (childIsDir) brokenDirs.add(childLocal)
+          else fileLanded.set(childLocal, false)
+          skipped++
         }
       }
     }
@@ -3084,6 +3116,7 @@ export class SshManager {
           if (cancelled) return
           // Best-effort: one unreadable entry must not block the whole download.
           fileLanded.set(item.key, false)
+          skipped++
         }
       }
     }
@@ -3100,7 +3133,7 @@ export class SshManager {
       await workers
       // A cancelled run isn't judged: files still queued never reported in, and
       // the caller is tearing this staging down anyway.
-      if (cancelled) return top
+      if (cancelled) return { path: top, skipped }
       if (dirLost(ROOT)) throw new Error(`download-tree-empty:${name}`)
     } catch (e) {
       // Stop the pool and drain what's queued: a worker rejection must not
@@ -3111,7 +3144,7 @@ export class SshManager {
     } finally {
       walkDone = true
     }
-    return top
+    return { path: top, skipped }
   }
 
   /** Silent single-file upload (no progress); used for external-editor save-back. */

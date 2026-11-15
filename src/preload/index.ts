@@ -318,15 +318,6 @@ const api = {
       ipcRenderer.invoke(IPC.sftpEditExternal, sessionId, path, name),
     openWith: (sessionId: string, path: string, name: string, program?: string): Promise<SftpResult> =>
       ipcRenderer.invoke(IPC.sftpOpenWith, sessionId, path, name, program),
-    startDrag: (sessionId: string, items: { remotePath: string; name: string; isDir: boolean }[]): void =>
-      ipcRenderer.send(IPC.sftpStartDrag, sessionId, items),
-    prefetchDrag: (sessionId: string, items: { remotePath: string; name: string; isDir: boolean }[]): void =>
-      ipcRenderer.send(IPC.sftpPrefetchDrag, sessionId, items),
-    onDragNotice: (cb: (n: { state: 'downloading' | 'ready' | 'failed'; name?: string; error?: string }) => void): (() => void) => {
-      const listener = (_e: unknown, n: { state: 'downloading' | 'ready' | 'failed'; name?: string; error?: string }): void => cb(n)
-      ipcRenderer.on(IPC.sftpDragNotice, listener)
-      return () => ipcRenderer.removeListener(IPC.sftpDragNotice, listener)
-    },
     cancel: (id: string): void => ipcRenderer.send(IPC.sftpCancel, id),
     pause: (id: string, paused: boolean): void => ipcRenderer.send(IPC.sftpPause, id, paused),
     pauseAll: (paused: boolean): void => ipcRenderer.send(IPC.sftpPauseAll, paused),

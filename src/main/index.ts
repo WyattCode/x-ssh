@@ -40,11 +40,9 @@ const imeTrace = createImeTrace(app.getPath('userData'))
 const masterLock = new MasterLock(settings)
 const userVerify = registerUserVerifyIpc({ settings, lang: uiLang, isTrusted: isTrustedIpcSender })
 const activeEdits = new Set<string>()
-/** Per-path stop callbacks for in-flight external edits (clear debounce + unwatch + rm). */
-const editCleanups = new Map<string, () => void>()
-// Cache of drag-out downloads keyed by session:paths, so files prefetched on
-// mousedown are ready by the time the drag gesture reaches startDrag.
-const dragCache = new Map<string, Promise<DragStaged>>()
+/** Per-path stop callbacks for in-flight external edits (clear debounce + unwatch +
+ *  final push + rm). Resolves once the file is safely off the local disk. */
+const editCleanups = new Map<string, () => Promise<void>>()
 let sshManager: SshManager | null = null
 
 /**
@@ -299,7 +297,7 @@ function trayImage(): Electron.NativeImage {
 async function setupTray(win: BrowserWindow): Promise<void> {
   if (tray) return
   let image = trayImage()
-  if (image.isEmpty()) image = nativeImage.createFromDataURL(DRAG_ICON.toDataURL())
+  if (image.isEmpty()) image = nativeImage.createFromDataURL(BLANK_ICON.toDataURL())
   tray = new Tray(image)
   tray.setToolTip('X-SSH')
   tray.setContextMenu(await buildTrayMenu(win))
@@ -343,93 +341,58 @@ function flushLaunchTargets(win: BrowserWindow): void {
   }
 }
 
-export interface DragItem {
-  remotePath: string
-  name: string
-  isDir: boolean
-}
+// Drag-out to the desktop was retired in 0.6.36 (every file has a hover
+// download button, every folder an inline action, and Chromium can only be
+// handed a file that already exists on local disk — so a big item could never
+// be a single gesture). Its staging cache, `sftp:startDrag` and
+// `sftp:prefetchDrag` channels went with it: an IPC surface that accepts an
+// arbitrary session id plus remote paths and writes them to temp, with nothing
+// in the app left to call it, is only ever attack surface. Re-enabling drag-out
+// means restoring them from git (see HANDOVER M3.192 §三 for the five-round
+// post-mortem, and M3.195 for why downloadTree's directory branch survived).
 
-interface DragStaged {
-  dir: string
-  local: string
-  /** Fetched while staging, NOT on the drag: the cache-hit path must reach
-   *  startDrag() without a single await, because the gesture dies the moment
-   *  the user releases. */
-  icon: ReturnType<typeof nativeImage.createFromDataURL>
-}
+// Temp dirs this app creates for staging remote files. Each has an in-process
+// expiry (30 min of editing inactivity for external-edit, 30 min for
+// open-with) — which a crash, a kill, or a plain quit skips, leaving someone's
+// remote tree in the system temp dir forever.
+const TEMP_PREFIXES = ['xssh-edit-', 'xssh-open-', 'xssh-drag-']
+const TEMP_MAX_AGE_MS = 6 * 60 * 60 * 1000
 
-const dragKey = (sessionId: string, items: DragItem[]): string =>
-  `${sessionId}:${items.map((i) => i.remotePath).join('|')}`
-
-/** Completed stagings, keyed like dragCache. A startDrag can only take over a
- *  LIVE gesture, so it must fire within a beat of dragstart: the synchronous
- *  lookup here is what makes a second drag of the same (already downloaded)
- *  items succeed instantly, while the first one only arms the fetch. */
-const dragStaged = new Map<string, DragStaged>()
-
-function prefetchDrag(sessionId: string, items: DragItem[]): Promise<DragStaged> {
-  const key = dragKey(sessionId, items)
-  let p = dragCache.get(key)
-  if (!p) {
-    p = (async (): Promise<DragStaged> => {
-      const dir = await mkdtemp(join(tmpdir(), 'xssh-drag-'))
-      try {
-        for (const it of items) {
-          await requireSshManager().downloadTree(sessionId, it.remotePath, dir, it.name, it.isDir)
-        }
-        // A single item — file OR folder — drags out as that item. The old
-        // branch treated every single DIRECTORY as "multiple items" and handed
-        // startDrag the bare temp parent (`xssh-drag-XXXX`), so dragging a
-        // folder either copied a garbage-named directory or took nothing at
-        // all. Only genuine multi-item stagings drag the shared directory.
-        const local = items.length === 1 ? join(dir, items[0].name) : dir
-        // Fetch the drag icon NOW so the cache-hit drag needs no awaits at
-        // gesture time. getFileIcon on a network-staged path is local disk
-        // work; failure just means the placeholder rides along.
-        let icon = DRAG_ICON
-        try {
-          icon = await app.getFileIcon(local, { size: 'normal' })
-        } catch {
-          /* placeholder icon */
-        }
-        const staged = { dir, local, icon }
-        dragStaged.set(key, staged)
-        return staged
-      } catch (e) {
-        // Drop a half-downloaded tree immediately so a retry is not blocked by
-        // a poisoned cache entry and so temp dirs do not accumulate.
-        await rm(dir, { recursive: true, force: true }).catch(() => undefined)
-        throw e
-      }
-    })()
-    dragCache.set(key, p)
-    const cached = p
-    // Evict a failed entry right away so the next mousedown can retry.
-    void cached.catch(() => {
-      if (dragCache.get(key) === cached) dragCache.delete(key)
-    })
-    // Keep a STAGED drag droppable for FIVE MINUTES after it finished
-    // preparing — the timer starts on completion. Sweeping 60s after the
-    // REQUEST deleted the temp dir out from under any download slower than a
-    // minute, and 60s after COMPLETION would expire mid-workflow: the answer
-    // to a lost gesture is "drag once more", which only works while the
-    // staged file is still there. Big transfers hold temp disk a while
-    // longer; the sweep-on-startup guard below covers what a quit skips.
-    void cached
-      .then(({ dir }) => {
-        setTimeout(() => {
-          if (dragCache.get(key) === cached) dragCache.delete(key)
-          dragStaged.delete(key)
-          void rm(dir, { recursive: true, force: true }).catch(() => undefined)
-        }, 300_000)
-      })
-      .catch(() => undefined)
+/** Delete our own orphaned staging dirs at startup. Safe to run unconditionally
+ *  here: nothing has connected yet, so no session owns any of these, and the
+ *  age check leaves anything the user might still have open in another run
+ *  alone. Best-effort — a locked file is skipped, not fatal. */
+async function sweepStaleTempDirs(): Promise<void> {
+  const root = tmpdir()
+  let names: string[]
+  try {
+    names = await readdir(root)
+  } catch {
+    return
   }
-  return p
+  const now = Date.now()
+  await Promise.all(
+    names
+      .filter((n) => TEMP_PREFIXES.some((p) => n.startsWith(p)))
+      .map(async (n) => {
+        const p = join(root, n)
+        try {
+          const st = await stat(p)
+          // mtime is what an open edit keeps touching; birthtime covers a dir
+          // that was created and never written.
+          if (now - Math.max(st.mtimeMs, st.birthtimeMs) < TEMP_MAX_AGE_MS) return
+          await rm(p, { recursive: true, force: true })
+        } catch {
+          /* one unreadable leftover must not stop the sweep */
+        }
+      })
+  )
 }
 
-// Tiny cursor image for native drag-out operations.
-const DRAG_ICON = nativeImage.createFromDataURL(
+// A 1x1 transparent PNG. Only left as the tray's fallback if the real icon
+// resource is missing (it used to double as the native drag cursor, which went
+// out with drag-out).
+const BLANK_ICON = nativeImage.createFromDataURL(
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
 )
 
@@ -1339,13 +1302,25 @@ function createWindow(saved?: SavedBounds, prefs: UiPrefs = {}): void {
           void settings.set('sessionHistory', capHistory(merged)).catch(() => undefined)
         })
     }
-    for (const stop of [...editCleanups.values()]) stop()
+    const stops = [...editCleanups.values()]
     editCleanups.clear()
     activeEdits.clear()
-    sshManager?.disposeAll()
-    sshManager = null
-    targetSender = null
-    mainWindow = null
+    const closeSessions = (): void => {
+      sshManager?.disposeAll()
+      sshManager = null
+      targetSender = null
+      mainWindow = null
+    }
+    if (!stops.length) return closeSessions()
+    // An open external edit may hold bytes the server has not seen. Give each
+    // one last push BEFORE the session goes away — disposing first would turn
+    // "saved in Notepad++" into a silently dropped save. Bounded: a dead
+    // connection must not hang shutdown, and the sweep on next start collects
+    // whatever this leaves behind.
+    void Promise.race([
+      Promise.all(stops.map((s) => s().catch(() => undefined))),
+      new Promise((r) => setTimeout(r, 10_000))
+    ]).finally(closeSessions)
   })
 }
 
@@ -2440,19 +2415,24 @@ function registerIpc(): void {
         if (!name || name === '.' || name === '..' || basename(name) !== name) {
           return { ok: false, error: 'invalid-name' }
         }
+        // Refuse a stale setting BEFORE touching the network. The sibling
+        // open-with handler already required the binary to exist; this one
+        // spawned whatever was stored, with no 'error' listener, so an
+        // uninstalled editor emitted 'error' on a ChildProcess with nobody
+        // watching — an uncaught exception in the MAIN process (there is no
+        // process.on('uncaughtException') anywhere in src/main).
+        const editor = await settings.get<string>('externalEditor')
+        if (editor && (!isAbsolute(editor) || !existsSync(editor))) {
+          return { ok: false, error: 'editor-missing' }
+        }
         const dir = await mkdtemp(join(tmpdir(), 'xssh-edit-'))
         const local = join(dir, name)
         await requireSshManager().downloadTree(sessionId, remotePath, dir, name, false)
 
-        const editor = await settings.get<string>('externalEditor')
-        if (editor) spawn(editor, [local], { detached: true, stdio: 'ignore' }).unref()
-        else {
-          const openErr = await shell.openPath(local)
-          if (openErr) {
-            await rm(dir, { recursive: true, force: true }).catch(() => undefined)
-            return { ok: false, error: friendlyError(openErr) }
-          }
-        }
+        // Launch exactly ONCE. Both a raw `.unref()` spawn and the guarded
+        // spawnDetached were in here, so the editor opened the same temp file
+        // twice — and two editors racing saves on one path means the buffer
+        // that happens to write last wins, then gets pushed to the server.
         if (editor) {
           try {
             await spawnDetached(editor, [local])
@@ -2460,49 +2440,80 @@ function registerIpc(): void {
             await rm(dir, { recursive: true, force: true }).catch(() => undefined)
             return { ok: false, error: friendlyError((e as Error).message) }
           }
-        } else await shell.openPath(local)
+        } else {
+          const openErr = await shell.openPath(local)
+          if (openErr) {
+            await rm(dir, { recursive: true, force: true }).catch(() => undefined)
+            return { ok: false, error: friendlyError(openErr) }
+          }
+        }
 
         const remoteDir = remotePath.slice(0, remotePath.lastIndexOf('/')) || '/'
-        let timer: NodeJS.Timeout | null = null
+        const mtimeNow = async (): Promise<number> =>
+          (await stat(local).catch(() => null))?.mtimeMs ?? 0
+        let debounce: NodeJS.Timeout | null = null
+        let sweep: NodeJS.Timeout | null = null
         let stopped = false
-        const stop = (): void => {
+        // mtime of the newest bytes known to be on the server. The download
+        // itself is trivially "uploaded"; every later save has to get there.
+        let uploaded = await mtimeNow()
+        let chain: Promise<void> = Promise.resolve()
+        const push = (): Promise<void> => {
+          chain = chain.then(async () => {
+            try {
+              await sshManager?.putFileSilent(sessionId, local, remoteDir, name)
+              uploaded = await mtimeNow()
+            } catch {
+              if (stopped) return
+              void (async () => {
+                if (!(await notifyEnabled())) return
+                const title = await dl('editSaveFailTitle')
+                const body = (await dl('editSaveFailBody')).replace('{name}', name)
+                notify(title, body)
+              })()
+            }
+          })
+          return chain
+        }
+        // 30 minutes of INACTIVITY, not 30 minutes of editing: every detected
+        // save re-arms it. The old single setTimeout armed at open time could
+        // fire while the user was mid-edit, deleting the file under them; the
+        // editor kept its buffer, the next save wrote a NEW file nobody was
+        // watching any more, and the change was lost with no message.
+        const armSweep = (): void => {
+          if (sweep) clearTimeout(sweep)
+          sweep = setTimeout(() => void stop(), 30 * 60 * 1000)
+        }
+        const stop = async (): Promise<void> => {
           if (stopped) return
           stopped = true
-          if (timer) {
-            clearTimeout(timer)
-            timer = null
-          }
+          if (debounce) clearTimeout(debounce)
+          if (sweep) clearTimeout(sweep)
           unwatchFile(local)
           activeEdits.delete(local)
           editCleanups.delete(local)
-          void rm(dir, { recursive: true, force: true }).catch(() => undefined)
+          // Last chance for bytes that changed after the final upload — the
+          // sweep (or a window close) used to drop them silently with the temp
+          // dir. Bounded, because a dead session must not hang the cleanup.
+          if ((await mtimeNow()) > uploaded) await push()
+          await Promise.race([chain, new Promise((r) => setTimeout(r, 20_000))])
+          await rm(dir, { recursive: true, force: true }).catch(() => undefined)
         }
         // watchFile polls mtime, so it also catches editors that save atomically
         // (write temp + rename), which fs.watch on the original path can miss.
         watchFile(local, { interval: 1000 }, (curr, prev) => {
           if (stopped) return
           if (curr.mtimeMs === prev.mtimeMs) return
-          if (timer) clearTimeout(timer)
-          timer = setTimeout(() => {
+          if (debounce) clearTimeout(debounce)
+          debounce = setTimeout(() => {
             if (stopped) return
-            void sshManager
-              ?.putFileSilent(sessionId, local, remoteDir, name)
-              .catch(() => {
-                void (async () => {
-                  if (stopped) return
-                  if (!(await notifyEnabled())) return
-                  const title = await dl('editSaveFailTitle')
-                  const body = (await dl('editSaveFailBody')).replace('{name}', name)
-                  notify(title, body)
-                })()
-              })
+            armSweep()
+            void push()
           }, 300)
         })
         activeEdits.add(local)
         editCleanups.set(local, stop)
-        // Stop watching after 30 minutes to avoid leaking watchers, and drop
-        // the temp dir.
-        setTimeout(stop, 30 * 60 * 1000)
+        armSweep()
         return { ok: true }
       } catch (e) {
         return { ok: false, error: friendlyError((e as Error).message) }
@@ -2537,14 +2548,9 @@ function registerIpc(): void {
       const dir = await mkdtemp(join(tmpdir(), 'xssh-open-'))
       const local = join(dir, name)
       await requireSshManager().downloadTree(sessionId, remotePath, dir, name, false)
-      if (program) spawn(program, [local], { detached: true, stdio: 'ignore' }).unref()
-      else {
-        const openErr = await shell.openPath(local)
-        if (openErr) {
-          await rm(dir, { recursive: true, force: true }).catch(() => undefined)
-          return { ok: false, error: friendlyError(openErr) }
-        }
-      }
+      // One launch. The raw `.unref()` spawn that used to sit next to these two
+      // calls opened the same file a second time (and, for an invalid binary,
+      // emitted an unobserved 'error' on the ChildProcess).
       if (program) {
         try {
           await spawnDetached(program, [local])
@@ -2552,7 +2558,13 @@ function registerIpc(): void {
           await rm(dir, { recursive: true, force: true }).catch(() => undefined)
           return { ok: false, error: friendlyError((e as Error).message) }
         }
-      } else await shell.openPath(local)
+      } else {
+        const openErr = await shell.openPath(local)
+        if (openErr) {
+          await rm(dir, { recursive: true, force: true }).catch(() => undefined)
+          return { ok: false, error: friendlyError(openErr) }
+        }
+      }
       setTimeout(() => void rm(dir, { recursive: true, force: true }).catch(() => undefined), 30 * 60 * 1000)
       return { ok: true }
     } catch (e) {
@@ -2560,75 +2572,7 @@ function registerIpc(): void {
     }
   })
 
-  // Drag out (dragstart): hand the OS a real file. Chromium keeps the
-  // gesture claimable while the button is held, so a short staging rides
-  // the held gesture (icon appears under the cursor). But a big folder can
-  // take a minute — no gesture survives that — so the contract is:
-  //   grab an unstaged item -> cancel this drag, stage in the background,
-  //   say so, and tell the user to drag again when 'ready' arrives (the
-  //   staged copy lives 5 minutes, so that second drag is instant).
-  // [drag-diag]: every decision mirrors to ime-trace.log (fresh flag only).
-  const dtrace = (line: string): void => imeTrace.write('drag: ' + line)
-  on(
-    IPC.sftpStartDrag,
-    async (e, sessionId: string, items: DragItem[]) => {
-      const key = dragKey(sessionId, items)
-      const name = items.length === 1 ? items[0].name : `${items.length} items`
-      dtrace(`startDrag recv n=${items.length} stagedHit=${dragStaged.has(key)}`)
-      const send = (msg: {
-        state: 'downloading' | 'ready' | 'failed'
-        name?: string
-        error?: string
-      }): void => {
-        if (!e.sender.isDestroyed()) e.sender.send(IPC.sftpDragNotice, msg)
-      }
-      const stagedNow = dragStaged.get(key)
-      if (stagedNow) {
-        // Straight to startDrag — no await in front of it, so a re-drag of
-        // already-staged items takes the gesture with console-level latency.
-        dtrace(`cache-hit exists=${existsSync(stagedNow.local)}`)
-        try {
-          e.sender.startDrag({ file: stagedNow.local, icon: stagedNow.icon })
-        } catch (err) {
-          dtrace(`cache-hit startDrag THREW ${(err as Error).message}`)
-        }
-        return
-      }
-      send({ state: 'downloading', name })
-      const t0 = Date.now()
-      try {
-        const staged = await prefetchDrag(sessionId, items)
-        // The window can be closed mid-staging (a minute is long enough that
-        // users do) — startDrag would throw "Object has been destroyed".
-        if (e.sender.isDestroyed()) {
-          dtrace(`prefetch done in ${Date.now() - t0}ms but sender gone; cache kept`)
-          return
-        }
-        dtrace(`prefetch done in ${Date.now() - t0}ms -> startDrag`)
-        e.sender.startDrag({ file: staged.local, icon: staged.icon })
-        send({ state: 'ready', name })
-      } catch (err) {
-        const raw = (err as Error).message || ''
-        dtrace(`prefetch FAILED in ${Date.now() - t0}ms: ${raw}`)
-        send({ state: 'failed', name, error: friendlyError(raw) })
-      }
-    }
-  )
-
-  // Pre-fetch the drag-out download on mousedown so the (mostly asynchronous,
-  // network-bound) download is ready by the time the drag gesture reaches
-  // sftpStartDrag. startDrag must effectively run during the drag gesture, so
-  // warming the cache here is what makes a drag-out reliable for larger files.
-  on(
-    IPC.sftpPrefetchDrag,
-    async (_e, sessionId: string, items: DragItem[]) => {
-      try {
-        await prefetchDrag(sessionId, items)
-      } catch {
-        /* download will just re-attempt at startDrag time */
-      }
-    }
-  )
+  // (Drag-out IPC removed — see the note by the retired staging cache above.)
 
   // ---- Settings ----
   handle(IPC.settingsGet, (_e, key: string) => settings.get(key))
@@ -2963,6 +2907,8 @@ app.whenReady().then(async () => {
     Menu.setApplicationMenu(null)
   }
   registerIpc()
+  // Orphaned staging dirs from a previous crash/quit, off the critical path.
+  void sweepStaleTempDirs().catch(() => undefined)
   // VcXsrv needs ~15 s to bind :6000 on a cold start — much longer than a
   // remote clipboard read will wait. If one is installed, boot it now so the
   // first paste after ticking "X11 forwarding" already succeeds. Set

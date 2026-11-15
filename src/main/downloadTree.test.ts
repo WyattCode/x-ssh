@@ -122,8 +122,8 @@ describe('downloadTree', () => {
       files: { '/r/a.txt': { body: 'AAA' }, '/r/sub/b.txt': { body: 'BBB' }, '/r/sub/deep/c.txt': { body: 'CCC' } }
     }
     await withTree(mgr, tree, async (stats) => {
-      const top = await mgr.downloadTree('s', '/r', base, 'r', true)
-      expect(top).toBe(out('r'))
+      const r = await mgr.downloadTree('s', '/r', base, 'r', true)
+      expect(r).toEqual({ path: out('r'), skipped: 0 })
       expect(await readFile(out('r', 'a.txt'), 'utf8')).toBe('AAA')
       expect(await readFile(out('r', 'sub', 'b.txt'), 'utf8')).toBe('BBB')
       expect(await readFile(out('r', 'sub', 'deep', 'c.txt'), 'utf8')).toBe('CCC')
@@ -139,7 +139,7 @@ describe('downloadTree', () => {
       files: { '/r/ok.txt': { body: 'OK' }, '/r/bad.txt': { fail: true } }
     }
     await withTree(mgr, tree, async () => {
-      await expect(mgr.downloadTree('s', '/r', base, 'r', true)).resolves.toBe(out('r'))
+      await expect(mgr.downloadTree('s', '/r', base, 'r', true)).resolves.toEqual({ path: out('r'), skipped: 1 })
       expect(await readFile(out('r', 'ok.txt'), 'utf8')).toBe('OK')
       // A failed stream must not leave a half-written file behind.
       expect(await goneWithin(out('r', 'bad.txt'))).toBe(true)
@@ -196,7 +196,7 @@ describe('downloadTree', () => {
       files: { '/r/good.txt': { body: 'GOOD' }, '/r/dead/x.txt': { fail: true } }
     }
     await withTree(mgr, tree, async () => {
-      await expect(mgr.downloadTree('s', '/r', base, 'r', true)).resolves.toBe(out('r'))
+      await expect(mgr.downloadTree('s', '/r', base, 'r', true)).resolves.toEqual({ path: out('r'), skipped: 1 })
       expect(await readFile(out('r', 'good.txt'), 'utf8')).toBe('GOOD')
     })
   })
@@ -204,15 +204,46 @@ describe('downloadTree', () => {
   it('drains a folder with no remote children as a legitimate empty dir', async () => {
     const tree: FakeTree = { dirs: { '/r': [] }, files: {} }
     await withTree(mgr, tree, async () => {
-      await expect(mgr.downloadTree('s', '/r', base, 'r', true)).resolves.toBe(out('r'))
+      await expect(mgr.downloadTree('s', '/r', base, 'r', true)).resolves.toEqual({ path: out('r'), skipped: 0 })
       expect(existsSync(out('r'))).toBe(true)
+    })
+  })
+
+  it('drops an entry the local filesystem cannot name, and says so', async () => {
+    // safeLocalJoin throws 'unsafe-filename' on a traversal. That used to escape
+    // the per-entry path and abort the WHOLE folder — one hostile or buggy row
+    // in a listing costing you every good file next to it.
+    const tree: FakeTree = {
+      dirs: {
+        '/r': [
+          { name: '../escape', dir: false },
+          { name: 'good.txt', dir: false }
+        ]
+      },
+      files: { '/r/good.txt': { body: 'GOOD' } }
+    }
+    await withTree(mgr, tree, async () => {
+      const r = await mgr.downloadTree('s', '/r', base, 'r', true)
+      expect(r).toEqual({ path: out('r'), skipped: 1 })
+      expect(await readFile(out('r', 'good.txt'), 'utf8')).toBe('GOOD')
+      // And nothing was written outside the folder.
+      expect(existsSync(join(base, 'escape'))).toBe(false)
+    })
+  })
+
+  it('throws when the only entries were ones it could not name', async () => {
+    // skipped > 0 with nothing landed is the silent-empty-folder case again: a
+    // ghost row counts as a lost child, so the verdict still fires.
+    const tree: FakeTree = { dirs: { '/r': [{ name: '../escape', dir: false }] }, files: {} }
+    await withTree(mgr, tree, async () => {
+      await expect(mgr.downloadTree('s', '/r', base, 'r', true)).rejects.toThrow(/download-tree-empty/)
     })
   })
 
   it('downloads a single file through the same entry point', async () => {
     const tree: FakeTree = { dirs: {}, files: { '/f.txt': { body: 'SINGLE' } } }
     await withTree(mgr, tree, async () => {
-      await expect(mgr.downloadTree('s', '/f.txt', base, 'f.txt', false)).resolves.toBe(out('f.txt'))
+      await expect(mgr.downloadTree('s', '/f.txt', base, 'f.txt', false)).resolves.toEqual({ path: out('f.txt'), skipped: 0 })
       expect(await readFile(out('f.txt'), 'utf8')).toBe('SINGLE')
     })
   })
