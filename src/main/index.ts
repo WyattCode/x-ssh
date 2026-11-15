@@ -351,43 +351,8 @@ function flushLaunchTargets(win: BrowserWindow): void {
 // means restoring them from git (see HANDOVER M3.192 §三 for the five-round
 // post-mortem, and M3.195 for why downloadTree's directory branch survived).
 
-// Temp dirs this app creates for staging remote files. Each has an in-process
-// expiry (30 min of editing inactivity for external-edit, 30 min for
-// open-with) — which a crash, a kill, or a plain quit skips, leaving someone's
-// remote tree in the system temp dir forever.
-const TEMP_PREFIXES = ['xssh-edit-', 'xssh-open-', 'xssh-drag-']
+// Temp dirs this app creates for staging remote files (see sweepTempDirs).
 const TEMP_MAX_AGE_MS = 6 * 60 * 60 * 1000
-
-/** Delete our own orphaned staging dirs at startup. Safe to run unconditionally
- *  here: nothing has connected yet, so no session owns any of these, and the
- *  age check leaves anything the user might still have open in another run
- *  alone. Best-effort — a locked file is skipped, not fatal. */
-async function sweepStaleTempDirs(): Promise<void> {
-  const root = tmpdir()
-  let names: string[]
-  try {
-    names = await readdir(root)
-  } catch {
-    return
-  }
-  const now = Date.now()
-  await Promise.all(
-    names
-      .filter((n) => TEMP_PREFIXES.some((p) => n.startsWith(p)))
-      .map(async (n) => {
-        const p = join(root, n)
-        try {
-          const st = await stat(p)
-          // mtime is what an open edit keeps touching; birthtime covers a dir
-          // that was created and never written.
-          if (now - Math.max(st.mtimeMs, st.birthtimeMs) < TEMP_MAX_AGE_MS) return
-          await rm(p, { recursive: true, force: true })
-        } catch {
-          /* one unreadable leftover must not stop the sweep */
-        }
-      })
-  )
-}
 
 // A 1x1 transparent PNG. Only left as the tray's fallback if the real icon
 // resource is missing (it used to double as the native drag cursor, which went
@@ -404,10 +369,28 @@ async function sweepTempDirs(): Promise<void> {
   const base = tmpdir()
   try {
     const names = await readdir(base)
+    const now = Date.now()
     await Promise.all(
       names
         .filter((n) => TMP_PREFIXES.some((p) => n.startsWith(p)))
-        .map((n) => rm(join(base, n), { recursive: true, force: true }).catch(() => undefined))
+        // Age-gated, which the original unconditional `rm` was not: a second
+        // instance of this app (no single-instance lock existed) starting
+        // while an external editor still has one of these open would delete
+        // the live staging directory out from under the first instance. A
+        // directory whose mtime moves is being used; one untouched for
+        // TEMP_MAX_AGE_MS is garbage. (The check lives here rather than in a
+        // second .filter() because Array.filter never awaits a predicate — an
+        // async one returns a truthy Promise and would keep every entry.)
+        .map(async (n) => {
+          const p = join(base, n)
+          try {
+            const st = await stat(p)
+            if (now - Math.max(st.mtimeMs, st.birthtimeMs) < TEMP_MAX_AGE_MS) return
+            await rm(p, { recursive: true, force: true })
+          } catch {
+            /* unreadable right now — leave it for the next start */
+          }
+        })
     )
   } catch {
     /* temp dir unreadable — nothing we can do */
@@ -2460,9 +2443,17 @@ function registerIpc(): void {
         let chain: Promise<void> = Promise.resolve()
         const push = (): Promise<void> => {
           chain = chain.then(async () => {
+            // Sample the mtime BEFORE the upload reads the file. Measuring it
+            // afterwards (as the first version did) credited the server with
+            // bytes it never received: a save landing while an upload was in
+            // flight set `uploaded` to that newer mtime, so stop()'s final
+            // "is anything unsent?" check came out even and the edit was
+            // dropped — exactly the silent loss this whole block exists to
+            // prevent.
+            const sending = await mtimeNow()
             try {
               await sshManager?.putFileSilent(sessionId, local, remoteDir, name)
-              uploaded = await mtimeNow()
+              if (sending > uploaded) uploaded = sending
             } catch {
               if (stopped) return
               void (async () => {
@@ -2895,7 +2886,34 @@ async function applyGlobalShowHideFromSettings(): Promise<void> {
 
 // Several instances may run side by side, so nothing here may touch storage
 // that Chromium locks to a single process (see UiPrefs in shared/types).
+// ---- Single instance ----
+// There was no lock, so double-clicking the icon — or launching while the app is
+// tucked into the tray, which is the whole point of `minimizeToTray` — started a
+// SECOND process over the same userData. Both hold their own in-memory copy of
+// hosts.json / settings.json, and every save replaces the whole file, so
+// whichever instance writes last silently drops the other's new host while BOTH
+// writes report success. A second process also re-ran the startup temp sweep and
+// the master-lock secret discovery against live state.
+const gotSingleInstanceLock = app.requestSingleInstanceLock()
+if (!gotSingleInstanceLock) {
+  app.quit()
+} else {
+  app.on('second-instance', (_e, argv) => {
+    // A second launch means "bring the app to me", not "open another one".
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMinimized()) mainWindow.restore()
+      if (!mainWindow.isVisible()) mainWindow.show()
+      mainWindow.focus()
+    }
+    // Honour what this launch actually asked for (an x-ssh:// URL, a -c target)
+    // by routing it into the window that is already open.
+    const target = readLaunchTarget(argv.slice(1))
+    if (target) pushLaunchTarget(target)
+  })
+}
+
 app.whenReady().then(async () => {
+  if (!gotSingleInstanceLock) return
   // Windows/Linux: no native menu bar (Alt should not reveal File/Edit/View…).
   // macOS: keep a minimal role-based menu so Cmd+C/V/X/A/Z still work in DOM
   // inputs (on macOS those route through the application menu's key equivalents).
@@ -2907,8 +2925,6 @@ app.whenReady().then(async () => {
     Menu.setApplicationMenu(null)
   }
   registerIpc()
-  // Orphaned staging dirs from a previous crash/quit, off the critical path.
-  void sweepStaleTempDirs().catch(() => undefined)
   // VcXsrv needs ~15 s to bind :6000 on a cold start — much longer than a
   // remote clipboard read will wait. If one is installed, boot it now so the
   // first paste after ticking "X11 forwarding" already succeeds. Set

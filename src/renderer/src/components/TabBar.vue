@@ -376,7 +376,7 @@ function cancelRename(): void {
   border-radius: 4px;
   background: var(--bg);
   border: 1px solid var(--border);
-  font-size: 10px;
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
   color: var(--text-dim);
 }

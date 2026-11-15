@@ -673,7 +673,7 @@ function onKey(e: KeyboardEvent): void {
   margin-left: 7px;
   padding: 1px 6px;
   border-radius: 999px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 500;
   vertical-align: 1px;
 }

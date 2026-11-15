@@ -214,7 +214,7 @@ async function remove(mode: ForwardMode | undefined, localPort: number): Promise
 .fw-mode {
   flex: none;
   padding: 1px 7px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 14%, transparent);

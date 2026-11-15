@@ -264,6 +264,21 @@ select:focus-visible {
   outline-offset: 2px;
 }
 
+/* The floor for every remaining focusable thing. Component styles clear the
+   outline on their own inputs in 30 places, and because scoped CSS compiles
+   `.search` to `.search[data-v-*]` those rules OUTRANK a plain global selector —
+   so `!important` here is load-bearing, not laziness: an invisible keyboard
+   caret position is not a styling preference worth losing an argument over.
+   The offset is inset so rings inside tight rows and the drawer don't overflow,
+   and :focus-visible means pointer users never see it. (xterm's helper textarea
+   is opacity:0 at left:-9999em, so it cannot show a ring either.) */
+input:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--accent) !important;
+  outline-offset: -2px !important;
+}
+
 ::-webkit-scrollbar {
   width: 9px;
   height: 9px;

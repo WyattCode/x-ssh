@@ -12,6 +12,7 @@ import {
   type RebindableAction
 } from '../lib/shortcuts'
 import { splitShortcutChips } from '../lib/shortcutChips'
+import { contrastRatio, formatRatio, meetsAA, nudgeToContrast } from '../lib/contrast'
 import { PRESETS } from '../lib/terminalThemes'
 import { useI18n } from '../lib/i18n'
 import { useToast } from '../composables/toast'
@@ -302,6 +303,24 @@ async function clearAccent(): Promise<void> {
 const accentSwatch = computed(() =>
   store.accentColor || (themeMode.value === 'light' ? '#2c68df' : '#6ea8fe')
 )
+
+/** The surface the accent is read against when it is used as label text (66
+ *  places). Mirrors the tokens in global.css. */
+const accentBg = computed(() => (themeMode.value === 'light' ? '#f7f8fa' : '#0e0f12'))
+const accentRatio = computed(() => contrastRatio(accentSwatch.value, accentBg.value))
+/** Only a CUSTOM accent can be unreadable — the two built-ins were chosen to
+ *  clear AA, and scripts/check-contrast.mjs guards them in CI. That script can
+ *  only see static CSS, though: a color picked at runtime is set inline by
+ *  App.vue and bypasses it entirely, so the picker carries its own floor. */
+const accentLow = computed(
+  () => !!store.accentColor && !meetsAA(store.accentColor, accentBg.value)
+)
+/** The smallest move (toward black on light, white on dark) that clears the
+ *  floor, so the user's hue survives instead of being replaced. */
+function fixAccent(): void {
+  store.accentColor = nudgeToContrast(store.accentColor, accentBg.value)
+  void store.saveSetting('accentColor', store.accentColor)
+}
 
 const cursorOptions = computed(() => [
   { v: 'bar', label: t('set.term.cursorBar') },
@@ -1435,6 +1454,10 @@ function onLockPassEnter(e: KeyboardEvent): void {
                        the UI but never saved, so the choice was lost on restart. -->
                   <input type="color" class="color-in" :value="accentSwatch" @input="onAccent" @change="commitAccent" />
                 </div>
+                <p v-if="accentLow" class="foot-note accent-warn">
+                  {{ t('set.term.accentLowContrast', { ratio: formatRatio(accentRatio) }) }}
+                  <button class="btn sm" @click="fixAccent">{{ t('set.term.accentFix') }}</button>
+                </p>
               </div>
               <p class="foot-note">{{ t('set.term.fontHint', { keys: `${modKey}+= / ${modKey}+-` }) }}</p>
             </section>
@@ -1935,6 +1958,14 @@ function onLockPassEnter(e: KeyboardEvent): void {
   line-height: 1.55;
   color: var(--text-faint);
 }
+/* Only shown for a CUSTOM accent that is too dim to read as label text. */
+.accent-warn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--warn);
+}
+
 .foot-note {
   margin: 8px 4px 0;
 }
