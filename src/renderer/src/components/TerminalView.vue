@@ -866,9 +866,9 @@ onBeforeUnmount(() => {
         }}
       </span>
       <button class="sb-btn case" :class="{ on: searchBar.caseSensitive }" :title="t('term.caseTip')" @click="toggleCase">Aa</button>
-      <button class="sb-btn" :title="t('term.prevTip')" @click="runSearch(false)"><Icon name="chevron-up" :size="15" /></button>
-      <button class="sb-btn" :title="t('term.nextTip')" @click="runSearch(true)"><Icon name="chevron-down" :size="15" /></button>
-      <button class="sb-btn" :title="t('term.closeTip')" @click="closeSearch"><Icon name="close" :size="15" /></button>
+      <button class="sb-btn" :title="t('term.prevTip')" :aria-label="t('term.prevTip')" @click="runSearch(false)"><Icon name="chevron-up" :size="15" /></button>
+      <button class="sb-btn" :title="t('term.nextTip')" :aria-label="t('term.nextTip')" @click="runSearch(true)"><Icon name="chevron-down" :size="15" /></button>
+      <button class="sb-btn" :title="t('term.closeTip')" :aria-label="t('term.closeTip')" @click="closeSearch"><Icon name="close" :size="15" /></button>
     </div>
 
     <div v-if="scrolledUp" class="follow-bar" @mousedown.stop>

@@ -148,6 +148,7 @@ const splitEl = ref<HTMLElement>()
       v-if="tab.panes.length > 1"
       class="pane-x"
       :title="t('app.closePaneTip', { key: `${modKey}+Shift+W` })"
+      :aria-label="t('app.closePaneTip', { key: `${modKey}+Shift+W` })"
       @mousedown.stop
       @click="store.closePane(pane.id)"
     >

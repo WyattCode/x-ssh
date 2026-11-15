@@ -30,7 +30,7 @@ const home = along(0)
         @mouseenter="setHover(true)"
         @mouseleave="setHover(false)"
       >
-        <button class="zb" :disabled="level <= ZOOM_MIN" :title="t('zoom.out')" @click="bump(-ZOOM_STEP)">
+        <button class="zb" :disabled="level <= ZOOM_MIN" :title="t('zoom.out')" :aria-label="t('zoom.out')" @click="bump(-ZOOM_STEP)">
           <Icon name="minus" :size="15" />
         </button>
         <div class="readout">
@@ -40,7 +40,7 @@ const home = along(0)
             <span class="home" :style="{ left: home + '%' }" />
           </span>
         </div>
-        <button class="zb" :disabled="level >= ZOOM_MAX" :title="t('zoom.in')" @click="bump(ZOOM_STEP)">
+        <button class="zb" :disabled="level >= ZOOM_MAX" :title="t('zoom.in')" :aria-label="t('zoom.in')" @click="bump(ZOOM_STEP)">
           <Icon name="plus" :size="15" />
         </button>
         <Transition name="zreset">

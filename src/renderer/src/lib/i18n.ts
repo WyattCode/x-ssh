@@ -619,6 +619,7 @@ const zh: Dict = {
   'sfp.gotoTerminal': '定位到终端目录',
   'sfp.history': '传输历史',
   'sfp.clear': '清空',
+  'sfp.clearFilter': '清除筛选',
   'sfp.clearHistConfirm': '清空全部传输历史?',
   'sfp.histEmpty': '暂无记录',
   'sfp.persistFail': '无法保存传输记录',
@@ -703,6 +704,7 @@ const zh: Dict = {
   'sfp.ok': '确定',
 
   // command palette
+  'pal.dialog': '命令面板',
   'pal.quick': '快速连接',
   'pal.hosts': '主机',
   'pal.snippets': '命令片段',
@@ -790,6 +792,7 @@ const zh: Dict = {
   'pal.snapOpenConfirm': '当前有活跃会话,打开快照会关闭它们。关闭前会先发送 exit。继续吗?',
 
   // history search
+  'hist.dialog': '搜索会话历史',
   'hist.placeholder': '搜索所有会话输出…',
   'hist.empty': '无匹配结果',
   'hist.copy': '复制',
@@ -1607,6 +1610,7 @@ const en: Dict = {
   'sfp.gotoTerminal': 'Go to terminal cwd',
   'sfp.history': 'Transfer history',
   'sfp.clear': 'Clear',
+  'sfp.clearFilter': 'Clear filter',
   'sfp.clearHistConfirm': 'Clear all transfer history?',
   'sfp.histEmpty': 'No records',
   'sfp.persistFail': 'Could not save transfer data',
@@ -1691,6 +1695,7 @@ const en: Dict = {
   'sfp.applying': 'Applying…',
   'sfp.ok': 'OK',
 
+  'pal.dialog': 'Command palette',
   'pal.quick': 'Quick connect',
   'pal.hosts': 'Hosts',
   'pal.snippets': 'Snippets',
@@ -1778,6 +1783,7 @@ const en: Dict = {
   'pal.snapOpenConfirm': 'Live sessions are open. Opening a snapshot will close them (exit is sent first). Continue?',
 
   // history search
+  'hist.dialog': 'Search session history',
   'hist.placeholder': 'Search all session output…',
   'hist.empty': 'No matches',
   'hist.copy': 'Copy',
@@ -2604,6 +2610,7 @@ const zhTW: Dict = {
   'sfp.gotoTerminal': '移至終端機目錄',
   'sfp.history': '傳輸歷程',
   'sfp.clear': '清除',
+  'sfp.clearFilter': '清除篩選',
   'sfp.clearHistConfirm': '清除全部傳輸歷程?',
   'sfp.histEmpty': '尚無紀錄',
   'sfp.persistFail': '無法儲存傳輸紀錄',
@@ -2689,6 +2696,7 @@ const zhTW: Dict = {
   'sfp.ok': '確定',
 
   // command palette
+  'pal.dialog': '命令面板',
   'pal.quick': '快速連線',
   'pal.hosts': '主機',
   'pal.snippets': '指令片段',
@@ -2776,6 +2784,7 @@ const zhTW: Dict = {
   'pal.snapOpenConfirm': '目前有作用中的工作階段,開啟快照會關閉它們。關閉前會先傳送 exit。要繼續嗎?',
 
   // history search
+  'hist.dialog': '搜尋工作階段歷史',
   'hist.placeholder': '搜尋所有工作階段的輸出…',
   'hist.empty': '沒有相符的結果',
   'hist.copy': '複製',

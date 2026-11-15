@@ -15,6 +15,7 @@
     "typecheck:web": "vue-tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "lint:i18n": "node scripts/lint-i18n.mjs && node scripts/lint-i18n-mobile.mjs && node scripts/lint-i18n-main.mjs",
+    "check:contrast": "node scripts/check-contrast.mjs",
     "test": "vitest run",
     "package": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder"

@@ -67,7 +67,7 @@ const onKey = (e: KeyboardEvent): void => {
 
 <template>
   <div class="lock-overlay" @mousedown.self="focus">
-    <div ref="trapEl" tabindex="-1" class="lock-card">
+    <div ref="trapEl" role="dialog" aria-modal="true" :aria-label="t('lock.title')" tabindex="-1" class="lock-card">
       <div class="lock-icon"><Icon name="lock" :size="26" /></div>
       <h1 class="lock-title">{{ t('lock.title') }}</h1>
       <p class="lock-sub">{{ t('lock.desc') }}</p>

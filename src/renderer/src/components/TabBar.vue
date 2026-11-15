@@ -207,13 +207,13 @@ function cancelRename(): void {
         <span class="close" :title="t('tabbar.close')" @click.stop="store.closeTabSafe(tab.id)"><Icon name="close" :size="13" /></span>
       </div>
     </div>
-    <button class="new" :title="t('tabbar.newConn', { key: `${modKey}+K` })" @click="store.togglePalette(true)">
+    <button class="new" :title="t('tabbar.newConn', { key: `${modKey}+K` })" :aria-label="t('tabbar.newConn', { key: `${modKey}+K` })" @click="store.togglePalette(true)">
       <Icon name="plus" :size="17" />
     </button>
     <div class="drag-spacer" />
     <div class="right-tools">
       <!-- Tab search and layouts only mean something once there are tabs. -->
-      <button v-if="store.tabs.length" class="tool" :class="{ on: filterOpen }" :title="t('tabbar.filter')" @click="toggleFilter">
+      <button v-if="store.tabs.length" class="tool" :class="{ on: filterOpen }" :title="t('tabbar.filter')" :aria-label="t('tabbar.filter')" @click="toggleFilter">
         <Icon name="search" :size="16" />
       </button>
       <div v-if="filterOpen" class="filter-box">
@@ -232,7 +232,7 @@ function cancelRename(): void {
         v-if="store.tabs.length"
         class="tool"
         :class="{ on: layoutMenu.open }"
-        :title="t('tabbar.layout')"
+        :title="t('tabbar.layout')" :aria-label="t('tabbar.layout')"
         @click.stop="openLayoutMenu"
       >
         <Icon name="layout" :size="16" />
@@ -241,7 +241,7 @@ function cancelRename(): void {
         v-if="store.activePane?.status === 'connected'"
         class="tool"
         :class="{ on: store.sftpOpen }"
-        :title="t('tabbar.sftp')"
+        :title="t('tabbar.sftp')" :aria-label="t('tabbar.sftp')"
         @click="store.toggleSftp()"
       >
         <Icon name="folder" :size="16" />
@@ -252,7 +252,7 @@ function cancelRename(): void {
       <button
         class="tool"
         :class="{ on: store.termSidebarHidden }"
-        :title="store.termSidebarHidden ? t('nav.exitFocus') : t('nav.focus')"
+        :title="store.termSidebarHidden ? t('nav.exitFocus') : t('nav.focus')" :aria-label="store.termSidebarHidden ? t('nav.exitFocus') : t('nav.focus')"
         @click="store.setTermSidebarHidden(!store.termSidebarHidden)"
       >
         <Icon name="focus" :size="16" />

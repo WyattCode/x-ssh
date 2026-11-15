@@ -349,7 +349,7 @@ defineExpose({ focusSearch: () => searchEl.value?.focus() })
               @focus="searchFocused = true"
               @blur="searchFocused = false"
             />
-            <button v-if="query" class="clear" :title="t('hosts.clear')" @click="query = ''"><Icon name="close" :size="12" /></button>
+            <button v-if="query" class="clear" :title="t('hosts.clear')" :aria-label="t('hosts.clear')" @click="query = ''"><Icon name="close" :size="12" /></button>
             <!-- Suggestion: an address was typed — connect to it. -->
             <button v-if="showSuggest && quickTarget" class="suggest" @mousedown.prevent @click="quickGo">
               <Icon name="terminal" :size="15" />
@@ -378,15 +378,15 @@ defineExpose({ focusSearch: () => searchEl.value?.focus() })
               </div>
             </div>
             <div class="views">
-              <button :class="{ on: store.hostsView === 'grid' }" :title="t('hosts.viewGrid')" @click="store.setHostsView('grid')">
+              <button :class="{ on: store.hostsView === 'grid' }" :title="t('hosts.viewGrid')" :aria-label="t('hosts.viewGrid')" @click="store.setHostsView('grid')">
                 <Icon name="grid" :size="16" />
               </button>
-              <button :class="{ on: store.hostsView === 'list' }" :title="t('hosts.viewList')" @click="store.setHostsView('list')">
+              <button :class="{ on: store.hostsView === 'list' }" :title="t('hosts.viewList')" :aria-label="t('hosts.viewList')" @click="store.setHostsView('list')">
                 <Icon name="list" :size="16" />
               </button>
             </div>
           </div>
-          <button class="add" :title="t('app.newConn')" @click="emit('new-host')"><Icon name="plus" :size="18" /></button>
+          <button class="add" :title="t('app.newConn')" :aria-label="t('app.newConn')" @click="emit('new-host')"><Icon name="plus" :size="18" /></button>
         </div>
       </header>
 
@@ -461,12 +461,12 @@ defineExpose({ focusSearch: () => searchEl.value?.focus() })
             <button
               class="more"
               :class="{ open: menu.open && menu.host?.id === h.id }"
-              :title="t('hosts.more')"
+              :title="t('hosts.more')" :aria-label="t('hosts.more')"
               @click.stop="openMenu($event, h)"
             >
               <Icon name="more-horizontal" :size="16" />
             </button>
-            <button class="play" :class="stateOf(h)" :title="t('hosts.connect')" @click.stop="connect(h)"><Icon name="play" :size="13" /></button>
+            <button class="play" :class="stateOf(h)" :title="t('hosts.connect')" :aria-label="t('hosts.connect')" @click.stop="connect(h)"><Icon name="play" :size="13" /></button>
           </div>
         </div>
         <button v-if="!store.hosts.length" class="hcard add-card" @click="emit('new-host')">
@@ -502,12 +502,12 @@ defineExpose({ focusSearch: () => searchEl.value?.focus() })
           <button
             class="more"
             :class="{ open: menu.open && menu.host?.id === h.id }"
-            :title="t('hosts.more')"
+            :title="t('hosts.more')" :aria-label="t('hosts.more')"
             @click.stop="openMenu($event, h)"
           >
             <Icon name="more-horizontal" :size="16" />
           </button>
-          <button class="play" :class="stateOf(h)" :title="t('hosts.connect')" @click.stop="connect(h)"><Icon name="play" :size="12" /></button>
+          <button class="play" :class="stateOf(h)" :title="t('hosts.connect')" :aria-label="t('hosts.connect')" @click.stop="connect(h)"><Icon name="play" :size="12" /></button>
         </div>
         <button v-if="!store.hosts.length" class="hrow add-row" @click="emit('new-host')">
           <Icon name="plus" :size="16" />

@@ -170,7 +170,7 @@ function eta(x: SftpProgress): string {
     <section class="tpanel">
       <header class="tp-head">
         <span class="tp-title">{{ t('tpanel.title') }}</span>
-        <button class="tp-x" :title="t('fileDiff.close')" @click="store.toggleTransferPanel(false)">
+        <button class="tp-x" :title="t('fileDiff.close')" :aria-label="t('fileDiff.close')" @click="store.toggleTransferPanel(false)">
           <Icon name="close" :size="16" />
         </button>
       </header>
@@ -214,10 +214,10 @@ function eta(x: SftpProgress): string {
                 </template>
               </div>
               <template v-if="!isResidual(x)">
-                <button class="tp-cancel" :title="t('sfp.pause')" @click="togglePause(x.id)">
+                <button class="tp-cancel" :title="t('sfp.pause')" :aria-label="t('sfp.pause')" @click="togglePause(x.id)">
                   <Icon :name="pausedIds.has(x.id) ? 'play' : 'pause'" :size="14" />
                 </button>
-                <button class="tp-cancel" :title="t('sfp.cancelTransfer')" @click="store.cancelTransfer(x.id)">
+                <button class="tp-cancel" :title="t('sfp.cancelTransfer')" :aria-label="t('sfp.cancelTransfer')" @click="store.cancelTransfer(x.id)">
                   <Icon name="close" :size="14" />
                 </button>
               </template>
@@ -240,7 +240,7 @@ function eta(x: SftpProgress): string {
                 </div>
                 <div v-if="h.status === 'error' && h.error" class="tp-err">{{ h.error }}</div>
               </div>
-              <button v-if="canReveal(h)" class="tp-cancel" :title="t('sfp.reveal')" @click="reveal(h)">
+              <button v-if="canReveal(h)" class="tp-cancel" :title="t('sfp.reveal')" :aria-label="t('sfp.reveal')" @click="reveal(h)">
                 <Icon name="folder" :size="14" />
               </button>
             </div>

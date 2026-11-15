@@ -8,11 +8,15 @@ const { list, dismiss } = useToast()
 <template>
   <div class="toast-host" aria-live="polite">
     <TransitionGroup name="toast">
+      <!-- An error is the one message that must interrupt the screen reader's
+           current spot: polite queues it behind whatever is being read, and the
+           toast is gone in 3.2s by then. -->
       <div
         v-for="t in list"
         :key="t.id"
         class="toast"
         :class="t.type"
+        :role="t.type === 'error' ? 'alert' : undefined"
         @click="dismiss(t.id)"
       >
         <Icon :name="t.type === 'error' ? 'alert-triangle' : t.type === 'success' ? 'check' : 'info'" :size="15" />

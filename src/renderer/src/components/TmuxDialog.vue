@@ -76,7 +76,7 @@ watch(
       <div class="tm-head">
         <Icon name="terminal" :size="15" />
         <span class="tm-title">{{ t('pal.tmux') }}</span>
-        <button class="tm-x" :title="t('fileDiff.close')" @click="store.toggleTmux(false)"><Icon name="close" :size="14" /></button>
+        <button class="tm-x" :title="t('fileDiff.close')" :aria-label="t('fileDiff.close')" @click="store.toggleTmux(false)"><Icon name="close" :size="14" /></button>
       </div>
       <div class="tm-body">
         <p v-if="!sessions.length" class="tm-empty">{{ t('tmux.empty') }}</p>

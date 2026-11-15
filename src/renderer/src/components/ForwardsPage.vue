@@ -253,7 +253,7 @@ async function add(): Promise<void> {
           <span class="text">{{ ruleText(row.rule) }}</span>
           <span v-if="!row.saved" class="badge temp" :title="t('fwp.tempHint')">{{ t('fwp.temp') }}</span>
           <span v-else />
-          <button class="del" :title="t('fw.remove')" :disabled="busyKey === `${s.id}|${key(row.rule)}`" @click="remove(s, row)">
+          <button class="del" :title="t('fw.remove')" :aria-label="t('fw.remove')" :disabled="busyKey === `${s.id}|${key(row.rule)}`" @click="remove(s, row)">
             <Icon name="trash" :size="14" />
           </button>
         </div>

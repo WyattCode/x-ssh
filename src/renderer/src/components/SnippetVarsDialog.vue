@@ -64,11 +64,11 @@ function onKey(e: KeyboardEvent): void {
 
 <template>
   <div v-if="state.open" class="sv-backdrop" @mousedown.self="cancel">
-    <section ref="svEl" class="sv" tabindex="-1" @keydown="onKey">
+    <section ref="svEl" class="sv" role="dialog" aria-modal="true" :aria-label="t('snip.vars')" tabindex="-1" @keydown="onKey">
       <header class="sv-head">
         <Icon name="zap" :size="16" class="sv-ico" />
         <span class="sv-title">{{ t('snip.vars') }}</span>
-        <button class="sv-x" :title="t('snip.cancel')" @click="cancel"><Icon name="close" :size="15" /></button>
+        <button class="sv-x" :title="t('snip.cancel')" :aria-label="t('snip.cancel')" @click="cancel"><Icon name="close" :size="15" /></button>
       </header>
       <div class="sv-body">
         <p class="sv-name">{{ state.snippet?.title }}</p>

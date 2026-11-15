@@ -1,5 +1,13 @@
 :root {
-  /* Dark is the default surface for a terminal app. */
+  /* Dark is the default surface for a terminal app.
+   *
+   * The text tokens keep a WCAG AA floor of 4.5:1 against --bg AND --bg-elev,
+   * which is what --text-faint (--ok/--warn/--danger as labels) used to miss —
+   * faint sat at 3.3:1 dark and 2.5:1 light while carrying the small print:
+   * file mtimes and sizes, transfer percentages, shortcut hints in the terminal
+   * context menu, search placeholders. `npm run check:contrast` re-verifies the
+   * pairs below, including the duplicated light block, so a "slightly softer"
+   * tweak can't quietly walk back under it. */
   --bg: #0e0f12;
   --bg-elev: #16181d;
   --bg-elev-2: #1d2027;
@@ -7,7 +15,7 @@
   --border-strong: #333844;
   --text: #e6e8ec;
   --text-dim: #9aa1ad;
-  --text-faint: #656b78;
+  --text-faint: #828791;
   --accent: #6ea8fe;
   --accent-soft: rgba(110, 168, 254, 0.14);
   /* Text on an accent-filled surface. White suits both default accents; when
@@ -54,16 +62,16 @@
   --border-strong: #d3d7df;
   --text: #1a1d23;
   --text-dim: #5c636e;
-  --text-faint: #98a0ab;
-  --accent: #2f6fed;
-  --accent-soft: rgba(47, 111, 237, 0.1);
+  --text-faint: #6a6f77;
+  --accent: #2c68df;
+  --accent-soft: rgba(44, 104, 223, 0.1);
   --accent-contrast: #fff;
   --shadow: 0 18px 50px -12px rgba(20, 30, 60, 0.18);
   --scrim: rgba(20, 24, 32, 0.055);
   --thumb: #ffffff;
-  --danger: #d63c3c;
-  --ok: #1f9a44;
-  --warn: #b7791f;
+  --danger: #d13a3a;
+  --ok: #1a833a;
+  --warn: #9d671b;
 }
 
 @media (prefers-color-scheme: light) {
@@ -75,16 +83,16 @@
     --border-strong: #d3d7df;
     --text: #1a1d23;
     --text-dim: #5c636e;
-    --text-faint: #98a0ab;
-    --accent: #2f6fed;
-    --accent-soft: rgba(47, 111, 237, 0.1);
+    --text-faint: #6a6f77;
+    --accent: #2c68df;
+    --accent-soft: rgba(44, 104, 223, 0.1);
   --accent-contrast: #fff;
     --shadow: 0 18px 50px -12px rgba(20, 30, 60, 0.18);
     --scrim: rgba(20, 24, 32, 0.055);
     --thumb: #ffffff;
-    --danger: #d63c3c;
-    --ok: #1f9a44;
-    --warn: #b7791f;
+    --danger: #d13a3a;
+    --ok: #1a833a;
+    --warn: #9d671b;
   }
 }
 

@@ -94,10 +94,10 @@ async function run(): Promise<void> {
 
 <template>
   <div class="pm-overlay" @mousedown.self="emit('close')">
-    <div ref="dialogEl" tabindex="-1" class="pm-dialog" @keydown.esc="emit('close')">
+    <div ref="dialogEl" role="dialog" aria-modal="true" :aria-label="tt('sfp.dirDiff')" tabindex="-1" class="pm-dialog" @keydown.esc="emit('close')">
       <div class="pm-head">
         <span>{{ tt('sfp.dirDiff') }}</span>
-        <button class="pm-x" :title="tt('sfp.close')" @click="emit('close')"><Icon name="close" /></button>
+        <button class="pm-x" :title="tt('sfp.close')" :aria-label="tt('sfp.close')" @click="emit('close')"><Icon name="close" /></button>
       </div>
       <label class="dialog-field">
         <span>{{ tt('sfp.syncLocal') }}</span>

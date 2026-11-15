@@ -506,7 +506,7 @@ function onKey(e: KeyboardEvent): void {
 
 <template>
   <div v-if="store.paletteOpen" class="overlay" @mousedown.self="onOverlayDismiss">
-    <div ref="trapEl" tabindex="-1" class="palette" @keydown="onKey">
+    <div ref="trapEl" role="dialog" aria-modal="true" :aria-label="t('pal.dialog')" tabindex="-1" class="palette" @keydown="onKey">
       <!-- Broadcast command prompt -->
       <template v-if="broadcastOpen">
         <div class="pw-head">

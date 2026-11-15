@@ -620,7 +620,7 @@ async function remove(): Promise<void> {
               spellcheck="false"
             />
           </div>
-          <button class="p-close" :title="t('host.cancel')" @click="void requestClose()"><Icon name="close" :size="15" /></button>
+          <button class="p-close" :title="t('host.cancel')" :aria-label="t('host.cancel')" @click="void requestClose()"><Icon name="close" :size="15" /></button>
         </header>
 
         <div class="p-body">
@@ -721,7 +721,7 @@ async function remove(): Promise<void> {
                     <div v-for="k in managedKeys" :key="k.id" class="key-item">
                       <span class="key-name" :title="k.fingerprint">{{ k.name }}</span>
                       <span v-if="k.type" class="chip">{{ k.type }}</span>
-                      <button type="button" class="icon-x" :title="t('host.deleteKey')" :disabled="!!deletingId" @click="deleteKey(k)"><Icon name="trash" :size="13" /></button>
+                      <button type="button" class="icon-x" :title="t('host.deleteKey')" :aria-label="t('host.deleteKey')" :disabled="!!deletingId" @click="deleteKey(k)"><Icon name="trash" :size="13" /></button>
                     </div>
                   </div>
                 </template>
@@ -743,7 +743,7 @@ async function remove(): Promise<void> {
                 <label class="r-label" for="he-tags">{{ t('host.tags') }}</label>
                 <span class="tag-box" @click.self="tagInputEl?.focus()">
                   <span v-for="(tg, i) in form.tags" :key="tg" class="chip">
-                    {{ tg }}<button type="button" :title="t('fw.remove')" @click="form.tags.splice(i, 1)"><Icon name="close" :size="9" /></button>
+                    {{ tg }}<button type="button" :title="t('fw.remove')" :aria-label="t('fw.remove')" @click="form.tags.splice(i, 1)"><Icon name="close" :size="9" /></button>
                   </span>
                   <input
                     id="he-tags"
@@ -874,7 +874,7 @@ async function remove(): Promise<void> {
                     <input v-model.number="f.remotePort" class="box mono port-box" type="number" min="1" max="65535" :placeholder="t('host.fwTarget')" />
                   </template>
                   <span v-else class="grow" />
-                  <button type="button" class="icon-x" :title="t('fw.remove')" @click="removeForward(i)"><Icon name="close" :size="13" /></button>
+                  <button type="button" class="icon-x" :title="t('fw.remove')" :aria-label="t('fw.remove')" @click="removeForward(i)"><Icon name="close" :size="13" /></button>
                 </div>
                 <button type="button" class="add-line" @click="addForward">{{ t('set.gen.addForward') }}</button>
               </div>
@@ -941,7 +941,7 @@ async function remove(): Promise<void> {
 
         <!-- Generate a key: a small sheet over the panel. -->
         <div v-if="keyModal.open" class="key-layer" @mousedown.self="closeKeySheet">
-          <div ref="keySheetEl" class="key-sheet" tabindex="-1" @keydown.esc.stop="closeKeySheet">
+          <div ref="keySheetEl" class="key-sheet" role="dialog" aria-modal="true" :aria-label="t('host.generateKey')" tabindex="-1" @keydown.esc.stop="closeKeySheet">
             <h3>{{ t('host.generateKey') }}</h3>
             <div class="card">
               <label class="row">

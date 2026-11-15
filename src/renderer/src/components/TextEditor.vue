@@ -182,7 +182,7 @@ function onKeydown(e: KeyboardEvent): void {
           <button class="save" :disabled="!dirty || saving" @click="save">
             {{ saving ? t('ed.saving') : t('ed.save') }}
           </button>
-          <button class="close" :title="t('ed.close')" @click="close"><Icon name="close" :size="15" /></button>
+          <button class="close" :title="t('ed.close')" :aria-label="t('ed.close')" @click="close"><Icon name="close" :size="15" /></button>
         </div>
       </div>
 

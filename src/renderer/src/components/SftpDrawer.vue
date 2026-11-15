@@ -1790,8 +1790,8 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
     <header class="toolbar">
       <span v-if="!page" class="bar-title">{{ tt('sfp.files') }}</span>
       <div class="nav-grp">
-        <button class="ib" :title="tt('sfp.upLevel')" :disabled="path === '/' || loading" @click="goUp"><Icon name="arrow-up" :size="15" /></button>
-        <button class="ib" :title="tt('sfp.home')" :disabled="!homePath" @click="load(homePath)"><Icon name="home" :size="15" /></button>
+        <button class="ib" :title="tt('sfp.upLevel')" :aria-label="tt('sfp.upLevel')" :disabled="path === '/' || loading" @click="goUp"><Icon name="arrow-up" :size="15" /></button>
+        <button class="ib" :title="tt('sfp.home')" :aria-label="tt('sfp.home')" :disabled="!homePath" @click="load(homePath)"><Icon name="home" :size="15" /></button>
         <div class="path-field" :class="{ editing: pathEditing }">
           <input
             v-if="pathEditing"
@@ -1812,20 +1812,20 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
               <Icon v-if="i < crumbs.length - 1" name="chevron-right" :size="12" class="sep" />
             </template>
           </div>
-          <button v-if="!pathEditing" class="ib sm" :title="tt('sfp.editPath')" @click="startPathEdit"><Icon name="edit" :size="13" /></button>
-          <button class="ib sm" :class="{ active: bookmarksMenu.open, starred: store.sftpBookmarks.includes(path) }" :title="tt('sfp.bookmarks')" @click.stop="openBookmarks">
+          <button v-if="!pathEditing" class="ib sm" :title="tt('sfp.editPath')" :aria-label="tt('sfp.editPath')" @click="startPathEdit"><Icon name="edit" :size="13" /></button>
+          <button class="ib sm" :class="{ active: bookmarksMenu.open, starred: store.sftpBookmarks.includes(path) }" :title="tt('sfp.bookmarks')" :aria-label="tt('sfp.bookmarks')" @click.stop="openBookmarks">
             <Icon name="book" :size="13" />
           </button>
         </div>
       </div>
       <div class="tools">
-        <button class="ib" :title="tt('sfp.refresh')" :disabled="loading" @click="load(path)"><Icon name="refresh" :size="15" /></button>
-        <button class="ib" :title="tt('sfp.newFolder')" @click="startCreate('folder')"><Icon name="folder-plus" :size="15" /></button>
-        <button class="ib" :class="{ active: localOpen }" :title="tt('sfp.local')" @click="toggleLocal"><Icon name="split" :size="15" /></button>
-        <button class="ib" :class="{ active: moreMenu.open }" :title="tt('sfp.more')" @click.stop="openMore"><Icon name="more-horizontal" :size="15" /></button>
+        <button class="ib" :title="tt('sfp.refresh')" :aria-label="tt('sfp.refresh')" :disabled="loading" @click="load(path)"><Icon name="refresh" :size="15" /></button>
+        <button class="ib" :title="tt('sfp.newFolder')" :aria-label="tt('sfp.newFolder')" @click="startCreate('folder')"><Icon name="folder-plus" :size="15" /></button>
+        <button class="ib" :class="{ active: localOpen }" :title="tt('sfp.local')" :aria-label="tt('sfp.local')" @click="toggleLocal"><Icon name="split" :size="15" /></button>
+        <button class="ib" :class="{ active: moreMenu.open }" :title="tt('sfp.more')" :aria-label="tt('sfp.more')" @click.stop="openMore"><Icon name="more-horizontal" :size="15" /></button>
         <button v-if="page" class="btn btn-primary pill up-btn" :disabled="busy" @click="uploadPick"><Icon name="upload" :size="14" />{{ tt('sfp.upload') }}</button>
-        <button v-else class="ib" :title="tt('sfp.upload')" :disabled="busy" @click="uploadPick"><Icon name="upload" :size="15" /></button>
-        <button v-if="!page" class="ib" :title="tt('sfp.close')" @click="emit('close')"><Icon name="close" :size="15" /></button>
+        <button v-else class="ib" :title="tt('sfp.upload')" :aria-label="tt('sfp.upload')" :disabled="busy" @click="uploadPick"><Icon name="upload" :size="15" /></button>
+        <button v-if="!page" class="ib" :title="tt('sfp.close')" :aria-label="tt('sfp.close')" @click="emit('close')"><Icon name="close" :size="15" /></button>
       </div>
     </header>
 
@@ -1862,7 +1862,7 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
           <label class="filter">
             <Icon name="search" :size="13" />
             <input v-model="filterText" :placeholder="tt('sfp.filterPh')" spellcheck="false" @keydown.esc.stop="filterText = ''" />
-            <button v-if="filterText" class="filter-x" @click="filterText = ''"><Icon name="close" :size="10" /></button>
+            <button v-if="filterText" class="filter-x" :aria-label="tt('sfp.clearFilter')" @click="filterText = ''"><Icon name="close" :size="10" /></button>
           </label>
         </div>
         <div v-if="dragOver" class="drop-veil">
@@ -1926,9 +1926,9 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
                 <span class="mtime">{{ fmtTime(entry.mtime) }}</span>
                 <!-- Hover shortcuts, so the common actions don't need the context menu. -->
                 <span class="row-acts" @mousedown.stop @dblclick.stop>
-                  <button :title="tt('sfp.download')" @click.stop="localActive = false; selectOne(entry.name); downloadSelected()"><Icon name="download" :size="13" /></button>
-                  <button :title="tt('sfp.rename')" @click.stop="localActive = false; startRename(entry)"><Icon name="edit" :size="13" /></button>
-                  <button class="danger" :title="tt('sfp.delete')" @click.stop="localActive = false; selectOne(entry.name); delSelected()"><Icon name="trash" :size="13" /></button>
+                  <button :title="tt('sfp.download')" :aria-label="tt('sfp.download')" @click.stop="localActive = false; selectOne(entry.name); downloadSelected()"><Icon name="download" :size="13" /></button>
+                  <button :title="tt('sfp.rename')" :aria-label="tt('sfp.rename')" @click.stop="localActive = false; startRename(entry)"><Icon name="edit" :size="13" /></button>
+                  <button class="danger" :title="tt('sfp.delete')" :aria-label="tt('sfp.delete')" @click.stop="localActive = false; selectOne(entry.name); delSelected()"><Icon name="trash" :size="13" /></button>
                 </span>
               </template>
             </div>
@@ -1952,7 +1952,7 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
                 <span v-if="fmtSpeed(t.id)" class="tf-speed">{{ fmtSpeed(t.id) }}</span>
               </div>
             </div>
-            <button v-if="!t.done && !t.error" class="ib sm" :title="tt('sfp.cancelTransfer')" @click="cancelTransfer(t.id)"><Icon name="close" :size="12" /></button>
+            <button v-if="!t.done && !t.error" class="ib sm" :title="tt('sfp.cancelTransfer')" :aria-label="tt('sfp.cancelTransfer')" @click="cancelTransfer(t.id)"><Icon name="close" :size="12" /></button>
           </div>
         </div>
         <div v-else class="foot">
@@ -1965,10 +1965,10 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
 
       <!-- ---- Between the panes: send the selection across ---- -->
       <div v-if="page && localOpen" class="gutter">
-        <button class="send" :disabled="!localSelCount || !props.sessionId" :title="tt('sfp.sendRight')" @click="uploadLocalSelection">
+        <button class="send" :disabled="!localSelCount || !props.sessionId" :title="tt('sfp.sendRight')" :aria-label="tt('sfp.sendRight')" @click="uploadLocalSelection">
           <Icon name="arrow-right" :size="15" />
         </button>
-        <button class="send" :disabled="!selCount || !props.sessionId" :title="tt('sfp.sendLeft')" @click="downloadSelectionToLocal">
+        <button class="send" :disabled="!selCount || !props.sessionId" :title="tt('sfp.sendLeft')" :aria-label="tt('sfp.sendLeft')" @click="downloadSelectionToLocal">
           <Icon name="arrow-left" :size="15" />
         </button>
       </div>
@@ -1983,27 +1983,27 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
               <span class="ph-title">{{ tt('sfp.localTitle') }}</span>
               <span class="ph-sub local-path" :title="localPath">{{ localPath }}</span>
             </div>
-            <button class="ib sm" :title="tt('sfp.upLevel')" :disabled="localLoading" @click="localGoUp"><Icon name="arrow-up" :size="14" /></button>
-            <button class="ib sm" :title="tt('sfp.home')" :disabled="localLoading" @click="localGoHome"><Icon name="home" :size="14" /></button>
+            <button class="ib sm" :title="tt('sfp.upLevel')" :aria-label="tt('sfp.upLevel')" :disabled="localLoading" @click="localGoUp"><Icon name="arrow-up" :size="14" /></button>
+            <button class="ib sm" :title="tt('sfp.home')" :aria-label="tt('sfp.home')" :disabled="localLoading" @click="localGoHome"><Icon name="home" :size="14" /></button>
           </template>
           <template v-else>
             <!-- An icon instead of the word: this bar is already tight, and
                  adding the home button pushed the path (and the last toolbar
                  button) out of the pane. -->
             <span class="pb-ic" :title="tt('sfp.localTitle')"><Icon name="monitor" :size="14" /></span>
-            <button class="ib sm" :title="tt('sfp.upLevel')" :disabled="localLoading" @click="localGoUp"><Icon name="arrow-up" :size="14" /></button>
-            <button class="ib sm" :title="tt('sfp.home')" :disabled="localLoading" @click="localGoHome"><Icon name="home" :size="14" /></button>
+            <button class="ib sm" :title="tt('sfp.upLevel')" :aria-label="tt('sfp.upLevel')" :disabled="localLoading" @click="localGoUp"><Icon name="arrow-up" :size="14" /></button>
+            <button class="ib sm" :title="tt('sfp.home')" :aria-label="tt('sfp.home')" :disabled="localLoading" @click="localGoHome"><Icon name="home" :size="14" /></button>
             <span class="local-path" :title="localPath">{{ localPath }}</span>
           </template>
           <label class="pattern" :class="{ bad: !!localPatternErr }" :title="localPatternErr || ''">
             <Icon name="search" :size="12" />
             <input v-model="localPattern" :placeholder="tt('sfp.patternPh')" spellcheck="false" @keyup.enter="selectByPattern($event)" />
           </label>
-          <button class="ib sm" :title="tt('sfp.selectAll')" @click="localSelectAll"><Icon name="check-all" :size="14" /></button>
-          <button class="ib sm" :title="tt('sfp.deploy')" :disabled="!localSelCount || !props.sessionId" @click="openDeploy"><Icon name="send" :size="14" /></button>
-          <button class="ib sm" :title="tt('sfp.newFile')" @click="localNew('file')"><Icon name="plus" :size="14" /></button>
-          <button class="ib sm" :title="tt('sfp.newFolder')" @click="localNew('folder')"><Icon name="folder-plus" :size="14" /></button>
-          <button class="ib sm" :title="tt('sfp.refresh')" :disabled="localLoading" @click="refreshLocal()"><Icon name="refresh" :size="14" /></button>
+          <button class="ib sm" :title="tt('sfp.selectAll')" :aria-label="tt('sfp.selectAll')" @click="localSelectAll"><Icon name="check-all" :size="14" /></button>
+          <button class="ib sm" :title="tt('sfp.deploy')" :aria-label="tt('sfp.deploy')" :disabled="!localSelCount || !props.sessionId" @click="openDeploy"><Icon name="send" :size="14" /></button>
+          <button class="ib sm" :title="tt('sfp.newFile')" :aria-label="tt('sfp.newFile')" @click="localNew('file')"><Icon name="plus" :size="14" /></button>
+          <button class="ib sm" :title="tt('sfp.newFolder')" :aria-label="tt('sfp.newFolder')" @click="localNew('folder')"><Icon name="folder-plus" :size="14" /></button>
+          <button class="ib sm" :title="tt('sfp.refresh')" :aria-label="tt('sfp.refresh')" :disabled="localLoading" @click="refreshLocal()"><Icon name="refresh" :size="14" /></button>
         </div>
         <div class="cols">
           <span class="c-ic" />
@@ -2088,10 +2088,10 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
             {{ h.status === 'done' ? fmtSize(h.bytes) : h.status === 'cancelled' ? tt('sfp.cancelled') : (h.error || tt('sfp.failed')) }}
           </span>
           <span class="hist-time">{{ fmtAgo(h.at) }}</span>
-          <button v-if="h.remoteDir && props.sessionId" class="hist-act" :title="tt('sfp.locate')" @click.stop="locateHistory(h)"><Icon name="folder" :size="12" /></button>
-          <button v-if="canReveal(h)" class="hist-act" :title="tt('sfp.reveal')" @click.stop="revealHistory(h)"><Icon name="folder-open" :size="12" /></button>
-          <button v-if="canRetry(h)" class="hist-act" :title="tt('sfp.retry')" @click.stop="retryHistory(h)"><Icon name="refresh" :size="12" /></button>
-          <button class="hist-act del" :title="tt('sfp.delHistory')" @click.stop="removeHistory(h)"><Icon name="trash" :size="12" /></button>
+          <button v-if="h.remoteDir && props.sessionId" class="hist-act" :title="tt('sfp.locate')" :aria-label="tt('sfp.locate')" @click.stop="locateHistory(h)"><Icon name="folder" :size="12" /></button>
+          <button v-if="canReveal(h)" class="hist-act" :title="tt('sfp.reveal')" :aria-label="tt('sfp.reveal')" @click.stop="revealHistory(h)"><Icon name="folder-open" :size="12" /></button>
+          <button v-if="canRetry(h)" class="hist-act" :title="tt('sfp.retry')" :aria-label="tt('sfp.retry')" @click.stop="retryHistory(h)"><Icon name="refresh" :size="12" /></button>
+          <button class="hist-act del" :title="tt('sfp.delHistory')" :aria-label="tt('sfp.delHistory')" @click.stop="removeHistory(h)"><Icon name="trash" :size="12" /></button>
         </div>
       </div>
     </div>
@@ -2192,7 +2192,7 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
       <div ref="syncDlgEl" class="dlg" tabindex="-1" @keydown.esc="closeSync" @keydown="onSyncEnter">
         <div class="dlg-head">
           <h3>{{ tt('sfp.sync') }}</h3>
-          <button class="ib sm" :title="tt('sfp.close')" @click="closeSync"><Icon name="close" :size="14" /></button>
+          <button class="ib sm" :title="tt('sfp.close')" :aria-label="tt('sfp.close')" @click="closeSync"><Icon name="close" :size="14" /></button>
         </div>
         <div class="dlg-card">
           <label class="dlg-row">
@@ -2247,7 +2247,7 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
       <div ref="deployDlgEl" class="dlg" tabindex="-1" @keydown.esc="closeDeploy">
         <div class="dlg-head">
           <h3>{{ tt('sfp.deploy') }}</h3>
-          <button class="ib sm" :title="tt('sfp.close')" @click="closeDeploy"><Icon name="close" :size="14" /></button>
+          <button class="ib sm" :title="tt('sfp.close')" :aria-label="tt('sfp.close')" @click="closeDeploy"><Icon name="close" :size="14" /></button>
         </div>
         <div class="dlg-card">
           <label class="dlg-row">
@@ -2285,7 +2285,7 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
       <div ref="previewDlgEl" class="dlg preview" tabindex="-1" @keydown.esc="closePreview">
         <div class="dlg-head">
           <h3 class="ellipsis">{{ preview.name }}</h3>
-          <button class="ib sm" :title="tt('sfp.close')" @click="closePreview"><Icon name="close" :size="14" /></button>
+          <button class="ib sm" :title="tt('sfp.close')" :aria-label="tt('sfp.close')" @click="closePreview"><Icon name="close" :size="14" /></button>
         </div>
         <div class="pv-body">
           <img v-if="preview.url" :src="preview.url" class="pv-img" alt="" />

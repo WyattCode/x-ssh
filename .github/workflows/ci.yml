@@ -31,6 +31,9 @@ jobs:
       - name: i18n lint
         run: npm run lint:i18n
 
+      - name: theme contrast (WCAG AA)
+        run: npm run check:contrast
+
       - name: Unit tests
         run: npm run test
 

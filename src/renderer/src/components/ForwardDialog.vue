@@ -119,18 +119,18 @@ async function remove(mode: ForwardMode | undefined, localPort: number): Promise
 
 <template>
   <div v-if="store.forwardOpen" class="fw-overlay" @mousedown.self="store.toggleForwards(false)">
-    <div ref="dialogEl" tabindex="-1" class="fw-dialog" @keydown.esc="store.toggleForwards(false)">
+    <div ref="dialogEl" role="dialog" aria-modal="true" :aria-label="t('fw.title')" tabindex="-1" class="fw-dialog" @keydown.esc="store.toggleForwards(false)">
       <div class="fw-head">
         <Icon name="split" :size="15" />
         <span class="fw-title">{{ t('fw.title') }}</span>
-        <button class="fw-x" :title="t('fileDiff.close')" @click="store.toggleForwards(false)"><Icon name="close" :size="14" /></button>
+        <button class="fw-x" :title="t('fileDiff.close')" :aria-label="t('fileDiff.close')" @click="store.toggleForwards(false)"><Icon name="close" :size="14" /></button>
       </div>
       <div class="fw-body">
         <p v-if="!list.length" class="fw-empty">{{ t('fw.empty') }}</p>
         <div v-for="(f, i) in list" :key="i" class="fw-row">
           <span class="fw-mode">{{ modeLabel(f.mode) }}</span>
           <span class="fw-rule">{{ ruleText(f.mode ?? 'local', f.localPort!, f.remoteHost || '127.0.0.1', f.remotePort!) }}</span>
-          <button class="fw-del" :title="t('fw.remove')" :disabled="removing" @click="void remove(f.mode, f.localPort!)"><Icon name="close" :size="13" /></button>
+          <button class="fw-del" :title="t('fw.remove')" :aria-label="t('fw.remove')" :disabled="removing" @click="void remove(f.mode, f.localPort!)"><Icon name="close" :size="13" /></button>
         </div>
         <div class="fw-form">
           <select v-model="form.mode" class="fw-in">

@@ -62,11 +62,11 @@ watch(
 
 <template>
   <div v-if="store.replayOpen" class="rp-overlay" @mousedown.self="store.toggleReplay(false)">
-    <div ref="dialogEl" tabindex="-1" class="rp-dialog" @keydown.esc="store.toggleReplay(false)">
+    <div ref="dialogEl" role="dialog" aria-modal="true" :aria-label="t('replay.title')" tabindex="-1" class="rp-dialog" @keydown.esc="store.toggleReplay(false)">
       <div class="rp-head">
         <Icon name="file" :size="15" />
         <span class="rp-title">{{ t('replay.title') }}</span>
-        <button class="rp-x" :title="t('fileDiff.close')" @click="store.toggleReplay(false)"><Icon name="close" :size="14" /></button>
+        <button class="rp-x" :title="t('fileDiff.close')" :aria-label="t('fileDiff.close')" @click="store.toggleReplay(false)"><Icon name="close" :size="14" /></button>
       </div>
       <div class="rp-body">
         <div class="rp-toolbar">

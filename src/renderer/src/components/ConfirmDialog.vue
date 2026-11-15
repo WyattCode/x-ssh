@@ -65,7 +65,7 @@ watch(
 
 <template>
   <div v-if="state.open" class="overlay" @mousedown.self="answer(false)">
-    <div ref="trapEl" tabindex="-1" class="dialog" @keydown.esc="answer(false)">
+    <div ref="trapEl" role="dialog" aria-modal="true" :aria-label="state.title || undefined" tabindex="-1" class="dialog" @keydown.esc="answer(false)">
       <div v-if="state.title" class="title">{{ state.title }}</div>
       <p class="message">{{ state.message }}</p>
       <div class="actions">

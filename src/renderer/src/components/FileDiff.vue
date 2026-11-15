@@ -23,7 +23,7 @@ const result = computed(() => diffLines(props.remoteContent, props.localContent)
 
 <template>
   <div class="fd-overlay" @mousedown.self="emit('close')">
-    <div ref="dialogEl" tabindex="-1" class="fd-dialog" @keydown.esc="emit('close')">
+    <div ref="dialogEl" role="dialog" aria-modal="true" :aria-label="remoteName" tabindex="-1" class="fd-dialog" @keydown.esc="emit('close')">
       <div class="fd-head">
         <span class="fd-title" :title="`${t('fileDiff.remote')}: ${remoteName} · ${t('fileDiff.local')}: ${localName}`">
           {{ remoteName }} ↔ {{ localName }}
@@ -32,7 +32,7 @@ const result = computed(() => diffLines(props.remoteContent, props.localContent)
         <span v-else class="fd-stats">
           <b>+{{ result.adds }}</b> / <b>-{{ result.dels }}</b>
         </span>
-        <button class="fd-x" :title="t('fileDiff.close')" @click="emit('close')"><Icon name="close" :size="14" /></button>
+        <button class="fd-x" :title="t('fileDiff.close')" :aria-label="t('fileDiff.close')" @click="emit('close')"><Icon name="close" :size="14" /></button>
       </div>
       <div class="fd-body">
         <div v-if="result.identical" class="fd-empty">{{ t('fileDiff.identical') }}</div>

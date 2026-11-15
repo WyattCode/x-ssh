@@ -177,7 +177,7 @@ function onKey(e: KeyboardEvent): void {
 
 <template>
   <div v-if="store.historyOpen" class="overlay" @mousedown.self="store.toggleHistory(false)">
-    <div ref="trapEl" tabindex="-1" class="panel" @keydown="onKey">
+    <div ref="trapEl" role="dialog" aria-modal="true" :aria-label="t('hist.dialog')" tabindex="-1" class="panel" @keydown="onKey">
       <div class="bar">
         <Icon name="search" :size="15" />
         <input
@@ -195,8 +195,8 @@ function onKey(e: KeyboardEvent): void {
         <span class="count" :title="results.length >= MAX_RESULTS ? t('hist.truncated') : undefined">
           {{ results.length >= MAX_RESULTS ? MAX_RESULTS + '+' : results.length }}
         </span>
-        <button class="iconbtn" :title="t('hist.export')" @click="exportLog"><Icon name="download" :size="14" /></button>
-        <button class="close" :title="t('hist.close')" @click="store.toggleHistory(false)"><Icon name="close" :size="15" /></button>
+        <button class="iconbtn" :title="t('hist.export')" :aria-label="t('hist.export')" @click="exportLog"><Icon name="download" :size="14" /></button>
+        <button class="close" :title="t('hist.close')" :aria-label="t('hist.close')" @click="store.toggleHistory(false)"><Icon name="close" :size="15" /></button>
       </div>
 
       <div class="list">

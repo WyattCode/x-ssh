@@ -298,9 +298,9 @@ async function clearAccent(): Promise<void> {
 }
 
 /** Swatch shown when no custom accent is set — must match the theme default
- *  in global.css (--accent is #6ea8fe dark / #2f6fed light). */
+ *  in global.css (--accent is #6ea8fe dark / #2c68df light; both clear 4.5:1 as label text, which scripts/check-contrast.mjs enforces). */
 const accentSwatch = computed(() =>
-  store.accentColor || (themeMode.value === 'light' ? '#2f6fed' : '#6ea8fe')
+  store.accentColor || (themeMode.value === 'light' ? '#2c68df' : '#6ea8fe')
 )
 
 const cursorOptions = computed(() => [
@@ -1245,7 +1245,7 @@ function onLockPassEnter(e: KeyboardEvent): void {
                   <span class="chip mono">.{{ ext }}</span>
                   <span class="mono grow ellipsis" :title="prog">{{ prog }}</span>
                   <button class="btn sm" @click="setOpenerProgram(ext)">{{ t('set.gen.openerSet') }}</button>
-                  <button class="icon-x" :title="t('set.gen.delete')" @click="removeOpener(ext)"><Icon name="trash" :size="14" /></button>
+                  <button class="icon-x" :title="t('set.gen.delete')" :aria-label="t('set.gen.delete')" @click="removeOpener(ext)"><Icon name="trash" :size="14" /></button>
                 </div>
                 <div class="row form-row">
                   <input v-model="openerForm.ext" class="box mono ext-in" :placeholder="t('set.gen.openerExt')" spellcheck="false" />
@@ -1340,7 +1340,7 @@ function onLockPassEnter(e: KeyboardEvent): void {
                   </div>
                   <span v-if="s.hostId" class="chip">{{ hostLabel(s.hostId) }}</span>
                   <button class="btn sm" @click="editSnippet(s)">{{ t('set.gen.edit') }}</button>
-                  <button class="icon-x" :title="t('set.gen.delete')" @click="deleteSnippet(s.id)"><Icon name="trash" :size="14" /></button>
+                  <button class="icon-x" :title="t('set.gen.delete')" :aria-label="t('set.gen.delete')" @click="deleteSnippet(s.id)"><Icon name="trash" :size="14" /></button>
                 </div>
                 <div v-if="snippetForm.open" class="sub">
                   <input v-model="snippetForm.title" class="box" :placeholder="t('set.gen.snipName')" spellcheck="false" />
@@ -1773,7 +1773,7 @@ function onLockPassEnter(e: KeyboardEvent): void {
                     :class="{ warn: keyStale(k.firstSeen) }"
                     :title="keyStale(k.firstSeen) ? t('set.sec.keyStaleTip') : t('set.sec.keyAge')"
                   >{{ keyAge(k.firstSeen) }}</span>
-                  <button class="icon-x" :title="t('set.sec.delete')" @click="forgetKnownHost(k)"><Icon name="trash" :size="14" /></button>
+                  <button class="icon-x" :title="t('set.sec.delete')" :aria-label="t('set.sec.delete')" @click="forgetKnownHost(k)"><Icon name="trash" :size="14" /></button>
                 </div>
                 <div v-if="!store.knownHosts.length" class="row empty">{{ t('set.sec.empty') }}</div>
               </div>

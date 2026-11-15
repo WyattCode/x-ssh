@@ -125,11 +125,11 @@ watch(
 
 <template>
   <div v-if="store.publishOpen" class="kp-overlay" @mousedown.self="store.togglePublish(false)">
-    <div ref="dialogEl" tabindex="-1" class="kp-dialog" @keydown.esc="store.togglePublish(false)">
+    <div ref="dialogEl" role="dialog" aria-modal="true" :aria-label="t('keyPub.title')" tabindex="-1" class="kp-dialog" @keydown.esc="store.togglePublish(false)">
       <div class="kp-head">
         <Icon name="keyboard" :size="15" />
         <span class="kp-title">{{ t('keyPub.title') }}</span>
-        <button class="kp-x" :title="t('fileDiff.close')" @click="store.togglePublish(false)"><Icon name="close" :size="14" /></button>
+        <button class="kp-x" :title="t('fileDiff.close')" :aria-label="t('fileDiff.close')" @click="store.togglePublish(false)"><Icon name="close" :size="14" /></button>
       </div>
       <div class="kp-body">
         <label class="kp-label">{{ t('keyPub.key') }}</label>

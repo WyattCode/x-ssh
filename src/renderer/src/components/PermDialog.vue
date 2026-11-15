@@ -126,10 +126,10 @@ onMounted(() => nextTick(() => dialogEl.value?.focus()))
 
 <template>
   <div class="pm-overlay" @mousedown.self="emit('close', { applied: false })">
-    <div ref="dialogEl" class="pm-dialog" tabindex="-1" @keydown="onKey">
+    <div ref="dialogEl" class="pm-dialog" role="dialog" aria-modal="true" :aria-label="tt('sfp.perm')" tabindex="-1" @keydown="onKey">
       <div class="pm-head">
         <span>{{ tt('sfp.perm') }}</span>
-        <button class="pm-x" :title="tt('sfp.close')" @click="emit('close', { applied: false })">
+        <button class="pm-x" :title="tt('sfp.close')" :aria-label="tt('sfp.close')" @click="emit('close', { applied: false })">
           <Icon name="close" />
         </button>
       </div>
