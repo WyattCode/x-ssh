@@ -34,7 +34,8 @@ suspend fun unlockSecret(activity: Activity, sealed: String): String? {
     if (!Secrets.isLocked(sealed)) return Secrets.open(sealed)
     // 先直接读一次:解锁窗口还开着(刚验证过、或者几秒内连第二台)时它就成了,
     // 不用打扰用户。窗口过了会抛 UserNotAuthenticatedException,那才去弹框。
-    val direct = runCatching { Secrets.readLocked(sealed) }
+    // 调用方在主线程的协程里:Keystore 解密走 IO,别卡界面(进场动画正在跑)。
+    val direct = withContext(Dispatchers.IO) { runCatching { Secrets.readLocked(sealed) } }
     direct.getOrNull()?.let { return it }
     // 只有"还没认证"才值得让用户验一次。密钥被系统销毁(改了锁屏方式、清了凭据)
     // 时验多少次都没用 —— 那种情况直接放弃,省得用户白按一次指纹还以为是自己按错了。
@@ -45,7 +46,7 @@ suspend fun unlockSecret(activity: Activity, sealed: String): String? {
     }
     return authMutex.withLock {
         // Another coroutine may have just authenticated while we waited.
-        runCatching { Secrets.readLocked(sealed) }.getOrNull()?.let { return@withLock it }
+        withContext(Dispatchers.IO) { runCatching { Secrets.readLocked(sealed) }.getOrNull() }?.let { return@withLock it }
         if (!authenticate(activity)) return@withLock null
         withContext(Dispatchers.IO) {
             runCatching { Secrets.readLocked(sealed) }

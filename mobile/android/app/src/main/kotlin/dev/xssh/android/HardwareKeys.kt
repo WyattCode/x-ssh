@@ -36,10 +36,6 @@ object KeyEncoder {
     private const val ESC = "\u001B"
 
     /**
-     * 返回要发的字节;null 表示这颗键终端不管(交给系统,比如 Win 键组合、音量键)。
-     * [stickyCtrl] / [stickyAlt] 是屏幕按键条上的粘滞修饰键,和实体修饰键等效。
-     */
-    /**
      * 方向键 / Home / End 的字节。屏幕按键条也走这里 —— 它原来是自己硬写 `ESC[A`,
      * 于是**同一颗上箭头,从实体键盘按和从屏幕上按发出去的字节不一样**:
      * 应用光标模式(vim、less 都会打开)下该发 `ESC O A`,屏幕那颗却还在发 `ESC [ A`,
@@ -54,7 +50,11 @@ object KeyEncoder {
         }
     }
 
-    fun encode(e: KeyEvent, modes: InputModes, stickyCtrl: Boolean = false, stickyAlt: Boolean = false): String? {
+    /**
+     * 返回要发的字节;null 表示这颗键终端不管(交给系统,比如 Win 键组合、音量键)。
+     * [stickyCtrl] / [stickyAlt] 是屏幕按键条上的粘滞修饰键,和实体修饰键等效。
+     */
+    fun encode(e: KeyEvent,modes: InputModes, stickyCtrl: Boolean = false, stickyAlt: Boolean = false): String? {
         if (e.isMetaPressed) return null
         val shift = e.isShiftPressed
         val alt = e.isAltPressed || stickyAlt
