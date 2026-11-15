@@ -49,7 +49,6 @@ const { list, dismiss } = useToast()
   color: var(--text);
   pointer-events: auto;
   cursor: pointer;
-  animation: slide-in 0.18s ease;
   animation: toast-in 0.16s ease-out;
 }
 .toast.error {

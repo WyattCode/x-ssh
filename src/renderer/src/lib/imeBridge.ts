@@ -15,35 +15,69 @@ const DEL = '\x7f'
 const BRACKETED_PASTE_START = '\x1b[200~'
 const BRACKETED_PASTE_END = '\x1b[201~'
 
-/** Shows control characters so a trace line is readable ("\x7f", not an invisible byte). */
-const vis = (s: string | null | undefined): string | null | undefined =>
-  typeof s === 'string'
-    ? s.replace(/[\x00-\x1f\x7f]/g, (c) =>
-        c === '\n' ? '\\n' : c === '\r' ? '\\r' : '\\x' + c.charCodeAt(0).toString(16).padStart(2, '0')
-      )
-    : s
+/** Stable short hash, used to tell "same text as last time" apart from "new text"
+ *  without keeping the text itself. */
+function shortHash(s: string): string {
+  let h = 5381
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h) ^ s.charCodeAt(i)
+  return (h >>> 0).toString(36).padStart(6, '0').slice(0, 6)
+}
+
+/**
+ * The SHAPE of a piece of text, never its content.
+ *
+ * Tracing exists to answer "how many commits did the IME make, how long was
+ * each, did we erase and how much" — none of which needs the characters. Keeping
+ * the characters meant that with tracing on, a password typed into a Chinese IME
+ * at a `sudo` prompt (the pinyin string lands in the textarea first) was written
+ * to `ime-trace.log` in plain text. `redactForTrace` only covered single keys,
+ * pastes and escape sequences, so any multi-character IME commit went through
+ * verbatim.
+ *
+ * The hash keeps the one property the log genuinely needs: two entries with the
+ * same id are the same text.
+ */
+export function traceShape(text: string | null | undefined): unknown {
+  if (typeof text !== 'string') return text
+  let dels = 0
+  let breaks = 0
+  let esc = false
+  for (const ch of text) {
+    if (ch === DEL) dels++
+    else if (ch === '\n' || ch === '\r') breaks++
+    else if (ch === '\x1b') esc = true
+  }
+  return { chars: Array.from(text).length, dels, breaks, esc, id: shortHash(text) }
+}
 
 /**
  * What a trace line may show of an xterm payload. Typed keys, terminal reports
  * and pasted text never go into the log: with tracing on, a password typed at a
  * prompt or a token pasted from the clipboard must not end up in a file.
  */
-export function redactForTrace(data: string, eventType: string | undefined): string | null | undefined {
+export function redactForTrace(data: string, eventType: string | undefined): unknown {
   if (data.startsWith('\x1b')) return '(esc)'
   if (eventType === 'paste' || eventType === 'drop') return `(paste, ${data.length} chars)`
   if ((eventType === 'keydown' || eventType === 'keypress') && data.length <= 2 && data !== DEL) return '(key)'
-  return vis(data)
+  return traceShape(data)
 }
 
 /**
  * A multi-line IME commit (a tidied-up dictation) must not reach a shell as raw
- * LF: that is Enter, so every line would execute. When the application has
- * switched bracketed paste on, deliver the text as a paste — erase part first,
- * outside the markers — so it is inserted, not run. A bare line break is a key
- * and is left alone.
+ * LF: that is Enter, so every line would execute.
+ *
+ * With bracketed paste on, deliver it as a paste — erase part first, outside the
+ * markers — so it is inserted, not run.
+ *
+ * With it off (bash 3.2, network-device CLIs, some TUIs), the lines cannot be
+ * inserted as a block, so they are joined into ONE line by replacing each break
+ * with a space. The substitution is 1:1 in UTF-16 units on purpose: the mirror
+ * erases by counting characters, and a shorter string would make every later
+ * correction erase one character too few.
  */
 export function bracketMultiline(out: string, bracketed: boolean): string {
-  if (!bracketed || !out.includes('\n')) return out
+  if (!out.includes('\n')) return out
+  if (!bracketed) return out.replace(/\r?\n/g, (m) => ' '.repeat(m.length))
   const m = /^(\x7f*)([\s\S]*)$/.exec(out)
   if (!m || !/[^\x00-\x1f\x7f]/.test(m[2])) return out
   return m[1] + BRACKETED_PASTE_START + m[2] + BRACKETED_PASTE_END
@@ -98,16 +132,11 @@ export function attachImeBridge(
       .catch(() => undefined)
   }
   refreshTracing()
-  /** Text xterm itself wrote into the textarea (a right-click selection): terminal
-   *  output, never the user's dictation, so it is masked in the log. */
-  let xtermText = ''
-  const scrub = (s: string): string =>
-    xtermText && s.includes(xtermText) ? s.split(xtermText).join('(xterm text)') : s
   const t0 = performance.now()
   const trace = (kind: string, info: () => Record<string, unknown> = () => ({})): void => {
     if (!tracing || !diag) return
     try {
-      const snap = ta ? { ta: vis(scrub(ta.value)), sel: [ta.selectionStart, ta.selectionEnd] } : {}
+      const snap = ta ? { ta: traceShape(ta.value), sel: [ta.selectionStart, ta.selectionEnd] } : {}
       diag.trace(JSON.stringify({ t: Math.round(performance.now() - t0), kind, ...info(), ...snap }))
     } catch {
       /* diagnostics only */
@@ -144,7 +173,7 @@ export function attachImeBridge(
 
   if (ta) {
     for (const type of ['compositionstart', 'compositionupdate', 'compositionend'] as const) {
-      ta.addEventListener(type, (e) => trace(type, () => ({ data: vis(scrub((e as CompositionEvent).data ?? '')) })), {
+      ta.addEventListener(type, (e) => trace(type, () => ({ data: traceShape((e as CompositionEvent).data ?? '') })), {
         capture: true,
         signal
       })
@@ -154,7 +183,7 @@ export function attachImeBridge(
         type,
         (e) => {
           const ie = e as InputEvent
-          trace(type, () => ({ inputType: ie.inputType, data: vis(ie.data), composing: ie.isComposing }))
+          trace(type, () => ({ inputType: ie.inputType, data: traceShape(ie.data), composing: ie.isComposing }))
         },
         { capture: true, signal }
       )
@@ -162,10 +191,18 @@ export function attachImeBridge(
     ta.addEventListener(
       'keydown',
       (e) => {
-        // Plain keys are not interesting; IME-driven ones (keyCode 229 / "Process")
-        // and anything while composing are — their `key` is a name, never a letter.
-        if (e.keyCode === 229 || e.key === 'Process' || e.isComposing || e.keyCode === 252) {
-          trace('keydown', () => ({ key: e.key, code: e.code, keyCode: e.keyCode, composing: e.isComposing }))
+        // Only IME-driven presses matter (keyCode 229 is "composing", 252 is the
+        // fake key Doubao sends mid-dictation) — and only their NUMBERS.
+        //
+        // `e.key`/`e.code` must not be logged: `code` is the physical key
+        // ("KeyM", "KeyI", …), so a password typed in pinyin at a sudo prompt
+        // was still recoverable from the log even after payloads were reduced
+        // to shapes. keyCode + isComposing answers every diagnostic question
+        // this entry exists for.
+        // `key === 'Process'` is redundant in Chromium (it maps to 229), but it
+        // costs one comparison and covers a platform that reports 0 instead.
+        if (e.keyCode === 229 || e.keyCode === 252 || e.isComposing || e.key === 'Process') {
+          trace('keydown', () => ({ keyCode: e.keyCode, composing: e.isComposing }))
         }
       },
       { capture: true, signal }
@@ -173,8 +210,13 @@ export function attachImeBridge(
     ta.addEventListener('focus', refreshTracing, { signal })
 
     const flushCommit = (snapshot: string): void => {
+      // Consume the deferred slot, whichever path got here. Leaving it set
+      // meant a snapshot that was parked for the *next* compositionstart
+      // survived a normal flush as well, and the composition after that
+      // replayed it — erasing the sentence that had just been committed.
+      pendingCommit = null
       const out = ime.sync(snapshot)
-      trace('flush', () => ({ snapshot: vis(scrub(snapshot)), out: vis(out) }))
+      trace('flush', () => ({ snapshot: traceShape(snapshot), out: traceShape(out) }))
       if (out) sendIme(out)
     }
     ta.addEventListener('compositionstart', () => {
@@ -219,7 +261,7 @@ export function attachImeBridge(
         !keyTextSent
       ) {
         const out = ime.sync(ta.value)
-        trace('input-sync', () => ({ out: vis(out) }))
+        trace('input-sync', () => ({ out: traceShape(out) }))
         if (out) sendIme(out)
         return
       }
@@ -256,14 +298,12 @@ export function attachImeBridge(
           set.call(this, v)
           if (v === '') {
             // xterm emptied the box: the textarea no longer holds the draft.
-            xtermText = ''
             ime.clear()
             trace('clear')
           } else if (!composing) {
             // During a composition the textarea holds the IME's *draft*, which
             // is not the remote line. Only a real write of text (right-click
             // copy, paste) should be recorded.
-            xtermText = v
             ime.adopt(get.call(this))
             trace('adopt')
           }
@@ -294,7 +334,7 @@ export function attachImeBridge(
     trace('onData', () => ({
       data: redactForTrace(data, eventType),
       eventType: eventType ?? '(timer)',
-      settled: eventType === 'paste' || eventType === 'drop' ? '(paste)' : vis(scrub(settled)),
+      settled: eventType === 'paste' || eventType === 'drop' ? '(paste)' : traceShape(settled),
       out: redactForTrace(out, eventType)
     }))
     const fromKey = eventType === 'keydown' || eventType === 'keypress'

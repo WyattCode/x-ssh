@@ -22,3 +22,22 @@ The window is not shown and the page is given CDP focus emulation, so the run ne
 keyboard focus from whatever else is open. If xterm still sees a blur (it empties its textarea
 on blur) that run is discarded and retried; a scenario that cannot get a clean run is reported
 as SKIP and the exit code is non-zero. Not part of `vitest`.
+
+## Reading `ime-trace.log`
+
+The log records the **shape** of every payload, not its text: `{ chars, dels, breaks, esc, id }`.
+
+```json
+{"t":184,"kind":"SEND","data":{"chars":46,"dels":0,"breaks":0,"esc":false,"id":"1k3x9p"},"ta":{"chars":46,...}}
+```
+
+- `chars` — length in code points (how much the IME committed).
+- `dels` — how many `\x7f` we emitted (how much we erased).
+- `breaks` — line breaks inside the payload (multi-line tidy-up).
+- `id` — same id on two entries means the same text; that is how you tell "the IME re-sent the
+  same sentence" from "it sent a new one", without the log containing the sentence.
+
+This replaced verbatim text on purpose: with tracing enabled, a password typed into a Chinese
+IME at a `sudo` prompt (the pinyin string lands in the textarea first) used to be written to
+this file in plain text. If you genuinely need the characters, attach a debugger to the renderer
+and read the textarea — do not put them back into the file.

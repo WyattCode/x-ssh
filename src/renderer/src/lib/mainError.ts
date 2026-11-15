@@ -45,6 +45,8 @@ export const MAIN_ERROR_KEYS: Record<string, string> = {
   'dir-not-listed': 'err.dirChanged',
   'not-listed': 'err.notListed',
   'invalid-name': 'err.invalidName',
+  'copy-into-self': 'err.copyIntoSelf',
+  'bad-input': 'err.badInput',
   'keygen-failed': 'err.keygenFailed',
 
   // nothing useful to say

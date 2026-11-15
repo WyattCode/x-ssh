@@ -12,14 +12,43 @@ const pane = computed(() => store.activePane)
 const tab = computed(() => store.active)
 const connected = computed(() => pane.value?.status === 'connected')
 
-// Uptime of the current live session, reset whenever the tracked pane changes.
+// Uptime of the current live session.
+//
+// The start time is kept PER PANE: the old code stamped `Date.now()` every time
+// the tracked pane changed, so switching to a tab that had been connected for
+// an hour restarted its uptime at 0s — the number shown was "time since you
+// last looked", not "time connected". Entries are dropped when the pane leaves
+// `connected`, so a reconnect starts a fresh count.
+const connectedAtByPane = new Map<string, { at: number; sshSessionId?: string }>()
 const connectedAt = ref<number | null>(null)
 const now = ref(Date.now())
 let timer: ReturnType<typeof setInterval> | null = null
+/** The link a pane is on, so a reconnect under the same pane id is noticed
+ *  even if it happened while another pane was being watched. */
+const linkOf = (p: { sshSessionId?: string } | undefined): string | undefined => p?.sshSessionId
 watch(
-  () => [pane.value?.id, connected.value] as const,
-  ([id, isConn]) => {
-    connectedAt.value = isConn ? Date.now() : null
+  () => [pane.value?.id, pane.value?.status, linkOf(pane.value)] as const,
+  ([id, status, link]) => {
+    if (!id) {
+      connectedAt.value = null
+      return
+    }
+    if (status === 'connected') {
+      let entry = connectedAtByPane.get(id)
+      // A new ssh session id means a new connection: restart the count.
+      if (!entry || entry.sshSessionId !== link) {
+        entry = { at: Date.now(), sshSessionId: link }
+        connectedAtByPane.set(id, entry)
+      }
+      connectedAt.value = entry.at
+    } else {
+      connectedAtByPane.delete(id)
+      connectedAt.value = null
+    }
+    // Forget panes that no longer exist at all (tab closed, pane split away).
+    for (const k of connectedAtByPane.keys()) {
+      if (!store.tabs.some((t) => t.panes.some((p) => p.id === k))) connectedAtByPane.delete(k)
+    }
   },
   { immediate: true }
 )

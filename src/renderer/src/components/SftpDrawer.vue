@@ -170,17 +170,17 @@ function localDragStart(e: DragEvent, entry: LocalEntry): void {
 }
 async function onLocalDrop(e: DragEvent): Promise<void> {
   endDrag()
-  const custom = e.dataTransfer?.getData('application/x-ssh-remote')
-  if (!custom || !props.sessionId || !localPath.value) return
-  let items: { path: string; name: string; isDir: boolean }[]
-  try {
-    items = JSON.parse(custom)
-  } catch {
-    return
-  }
-  if (!items.length) return
-  const r = await window.api.sftp.downloadTo(props.sessionId, items, localPath.value, store.transferConcurrency)
-  if (!r.ok && !r.canceled) toast(sftpErr(r.error, 'sfp.downloadFail'), 'error')
+  if (!localPath.value) return
+  // Since remote rows drag out natively, their drops arrive as real files —
+  // including a release over our own local pane. The renderer can read each
+  // dropped file's source path; main copies them into the pane's directory.
+  // This also serves plain desktop→pane drops, no session required.
+  const paths = Array.from(e.dataTransfer?.files ?? [])
+    .map((f) => window.api.getPathForFile(f))
+    .filter((p): p is string => !!p)
+  if (!paths.length) return
+  const r = await window.api.local.copyIn(localPath.value, paths)
+  if (!r.ok) toast(sftpErr(r.error, 'sfp.copyInFail'), 'error')
   else await refreshLocal()
 }
 
@@ -688,8 +688,10 @@ async function load(p?: string): Promise<void> {
     if (res.path !== '/') void store.addSftpRecent(res.path)
   } catch (e) {
     if (seq !== loadSeq || sidAtCall !== props.sessionId) return
-    error.value = sftpErr((e as Error).message || undefined, 'sfp.readDirFail')
-    const msg = (e as Error).message || tt('sfp.readDirFail')
+    // One localized message for both the banner and the toast. This used to
+    // assign sftpErr(...) and then overwrite it with the RAW error text, so a
+    // machine code (`files-failed:2`, `unsafe-filename`) reached the toast.
+    const msg = sftpErr((e as Error).message || undefined, 'sfp.readDirFail')
     error.value = msg
     toast(msg, 'error')
   } finally {
@@ -1121,10 +1123,9 @@ async function diffWithLocal(entry: FileEntry): Promise<void> {
   if (!props.sessionId) return
   const remote = await window.api.sftp.readText(props.sessionId, posixJoin(path.value, entry.name))
   if (!remote.ok) {
-    error.value =
-      remote.error === 'file-too-large' ? tt('sfp.fileTooLarge') : (remote.error ?? tt('sfp.diffFail'))
-    error.value = sftpErr(remote.error, 'sfp.diffFail')
-    const msg = remote.error ?? tt('sfp.diffFail')
+    // sftpErr already maps `file-too-large` / `path-invalid`; the two earlier
+    // assignments here were merge leftovers that a raw code then overwrote.
+    const msg = sftpErr(remote.error, 'sfp.diffFail')
     error.value = msg
     toast(msg, 'error')
     return
@@ -1133,11 +1134,9 @@ async function diffWithLocal(entry: FileEntry): Promise<void> {
   if (!picked.ok || !picked.path) return
   const local = await window.api.local.readText(picked.path)
   if (!local.ok || local.content === undefined) {
-    error.value =
-      local.error === 'file-too-large' ? tt('sfp.fileTooLarge') : (local.error ?? tt('sfp.diffFail'))
-      local.error === 'path-invalid' ? tt('sfp.pathInvalid') : (local.error ?? tt('sfp.diffFail'))
-    error.value = sftpErr(local.error, 'sfp.diffFail')
-    const msg = local.error ?? tt('sfp.diffFail')
+    // The middle line here used to be a bare ternary statement (no assignment)
+    // left by a stacked merge — syntactically valid, semantically nothing.
+    const msg = sftpErr(local.error, 'sfp.diffFail')
     error.value = msg
     toast(msg, 'error')
     return
@@ -1184,10 +1183,10 @@ async function runDeploy(): Promise<void> {
       toast(tt('sfp.deployDone'), 'success')
       deploy.open = false
     } else if (!up.canceled) {
-      // The drawer's banner sits behind this dialog — report the failure here.
-      deploy.error = up.error ?? tt('sfp.deployFail')
-      error.value = sftpErr(up.error, 'sfp.deployFail')
-      const msg = up.error ?? tt('sfp.deployFail')
+      // The drawer's banner sits behind this dialog — report the failure here
+      // (localized), and in the banner for when the dialog is closed again.
+      const msg = sftpErr(up.error, 'sfp.deployFail')
+      deploy.error = msg
       error.value = msg
       toast(msg, 'error')
     }
@@ -1200,49 +1199,27 @@ function openWith(entry: FileEntry): void {
   const payload = { path: posixJoin(path.value, entry.name), name: entry.name, ext: fileExt(entry.name) }
   emit('open-with', payload)
 }
-function onRemoteMouseDown(e: MouseEvent, entry: FileEntry): void {
-  // Alt+mousedown pre-fetches the drag-out download into the main-process cache
-  // so that startDrag (called from onDragStart) can complete near-instantly and
-  // actually drive the native OS drag gesture instead of missing it.
-  if (!props.sessionId || !e.altKey) return
-  const sel = selected.value.has(entry.name) ? selectedEntries() : [entry]
-  const items = sel.map((x) => ({ remotePath: posixJoin(path.value, x.name), name: x.name, isDir: x.isDir }))
-  window.api.sftp.prefetchDrag(props.sessionId, items)
-}
-function onDragStart(e: DragEvent, entry: FileEntry): void {
-  if (!props.sessionId) return
-  // Alt+drag initiates a native OS drag-out (to the desktop / Explorer).
-  // If the dragged row is part of a multi-selection, all selected items are
-  // carried; the main process downloads them (a single file drags out as that
-  // file, multiple items / folders into a temp directory) and startDrags it.
-  // Regular drag keeps carrying the in-app MIME for the dual-pane drop.
-  if (e.altKey) {
-    const sel = selected.value.has(entry.name) ? selectedEntries() : [entry]
-    e.preventDefault()
-    const items = sel.map((x) => ({ remotePath: posixJoin(path.value, x.name), name: x.name, isDir: x.isDir }))
-    window.api.sftp.startDrag(props.sessionId, items)
-    return
-  }
-  // In-app drag (dual-panel): carry the remote path(s) so the local pane can
-  // accept them as a drop target and download into its current directory.
-  // If the dragged row is part of a multi-selection, drag them all.
-  const items = (selected.value.has(entry.name) ? selectedEntries() : [entry]).map((x) => ({
-    path: posixJoin(path.value, x.name),
-    name: x.name,
-    isDir: x.isDir
-  }))
-  e.dataTransfer?.setData('application/x-ssh-remote', JSON.stringify(items))
-  e.dataTransfer?.setData('text/plain', items.map((i) => i.path).join('\n'))
-  if (e.dataTransfer) e.dataTransfer.effectAllowed = 'copy'
-}
+// ---- Drag-out is DISABLED (2026-11-15, Wyatt) ----
+// Dragging rows to the desktop is off: every file has a hover download button
+// and every folder a row action, so the gesture went unused — and it could
+// never be made fully reliable anyway, because the OS can only be handed a
+// file that ALREADY exists locally, which made big items a two-step dance
+// ("preparing… ready, drag again"). Uploads still work: dragging files from
+// the desktop or the local pane onto this pane drops them in (onDrop), and
+// local→remote row drags keep their x-ssh-local MIME. To re-enable, restore
+// `draggable="true"`, `@mousedown="onRemoteMouseDown($event, entry)"` and
+// `@dragstart="onDragStart($event, entry)"` on the remote row, and rebuild
+// the handlers on top of window.api.sftp.prefetchDrag/startDrag (the main
+// process side and its 5-minute staging cache are still in place).
 async function uploadPick(): Promise<void> {
   if (!props.sessionId || busy.value) return
   busy.value = true
   try {
     const r = await window.api.sftp.upload(props.sessionId, path.value, store.transferConcurrency)
-    if (!r.ok && !r.canceled) error.value = sftpErr(r.error, 'sfp.uploadFail')
     if (!r.ok && !r.canceled) {
-      const msg = r.error ?? tt('sfp.uploadFail')
+      // Localized text, not the raw code: a stacked merge had left a second
+      // block that overwrote sftpErr()'s result with `files-failed:2`.
+      const msg = sftpErr(r.error, 'sfp.uploadFail')
       error.value = msg
       toast(msg, 'error')
     }
@@ -1255,9 +1232,8 @@ async function uploadDirPick(): Promise<void> {
   busy.value = true
   try {
     const r = await window.api.sftp.uploadDir(props.sessionId, path.value, store.transferConcurrency)
-    if (!r.ok && !r.canceled) error.value = sftpErr(r.error, 'sfp.uploadFail')
     if (!r.ok && !r.canceled) {
-      const msg = r.error ?? tt('sfp.uploadFail')
+      const msg = sftpErr(r.error, 'sfp.uploadFail')
       error.value = msg
       toast(msg, 'error')
     }
@@ -1281,19 +1257,20 @@ async function onDrop(e: DragEvent): Promise<void> {
     }
     if (!paths.length) return
   } else {
+    // Every real drop is a path the user chose. (A filter dropped paths living
+    // in our own xssh-drag staging dir — that existed only while row drag-out
+    // was enabled, and it silently swallowed any user file whose path merely
+    // contained "xssh-drag-". Drag-out is gone, so the filter went with it.)
     paths = Array.from(e.dataTransfer?.files ?? [])
       .map((f) => window.api.getPathForFile(f))
-      // Ignore files that came from our own drag-out (dragging a file out and
-      // releasing back over the panel) — they live in the xssh-drag temp dir.
-      .filter((p): p is string => !!p && !p.includes('xssh-drag-'))
+      .filter((p): p is string => !!p)
     if (!paths.length) return
   }
   // Don't gate on `busy` here — dropping a second folder mid-upload is fine —
   // but do surface failures, or a drop that never starts looks like a no-op.
   const r = await window.api.sftp.uploadPaths(props.sessionId, path.value, paths, store.transferConcurrency)
-  if (!r.ok && !r.canceled) error.value = sftpErr(r.error, 'sfp.uploadFail')
   if (!r.ok && !r.canceled) {
-    const msg = r.error ?? tt('sfp.uploadFail')
+    const msg = sftpErr(r.error, 'sfp.uploadFail')
     error.value = msg
     toast(msg, 'error')
   }
@@ -1928,12 +1905,9 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
               :class="{ dir: entry.isDir, sel: selected.has(entry.name) }"
               :data-name="entry.name"
               :title="permTitle(entry)"
-              draggable="true"
-              @mousedown="onRemoteMouseDown($event, entry)"
               @click="onRowClick(entry, $event)"
               @dblclick="onRowDblClick(entry)"
               @contextmenu="openMenu($event, entry)"
-              @dragstart="onDragStart($event, entry)"
             >
               <span class="ic" :class="'k-' + kindOf(entry)"><Icon :name="KIND_ICON[kindOf(entry)]" :size="15" /></span>
               <input
@@ -2812,9 +2786,14 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
 
 /* Column header and rows share one grid: icon · name · size · modified. */
 .cols,
+/* Name gets a hard floor (72px) and the date column shrinks first: at the
+   drawer's narrowest the old fixed 148px date left the name a few pixels —
+   useless exactly when only one pane fits. .size / .mtime already clip with
+   ellipsis, so the squeezed column degrades visibly instead of crushing the
+   name. */
 .row {
   display: grid;
-  grid-template-columns: 22px minmax(0, 1fr) 84px 148px;
+  grid-template-columns: 22px minmax(72px, 1fr) 84px minmax(0, 148px);
   align-items: center;
   column-gap: 10px;
 }

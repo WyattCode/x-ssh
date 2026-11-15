@@ -1,4 +1,87 @@
-# 会话记录:M3.192(2026-11-14,补记 11-10 → 11-14:交接文档漏掉的这四天)
+# 会话记录:M3.192(2026-11-15,**已发版 v0.6.35 + v0.6.36**:终端裁行根因收口、传输簿记泄漏、"拖出到桌面"整条线停用)
+
+> Release:<https://github.com/WyattCode/x-ssh/releases/tag/v0.6.35> 、<https://github.com/WyattCode/x-ssh/releases/tag/v0.6.36>
+> 两次都是**直接推 `main` + 打 tag**(仓库保护设置不要求 PR),CI 在 tag 上自动构建 NSIS 安装包并发布 Release。与 M3.189/M3.190 同一条路径,M3.191 走过的那次 PR 不是硬性要求。
+> 版本号事实:**0.6.31–0.6.34 从未打过 tag**,它们是 11-10~11-11 开发途中逐次 bump 出来的号(`95b1daf` 0.6.31 → `8e9ca69` 0.6.32 → `27ad363` 0.6.33 → `d5d810b` 0.6.35),最终全部并入 0.6.35 一次发布。下一位不要以为中间丢过版本。
+
+## 一、当前状态(接手先看)
+
+| 项 | 值 |
+|---|---|
+| HEAD | `310f9a8 chore: release 0.6.36`,工作区干净,与 `origin/main` 同步,无未推送提交 |
+| 最新产物 | Release `X-SSH.Setup.0.6.36.exe`(81,997,155 B)+ blockmap,**CI 干净环境构建**,与本地 `release/` 里的不是同一文件 |
+| 基线(每轮提交前都跑过) | `npm run typecheck` 0 错 / vitest **74 文件 775 用例** / `npm run lint:i18n` / `npm run build`(含 ESM 命名导入检查)全绿 |
+| 真机验证 | **v0.6.36 尚未真机运行过**。0.6.35 里 DPR 双屏裁行也只做到"静态 + 构建产物核验",没上过真机 |
+| 开发模式 | `npm run dev` 在本机起不来:`TypeError: Cannot read properties of undefined (reading 'exports')` at `cjsPreparseModuleExports`(Node 20 ESM 对 CJS 的预解析)。**存量问题,本轮未修**,与任何业务提交无关。真机验证只能走 `npx electron-builder --win nsis -c.electronDist=node_modules/electron/dist`(打包要摘掉代理环境变量,挂着会 504) |
+| 本机安装 | `D:\Apps\X-SSH` 装的是 02:44 的本地构建,内容与 0.6.36 一致(只是没打 tag) |
+
+## 二、v0.6.35 收口的问题(桌面线,11-10 ~ 11-14)
+
+| 症状 | 根因 | 修法 |
+|---|---|---|
+| **终端最后一行被裁**(Codex 等 TUI 底部少一行) | 8px padding 挂在 **FitAddon 测量的那个元素**上:行数按整盒算、渲染只有盒减负 padding | padding 移到外层 `.term-pad`(背景跟主题色,不再露色带)。**注意走过的弯路**:第一版 `ccef180` 是"在 fit proposal 里夹取行数",`a709470` 已 revert —— 那个夹取分支永远不触发 |
+| 拖到另一块缩放不同的显示器仍然裁 | DPR 变了但 CSS 尺寸没变,无人重算行数 | `matchMedia('screen and (resolution: Ndppx)')` 监听变化后重 fit;`onDprChange` 要延迟一个宏任务,因为 xterm 自己也挂了这个查询,**两个监听器顺序未定义** |
+| 上面那条的重试路径哑火(自查抓到) | 发现属性未变时只无条件重挂监听并 return;若 150ms 内属性已悄悄落定,新查询立刻"匹配中",**没有任何人调 `doFit()`** | 重试即发现路径:比对属性,真变了就走完整重 fit(`7b00aef`) |
+| Windows 语音听写整段被拒 / 逐行执行 | 口述整理文本带 `\r\n`,以前当输入法文本拒收,或走普通发送把每个 CR 当回车 | 接受成对 CRLF(单独 CR 仍视为粘贴);未开括号粘贴模式时多行按 1:1 换成空格连成一行(`d5d810b`) |
+| **追踪日志泄密** | 快照记原文;`keydown` 记 `key`/`code`(可由拼音反推 sudo 密码) | 只记"形状"(字数/退格数/换行数/内容哈希),`keydown` 只记 keyCode 数字(`8e9ca69`) |
+| SFTP 报错蹦机器码(`files-failed:2`、`unsafe-filename`) | 六处本地化文案被原始码覆盖(合并残留) | 统一走 `sftpErr`;新增错误码必须同时登记 `mainError.ts` 映射表 + 三语文案,否则裸码进 UI |
+| **传输作业簿记泄漏** | `syncJob` 注册 6 项状态,清理是手写散点:三个失败出口各清一半(getSftp 失败只删 jobSession;sync-list-failed 只删 cancelled+paused;plan 循环 `safeLocalJoin` 抛 unsafe-filename **完全没清**)。持续同步每 5 秒调一次且 `.catch(() => null)` 吞异常 → 一个不可读目录让集合无界增长 | 一个 `releaseJob()` 闭包覆盖所有退出(照本文件 downloadJob 自己的 idiom);`downloadJob` 两个早期出口、`uploadJob` finally 漏 `cancelledJobs` 同修(`e2ee197`) |
+| 切回挂了一小时的标签,uptime 从 0s 重数 | 连接时刻没按面板记录 | 每面板记连接时刻,只有链路(ssh 会话 id)真换了才重新计时 |
+| 历史搜索里按回车直接跳进会话 | 面板级按键处理劫持了下拉/工具按钮的方向键与回车;"未命名"筛选与"全部主机"空值冲突 | 见 `65e31d6`;`onKey` 要先放行表单控件 |
+| 标签右键菜单出界 | x 用拍脑袋的 168px、y 完全不管 | `nextTick` 后按实测 `getBoundingClientRect()` 双向夹取,与终端菜单同款(`fcce563`) |
+| 亮色主题下语法高亮不可读 | 高亮层硬编码 One Dark,亮底对比度约 2:1 | 补 `:root[data-theme='light']` 的 One Light 色板。**验证方式唯一可靠:去构建产物 `out/renderer/assets/index-*.css` 里 grep,确认 scoped 的 `data-v-` 属性落在正确选择器上** |
+| 传输日志启动失败原因笼统 | `startLog` 没把主进程已经返回的 `error` 字段透出来 | `4e4b3e9` |
+
+同一版本还并入了 `origin/main` 上另一条线的 12 个提交(rust-hardening #41、mac 托盘模板图 #38、iOS/mac bundle id #39/#40、Android 0.2.0)。**发版前必须先 merge 再打 tag** —— 那次本地与远端已分叉,直接推会出事。
+
+## 三、"远程栏拖出到桌面":五轮尝试与最终停用(本轮最大的教训池)
+
+结论先行:**这条线已删,不要再"修好它"**。物理约束在 Electron/Chromium 这一侧,不是我们代码不够聪明:
+
+> `webContents.startDrag()` 只能交给系统**已经在本机磁盘上**的文件,而且只能接管**正在进行中的手势**。所以任何"边下边拖"都要求下载快过用户松手,大文件/大文件夹必然做不到。
+
+五轮尝试各自的死法(提交号可查):
+
+| 轮 | 做法 | 为什么不够 |
+|---|---|---|
+| 1 `f4bdc88` | 普通拖拽 = 原生拖出(不再需要 Alt),新增 `local:copyIn` 接收落回本地栏,过期计时改为"下载完成后起算",`liveDrags` 状态机判手势死活,慢了就提示"再拖一次" | 预取触发条件是"按下 150ms 计时器" |
+| 2 `eb4d189` | 改成"按住并移动过 6px"才预取 | **阈值从不触发** —— Chromium 在 mousemove 报出 6px 之前就开始了 dragstart |
+| 3 `6769f81` | 改回"按下即预取";修单个目录的暂存路径 | 真机报告:顶层文件夹拖不出。**旧分支把任何"单个目录"都当多项处理,交给 startDrag 的是临时父目录**,于是拖出个名叫 `xssh-drag-XXXX` 的怪东西 |
+| 4 `862645d` | 删掉整个 `liveDrags` | 日志证据:5.6s / 28.4s 的下载**其实成功了**,却被我自己的单槽位 Map 判成 `gesture=false` 拒发 startDrag(同一文件的 mousedown 预取与 dragstart 等待互相覆盖)。而且 `dragEnd` 一条都没到过主进程 —— **`preventDefault()` 的 dragstart 会连带取消 DOM 的 dragend** |
+| 5 `0093708` | 改两段式话术(本次拖=准备,完成后再拖一次)+ `isDestroyed` 守卫 | 日志显示一个文件夹要下 **59 秒**,6 个并发等待者共享同一个 Promise,完成时窗口已被用户关掉。**没有任何鼠标手势能按住一分钟**,"保持按住等图标"只对小文件成立 |
+
+用户决定(`dba0e6d`):每个文件本来就有悬停下载按钮、每个文件夹有行内操作,这条手势没人真在用 —— **停用**。
+
+删掉之后 `71f42de` 又扫出一个雷:`onDrop` 里为"拖出落回面板"写的 `xssh-drag-` 路径过滤还在,此时它的唯一作用是**把路径里恰好含这个片段的正常上传文件静默丢掉**。
+
+停用后的代码现状(别误删也别误以为还活着):
+
+- 远程行:只剩 click / dblclick / contextmenu。`src/renderer/src/components/SftpDrawer.vue` 里有一处 `// ---- Drag-out is DISABLED (2026-11-15, Wyatt) ----` 注释写明原因与恢复方式。
+- **主进程侧 `prefetchDrag` / `IPC.sftpStartDrag` / `dragStaged` 全部保留但已不可达**(渲染层零调用),重新启用只需改渲染层。
+- **仍然活着的拖拽**:本地栏 → 远程栏上传(`x-ssh-local` MIME + `onDrop`)、桌面 → 本地栏复制(`local:copyIn`,防护与面板其他写操作同级:仅列过的目录、逐段 `resolveInside`、防目录复制进自身、`errorOnExist` + `名字 (n)` 后缀)。
+
+另一条值得单独记住的事故:**0.6.35 这个号 11-11 被本地构建占用过**,导致"版本号相同、代码不同"。我曾据此误报"已装好 0.6.35",而用户机器上跑的其实是没有拖拽修复的旧包 —— **核对安装内容要拆 asar(`@electron/asar` + `listPackage`/`extractFile` grep 特征串),只看 `ProductVersion` 不够**。
+
+## 四、v0.6.36 的内容
+
+只有两项(0.6.35 之后的增量):`dba0e6d` 停用拖出 + `71f42de` 删掉那条误伤过滤。CHANGELOG 已同步。
+
+## 五、还没做的
+
+1. **真机验证 v0.6.36**:拖入方向(桌面 → 本地栏复制、本地栏 → 远程栏上传)、下载按钮、亮色主题高亮、切标签 uptime、SFTP 报错文案。
+2. **`npm run dev` 起不来** —— 想修的话是 electron-vite + Node 20 CJS 预解析的兼容问题,不是业务代码。
+3. **传输速度**:`downloadTree` 是单文件串行,局域网实测约 5 MB/s(148MB 要 28s、大文件夹 59s)。改成并发/流水线能显著改善下载按钮的体验,和已停用的拖拽无关。
+4. 语音链路已知局限延续 M3.191 的记录(按过光标键后该行纠正只追加;括号粘贴的原子性未处理),无新增证据不动。
+
+## 六、这轮踩过的坑(给下一个人省时间)
+
+- **同一个 bug 修到第二次不中就必须取证**。拖出这条线我隔屏猜了四轮全错,第五轮读 `ime-trace.log` 一次定案。诊断路径:新建 `%APPDATA%\X-SSH\ime-trace.enabled`(空文件,有新鲜度校验)→ 复现 → 看同目录 `ime-trace.log`。主进程里对应 `src/main/imeTrace.ts`,`drag:` 前缀的行记录了消息到达 / 缓存命中 / 下载耗时 / startDrag 结果。
+- **30 行以上的方法体不要用脚本一把梭重排**。本轮一次 python 重排 `syncJob` 翻车(占位行抛 not found + 大括号错位),`git checkout` 回滚后改用逐段 Edit 才干净。
+- **UI 改动的验证要落到构建产物**:typecheck 证明不了 CSS 选择器是否真的编译进包里。
+- 从沙箱里用 `Start-Process` 拉 GUI 应用,**进程会随命令结束被清理**,表现是"秒退、退出码 0、无日志"—— 那不是启动 bug,别照着它诊断。真机验证要让用户手动双击。
+
+
+# 会话记录:M3.193(2026-11-14,补记 11-10 → 11-14:交接文档漏掉的这四天)
 
 > 上一节 M3.191 停在 v0.6.30(11-08),之后的工作没有现场记录,这一节是**事后补写的**
 > (依据 `git log` 与提交正文,取舍理由可能没留下),基线是 `0e2e9f2`。
@@ -79,7 +162,7 @@ UniFFI 的 panic 跨边界会变成 `InternalException`(一个 `kotlin.Exception
   - 「光晕被滚动容器切平」已由另一条线用 `a114d9d` 重做并提交(`Identity` 顶部留 `HaloOvershoot`,平板传 `haloRoom = false`)。
   - 「连接中页的『取消』加正文色 + 细边」是它独有的那半,由本会话提交(`802a3a8`),已合入本地 `main`(`1d76da0`),
     并随 **0.2.1**(`ad256b2`,`versionCode 3`)一起备好包:`mobile/android/release/xssh-android-0.2.1-debug.apk`
-    (18,402,258 B,sha256 `3f02b1c6…7ce6271`)。`:app:assembleDebug` + `:app:testDebugUnitTest` 全绿,
+    (最终发版的是 19,834,287 B,sha256 `31d36d7f…dad73b`,多了 `bcd455f`)。`:app:assembleDebug` + `:app:testDebugUnitTest` 全绿,
     包内 `.so` 查得到 `<redacted>`;已覆盖装到 Fold,**真机行为仍未验**。
     移动端交接文档原本写着这半"不归安卓线管";用户这轮确认入库,所以是**授权例外**,不是越界。
 - 未跟踪的 `arm64`(25 字节,内容 `=== Rust core - .so ===`)已按用户确认删除;`git status` 现在干净。
@@ -91,7 +174,7 @@ UniFFI 的 panic 跨边界会变成 `InternalException`(一个 `kotlin.Exception
 1. `cargo test --workspace` 本机已过(58 个);`cargo clippy -- -D warnings` 只在 CI 跑过,本地补一次。
 2. Android 真机验加固:超长 OSC 标题、组合符洪水、上传中途断开、目标是符号链接(清单见 `mobile/HANDOVER.md`)。
 3. iOS 先在 Mac 上重编 Core,否则 iOS 还是旧核心。
-4. 0.2.1 已备好包并装到 Fold,**真机把 `mobile/HANDOVER.md` §5 的清单走一遍**;通过后再打 `android-v0.2.1` 标签、建 GitHub Release。
+4. 0.2.1 已发版并装到 Fold(标签前的构建),**真机把 `mobile/HANDOVER.md` §5 的清单走一遍**;**`android-v0.2.1` 标签已打**(11-14),GitHub Release 页面仍没建。
 
 ---
 

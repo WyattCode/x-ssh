@@ -228,23 +228,12 @@ async function toggleLog(): Promise<void> {
     // Stopping is complete here: without this return the tail of the function
     // started a *new* log, i.e. "stop recording" popped a save dialog.
     return
-  } else {
-    const res = await window.api.ssh.startLog(props.sessionId)
-    if (res.ok) logOn.value = true
-    else if (!res.canceled) toast(t('term.logFail'), 'error')
-    return
   }
-  // Starting the log can fail (no writable path, or the log manager is not
-  // ready yet and answers a bare { ok: false }). Without a toast the menu item
-  // just looks like it did nothing — the state stays "off" with no explanation.
-  const res: { ok: boolean; canceled?: boolean; error?: string } =
-    await window.api.ssh.startLog(props.sessionId)
-  if (res.ok) {
-    logOn.value = true
-  } else if (!res.canceled) {
-    toast(res.error ? String(res.error) : t('term.logFail'), 'error')
-
-  }
+  // Starting the log can fail (window not ready, session gone) — say so with
+  // the real reason when main gives one instead of a generic failure.
+  const res = await window.api.ssh.startLog(props.sessionId)
+  if (res.ok) logOn.value = true
+  else if (!res.canceled) toast(res.error ? String(res.error) : t('term.logFail'), 'error')
 }
 
 // Main stops the session log on disconnect; keep the menu badge in sync so
@@ -390,6 +379,20 @@ function scheduleFit(): void {
  *  send it again. */
 let sentSize = ''
 
+/**
+ * Fits the grid to its container and pushes the size to the server if it moved.
+ *
+ * `fit.fit()` is enough — no extra row clamp. FitAddon measures `.term` (which
+ * carries no CSS padding any more; that lives on `.term-pad`), reads the cell
+ * height xterm already rounded per DEVICE pixel, and FLOORS `available / cell`
+ * into a row count. `rows × cellHeight` is therefore always ≤ available, so a
+ * hand-written clamp on top of it can only ever be a no-op (its condition can
+ * never be true under the same measurement). The clipped last row was padding
+ * sitting on the measured element, which is gone — not something a clamp fixes.
+ *
+ * fit.fit() also clears the renderer before resizing, so the old-sized frame
+ * never flashes stretched over the new grid.
+ */
 function doFit(): void {
   if (!fit || !term || !props.visible) return
   try {
@@ -402,6 +405,59 @@ function doFit(): void {
   } catch {
     /* container not measurable yet */
   }
+}
+
+/**
+ * Re-fit when the device pixel ratio changes (window dragged to another
+ * display, Windows setting "Make text and apps bigger").
+ *
+ * xterm re-renders for the new DPR internally, but nothing recomputes the row
+ * count: FitAddon has no DPR listener (verified against its source), and the
+ * ResizeObserver above does not fire because the CSS pixel size of the box
+ * did not change. The rounded cell height shifts, so the box that fitted
+ * exactly a moment ago overflows by a fraction — the clipped last row again.
+ *
+ * The MediaQueryList has to be rebuilt after every change: its query holds the
+ * OLD ratio, and "screen and (resolution: Xdppx)" fires once on leaving that
+ * value, never again.
+ */
+let dprMql: MediaQueryList | null = null
+let dprSeen = window.devicePixelRatio
+let unmounted = false
+function watchDpr(): void {
+  dprMql?.removeEventListener('change', onDprChange)
+  dprMql = window.matchMedia(`screen and (resolution: ${window.devicePixelRatio}dppx)`)
+  dprMql.addEventListener('change', onDprChange)
+}
+/** The change has landed and the ratio is readable: record it, re-arm on the
+ *  new value, and re-fit. The fit is deferred a macro task because xterm
+ *  recomputes its cell metrics in its OWN MediaQueryList listener and the
+ *  order between independent lists is not specified — a timeout runs after
+ *  both listeners' synchronous work has landed. */
+function refitForDpr(): void {
+  dprSeen = window.devicePixelRatio
+  watchDpr()
+  setTimeout(() => {
+    if (!unmounted) doFit()
+  }, 0)
+}
+function onDprChange(): void {
+  // Some Chromium versions deliver the change event one beat before
+  // devicePixelRatio reports the new value. Re-check shortly — and the retry
+  // itself has to do the work: if the property settles without a second
+  // event (the old query already fired and a re-arm on the current value
+  // would match from the start), this poll is the only discovery path, and
+  // fitting nothing would let the clipped row survive until some unrelated
+  // resize.
+  if (window.devicePixelRatio === dprSeen) {
+    setTimeout(() => {
+      if (unmounted) return
+      if (window.devicePixelRatio !== dprSeen) refitForDpr()
+      else watchDpr()
+    }, 150)
+    return
+  }
+  refitForDpr()
 }
 
 /** Opens a link clicked in the output. Main restricts this to http/https, so a
@@ -417,6 +473,14 @@ onMounted(() => {
   if (!el.value) return
   term = new Terminal({
     fontFamily: fontFamilyFor(hostFontFamily.value || store.terminalFontFamily),
+    // Left at the stock value on purpose. xterm derives the cell height from
+    // the MEASURED glyph height (floor(glyphHeight × lineHeight)), not from
+    // fontSize, so "round it to whole pixels via fontSize" changes nothing at
+    // 13px (floor(15.6 × 1.25) and floor(15.6 × 1.2308) are both 19) while
+    // shifting the row ratio at other sizes. FitAddon floors available/cell
+    // into the row count, so the last row is not clipped as long as nothing
+    // steals height off the measured box (the padding that used to do that now
+    // lives on .term-pad, outside it).
     lineHeight: 1.25,
     letterSpacing: 0,
     cursorBlink: true,
@@ -655,6 +719,7 @@ onMounted(() => {
 
   ro = new ResizeObserver(() => scheduleFit())
   ro.observe(el.value)
+  watchDpr()
 
   nextTick(() => {
     doFit()
@@ -751,7 +816,10 @@ defineExpose({
 })
 
 onBeforeUnmount(() => {
+  unmounted = true
   if (fitTimer) clearTimeout(fitTimer)
+  dprMql?.removeEventListener('change', onDprChange)
+  dprMql = null
   imeAbort.abort()
   offData?.()
   offLogFailed?.()
@@ -764,7 +832,14 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="term-wrap" @contextmenu="onContextMenu" @auxclick="onAuxClick">
-    <div ref="el" class="term" />
+    <!-- Padding lives on this wrapper, NOT on `.term`. FitAddon measures
+         `.term` and subtracts only the padding of xterm's own root, so padding
+         on `.term` was invisible to it: rows were computed for the full height
+         while the grid had 16px less, and the last row was clipped. With the
+         padding outside, the measured height and the usable height agree. -->
+    <div class="term-pad" :style="{ background: currentTheme().background }">
+      <div ref="el" class="term" />
+    </div>
 
     <div v-if="searchBar.open" class="search-bar" @mousedown.stop>
       <input
@@ -782,7 +857,11 @@ onBeforeUnmount(() => {
       <span v-if="searchBar.query" class="sb-count" :class="{ none: searchHits.count === 0 }" role="status" aria-live="polite">
         {{
           searchHits.count
-            ? `${searchHits.index >= 0 ? searchHits.index + 1 : '?'}/${searchHits.count}`
+            ? // resultIndex is -1 in the beat between a new query and the
+              // addon resolving the active match. A "?" there read as an
+              // error; the count is already known, so show "1/N" and let the
+              // next event correct it.
+              `${Math.max(searchHits.index + 1, 1)}/${searchHits.count}`
             : '0/0'
         }}
       </span>
@@ -833,11 +912,18 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 100%;
 }
-.term {
+.term-pad {
   width: 100%;
   height: 100%;
   padding: 8px 4px 8px 12px;
-  background: var(--bg);
+  /* The background comes from the inline style (the current terminal theme).
+     `--bg` is the app background, which differs from a preset theme's own
+     colour: with the row count now exact, the band under the last row is up to
+     a full line tall, so it was a visible stripe of the wrong colour. */
+}
+.term {
+  width: 100%;
+  height: 100%;
 }
 .search-bar {
   position: absolute;

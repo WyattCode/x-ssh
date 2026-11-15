@@ -604,6 +604,15 @@ describe('createImeMirror telling dictation from paste', () => {
     expect(isImeText('\r')).toBe(false)
   })
 
+  it('accepts a Windows line break, which IMEs emit as CRLF', () => {
+    // Rejecting CR outright sent CRLF dictation down the plain-send path, where
+    // each CR was Enter and every line ran as its own command.
+    expect(isImeText('第一行\r\n第二行')).toBe(true)
+    expect(isImeText('a\r\n')).toBe(true)
+    // A lone CR is still "paste", not dictation.
+    expect(isImeText('a\rb\r\n')).toBe(false)
+  })
+
   it('does not let a pasted line that resembles the draft erase the draft', () => {
     const h = harness()
     h.value = '你好世界这是草稿'
@@ -727,6 +736,22 @@ describe('createImeMirror after the cursor moved or the line was edited', () => 
       expect(h.remote()).toBe(V2)
     })
   }
+
+  it('never erases after the cursor moved, even when the new draft overlaps', () => {
+    // The regression this pins: plan() refuses to erase when `exact` is false,
+    // but it falls through to append(), and append() had its own erasing branch
+    // with no such guard — so pressing Left and then correcting still emitted
+    // DELs at the cursor, deleting characters to its left.
+    const h = harness()
+    const v1 = '把日志重启一下'
+    h.value = v1
+    h.xterm(v1)
+    h.xterm('\x1b[D', { eventType: 'keydown' })
+    const v2 = '把服务重启一下'
+    h.value = v2
+    h.xterm(v2)
+    expect(h.wire.join('')).not.toContain('\x7f')
+  })
 
   it('trusts the line again once Enter empties it', () => {
     const h = harness()

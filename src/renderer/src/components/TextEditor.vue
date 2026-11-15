@@ -328,6 +328,9 @@ function onKeydown(e: KeyboardEvent): void {
   pointer-events: none;
   overflow: hidden;
 }
+/* One Dark token palette. It assumes a dark canvas: on a light theme the
+   green/blue/orange tokens sit around 2:1 against white and are unreadable,
+   so the light mode swaps in One Light's matching hues. */
 .area.highlight .k { color: #c678dd; }
 .area.highlight .s { color: #98c379; }
 .area.highlight .c { color: var(--text-faint); font-style: italic; }
@@ -335,6 +338,11 @@ function onKeydown(e: KeyboardEvent): void {
 .area.highlight .b { color: #61afef; }
 .area.highlight .m { color: #e5c07b; }
 .area.highlight .p { color: var(--text-faint); }
+:root[data-theme='light'] .area.highlight .k { color: #a626a4; }
+:root[data-theme='light'] .area.highlight .s { color: #50a14f; }
+:root[data-theme='light'] .area.highlight .n { color: #986801; }
+:root[data-theme='light'] .area.highlight .b { color: #4078f2; }
+:root[data-theme='light'] .area.highlight .m { color: #c18401; }
 .area.input {
   position: relative;
   width: 100%;
