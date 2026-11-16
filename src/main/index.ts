@@ -8,7 +8,7 @@ import { spawn } from 'node:child_process'
 import { IPC, PREFS_ARG } from '../shared/ipc'
 import type { ConnectParams, Host, HostForward, ForwardMode, JumpConfig, KeyErrorCode, LocalEntry, Snippet, ThemePref, UiPrefs, UploadOverwrite } from '../shared/types'
 import { readLaunchTarget, targetFromUrl, PROTOCOL, compareVersions } from '../shared/launchTarget'
-import { isRendererSettableKey } from '../shared/settingsKeys'
+import { isRendererSettableKey, isRendererReadableKey } from '../shared/settingsKeys'
 import { resolveLang, type LangPref, type UiLang } from '../shared/lang'
 import { resolveDir, resolveInside } from '../shared/localPaths'
 import { extractBackupHosts } from '../shared/backup'
@@ -2566,7 +2566,7 @@ function registerIpc(): void {
   // (Drag-out IPC removed — see the note by the retired staging cache above.)
 
   // ---- Settings ----
-  handle(IPC.settingsGet, (_e, key: string) => settings.get(key))
+  handle(IPC.settingsGet, (_e, key: string) => isRendererReadableKey(key) ? settings.get(key) : undefined)
   handle(IPC.settingsStatus, () => settings.status())
   handle(IPC.settingsSet, async (_e, key: string, value: unknown) => {
     // The settings map also holds the master-lock record, the connection audit

@@ -101,3 +101,8 @@ export const MAIN_ONLY_KEYS = new Set([
 export function isRendererSettableKey(key: unknown): key is string {
   return typeof key === 'string' && RENDERER_SETTABLE_KEYS.has(key)
 }
+
+/** Main-owned UI preferences are readable; secrets and internal records are not. */
+export function isRendererReadableKey(key: unknown): key is string {
+  return typeof key === 'string' && (!MAIN_ONLY_KEYS.has(key) || ['theme', 'autoBackupDir', 'winHelloKeyGate'].includes(key))
+}
