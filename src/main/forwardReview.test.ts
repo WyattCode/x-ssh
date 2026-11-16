@@ -85,3 +85,18 @@ it('B5 reserves an in-flight remote port so concurrent requests cannot replace e
   expect(await second).toBe(false)
   expect(client.forwardIn).toHaveBeenCalledTimes(1)
 })
+it('B16 tears down SOCKS clients even while their handshake is pending', () => {
+  const mgr = new SshManager({} as never, {} as never) as any
+  const socket = Object.assign(new EventEmitter(), { destroy: vi.fn() })
+  const session = { client: {} }
+  mgr.handleSocks(session, socket, 1080)
+  mgr.closeForwards(session)
+  expect(socket.destroy).toHaveBeenCalled()
+})
+it('B17 removing a remote rule does not close a same-numbered local listener', () => {
+  const mgr = new SshManager({} as never, {} as never) as any
+  const server = { address: () => ({ port: 9000 }), close: vi.fn() }
+  mgr.sessions.set('s', { client: {}, forwardServers: [server] })
+  mgr.removeForward('s', { mode: 'remote', localPort: 9000 })
+  expect(server.close).not.toHaveBeenCalled()
+})

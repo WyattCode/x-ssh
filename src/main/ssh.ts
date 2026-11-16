@@ -700,6 +700,7 @@ export class SshManager {
     const rh = rule.remoteHost || '127.0.0.1'
     const rp = rule.remotePort
     const server = createServer((socket: Socket) => {
+      this.trackForwardSocket(session, socket, `local:${lp}`)
       // ssh2 has no timeout on the channel open: a remote that silently drops
       // the target would leave this accepted local client hanging forever.
       let settled = false
@@ -711,7 +712,7 @@ export class SshManager {
       timer.unref?.()
       this.safeForwardOut(session.client, '127.0.0.1', lp, rh, rp, (err, channel) => {
         clearTimeout(timer)
-        if (settled) {
+        if (settled || socket.destroyed) {
           // Timed out already: the local client is gone, so drop the channel.
           channel?.destroy()
           return
@@ -850,6 +851,7 @@ export class SshManager {
     const owned = session.runtimeRules?.get(key)?.servers ?? []
     const port = rule.localPort
     const toClose = session.forwardServers?.filter((s) => {
+      if (mode === 'remote') return false
       const addr = s.address()
       const boundPort = addr && typeof addr !== 'string' ? addr.port : -1
       return owned.includes(s) || boundPort === port
@@ -1004,6 +1006,7 @@ export class SshManager {
    *  handshake: version/method negotiation, then a CONNECT request whose
    *  destination is tunneled via forwardOut. NOAUTH only. */
   private handleSocks(session: Session, socket: Socket, port = 0): void {
+    this.trackForwardSocket(session, socket, `dynamic:${port}`)
     let buf = Buffer.alloc(0)
     let greeted = false
     const onData = (chunk: Buffer): void => {
@@ -1043,7 +1046,7 @@ export class SshManager {
       timer.unref?.()
       this.safeForwardOut(session.client, '127.0.0.1', 0, req.host, req.port, (err, channel) => {
         clearTimeout(timer)
-        if (settled) {
+        if (settled || socket.destroyed) {
           // Timed out already: the failure reply went out, drop the channel.
           channel?.destroy()
           return
@@ -1078,6 +1081,7 @@ export class SshManager {
     // the listener alone leaves them running after the session is gone.
     session.forwardSockets?.forEach((s) => s.destroy())
     session.forwardSockets = undefined
+    session.ruleSockets = undefined
   }
 
   /** Drops everything a session owns apart from the SSH client itself: log
