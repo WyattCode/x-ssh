@@ -44,6 +44,13 @@ fn sftp_err(err: impl std::fmt::Display) -> SshError {
     SshError::Sftp(err.to_string())
 }
 
+/// Only expired regular staging files are disposable. Backups may be the sole copy.
+fn stale_part(name: &str, modified: u64, now: u64) -> bool {
+    let Some((_, suffix)) = name.rsplit_once(".xssh-part-") else { return false };
+    !suffix.is_empty() && suffix.bytes().all(|c| c.is_ascii_hexdigit())
+        && modified > 0 && now.saturating_sub(modified) > 24 * 60 * 60
+}
+
 fn require_staging<T>(staged: Option<T>) -> Result<T, SshError> {
     staged.ok_or_else(|| SshError::Sftp("cannot-create-upload-temp".to_owned()))
 }
@@ -118,6 +125,14 @@ impl Sftp {
                 }
             })
             .collect();
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs()).unwrap_or(0);
+        entries.retain(|entry| {
+            if !entry.is_dir && !entry.is_link && stale_part(&entry.name, entry.modified, now) {
+                return self.block(self.session.remove_file(entry.path.clone())).is_err();
+            }
+            true
+        });
         entries.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase())));
         Ok(entries)
     }
@@ -269,7 +284,8 @@ impl Sftp {
                 return Err(SshError::Sftp(format!("{}(内容已上传到 {temp})", sftp_err(err))));
             }
             if moved_aside {
-                let _ = self.session.remove_file(backup).await;
+                self.session.remove_file(backup.clone()).await.map_err(|err|
+                    SshError::Sftp(format!("upload-complete-backup-retained:{backup}:{}", sftp_err(err))))?;
             }
             // 权限再核一遍(创建时已经带上了;服务端要是忽略了那个属性,这里补上。拿不到原来的就随服务端默认)。
             if let Some(permissions) = previous.and_then(|before| before.permissions) {
@@ -308,7 +324,16 @@ impl Sftp {
 
 #[cfg(test)]
 mod tests {
-    use super::{join, parent, unique_suffix, require_staging};
+    use super::{join, parent, unique_suffix, require_staging, stale_part};
+
+    #[test]
+    fn b19_cleanup_only_expired_parts() {
+        assert!(stale_part("a.xssh-part-abc123", 1, 90000));
+        assert!(!stale_part("a.xssh-old-abc123", 1, 90000));
+        assert!(!stale_part("a.xssh-part-abc123", 89999, 90000));
+        assert!(!stale_part("a.xssh-part-not-ours", 1, 90000));
+        assert!(!stale_part("a.xssh-part-abc123", 0, 90000));
+    }
 
     #[test]
     fn b18_missing_staging_refuses_upload() {
