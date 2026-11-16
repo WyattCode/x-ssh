@@ -3405,9 +3405,21 @@ export class SshManager {
     if (st.size > 2 * 1024 * 1024) {
       throw new Error('file-too-large')
     }
-    const buf = await new Promise<Buffer>((res, rej) =>
-      sftp.readFile(path, (e, d) => (e ? rej(e) : res(d as never)))
-    )
+    const buf = await new Promise<Buffer>((res, rej) => {
+      const stream = sftp.createReadStream(path)
+      const chunks: Buffer[] = []
+      let size = 0
+      stream.on('data', (chunk: Buffer) => {
+        size += chunk.length
+        if (size > 2 * 1024 * 1024) {
+          stream.destroy(new Error('file-too-large'))
+          return
+        }
+        chunks.push(chunk)
+      })
+      stream.on('error', rej)
+      stream.on('end', () => res(Buffer.concat(chunks)))
+    })
     return buf.toString('utf8')
   }
 

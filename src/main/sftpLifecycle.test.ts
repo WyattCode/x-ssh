@@ -38,3 +38,15 @@ it('B6 times out an unanswered handshake and closes a late channel', async () =>
     expect(channel.end).toHaveBeenCalled()
   } finally { vi.useRealTimers() }
 })
+it('B24 bounds actual text bytes even when stat lies', async () => {
+  const { Readable } = await import('node:stream')
+  const mgr = new SshManager({} as never, {} as never) as any
+  const stream = Readable.from([Buffer.alloc(2 * 1024 * 1024 + 1)])
+  mgr.getSftp = async () => ({
+    stat: (_: string, cb: Function) => cb(null, { size: 1 }),
+    readFile: (_: string, cb: Function) => cb(null, Buffer.alloc(2 * 1024 * 1024 + 1)),
+    createReadStream: () => stream
+  })
+  await expect(mgr.readTextFile('s', '/large')).rejects.toThrow('file-too-large')
+  expect(stream.destroyed).toBe(true)
+})
