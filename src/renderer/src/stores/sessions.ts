@@ -387,6 +387,7 @@ interface State {
   /** Strip non-printing control characters from pasted text (default on). */
   sanitizePaste: boolean
   /** Auto-copy the terminal selection to the clipboard on select. */
+  allowRemoteClipboard: boolean
   copyOnSelect: boolean
   /** Middle mouse button pastes the clipboard (default on). */
   middleClickPaste: boolean
@@ -483,6 +484,7 @@ export const useSessions = defineStore('sessions', {
     palettePasswordFor: null,
     confirmPaste: true,
     sanitizePaste: true,
+    allowRemoteClipboard: false,
     copyOnSelect: false,
     middleClickPaste: true,
     rightClickPaste: false,
@@ -720,6 +722,7 @@ export const useSessions = defineStore('sessions', {
       this.keybindings = (await window.api.settings.get<Record<string, string>>('keybindings')) ?? {}
       this.confirmPaste = cp !== false
       this.sanitizePaste = sp !== false
+      this.allowRemoteClipboard = (await window.api.settings.get<boolean>('allowRemoteClipboard')) === true
       this.copyOnSelect = (await window.api.settings.get<boolean>('copyOnSelect')) === true
       this.middleClickPaste = (await window.api.settings.get<boolean>('middleClickPaste')) !== false
       this.rightClickPaste = (await window.api.settings.get<boolean>('rightClickPaste')) === true

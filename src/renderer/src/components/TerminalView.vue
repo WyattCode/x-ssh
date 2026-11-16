@@ -12,7 +12,7 @@ import { useToast } from '../composables/toast'
 import { themeFor } from '../lib/terminalThemes'
 import { useI18n } from '../lib/i18n'
 import { isImeKey } from '../lib/ime'
-import { decodeOsc52Payload } from '../lib/osc52'
+import { createOsc52Gate } from '../lib/osc52'
 import { useSessions } from '../stores/sessions'
 import {
   DEFAULT_BINDINGS,
@@ -541,10 +541,11 @@ onMounted(() => {
   // The base64 is decoded by lib/osc52, which tolerates the whitespace/newlines
   // some remotes (tmux wrapping, multi-line OSC) put inside it — atob() alone
   // threw on those and the copy failed silently.
+  const remoteClipboard = createOsc52Gate()
   term.parser.registerOscHandler(52, (data) => {
     const semi = data.indexOf(';')
     const payload = semi >= 0 ? data.slice(semi + 1) : data
-    const text = decodeOsc52Payload(payload)
+    const text = remoteClipboard(payload, store.allowRemoteClipboard)
     // Query, empty, oversized or undecodable: nothing to copy, but the sequence
     // is still ours — don't let xterm fall through to its own handling.
     if (text === null) return true

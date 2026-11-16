@@ -35,6 +35,7 @@ export const RENDERER_SETTABLE_KEYS = new Set([
   // Terminal interaction
   'confirmPaste',
   'copyOnSelect',
+  'allowRemoteClipboard',
   'keybindings',
   'middleClickPaste',
   'rightClickPaste',

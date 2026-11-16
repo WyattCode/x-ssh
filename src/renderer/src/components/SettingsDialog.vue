@@ -390,6 +390,21 @@ async function toggleSanitizePaste(): Promise<void> {
     toast(t('set.gen.writeFail'), 'error')
   }
 }
+async function toggleAllowRemoteClipboard(): Promise<void> {
+  const next = !store.allowRemoteClipboard
+  store.allowRemoteClipboard = next
+  try {
+    const r = await window.api.settings.set('allowRemoteClipboard', next)
+    if (r && r.ok === false) {
+      store.allowRemoteClipboard = !next
+      toast(t('set.gen.writeFail'), 'error')
+    }
+  } catch {
+    store.allowRemoteClipboard = !next
+    toast(t('set.gen.writeFail'), 'error')
+  }
+}
+
 async function toggleCopyOnSelect(): Promise<void> {
   const next = !store.copyOnSelect
   store.copyOnSelect = next
@@ -1478,6 +1493,13 @@ function onLockPassEnter(e: KeyboardEvent): void {
                     <span class="r-desc">{{ t('set.term.sanitizePasteDesc') }}</span>
                   </div>
                   <span class="switch" :class="{ on: store.sanitizePaste }"><i /></span>
+                </label>
+                <label class="row toggle" @click="toggleAllowRemoteClipboard">
+                  <div class="r-text">
+                    <span class="r-title">{{ t('set.term.allowRemoteClipboard') }}</span>
+                    <span class="r-desc">{{ t('set.term.allowRemoteClipboardDesc') }}</span>
+                  </div>
+                  <span class="switch" :class="{ on: store.allowRemoteClipboard }"><i /></span>
                 </label>
                 <label class="row toggle" @click="toggleCopyOnSelect">
                   <div class="r-text">

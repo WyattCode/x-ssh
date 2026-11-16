@@ -14,3 +14,14 @@ export function decodeOsc52Payload(payload: string, maxLen = 2_000_000): string 
     return null
   }
 }
+
+/** Per-terminal consent and rate gate; disabled unless explicitly enabled. */
+export function createOsc52Gate(): (payload: string, enabled: boolean, now?: number) => string | null {
+  let last = -Infinity
+  return (payload, enabled, now = Date.now()) => {
+    if (!enabled || payload.length > 65536 || now - last < 1000) return null
+    const text = decodeOsc52Payload(payload, 65536)
+    if (text !== null) last = now
+    return text
+  }
+}
