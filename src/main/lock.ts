@@ -27,6 +27,7 @@ export class MasterLock {
   private hash: string | null = null
   private unlocked = true
   private verifying = false
+  private lockEpoch = 0
   private failures = 0
   private nextAttempt = 0
 
@@ -67,11 +68,11 @@ export class MasterLock {
   private async verify(passphrase: string): Promise<boolean> {
     if (!this.hash || this.verifying || Date.now() < this.nextAttempt) return false
     this.verifying = true
-    const hash = this.hash, salt = this.salt
+    const hash = this.hash, salt = this.salt, epoch = this.lockEpoch
     try {
       const candidate = Buffer.from(await this.derive(passphrase, salt), 'hex')
       const stored = Buffer.from(hash, 'hex')
-      const valid = this.hash === hash && candidate.length === stored.length && timingSafeEqual(candidate, stored)
+      const valid = this.lockEpoch === epoch && this.hash === hash && candidate.length === stored.length && timingSafeEqual(candidate, stored)
       if (valid) { this.failures = 0; this.nextAttempt = 0 }
       else { this.nextAttempt = Date.now() + Math.min(30_000, 500 * 2 ** Math.min(this.failures++, 6)) }
       return valid
@@ -87,11 +88,19 @@ export class MasterLock {
   async setPassphrase(passphrase: string): Promise<void> {
     if (!passphrase) throw new Error('passphrase-empty')
     if (this.enabled && !this.unlocked) throw new Error('app-locked')
-    const salt = randomBytes(16).toString('hex')
-    this.salt = salt
-    this.hash = await this.derive(passphrase, salt)
-    this.unlocked = true
-    await this.settings.set(KEY, { salt, hash: this.hash })
+    if (this.verifying) throw new Error('app-locked')
+    this.verifying = true
+    const epoch = this.lockEpoch
+    try {
+      const salt = randomBytes(16).toString('hex')
+      const hash = await this.derive(passphrase, salt)
+      await this.settings.set(KEY, { salt, hash })
+      this.salt = salt
+      this.hash = hash
+      this.unlocked = this.lockEpoch === epoch
+      this.failures = 0
+      this.nextAttempt = 0
+    } finally { this.verifying = false }
   }
 
   /** Verifies the current passphrase, then removes the lock record. */
@@ -108,6 +117,7 @@ export class MasterLock {
 
   /** Locks the app immediately (no-op when no passphrase is set). */
   lock(): void {
+    this.lockEpoch++
     if (this.enabled) this.unlocked = false
   }
 
