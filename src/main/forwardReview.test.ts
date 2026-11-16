@@ -42,3 +42,10 @@ it('B3 bounds remote forward negotiation and discards late success', async () =>
     expect(client.unforwardIn).toHaveBeenCalled()
   } finally { vi.useRealTimers() }
 })
+it('B4 converts synchronous ssh2 forwarding throws into callback errors', () => {
+  const mgr = new SshManager({} as never, {} as never) as any
+  const callback = vi.fn()
+  const client = { forwardOut: () => { throw new Error('Not connected') } }
+  expect(() => mgr.safeForwardOut(client, '127.0.0.1', 0, 'host', 22, callback)).not.toThrow()
+  expect(callback).toHaveBeenCalledWith(expect.objectContaining({ message: 'Not connected' }), undefined)
+})

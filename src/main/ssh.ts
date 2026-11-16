@@ -466,7 +466,7 @@ export class SshManager {
         // has no timeout of its own, so connect() would never settle.
         const timer = setTimeout(() => fail('jump-forward-timeout', { code: 'jump-forward-timeout' }), this.jumpForwardTimeoutMs)
         timer.unref?.()
-        client.forwardOut(
+        this.safeForwardOut(client, 
           '127.0.0.1',
           0,
           targetHost,
@@ -656,6 +656,16 @@ export class SshManager {
     })
   }
 
+  private safeForwardOut(client: Client, host: string, port: number, target: string, targetPort: number, cb: (err: Error | undefined, channel: ClientChannel) => void): void {
+    try { client.forwardOut(host, port, target, targetPort, cb) }
+    catch (error) { cb(error as Error, undefined as unknown as ClientChannel) }
+  }
+
+  private safeForwardIn(client: Client, host: string, port: number, cb: (err?: Error) => void): void {
+    try { client.forwardIn(host, port, cb) }
+    catch (error) { cb(error as Error) }
+  }
+
   /** Opens a single port forward per rule mode (local -L, remote -R, dynamic
    *  SOCKS -D) and returns the local servers it created (none for remote). */
   private openRule(session: Session, rule: HostForward): Server[] {
@@ -687,7 +697,7 @@ export class SshManager {
         socket.destroy()
       }, this.forwardOutTimeoutMs)
       timer.unref?.()
-      session.client.forwardOut('127.0.0.1', lp, rh, rp, (err, channel) => {
+      this.safeForwardOut(session.client, '127.0.0.1', lp, rh, rp, (err, channel) => {
         clearTimeout(timer)
         if (settled) {
           // Timed out already: the local client is gone, so drop the channel.
@@ -935,7 +945,7 @@ export class SshManager {
       let settled = false
       const timer = setTimeout(() => { settled = true; resolve(false) }, this.forwardOutTimeoutMs)
       timer.unref?.()
-      session.client.forwardIn('127.0.0.1', rule.localPort, (err) => {
+      this.safeForwardIn(session.client, '127.0.0.1', rule.localPort, (err) => {
         clearTimeout(timer)
         if (settled || this.sessions.get(session.id) !== session) {
           if (!err) this.unregisterRemoteForward(session.client, rule.localPort, handler)
@@ -1001,7 +1011,7 @@ export class SshManager {
         failReply()
       }, this.forwardOutTimeoutMs)
       timer.unref?.()
-      session.client.forwardOut('127.0.0.1', 0, req.host, req.port, (err, channel) => {
+      this.safeForwardOut(session.client, '127.0.0.1', 0, req.host, req.port, (err, channel) => {
         clearTimeout(timer)
         if (settled) {
           // Timed out already: the failure reply went out, drop the channel.
