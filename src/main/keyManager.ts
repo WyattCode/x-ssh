@@ -270,7 +270,6 @@ export class KeyManager {
       await rm(`${priv}.pub`, { force: true }).catch(() => {})
       // Stable marker: main turns this into KeyErrorCode 'invalid-key'.
       throw new Error('invalid-key')
-      throw new Error('invalid-private-key')
     }
     const label = basename(srcPath).replace(/\.(pem|key|pub)$/i, '')
     try {

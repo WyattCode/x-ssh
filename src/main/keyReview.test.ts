@@ -24,3 +24,8 @@ it('B21 bounds concurrent key descriptions', async () => {
     expect(max).toBeLessThanOrEqual(2)
   } finally { await rm(dir, { recursive: true, force: true }) }
 })
+it('B23 has one stable invalid-private-key rejection', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const source = await readFile('src/main/keyManager.ts', 'utf8')
+  expect(source.includes("throw new Error('invalid-private-key')")).toBe(false)
+})
