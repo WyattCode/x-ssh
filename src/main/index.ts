@@ -1,3 +1,4 @@
+import { publishKeyCommand } from '../shared/publicKey'
 import { rendererConnLogPush } from './connLogIpc'
 import { renameNoReplace } from './localRename'
 import { app, shell, BrowserWindow, ipcMain, dialog, nativeImage, nativeTheme, screen, Menu, Notification, Tray, globalShortcut, powerMonitor, clipboard, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron'
@@ -2781,7 +2782,7 @@ function registerIpc(): void {
     if (!pub) return { ok: false, code: 'no-pubkey' }
     if (!sshManager) return { ok: false, code: 'not-ready' }
     const results = await withTempHosts(hostIds, async (sid) => {
-      const cmd = `umask 077; mkdir -p ~/.ssh && chmod 700 ~/.ssh\ncat >> ~/.ssh/authorized_keys <<'XSSH'\n${pub}\nXSSH\ntouch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys`
+      const cmd = publishKeyCommand(pub)
       await requireSshManager().execCommand(sid, cmd)
     })
     return { ok: true, results }

@@ -1,3 +1,4 @@
+import { validatePublicKey } from '../shared/publicKey'
 import { randomUUID } from 'node:crypto'
 import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
@@ -255,10 +256,13 @@ export class KeyManager {
     await writeFile(priv, buf, { mode: 0o600 })
     const pubSrc = `${srcPath}.pub`
     try {
-      const pubBuf = await readFile(pubSrc)
-      await writeFile(`${priv}.pub`, pubBuf, { mode: 0o644 })
-    } catch {
-      /* no .pub alongside; fine */
+      const pubText = await readFile(pubSrc, 'utf8')
+      await writeFile(`${priv}.pub`, validatePublicKey(pubText) + '\n', { mode: 0o644 })
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        await rm(priv, { force: true })
+        throw error
+      }
     }
     // Reject a copy without a valid key marker (matches PEM / OpenSSH private keys).
     if (!isPrivateKey(buf)) {
@@ -289,11 +293,12 @@ export class KeyManager {
     if (basename(id) !== id) throw new Error('bad-id')
     const priv = join(this.keysDir, id)
     try {
-      return (await readFile(`${priv}.pub`, 'utf8')).trim()
-    } catch {
+      return validatePublicKey(await readFile(`${priv}.pub`, 'utf8'))
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
       // No .pub alongside — derive it, which only works for passphrase-free keys.
       const { stdout } = await this.sshKeygen(['-y', '-P', '', '-f', priv])
-      return stdout.trim()
+      return validatePublicKey(stdout)
     }
   }
 
