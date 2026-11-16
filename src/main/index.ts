@@ -1,3 +1,4 @@
+import { rendererConnLogPush } from './connLogIpc'
 import { renameNoReplace } from './localRename'
 import { app, shell, BrowserWindow, ipcMain, dialog, nativeImage, nativeTheme, screen, Menu, Notification, Tray, globalShortcut, powerMonitor, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron'
 import { join, dirname, basename, isAbsolute, sep } from 'node:path'
@@ -2615,10 +2616,7 @@ function registerIpc(): void {
     return { ok: true as const, dark: nativeTheme.shouldUseDarkColors }
   })
   handle(IPC.connLogList, async () => (await settings.get<ConnLogEntry[]>('connectionLog')) ?? [])
-  handle(IPC.connLogPush, async (_e, entry: ConnLogEntry) => {
-    await pushConnLog(entry)
-    return { ok: true }
-  })
+  handle(IPC.connLogPush, (_e, entry: ConnLogEntry) => rendererConnLogPush(entry, pushConnLog))
   handle(IPC.connLogClear, async () => {
     try {
       await settings.set('connectionLog', [])
