@@ -752,7 +752,7 @@ export class SshManager {
     const mode = rule.mode ?? 'local'
     if (mode !== 'dynamic' && !rule.remotePort) return { ok: false, code: 'bad-port', error: 'missing remote port' }
     const key = `${mode}:${rule.localPort}`
-    if (session.runtimeRules?.has(key)) return { ok: false, code: 'already', error: 'already forwarding' }
+    if (session.runtimeRules?.has(key) || (mode === 'remote' && this.remoteForwardTable(session.client).has(rule.localPort))) return { ok: false, code: 'already', error: 'already forwarding' }
     // Remote (-R) forwards have no local listener: openRule returns [] for them,
     // so the forwardIn result has to be awaited here or a refused remote listen
     // port would be recorded as live.
@@ -888,6 +888,7 @@ export class SshManager {
    *  'tcp connection' event, keyed by the remote listen port. */
   private openRemoteForward(session: Session, rule: HostForward): Promise<boolean> {
     const table = this.remoteForwardTable(session.client)
+    if (table.has(rule.localPort)) return Promise.resolve(false)
     if (!session.remoteForwards) session.remoteForwards = new Map()
     const destHost = rule.remoteHost || '127.0.0.1'
     const destPort = rule.remotePort
@@ -925,16 +926,14 @@ export class SshManager {
         inSock.pipe(dest).pipe(inSock)
       })
     }
-    session.remoteForwards.set(rule.localPort, handler)
-    table.set(rule.localPort, handler)
     return new Promise<boolean>((resolve) => {
       session.client.forwardIn('127.0.0.1', rule.localPort, (err) => {
         if (err) {
-          session.remoteForwards?.delete(rule.localPort)
-          if (table.get(rule.localPort) === handler) table.delete(rule.localPort)
           resolve(false)
           return
         }
+        session.remoteForwards!.set(rule.localPort, handler)
+        table.set(rule.localPort, handler)
         resolve(true)
       })
     })
