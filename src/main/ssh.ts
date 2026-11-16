@@ -1027,6 +1027,8 @@ export class SshManager {
         socket.write(Buffer.from([0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0]))
         socket.on('error', () => channel.destroy())
         channel.on('error', () => socket.destroy())
+        this.trackForwardSocket(session, socket)
+        this.trackForwardSocket(session, channel)
         // After the handshake, raw bytes flow both ways.
         socket.pipe(channel).pipe(socket)
       })

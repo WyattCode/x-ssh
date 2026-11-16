@@ -49,3 +49,15 @@ it('B4 converts synchronous ssh2 forwarding throws into callback errors', () => 
   expect(() => mgr.safeForwardOut(client, '127.0.0.1', 0, 'host', 22, callback)).not.toThrow()
   expect(callback).toHaveBeenCalledWith(expect.objectContaining({ message: 'Not connected' }), undefined)
 })
+it('B16 tracks both SOCKS endpoints for session teardown', () => {
+  const mgr = new SshManager({} as never, {} as never) as any
+  const socket = Object.assign(new EventEmitter(), { write: vi.fn(), pipe: vi.fn(), destroy: vi.fn() })
+  const channel = Object.assign(new EventEmitter(), { pipe: vi.fn(), destroy: vi.fn() })
+  socket.pipe.mockReturnValue(channel); channel.pipe.mockReturnValue(socket)
+  const session = { client: { forwardOut: (...args: any[]) => args.at(-1)(null, channel) } }
+  mgr.handleSocks(session, socket)
+  socket.emit('data', Buffer.from([5, 1, 0, 5, 1, 0, 1, 127, 0, 0, 1, 0, 22]))
+  mgr.closeForwards(session)
+  expect(socket.destroy).toHaveBeenCalled()
+  expect(channel.destroy).toHaveBeenCalled()
+})
