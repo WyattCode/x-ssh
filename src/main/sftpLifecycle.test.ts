@@ -50,3 +50,11 @@ it('B24 bounds actual text bytes even when stat lies', async () => {
   await expect(mgr.readTextFile('s', '/large')).rejects.toThrow('file-too-large')
   expect(stream.destroyed).toBe(true)
 })
+it('B6 clears failed synchronous handshakes so the next request can retry', async () => {
+  const mgr = new SshManager({} as never, {} as never) as any
+  const channel = new EventEmitter()
+  let attempts = 0
+  mgr.sessions.set('s', { client: { sftp: (cb: Function) => { if (++attempts === 1) throw new Error('Not connected'); cb(null, channel) } } })
+  await expect(mgr.getSftp('s')).rejects.toThrow('Not connected')
+  expect(await mgr.getSftp('s')).toBe(channel)
+})

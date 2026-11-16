@@ -1837,7 +1837,7 @@ export class SshManager {
         rej(new Error('sftp-timeout'))
       }, this.sftpTimeoutMs)
       timer.unref?.()
-      session.client.sftp((err, sftp) => {
+      try { session.client.sftp((err, sftp) => {
         clearTimeout(timer)
         if (expired || this.sessions.get(sessionId) !== session) {
           sftp?.on('error', () => {})
@@ -1864,9 +1864,13 @@ export class SshManager {
         sftp.on('end', invalidate)
         session.sftp = sftp
         res(sftp)
-      })
+      }) } catch (error) { clearTimeout(timer); rej(error) }
     })
-    return session.sftpPromise
+    const attempt = session.sftpPromise
+    void attempt.catch(() => {
+      if (session.sftpPromise === attempt) session.sftpPromise = undefined
+    })
+    return attempt
   }
 
   private posixJoin(dir: string, name: string): string {
