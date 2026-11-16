@@ -88,8 +88,7 @@ if (process.platform === 'win32') app.setAppUserModelId('com.x-ssh.app')
 let mainWindow: BrowserWindow | null = null
 
 /** Only the app's own top frame may talk to main. A navigated window (or an
- *  injected iframe) would otherwise inherit the full preload API, which with
- *  `sandbox: true` means filesystem and credential access. */
+ *  injected iframe) would otherwise inherit the privileged preload API. */
 function isTrustedIpcSender(e: IpcMainInvokeEvent | IpcMainEvent): boolean {
   const w = mainWindow
   if (!w || w.isDestroyed()) return false
@@ -2771,7 +2770,7 @@ function registerIpc(): void {
   })
   // Appends a public key to the authorized_keys of several saved hosts. Each is
   // connected with its own saved credentials, the key written via a shell
-  // here-doc (safe from quoting), then the one-shot session is torn down.
+  // quoted printf data, then the one-shot session is torn down.
   handle(IPC.keysPublish, async (_e, keyId: string, hostIds: string[]) => {
     let pub: string
     try {

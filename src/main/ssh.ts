@@ -804,7 +804,7 @@ export class SshManager {
       // A failed bind surfaces as an async 'error' after listen(); wait for all
       // servers to actually start listening (or roll back the ones that didn't).
       const bound = await Promise.all(servers.map((s) => this.waitForListen(s)))
-      if (bound.some((b) => !b)) {
+      if (this.sessions.get(sessionId) !== session || bound.some((b) => !b)) {
         servers.forEach((s) => s.close())
         return { ok: false, code: 'in-use', error: `local port ${rule.localPort} in use` }
       }
@@ -1513,7 +1513,8 @@ export class SshManager {
               return settle({ ok: false, error: message })
             }
             const session = this.sessions.get(id)
-            if (session) session.stream = stream
+            if (!session || settled) { stream.close(); return settle({ ok: false, error: 'session-missing' }) }
+            session.stream = stream
 
             stream.on('data', (data: Buffer) => this.emitData(id, data.toString('utf8')))
             stream.stderr.on('data', (data: Buffer) => this.sendData(id, data.toString('utf8')))
@@ -1586,6 +1587,7 @@ export class SshManager {
                 }
               }
 
+              if (!session || this.sessions.get(id) !== session) return settle({ ok: false, error: 'session-missing' })
               // Send the per-host startup command(s) after the shell is ready. An
               // optional delay lets a slow login shell/MOTD finish first (values
               // up to a few seconds are typical for `wait`-style startup hooks).
@@ -1701,7 +1703,8 @@ export class SshManager {
             return settle({ ok: false, error: message })
           }
           const session = this.sessions.get(id)
-          if (session) session.stream = stream
+          if (!session || settled) { stream.close(); return settle({ ok: false, error: 'session-missing' }) }
+          session.stream = stream
           stream.on('data', (d: Buffer) => this.emitData(id, d.toString('utf8')))
           stream.stderr.on('data', (d: Buffer) => this.sendData(id, d.toString('utf8')))
           stream.on('close', () => {
@@ -1734,6 +1737,7 @@ export class SshManager {
                 forwardError = failed.join(',')
               }
             }
+            if (!session || this.sessions.get(id) !== session) return settle({ ok: false, error: 'session-missing' })
             if (params.onConnect) {
               const delay = params.onConnectDelayMs ?? 0
               if (delay > 0) setTimeout(() => stream.write(params.onConnect + '\n'), delay)
@@ -3256,7 +3260,18 @@ export class SshManager {
   async putFileSilent(sessionId: string, localPath: string, remoteDir: string, name: string): Promise<void> {
     const sftp = await this.getSftp(sessionId)
     const remote = this.posixJoin(remoteDir, name)
-    await this.pipeStream(randomUUID(), createReadStream(this.longPath(localPath)), sftp.createWriteStream(remote, await this.remoteWriteOptions(sftp, remote)), () => undefined)
+    const options = await this.remoteWriteOptions(sftp, remote)
+    let read: Readable | undefined
+    let write: Writable | undefined
+    try {
+      write = sftp.createWriteStream(remote, options)
+      read = createReadStream(this.longPath(localPath))
+      await this.pipeStream(randomUUID(), read, write, () => undefined)
+    } catch (error) {
+      read?.destroy()
+      write?.destroy()
+      throw error
+    }
   }
 
   async mkdir(sessionId: string, path: string): Promise<void> {

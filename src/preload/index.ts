@@ -219,7 +219,7 @@ const api = {
     forwardRemove: (
       sessionId: string,
       rule: { mode?: ForwardMode; localPort: number }
-    ): Promise<{ ok: boolean; error?: string; code?: ForwardErrorCode }> =>
+    ): Promise<{ ok: boolean; removed?: boolean; error?: string; code?: ForwardErrorCode }> =>
       ipcRenderer.invoke(IPC.sshForwardRemove, sessionId, rule)
   },
   sftp: {
