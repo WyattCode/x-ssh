@@ -22,3 +22,19 @@ it('B2 refuses to guess permissions when stat fails', async () => {
   const sftp = { stat: (_: string, cb: Function) => cb(Object.assign(new Error('denied'), { code: 3 })) }
   await expect(mgr.remoteWriteOptions(sftp, '/key')).rejects.toThrow('denied')
 })
+it('B6 times out an unanswered handshake and closes a late channel', async () => {
+  vi.useFakeTimers()
+  try {
+    const mgr = new SshManager({} as never, {} as never) as any
+    mgr.sftpTimeoutMs = 10
+    let cb: Function = () => {}
+    const session = { client: { sftp: (callback: Function) => { cb = callback } } }
+    mgr.sessions.set('s', session)
+    const pending = expect(mgr.getSftp('s')).rejects.toThrow('sftp-timeout')
+    await vi.advanceTimersByTimeAsync(11); await pending
+    expect((session as any).sftpPromise).toBeUndefined()
+    const channel = Object.assign(new EventEmitter(), { end: vi.fn() })
+    cb(null, channel)
+    expect(channel.end).toHaveBeenCalled()
+  } finally { vi.useRealTimers() }
+})

@@ -1781,6 +1781,8 @@ export class SshManager {
   }
 
   // ---- SFTP ----
+  sftpTimeoutMs = 15_000
+
   private getSftp(sessionId: string): Promise<SFTPWrapper> {
     const session = this.sessions.get(sessionId)
     if (!session) return Promise.reject(new Error('session-missing'))
@@ -1788,7 +1790,21 @@ export class SshManager {
     // Reuse an in-flight sftp() so concurrent callers don't open extra channels.
     if (session.sftpPromise) return session.sftpPromise
     session.sftpPromise = new Promise<SFTPWrapper>((res, rej) => {
+      let expired = false
+      const timer = setTimeout(() => {
+        expired = true
+        session.sftpPromise = undefined
+        rej(new Error('sftp-timeout'))
+      }, this.sftpTimeoutMs)
+      timer.unref?.()
       session.client.sftp((err, sftp) => {
+        clearTimeout(timer)
+        if (expired || this.sessions.get(sessionId) !== session) {
+          sftp?.on('error', () => {})
+          sftp?.end()
+          rej(new Error('session-missing'))
+          return
+        }
         if (err) {
           session.sftpPromise = undefined
           return rej(err)
