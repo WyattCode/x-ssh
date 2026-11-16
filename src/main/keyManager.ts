@@ -48,25 +48,19 @@ export class KeyManager {
     await this.ensureDir()
     const names = await readdir(this.keysDir)
     const labels = await this.readLabels()
-    // Concurrently describe every candidate (skipping .pub / hidden / scratch
-    // files) instead of spawning ssh-keygen serially, which made the host
-    // editor slow once a user had several keys.
-    const jobs: Promise<ManagedKey | null>[] = []
-    for (const n of names) {
-      if (shouldSkipKeyFile(n)) continue
-      jobs.push(
-        (async (): Promise<ManagedKey | null> => {
-          const p = join(this.keysDir, n)
-          try {
-            if (!(await stat(p)).isFile()) return null
-          } catch {
-            return null
-          }
-          return this.describe(p, n, labels[n])
-        })()
-      )
+    const candidates = names.filter((name) => !shouldSkipKeyFile(name))
+    const out: ManagedKey[] = []
+    const worker = async (): Promise<void> => {
+      for (;;) {
+        const n = candidates.shift()
+        if (n === undefined) return
+        const p = join(this.keysDir, n)
+        try {
+          if ((await stat(p)).isFile()) out.push(await this.describe(p, n, labels[n]))
+        } catch { /* vanished or unreadable */ }
+      }
     }
-    const out = (await Promise.all(jobs)).filter((k): k is ManagedKey => k != null)
+    await Promise.all([worker(), worker()])
     // Newest first when types/names are identical; keep insertion order stable.
     return out.sort((a, b) => (b.mtime ?? 0) - (a.mtime ?? 0))
   }
@@ -205,11 +199,11 @@ export class KeyManager {
     // protection the passphrase is for.
     let pair: { private: string; public: string }
     try {
-      pair = ssh2.utils.generateKeyPairSync(type, {
+      pair = await new Promise((resolve, reject) => ssh2.utils.generateKeyPair(type, {
         ...(opts.bits && type === 'rsa' ? { bits: opts.bits } : {}),
         ...(opts.passphrase ? { passphrase: opts.passphrase } : {}),
         comment: `x-ssh-${id}`
-      })
+      }, (error, result) => error ? reject(error) : resolve(result)))
     } catch {
       throw new Error('keygen-failed')
     }
