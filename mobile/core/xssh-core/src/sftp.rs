@@ -44,6 +44,10 @@ fn sftp_err(err: impl std::fmt::Display) -> SshError {
     SshError::Sftp(err.to_string())
 }
 
+fn require_staging<T>(staged: Option<T>) -> Result<T, SshError> {
+    staged.ok_or_else(|| SshError::Sftp("cannot-create-upload-temp".to_owned()))
+}
+
 /// 临时文件 / 备份文件名里的后缀:进程号 + 时间 + 递增计数。不是为了"猜不到"
 /// (独占创建本身就挡住了抢先放符号链接的人),只是让两次上传、两个进程不会互相踩到。
 fn unique_suffix() -> String {
@@ -152,7 +156,7 @@ impl Sftp {
     }
 
     /// 在 [target] 旁边**独占创建**一个临时文件(`CREATE | EXCLUDE`),并在创建时就带上 [permissions]
-    /// (去掉文件类型位)。返回打开的文件和它的路径;创建不了返回 None,由调用方退回直写。
+    /// (去掉文件类型位)。返回打开的文件和它的路径;创建不了返回 None,由调用方拒绝上传。
     ///
     /// 独占很关键:原来用的是 `create`(`CREATE | TRUNCATE`),它会**跟着符号链接走**并截断已有文件 ——
     /// 在别人也能写的目录里,有人预先放一个同名符号链接指向你的文件,你的上传就会把那个文件覆盖掉。
@@ -212,13 +216,10 @@ impl Sftp {
             // 先开临时文件,**创建的那一刻就带上原来的权限位**:原来是等改名之后才补回去,
             // 整个上传期间 0600 的私钥 / 凭据文件的新内容是按服务端默认(通常 0644)躺在磁盘上的。
             //
-            // **开不出来就退回直接写目标**:目录不可写、而文件本身可写的情况
-            // (别人家目录下一个 group-writable 的文件)本来传得动,不能因为多了这道保护就传不了。
-            // 退回的那条路没有"传完再换"的保护,和以前一样。
-            let (mut file, temp) = match self.create_temp(&target, previous.as_ref().and_then(|m| m.permissions)).await {
-                Some((file, temp)) => (file, Some(temp)),
-                None => (self.session.create(target.clone()).await.map_err(sftp_err)?, None),
-            };
+            // Refuse if staging is unavailable: direct writes can destroy the original.
+            let (mut file, temp) = require_staging(
+                self.create_temp(&target, previous.as_ref().and_then(|m| m.permissions)).await
+            )?;
 
             let outcome = async {
                 let mut buffer = vec![0u8; CHUNK];
@@ -244,16 +245,9 @@ impl Sftp {
                 Ok(done) => done,
                 Err(err) => {
                     // 取消、写失败、读本地失败:只收拾自己的临时文件,目标不动。
-                    // 退回直写的那条路上没有临时文件可收 —— 目标已经被截断了,无能为力。
-                    if let Some(temp) = &temp {
-                        let _ = self.session.remove_file(temp.clone()).await;
-                    }
+                    let _ = self.session.remove_file(temp.clone()).await;
                     return Err(err);
                 }
-            };
-
-            let Some(temp) = temp else {
-                return Ok(done);
             };
 
             // 盖过去。SFTP v3 的 rename 在目标已存在时会失败(这个库也没暴露 posix-rename 扩展),
@@ -264,8 +258,8 @@ impl Sftp {
             let had_target = previous.is_some();
             let moved_aside = had_target && self.session.rename(target.clone(), backup.clone()).await.is_ok();
             if had_target && !moved_aside {
-                // 旧文件挪不开:退回原来的办法(先删再改名),总比整个上传失败强。
-                let _ = self.session.remove_file(target.clone()).await;
+                let _ = self.session.remove_file(temp.clone()).await;
+                return Err(SshError::Sftp("cannot-stage-existing-target".to_owned()));
             }
             if let Err(err) = self.session.rename(temp.clone(), target.clone()).await {
                 if moved_aside {
@@ -314,7 +308,13 @@ impl Sftp {
 
 #[cfg(test)]
 mod tests {
-    use super::{join, parent, unique_suffix};
+    use super::{join, parent, unique_suffix, require_staging};
+
+    #[test]
+    fn b18_missing_staging_refuses_upload() {
+        assert!(require_staging::<()>(None).is_err());
+        assert_eq!(require_staging(Some(42)).unwrap(), 42);
+    }
 
     #[test]
     fn temp_and_backup_names_do_not_collide() {
