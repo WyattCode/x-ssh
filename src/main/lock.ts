@@ -1,4 +1,4 @@
-import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
+import { randomBytes, scrypt, timingSafeEqual } from 'node:crypto'
 import type { SettingsStore } from './settings'
 
 /**
@@ -26,6 +26,9 @@ export class MasterLock {
   private salt = ''
   private hash: string | null = null
   private unlocked = true
+  private verifying = false
+  private failures = 0
+  private nextAttempt = 0
 
   constructor(private settings: SettingsStore) {}
 
@@ -54,15 +57,25 @@ export class MasterLock {
     return { enabled: this.enabled, locked: this.locked }
   }
 
-  private derive(passphrase: string, salt: string): string {
-    return scryptSync(passphrase, salt, 64).toString('hex')
+  private derive(passphrase: string, salt: string): Promise<string> {
+    return new Promise((resolve, reject) => scrypt(passphrase, salt, 64, (error, key) => {
+      if (error) reject(error)
+      else resolve(key.toString('hex'))
+    }))
   }
 
-  private verify(passphrase: string): boolean {
-    if (!this.hash) return false
-    const candidate = Buffer.from(this.derive(passphrase, this.salt), 'hex')
-    const stored = Buffer.from(this.hash, 'hex')
-    return candidate.length === stored.length && timingSafeEqual(candidate, stored)
+  private async verify(passphrase: string): Promise<boolean> {
+    if (!this.hash || this.verifying || Date.now() < this.nextAttempt) return false
+    this.verifying = true
+    const hash = this.hash, salt = this.salt
+    try {
+      const candidate = Buffer.from(await this.derive(passphrase, salt), 'hex')
+      const stored = Buffer.from(hash, 'hex')
+      const valid = this.hash === hash && candidate.length === stored.length && timingSafeEqual(candidate, stored)
+      if (valid) { this.failures = 0; this.nextAttempt = 0 }
+      else { this.nextAttempt = Date.now() + Math.min(30_000, 500 * 2 ** Math.min(this.failures++, 6)) }
+      return valid
+    } finally { this.verifying = false }
   }
 
   /** Enables (or changes) the master passphrase. The caller just succeeded in
@@ -76,7 +89,7 @@ export class MasterLock {
     if (this.enabled && !this.unlocked) throw new Error('app-locked')
     const salt = randomBytes(16).toString('hex')
     this.salt = salt
-    this.hash = this.derive(passphrase, salt)
+    this.hash = await this.derive(passphrase, salt)
     this.unlocked = true
     await this.settings.set(KEY, { salt, hash: this.hash })
   }
@@ -88,7 +101,7 @@ export class MasterLock {
 
   /** Attempts to unlock with the passphrase. Returns true on success. */
   async unlock(passphrase: string): Promise<boolean> {
-    if (!this.verify(passphrase)) return false
+    if (!(await this.verify(passphrase))) return false
     this.unlocked = true
     return true
   }
@@ -109,7 +122,7 @@ export class MasterLock {
 
   /** Drop the lock record after checking the passphrase. */
   private async forget(passphrase: string): Promise<boolean> {
-    if (!this.verify(passphrase)) return false
+    if (!(await this.verify(passphrase))) return false
     this.hash = null
     this.salt = ''
     this.unlocked = true
