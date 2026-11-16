@@ -2564,6 +2564,10 @@ export class SshManager {
           }
         }
       } else {
+        while (queue.length >= SshManager.QUEUE_MAX && !this.cancelledJobs.has(jobId)) {
+          await new Promise((r) => setTimeout(r, 15))
+        }
+        if (this.cancelledJobs.has(jobId)) return
         discovered++
         queue.push({ remote, local, name: basename(local) })
       }
@@ -2593,11 +2597,11 @@ export class SshManager {
           // replaced from the start. On error/cancel the partial is kept so the
           // next attempt can pick up from it.
           let offset = 0
+          remoteInfo = await this.statFile(sftp, item.remote)
           try {
             const localSize = (await stat(this.longPath(item.local))).size
             if (localSize > 0) {
-              const remote = await this.statFile(sftp, item.remote)
-              remoteInfo = remote
+              const remote = remoteInfo
               const prior = this.partialDownloads.get(partialKey)
               const resumable =
                 !!remote &&
