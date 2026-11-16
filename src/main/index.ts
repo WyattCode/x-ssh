@@ -911,7 +911,7 @@ async function detectHostOs(hostId: string, sessionId: string | undefined, at?: 
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
     const out = await Promise.race([
-      sshManager.execCommand(sessionId, OS_PROBE_COMMAND),
+      sshManager.execCommand(sessionId, OS_PROBE_COMMAND, 7500),
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => reject(new Error('timeout')), 8000)
       })

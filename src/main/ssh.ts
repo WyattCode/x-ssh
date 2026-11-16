@@ -3555,37 +3555,39 @@ export class SshManager {
   // ---- tmux / screen session helpers (run over a separate exec channel) ----
 
   /** Runs a command on a dedicated shell channel and returns its stdout. */
-  private remoteExec(sessionId: string, cmd: string): Promise<string> {
+  private remoteExec(sessionId: string, cmd: string, timeoutMs = this.execTimeoutMs): Promise<string> {
     const session = this.sessions.get(sessionId)
     if (!session) return Promise.reject(new Error('session-missing'))
     return new Promise((resolve, reject) => {
-      session.client.exec(cmd, (err, stream) => {
-        if (err) return reject(err)
-        let out = ''
-        // The SSH2 spec makes exit-status optional, so a missing 'exit' event
-        // still resolves (back-compat); when present, a non-zero code is a
-        // failure — previously this was silently reported as success.
-        let exitCode: number | null = null
-        let settled = false
-        const settle = (e?: Error, value?: string): void => {
-          if (settled) return
-          settled = true
-          if (e) reject(e)
-          else resolve(value ?? out)
-        }
-        stream.on('data', (d: Buffer) => {
-          out += d.toString()
+      let channel: ClientChannel | undefined
+      let settled = false
+      let out = Buffer.alloc(0)
+      const finish = (error?: Error): void => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        if (error) reject(error)
+        else resolve(out.toString('utf8'))
+      }
+      const timer = setTimeout(() => {
+        finish(new Error('remote-timeout'))
+        try { channel?.close() } catch { /* already closed */ }
+      }, timeoutMs)
+      timer.unref?.()
+      try {
+        session.client.exec(cmd, (err, stream) => {
+          if (err) return finish(err)
+          channel = stream
+          if (settled) { stream.close(); return }
+          let exitCode: number | null = null
+          stream.on('data', (data: Buffer) => {
+            if (!settled && out.length < 65536) out = Buffer.concat([out, data.subarray(0, 65536 - out.length)])
+          })
+          stream.on('exit', (code: unknown) => { if (typeof code === 'number') exitCode = code })
+          stream.on('close', () => finish(exitCode !== null && exitCode !== 0 ? new Error(`remote-exit:${exitCode}`) : undefined))
+          stream.on('error', finish)
         })
-        stream.on('exit', (code: unknown) => {
-          if (typeof code === 'number') exitCode = code
-        })
-        // A machine code, not display text: callers that show it to the user
-        // (publish / revoke) translate it, so the wording isn't baked in here.
-        stream.on('close', () =>
-          settle(exitCode !== null && exitCode !== 0 ? new Error(`remote-exit:${exitCode}`) : undefined)
-        )
-        stream.on('error', (e: Error) => settle(e))
-      })
+      } catch (error) { finish(error as Error) }
     })
   }
 
@@ -3713,8 +3715,8 @@ export class SshManager {
   }
 
   /** Runs a command on a dedicated exec channel and returns its stdout. */
-  execCommand(sessionId: string, cmd: string): Promise<string> {
-    return this.remoteExec(sessionId, cmd)
+  execCommand(sessionId: string, cmd: string, timeoutMs = this.execTimeoutMs): Promise<string> {
+    return this.remoteExec(sessionId, cmd, timeoutMs)
   }
 
   /** Lists tmux session names on the remote, via a throwaway exec channel. */
