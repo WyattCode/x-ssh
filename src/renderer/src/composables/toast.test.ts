@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach, vi } from 'vitest'
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
 import { useToast } from './toast'
 
 /**
@@ -7,6 +7,7 @@ import { useToast } from './toast'
  * eight identical banners covering the card they were reading.
  */
 describe('useToast', () => {
+  afterEach(() => { vi.clearAllTimers(); vi.useRealTimers() })
   beforeEach(() => {
     vi.useFakeTimers()
     // The store is module-level state shared across tests: drain it so each
