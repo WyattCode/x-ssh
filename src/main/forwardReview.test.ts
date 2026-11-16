@@ -72,3 +72,16 @@ it('B17 reports missing rules and destroys only sockets owned by a removed rule'
   expect(other.destroy).not.toHaveBeenCalled()
   expect(mgr.removeForward('s', { mode: 'remote', localPort: 9000 })).toMatchObject({ removed: false })
 })
+it('B5 reserves an in-flight remote port so concurrent requests cannot replace each other', async () => {
+  const mgr = new SshManager({} as never, {} as never) as any
+  let cb: Function = () => {}
+  const client = Object.assign(new EventEmitter(), { forwardIn: vi.fn((_: string, __: number, callback: Function) => { cb = callback }) })
+  const session = { id: 's', client }
+  mgr.sessions.set('s', session)
+  const first = mgr.openRemoteForward(session, { localPort: 9000 })
+  const second = mgr.openRemoteForward(session, { localPort: 9000 })
+  cb(null)
+  expect(await first).toBe(true)
+  expect(await second).toBe(false)
+  expect(client.forwardIn).toHaveBeenCalledTimes(1)
+})

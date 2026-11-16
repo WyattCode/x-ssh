@@ -478,7 +478,7 @@ export class SshManager {
         // has no timeout of its own, so connect() would never settle.
         const timer = setTimeout(() => fail('jump-forward-timeout', { code: 'jump-forward-timeout' }), this.jumpForwardTimeoutMs)
         timer.unref?.()
-        this.safeForwardOut(client, 
+        this.safeForwardOut(client,
           '127.0.0.1',
           0,
           targetHost,
@@ -917,9 +917,14 @@ export class SshManager {
   /** Remote forward (-R): listen on the server; each inbound connection is
    *  piped to the local destination. ssh2 reports these via a single client
    *  'tcp connection' event, keyed by the remote listen port. */
+  private readonly pendingRemoteForwards = new WeakMap<Client, Set<number>>()
+
   private openRemoteForward(session: Session, rule: HostForward): Promise<boolean> {
     const table = this.remoteForwardTable(session.client)
-    if (table.has(rule.localPort)) return Promise.resolve(false)
+    let pending = this.pendingRemoteForwards.get(session.client)
+    if (!pending) { pending = new Set(); this.pendingRemoteForwards.set(session.client, pending) }
+    if (table.has(rule.localPort) || pending.has(rule.localPort)) return Promise.resolve(false)
+    pending.add(rule.localPort)
     if (!session.remoteForwards) session.remoteForwards = new Map()
     const destHost = rule.remoteHost || '127.0.0.1'
     const destPort = rule.remotePort
@@ -962,6 +967,7 @@ export class SshManager {
       const timer = setTimeout(() => { settled = true; resolve(false) }, this.forwardOutTimeoutMs)
       timer.unref?.()
       this.safeForwardIn(session.client, '127.0.0.1', rule.localPort, (err) => {
+        pending!.delete(rule.localPort)
         clearTimeout(timer)
         if (settled || this.sessions.get(session.id) !== session) {
           if (!err) this.unregisterRemoteForward(session.client, rule.localPort, handler)
