@@ -1768,6 +1768,7 @@ export class SshManager {
             session.sftpPromise = undefined
           }
         }
+        sftp.on('error', invalidate)
         sftp.on('close', invalidate)
         sftp.on('end', invalidate)
         session.sftp = sftp
