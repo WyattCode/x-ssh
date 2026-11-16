@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer, clipboard, webUtils, webFrame } from 'electron'
+import { contextBridge, ipcRenderer, webUtils, webFrame } from 'electron'
 import { IPC, PREFS_ARG } from '../shared/ipc'
 import type {
   ConnectParams,
@@ -411,8 +411,8 @@ const api = {
     set: (level: number): void => webFrame.setZoomLevel(level)
   },
   clipboard: {
-    readText: (): string => clipboard.readText(),
-    writeText: (text: string): void => clipboard.writeText(text)
+    readText: (): string => ipcRenderer.sendSync(IPC.clipboardRead),
+    writeText: (text: string): void => ipcRenderer.sendSync(IPC.clipboardWrite, text)
   }
 }
 

@@ -1,6 +1,6 @@
 import { rendererConnLogPush } from './connLogIpc'
 import { renameNoReplace } from './localRename'
-import { app, shell, BrowserWindow, ipcMain, dialog, nativeImage, nativeTheme, screen, Menu, Notification, Tray, globalShortcut, powerMonitor, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, dialog, nativeImage, nativeTheme, screen, Menu, Notification, Tray, globalShortcut, powerMonitor, clipboard, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron'
 import { join, dirname, basename, isAbsolute, sep } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { tmpdir, homedir } from 'node:os'
@@ -88,7 +88,7 @@ let mainWindow: BrowserWindow | null = null
 
 /** Only the app's own top frame may talk to main. A navigated window (or an
  *  injected iframe) would otherwise inherit the full preload API, which with
- *  `sandbox: false` means filesystem and credential access. */
+ *  `sandbox: true` means filesystem and credential access. */
 function isTrustedIpcSender(e: IpcMainInvokeEvent | IpcMainEvent): boolean {
   const w = mainWindow
   if (!w || w.isDestroyed()) return false
@@ -1154,8 +1154,8 @@ function createWindow(saved?: SavedBounds, prefs: UiPrefs = {}): void {
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#0e0f12' : '#f7f8fa',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     webPreferences: {
-      preload: join(__dirname, '../preload/index.mjs'),
-      sandbox: false,
+      preload: join(__dirname, '../preload/index.cjs'),
+      sandbox: true,
       contextIsolation: true,
       nodeIntegration: false,
       // Hand the renderer its startup preferences as a launch argument: the
@@ -1310,6 +1310,11 @@ function createWindow(saved?: SavedBounds, prefs: UiPrefs = {}): void {
 }
 
 function registerIpc(): void {
+  on(IPC.clipboardRead, (e) => { e.returnValue = clipboard.readText() })
+  on(IPC.clipboardWrite, (e, text: unknown) => {
+    if (typeof text === 'string' && text.length <= 2_000_000) clipboard.writeText(text)
+    e.returnValue = undefined
+  })
   // ---- Host store ----
   handle(IPC.hostsList, () => store.list())
   handle(IPC.hostsSecretsStatus, () => store.secretsStatus())
