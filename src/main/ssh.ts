@@ -74,7 +74,7 @@ interface Session {
   /** Human label for history results (user@host[:port]). */
   label?: string
   /** Recent raw output, capped, for cross-session history search. */
-  history?: string
+  history?: { chunks: string[]; size: number; head: number }
   /** Set once the shell channel closes normally (e.g. the user typed `exit`),
    *  so a subsequent client close is classified as intentional, not a drop. */
   shellExit?: boolean
@@ -199,7 +199,18 @@ export class SshManager {
 
   private sendData(id: string, chunk: string): void {
     const session = this.sessions.get(id)
-    if (session) session.history = ((session.history ?? '') + chunk).slice(-SshManager.HISTORY_MAX)
+    if (session && chunk) {
+      const h = session.history ??= { chunks: [], size: 0, head: 0 }
+      h.chunks.push(chunk)
+      h.size += chunk.length
+      while (h.size > SshManager.HISTORY_MAX) {
+        const excess = h.size - SshManager.HISTORY_MAX
+        const first = h.chunks[h.head]
+        if (first.length <= excess) { h.size -= first.length; h.chunks[h.head++] = '' }
+        else { h.chunks[h.head] = first.slice(excess); h.size -= excess }
+      }
+      if (h.head > 1024) { h.chunks = h.chunks.slice(h.head); h.head = 0 }
+    }
     // Live log-to-file: append every byte to the session's log if enabled.
     if (session?.logWrite && session.logging) {
       session.logWrite.write(chunk)
@@ -3582,7 +3593,7 @@ export class SshManager {
   historyList(): { sessionId: string; label: string; text: string }[] {
     const out: { sessionId: string; label: string; text: string }[] = []
     for (const [id, s] of this.sessions) {
-      if (s.history) out.push({ sessionId: id, label: s.label ?? '', text: s.history })
+      if (s.history) out.push({ sessionId: id, label: s.label ?? '', text: s.history.chunks.slice(s.history.head).join('') })
     }
     return out
   }
