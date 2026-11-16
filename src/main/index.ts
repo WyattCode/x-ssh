@@ -1,3 +1,4 @@
+import { renameNoReplace } from './localRename'
 import { app, shell, BrowserWindow, ipcMain, dialog, nativeImage, nativeTheme, screen, Menu, Notification, Tray, globalShortcut, powerMonitor, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron'
 import { join, dirname, basename, isAbsolute, sep } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -1638,7 +1639,7 @@ function registerIpc(): void {
       const to = resolveInside(base, newName)
       if (!from || !to) return { ok: false, error: 'invalid-name' }
       try {
-        await rename(from, to)
+        await renameNoReplace(from, to)
         return { ok: true }
       } catch (e) {
         return { ok: false, error: friendlyError((e as Error).message) }
