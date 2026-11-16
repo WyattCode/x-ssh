@@ -14,3 +14,31 @@ it('B5 rejects duplicate remote forwards without replacing the live handler', as
   expect(mgr.remoteForwardTable(client).get(9000)).toBe(old)
   expect(client.forwardIn).not.toHaveBeenCalled()
 })
+it('B3 closes listeners that finish binding after their session was removed', async () => {
+  const mgr = new SshManager({} as never, {} as never) as any
+  const session = { id: 's' }
+  const server = { close: vi.fn() }
+  mgr.sessions.set('s', session)
+  mgr.openRule = () => [server]
+  mgr.waitForListen = async () => { mgr.sessions.delete('s'); return true }
+  await mgr.openForwards(session, [{ localPort: 9000 }])
+  expect(server.close).toHaveBeenCalled()
+  expect((session as any).forwardServers?.length ?? 0).toBe(0)
+})
+it('B3 bounds remote forward negotiation and discards late success', async () => {
+  vi.useFakeTimers()
+  try {
+    const mgr = new SshManager({} as never, {} as never) as any
+    mgr.forwardOutTimeoutMs = 10
+    let callback: Function = () => {}
+    const client = Object.assign(new EventEmitter(), { forwardIn: (_: string, __: number, cb: Function) => { callback = cb }, unforwardIn: vi.fn() })
+    const session = { id: 's', client }
+    mgr.sessions.set('s', session)
+    const pending = mgr.openRemoteForward(session, { localPort: 9000 })
+    await vi.advanceTimersByTimeAsync(11)
+    expect(await pending).toBe(false)
+    callback(null)
+    expect(mgr.remoteForwardTable(client).size).toBe(0)
+    expect(client.unforwardIn).toHaveBeenCalled()
+  } finally { vi.useRealTimers() }
+})

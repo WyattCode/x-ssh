@@ -720,6 +720,7 @@ export class SshManager {
     const failed: number[] = []
     const servers: Server[] = []
     for (const rule of rules) {
+      if (this.sessions.get(session.id) !== session) break
       if (!rule.localPort) continue
       const mode = rule.mode ?? 'local'
       if (mode === 'remote') {
@@ -729,12 +730,16 @@ export class SshManager {
       const created = this.openRule(session, rule)
       if (!created.length) continue
       const bound = await Promise.all(created.map((s) => this.waitForListen(s)))
-      if (bound.some((b) => !b)) {
+      if (this.sessions.get(session.id) !== session || bound.some((b) => !b)) {
         created.forEach((s) => s.close())
         failed.push(rule.localPort)
       } else {
         servers.push(...created)
       }
+    }
+    if (this.sessions.get(session.id) !== session) {
+      servers.forEach((s) => s.close())
+      return failed
     }
     if (servers.length) {
       session.forwardServers = (session.forwardServers ?? []).concat(servers)
@@ -927,11 +932,18 @@ export class SshManager {
       })
     }
     return new Promise<boolean>((resolve) => {
+      let settled = false
+      const timer = setTimeout(() => { settled = true; resolve(false) }, this.forwardOutTimeoutMs)
+      timer.unref?.()
       session.client.forwardIn('127.0.0.1', rule.localPort, (err) => {
-        if (err) {
+        clearTimeout(timer)
+        if (settled || this.sessions.get(session.id) !== session) {
+          if (!err) this.unregisterRemoteForward(session.client, rule.localPort, handler)
           resolve(false)
           return
         }
+        settled = true
+        if (err) { resolve(false); return }
         session.remoteForwards!.set(rule.localPort, handler)
         table.set(rule.localPort, handler)
         resolve(true)
@@ -1414,9 +1426,15 @@ export class SshManager {
       const settle = (result: ConnectResult): void => {
         if (settled) return
         settled = true
+        clearTimeout(connectTimer)
         resolve(result)
       }
 
+      const connectTimer = setTimeout(() => {
+        this.disconnect(id)
+        settle({ ok: false, error: 'connect-timeout' })
+      }, params.readyTimeoutMs ?? 60_000)
+      connectTimer.unref?.()
       this.emit({ sessionId: id, status: 'connecting' })
 
       client.on('ready', () => {
@@ -1532,9 +1550,10 @@ export class SshManager {
                 else sendStartup()
               }
 
+              if (!session || this.sessions.get(id) !== session) return settle({ ok: false, error: 'session-missing' })
               this.emit({ sessionId: id, status: 'connected' })
               settle({ ok: true, sessionId: id, code: forwardCode, error: forwardError })
-            })()
+            })().catch((error: Error) => { this.disconnect(id); settle({ ok: false, error: friendlyError(error.message) }) })
           }
           )
         }
@@ -1608,8 +1627,14 @@ export class SshManager {
       const settle = (r: ConnectResult): void => {
         if (settled) return
         settled = true
+        clearTimeout(connectTimer)
         resolve(r)
       }
+      const connectTimer = setTimeout(() => {
+        this.disconnect(id)
+        settle({ ok: false, error: 'connect-timeout' })
+      }, params.readyTimeoutMs ?? 60_000)
+      connectTimer.unref?.()
       this.emit({ sessionId: id, status: 'connecting' })
       const x11 = params.x11Forward ? this.x11Options(client, id) : undefined
       const openShell = (withX11: boolean): void => {
@@ -1668,9 +1693,10 @@ export class SshManager {
               if (delay > 0) setTimeout(() => stream.write(params.onConnect + '\n'), delay)
               else stream.write(params.onConnect + '\n')
             }
+            if (!session || this.sessions.get(id) !== session) return settle({ ok: false, error: 'session-missing' })
             this.emit({ sessionId: id, status: 'connected' })
             settle({ ok: true, sessionId: id, code: forwardCode, error: forwardError })
-          })()
+          })().catch((error: Error) => { this.disconnect(id); settle({ ok: false, error: friendlyError(error.message) }) })
         }
       )
       }
