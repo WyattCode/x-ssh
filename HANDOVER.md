@@ -1,3 +1,57 @@
+# 会话记录:M3.197(2026-11-17,REVIEW_DGX B1–B24 全量修复)
+
+> 工作分支 `fix-all-review`,基线 `main ca8532b`。**未发版、未 push、未改 main**;版本仍 0.6.37。
+> 门禁:vitest **88 文件 / 826 passed / 2 skipped**(基线 790 passed / 2 skipped);`npx tsc --noEmit`、node/web typecheck、i18n、contrast、build + ESM 检查通过。
+> `REVIEW_DGX.md` / `TASK_FIX.md` / `review-run.log` / `FIX_REPORT.md` 均不提交。没有安装依赖,没有改 package.json/package-lock,没有动 node_modules 符号链接。
+
+## 一、真正修了什么(按审查行动清单先后)
+
+1. **B1**:SFTPWrapper 接住 error 并失效缓存,迟到的旧通道事件不清掉新缓存。`sftpLifecycle.test.ts` 用 EventEmitter 直接复现无人监听 error 的抛出,先红后绿。
+2. **B2**:sync up / upload / external-editor save-back 共用 `remoteWriteOptions`,存在时保留 mode 的 07777 位,仅 SFTP no-such-file 使用 0644;其余 stat 错误拒绝写入。接缝测试覆盖 0600/0755 与权限拒绝;额外 `remoteMode.test.ts` 覆盖三个真实入口,把三处调用退回旧实现做变异验证,**3 条全部变红**,恢复后全绿。外部编辑回写先拿 options 再创建流,构造失败清理另一条流。
+3. **B5**:远端端口先查活表和预约集合;forwardIn 成功才提交 handler,失败不删除旧 handler。预约也覆盖并发添加和 multiplex 共用 client。
+4. **B3**:绑定结束及 connected 前核对 session 身份,过期监听主动关闭;forwardIn 有 30s 上限,迟到成功撤回;fresh/reuse shell 都有总超时和异步 catch,迟到 shell 关闭。`forwardReview.test.ts` 拆接缝复现“绑定中删除 session”和“超时后迟到成功”,均先红后绿。**真实网络断线时序未验**,总超时/迟到 shell 的全部组合没有逐一红测试钉住,不冒充端到端覆盖。
+5. **B4**:jump / local / dynamic 的 forwardOut 与 remote forwardIn 统一接同步 throw,转回既有 callback 错误路径。可注入假 client 复现 Not connected,先红后绿。测试直接钉住 forwardOut 接缝,forwardIn 同步抛的单独分支已加固但无独立红测试钉住。
+6. **B11**:settings:get 过滤主锁、审计、历史和内部状态,拒绝返回 undefined;仍兼容公开 UI 偏好,不改 IPC 返回形状。
+7. **B10**:新增“允许远端写剪贴板”,默认关闭;每终端每秒一次,原始 base64 输入限 64KiB(解码最多 48KiB),避免先去空白产生无界副本。成功写入才更新 lastAppCopy。三语设置齐全,gate 测试先红后绿。
+8. **B14**:重命名前 lstat 目标,包含悬空链接也拒绝覆盖,返回 target-exists 并翻译。真实 POSIX 文件测试验证两边内容保留;退回原生 rename 的变异确认会红。**外部进程在 lstat 与 rename 间抢建目标的 TOCTOU 不由 Node 的跨平台 rename API 原子解决**,这次是审查要求的“已存在则拒绝”守卫,不是宣称有 renameat2 NOREPLACE 保证。
+9. **B15**:remoteExec/execCommand 超时关闭 channel(迟到 channel 也关闭),stdout 按字节限 64KiB,保留非零 exit 拒绝语义;OS 探测给实际执行传 7.5s 上限,先于外层 8s race 清理资源。timeout/output 两条先红后绿。
+10. **B7+B8**:downloadJob 复用 QUEUE_MAX 背压,取消能退出等待;第一次下载就获取远端 size/mtime,中断也记录 partial。实际 worker/临时目录测试先红后绿。测试清理要等待 job 退出,不能让断言失败遮住清理中的 ENOTEMPTY。
+11. **B6**:SFTP 协商 15s 超时,清缓存、丢弃并关闭迟到通道;同步 throw 也清 timer,失败 Promise 不缓存到下一次重试。假时钟及同步失败重试均先红后绿。
+12. **B12**:保留 connLog:push 兼容通道与 `{ok:boolean}` 形状,但返回 `{ok:false}` 且不调用持久化。主进程真实事件继续记账;渲染层遗留 push 不能伪造记录。把旧写入逻辑抽成接缝先测红,再改拒绝。
+13. **B13**:sandbox:true,preload 改成打包的 CommonJS index.cjs(沙箱不能直接跑 ESM preload),同步剪贴板 API 通过已有 sender guard 下的两个窄 IPC 兼容,写入只接受有界字符串。webUtils 仍可用,没有增加任意文件路径 IPC。vitest 钉配置与桥接接线,**不是沙箱逃逸测试**;另外用实际 Electron 33 + 隐藏窗口加载最终 preload,验证 API、剪贴板同步桥接和 File 路径 API 可调用,smoke 成功。未覆盖打包后 Windows 真机。
+14. **B16+B17**:动态转发 socket/channel 纳入清理,握手未完成的本地客户端也先登记;按 mode:port 保存 socket 集合,移除规则关闭其已建立连接,返回 removed;移除同端口 -R 不碰 -L 监听。接缝测试先红后绿。
+15. **B9**:历史换成分块队列,逐块裁剪并摊销压缩索引,historyList 时 join,保留原 256Ki 字符尾部语义;测试检查内部不再存全量字符串并验证尾部内容。
+16. **B18**:移动端临时文件开不了直接拒绝,不再截断原文件;顺带删掉“旧文件备份挪不开就先删除目标”的第二条破坏性回退。Rust 单测覆盖 staging 缺失拒绝。
+17. **B19**:浏览目录时清 >24h、生成后缀匹配的普通 part 文件,不跟随链接;成功换入新文件后删除 backup 失败会报备份路径,不会静默吞。Rust 单测覆盖年龄/名称/未知时间/备份保留策略。
+18. **B20**:crypto.scrypt 异步,失败指数退避(500ms 起,最多 30s),验证并发拒绝;派生期间不提前改 salt/hash,持久化成功再提交。补测抓到我自己异步化新引入的“计算时手动锁定,完成又解锁”,用 lock epoch 保留用户锁定意图,先红后绿。
+19. **B21**:ssh2 异步 generateKeyPair;列表两个 describe worker(每个 describe 两个子进程,单次列表上限四个),不再 2N 并发。spy 确认不调用同步 API,并发计数测试先红后绿。
+20. **B22**:导入及读取/发布前校验单行 OpenSSH 公钥格式,不吞无效 .pub;发布使用转义后的 printf 数据参数,取消固定 here-doc 分隔符,评论中的引号不能成为 shell 语法。
+21. **B23**:删不可达重复 throw,保留 invalid-key 既有错误码。不可达语句无法写出运行时触发测试,用源码回归断言先红后绿,不声称它是行为测试。
+22. **B24**:readTextFile 用流按实际字节计数,超过 2MiB 销毁并报 file-too-large,不信任 stat。假服务端 stat 报 1 字节但实际超限的测试先红后绿。
+
+## 二、核对后决定不照 review 建议改的部分
+
+- **B11 不把 MAIN_ONLY_KEYS 当成一概禁止读的名单**:这是原来的“不可写”名单。`sessions.ts` 初始化明确读取 autoBackupDir 显示备份位置;theme 和 winHelloKeyGate 是公开 UI 偏好,不含密钥。保留这三个键的兼容读取,masterLock/connectionLog/sessionHistory/windowBounds/osDetectFailed 拒绝。未放松任何写权限。
+- **B19 不自动删 old 备份**:进程可能恰好死在“原文件改名成备份、新文件尚未就位”的窗口,备份就是唯一好副本。`Files.kt` 原有删除确认入口 → `RemoteFiles.remove` → core remove 已能人工清理,无需另造一条危险自动删除路径。残留 part 自动过期清理,old 留作可恢复数据并显式报错。这是有意保留,不是承诺“所有备份自动消失”。
+- **B21 不加指纹缓存**:本轮消除同步 RSA 与单次列表 2N 子进程风暴;缓存不是修这两个根因的必要条件,正确失效还要考虑用户外部替换私钥/.pub,不把独立优化混进安全修复。
+- **B15 不把 execRemote/remoteExec 合并**:前者给压缩等调用返回 code + 合并 stderr,后者 stdout-only 并对非零 exit reject;直接替换会改语义。修的是后者缺失的超时/上限,不是借修 bug 重写命令 API。
+
+## 三、测试诚实标注与当场写法坑
+
+- **移动端没有 RED/GREEN 实测**:本机 `cargo: command not found`,未安装工具链,没有冒称 Rust 编译或测试通过。B18/B19 **已加固但无红测试钉住(测试已写、未运行)**,需要后续 `cd mobile/core && cargo test -p xssh-core --lib` 及真实 SFTP 失败/断线验证。
+- 新接缝的首个红有些是“函数尚不存在”,覆盖的是待加入策略;B2/B14 另外做了旧实现变异确认。B13/B23 是配置/源码守卫,不能替代真实安全攻击或运行时不可达分支覆盖。真网络竞态保留上述覆盖边界。
+- **singleFork 下 fake timers 会跨测试文件影响后续等待**:旧 toast.test.ts 只 useFakeTimers 没恢复,全量跑把新增 download/key 测试挂成 timeout,单文件却全绿。补 afterEach 清 timer + useRealTimers 后,全量恢复。不要靠扩大 testTimeout 掩盖它。
+- **异步化不是替换一个函数名**:主锁原来的同步状态赋值顺序,在 await 后会让 UI 锁定意图失效;必须把状态提交放到持久化之后,并核对中途发生的锁定。
+- **先成功后写表仍需预约**:两个 forwardIn 同时开始时活表都为空;独立 pending 集合才能挡住并发覆盖。超时后仍保留预约到回调终结,因为服务端是否绑定尚不确定,不能立即允许同端口新请求。
+- **同一个翻译 key 的别名会撞现有唯一性测试**:新增 target-exists 起初复用 fs-exists 文案,本仓测试要求每行 key 唯一。改成明确的“新名称已存在”文案,未删掉守卫。
+- 提交消息全用英文 conventional commit,没有反引号或 dollar 字符;没有执行 shell 命令替换式提交文本。
+
+## 四、仍需真机验证
+
+Windows/macOS 安装包的沙箱 preload、拖入路径及剪贴板;服务器在握手/转发协商期间断线;远端 0600/0755 覆盖后权限;移动端创建 temp/备份/改名各阶段断线与进程被杀。桌面全量测试与构建成功不等于这些平台场景都已验证。
+
+---
+
 # 会话记录:M3.196(2026-11-15 晚,第二轮审查的全量修复 —— 其中一条打在我自己上一轮的产出上)
 
 > 提交 `cbd5228`。**未发版**,版本号仍 0.6.36。
