@@ -61,3 +61,14 @@ it('B16 tracks both SOCKS endpoints for session teardown', () => {
   expect(socket.destroy).toHaveBeenCalled()
   expect(channel.destroy).toHaveBeenCalled()
 })
+it('B17 reports missing rules and destroys only sockets owned by a removed rule', () => {
+  const mgr = new SshManager({} as never, {} as never) as any
+  const old = { destroy: vi.fn() }, other = { destroy: vi.fn() }
+  const handler = vi.fn()
+  const client = { unforwardIn: vi.fn() }
+  mgr.sessions.set('s', { client, remoteForwards: new Map([[9000, handler]]), ruleSockets: new Map([['remote:9000', new Set([old])], ['remote:9001', new Set([other])]]) })
+  expect(mgr.removeForward('s', { mode: 'remote', localPort: 9000 })).toMatchObject({ ok: true, removed: true })
+  expect(old.destroy).toHaveBeenCalled()
+  expect(other.destroy).not.toHaveBeenCalled()
+  expect(mgr.removeForward('s', { mode: 'remote', localPort: 9000 })).toMatchObject({ removed: false })
+})

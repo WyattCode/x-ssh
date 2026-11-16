@@ -67,6 +67,7 @@ interface Session {
   remoteForwards?: Map<number, (socket: Duplex) => void>
   /** Sockets/channels opened by a forward, destroyed with the session. */
   forwardSockets?: Set<Duplex>
+  ruleSockets?: Map<string, Set<Duplex>>
   /** Port forwards added at runtime (keyed `mode:localPort`), so they can be
    *  tracked and removed; also lets us tell runtime from host-configured rules. */
   runtimeRules?: Map<string, { mode: ForwardMode; localPort: number; remoteHost: string; remotePort: number; servers: Server[] }>
@@ -676,7 +677,7 @@ export class SshManager {
     // The caller awaits openRemoteForward itself (it reports forwardIn errors).
     if (mode === 'remote') return []
     if (mode === 'dynamic') {
-      const server = createServer((socket: Socket) => this.handleSocks(session, socket))
+      const server = createServer((socket: Socket) => this.handleSocks(session, socket, rule.localPort))
       server.on('error', () => {
         /* local port busy — skip silently */
       })
@@ -711,8 +712,8 @@ export class SshManager {
         }
         socket.on('error', () => channel.destroy())
         channel.on('error', () => socket.destroy())
-        this.trackForwardSocket(session, socket)
-        this.trackForwardSocket(session, channel)
+        this.trackForwardSocket(session, socket, `local:${lp}`)
+        this.trackForwardSocket(session, channel, `local:${lp}`)
         socket.pipe(channel).pipe(socket)
       })
     })
@@ -828,9 +829,10 @@ export class SshManager {
 
   /** Removes a port forward from a live session. Handles both runtime-added and
    *  host-configured rules by matching the local listener port. */
-  removeForward(sessionId: string, rule: { mode?: ForwardMode; localPort: number }): { ok: boolean; error?: string; code?: ForwardErrorCode } {
+  removeForward(sessionId: string, rule: { mode?: ForwardMode; localPort: number }): { ok: boolean; removed?: boolean; error?: string; code?: ForwardErrorCode } {
     const session = this.sessions.get(sessionId)
     if (!session) return { ok: false, code: 'no-session', error: 'session not found' }
+    let removed = false
     const mode = rule.mode ?? 'local'
     const key = `${mode}:${rule.localPort}`
     // Close any local/dynamic listener bound to this port (static or runtime).
@@ -841,17 +843,20 @@ export class SshManager {
       const boundPort = addr && typeof addr !== 'string' ? addr.port : -1
       return owned.includes(s) || boundPort === port
     }) ?? []
+    removed = toClose.length > 0
     toClose.forEach((s) => s.close())
     if (toClose.length) {
       session.forwardServers = (session.forwardServers ?? []).filter((s) => !toClose.includes(s))
     }
     if (mode === 'remote') {
       const handler = session.remoteForwards?.get(port)
-      if (handler) this.unregisterRemoteForward(session.client, port, handler)
+      if (handler) { removed = true; this.unregisterRemoteForward(session.client, port, handler) }
       session.remoteForwards?.delete(port)
     }
-    session.runtimeRules?.delete(key)
-    return { ok: true }
+    if (session.runtimeRules?.delete(key)) removed = true
+    for (const socket of session.ruleSockets?.get(key) ?? []) socket.destroy()
+    session.ruleSockets?.delete(key)
+    return { ok: true, removed }
   }
 
   /** Remote (-R) handlers attached to each SSH client. A multiplexed master
@@ -908,8 +913,8 @@ export class SshManager {
     const destHost = rule.remoteHost || '127.0.0.1'
     const destPort = rule.remotePort
     const handler = (inSock: Duplex): void => {
-      this.trackForwardSocket(session, inSock)
-      const dest = this.trackForwardSocket(session, new Socket())
+      this.trackForwardSocket(session, inSock, `remote:${rule.localPort}`)
+      const dest = this.trackForwardSocket(session, new Socket(), `remote:${rule.localPort}`)
       let settled = false
       // ssh2 imposes no connect timeout: a black-holed local destination would
       // leave the accepted remote channel hanging for the life of the session.
@@ -963,17 +968,25 @@ export class SshManager {
 
   /** Remembers a socket opened by a forward so teardown can destroy it, and
    *  forgets it once the peer closes on its own. */
-  private trackForwardSocket<T extends Duplex>(session: Session, sock: T): T {
+  private trackForwardSocket<T extends Duplex>(session: Session, sock: T, key?: string): T {
     if (!session.forwardSockets) session.forwardSockets = new Set()
     session.forwardSockets.add(sock)
-    sock.once('close', () => session.forwardSockets?.delete(sock))
+    if (key) {
+      session.ruleSockets ??= new Map()
+      if (!session.ruleSockets.has(key)) session.ruleSockets.set(key, new Set())
+      session.ruleSockets.get(key)!.add(sock)
+    }
+    sock.once('close', () => {
+      session.forwardSockets?.delete(sock)
+      if (key) session.ruleSockets?.get(key)?.delete(sock)
+    })
     return sock
   }
 
   /** Minimal SOCKS5 server for dynamic forwarding (-D). Supports the standard
    *  handshake: version/method negotiation, then a CONNECT request whose
    *  destination is tunneled via forwardOut. NOAUTH only. */
-  private handleSocks(session: Session, socket: Socket): void {
+  private handleSocks(session: Session, socket: Socket, port = 0): void {
     let buf = Buffer.alloc(0)
     let greeted = false
     const onData = (chunk: Buffer): void => {
@@ -1027,8 +1040,8 @@ export class SshManager {
         socket.write(Buffer.from([0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0]))
         socket.on('error', () => channel.destroy())
         channel.on('error', () => socket.destroy())
-        this.trackForwardSocket(session, socket)
-        this.trackForwardSocket(session, channel)
+        this.trackForwardSocket(session, socket, `dynamic:${port}`)
+        this.trackForwardSocket(session, channel, `dynamic:${port}`)
         // After the handshake, raw bytes flow both ways.
         socket.pipe(channel).pipe(socket)
       })
