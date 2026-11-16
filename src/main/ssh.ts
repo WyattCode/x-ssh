@@ -2143,7 +2143,7 @@ export class SshManager {
           if (item.dir === 'up') await this.ensureRemoteDir(sftp, destDir)
           else await mkdir(this.longPath(destDir), { recursive: true })
           if (item.dir === 'up') {
-            write = sftp.createWriteStream(item.remote)
+            write = sftp.createWriteStream(item.remote, await this.remoteWriteOptions(sftp, item.remote))
             read = createReadStream(this.longPath(item.local))
           } else {
             write = createWriteStream(this.longPath(item.local))
@@ -2875,7 +2875,7 @@ export class SshManager {
             // in fsUtils, unit-tested in uploadPlan.test.ts: passing `start`
             // with ssh2's default 'w' truncated the file, and the resulting
             // size equalled the local one, so the corruption looked synced.
-            write = sftp.createWriteStream(item.remote, uploadStreamOptions(offset))
+            write = sftp.createWriteStream(item.remote, await this.remoteWriteOptions(sftp, item.remote, offset))
             read = offset
               ? createReadStream(this.longPath(item.local), { start: offset })
               : createReadStream(this.longPath(item.local))
@@ -3148,11 +3148,24 @@ export class SshManager {
     return { path: top, skipped }
   }
 
+  /** Preserve existing permissions; only a missing file gets the creation default. */
+  private async remoteWriteOptions(sftp: SFTPWrapper, path: string, offset = 0): Promise<ReturnType<typeof uploadStreamOptions>> {
+    const mode = await new Promise<number>((resolve, reject) => {
+      sftp.stat(path, (err, attrs) => {
+        if (err) {
+          if ((err as Error & { code?: number }).code === 2) resolve(0o644)
+          else reject(err)
+        } else resolve(attrs.mode & 0o7777)
+      })
+    })
+    return { ...uploadStreamOptions(offset), mode }
+  }
+
   /** Silent single-file upload (no progress); used for external-editor save-back. */
   async putFileSilent(sessionId: string, localPath: string, remoteDir: string, name: string): Promise<void> {
     const sftp = await this.getSftp(sessionId)
     const remote = this.posixJoin(remoteDir, name)
-    await this.pipeStream(randomUUID(), createReadStream(this.longPath(localPath)), sftp.createWriteStream(remote), () => undefined)
+    await this.pipeStream(randomUUID(), createReadStream(this.longPath(localPath)), sftp.createWriteStream(remote, await this.remoteWriteOptions(sftp, remote)), () => undefined)
   }
 
   async mkdir(sessionId: string, path: string): Promise<void> {
