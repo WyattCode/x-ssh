@@ -1514,6 +1514,8 @@ export class SshManager {
             }
             const session = this.sessions.get(id)
             if (!session || settled) { stream.close(); return settle({ ok: false, error: 'session-missing' }) }
+            // Shell establishment ends the connection watchdog; forwards have their own budgets.
+            clearTimeout(connectTimer)
             session.stream = stream
 
             stream.on('data', (data: Buffer) => this.emitData(id, data.toString('utf8')))
@@ -1704,7 +1706,9 @@ export class SshManager {
           }
           const session = this.sessions.get(id)
           if (!session || settled) { stream.close(); return settle({ ok: false, error: 'session-missing' }) }
-          session.stream = stream
+          // Shell establishment ends the connection watchdog; forwards have their own budgets.
+            clearTimeout(connectTimer)
+            session.stream = stream
           stream.on('data', (d: Buffer) => this.emitData(id, d.toString('utf8')))
           stream.stderr.on('data', (d: Buffer) => this.sendData(id, d.toString('utf8')))
           stream.on('close', () => {
