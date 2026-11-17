@@ -99,3 +99,10 @@ describe('renderer-settable settings keys', () => {
     expect(stale, 'remove these from the allowlist').toEqual([])
   })
 })
+it('B11 denies main-only settings reads while preserving UI preferences', async () => {
+  const { isRendererReadableKey } = await import('./settingsKeys')
+  expect(isRendererReadableKey('masterLock')).toBe(false)
+  expect(isRendererReadableKey('connectionLog')).toBe(false)
+  expect(isRendererReadableKey('sessionHistory')).toBe(false)
+  expect(isRendererReadableKey('theme')).toBe(true)
+})

@@ -67,13 +67,14 @@ interface Session {
   remoteForwards?: Map<number, (socket: Duplex) => void>
   /** Sockets/channels opened by a forward, destroyed with the session. */
   forwardSockets?: Set<Duplex>
+  ruleSockets?: Map<string, Set<Duplex>>
   /** Port forwards added at runtime (keyed `mode:localPort`), so they can be
    *  tracked and removed; also lets us tell runtime from host-configured rules. */
   runtimeRules?: Map<string, { mode: ForwardMode; localPort: number; remoteHost: string; remotePort: number; servers: Server[] }>
   /** Human label for history results (user@host[:port]). */
   label?: string
   /** Recent raw output, capped, for cross-session history search. */
-  history?: string
+  history?: { chunks: string[]; size: number; head: number }
   /** Set once the shell channel closes normally (e.g. the user typed `exit`),
    *  so a subsequent client close is classified as intentional, not a drop. */
   shellExit?: boolean
@@ -198,7 +199,18 @@ export class SshManager {
 
   private sendData(id: string, chunk: string): void {
     const session = this.sessions.get(id)
-    if (session) session.history = ((session.history ?? '') + chunk).slice(-SshManager.HISTORY_MAX)
+    if (session && chunk) {
+      const h = session.history ??= { chunks: [], size: 0, head: 0 }
+      h.chunks.push(chunk)
+      h.size += chunk.length
+      while (h.size > SshManager.HISTORY_MAX) {
+        const excess = h.size - SshManager.HISTORY_MAX
+        const first = h.chunks[h.head]
+        if (first.length <= excess) { h.size -= first.length; h.chunks[h.head++] = '' }
+        else { h.chunks[h.head] = first.slice(excess); h.size -= excess }
+      }
+      if (h.head > 1024) { h.chunks = h.chunks.slice(h.head); h.head = 0 }
+    }
     // Live log-to-file: append every byte to the session's log if enabled.
     if (session?.logWrite && session.logging) {
       session.logWrite.write(chunk)
@@ -466,7 +478,7 @@ export class SshManager {
         // has no timeout of its own, so connect() would never settle.
         const timer = setTimeout(() => fail('jump-forward-timeout', { code: 'jump-forward-timeout' }), this.jumpForwardTimeoutMs)
         timer.unref?.()
-        client.forwardOut(
+        this.safeForwardOut(client,
           '127.0.0.1',
           0,
           targetHost,
@@ -656,6 +668,16 @@ export class SshManager {
     })
   }
 
+  private safeForwardOut(client: Client, host: string, port: number, target: string, targetPort: number, cb: (err: Error | undefined, channel: ClientChannel) => void): void {
+    try { client.forwardOut(host, port, target, targetPort, cb) }
+    catch (error) { cb(error as Error, undefined as unknown as ClientChannel) }
+  }
+
+  private safeForwardIn(client: Client, host: string, port: number, cb: (err?: Error) => void): void {
+    try { client.forwardIn(host, port, cb) }
+    catch (error) { cb(error as Error) }
+  }
+
   /** Opens a single port forward per rule mode (local -L, remote -R, dynamic
    *  SOCKS -D) and returns the local servers it created (none for remote). */
   private openRule(session: Session, rule: HostForward): Server[] {
@@ -666,7 +688,7 @@ export class SshManager {
     // The caller awaits openRemoteForward itself (it reports forwardIn errors).
     if (mode === 'remote') return []
     if (mode === 'dynamic') {
-      const server = createServer((socket: Socket) => this.handleSocks(session, socket))
+      const server = createServer((socket: Socket) => this.handleSocks(session, socket, rule.localPort))
       server.on('error', () => {
         /* local port busy — skip silently */
       })
@@ -678,6 +700,7 @@ export class SshManager {
     const rh = rule.remoteHost || '127.0.0.1'
     const rp = rule.remotePort
     const server = createServer((socket: Socket) => {
+      this.trackForwardSocket(session, socket, `local:${lp}`)
       // ssh2 has no timeout on the channel open: a remote that silently drops
       // the target would leave this accepted local client hanging forever.
       let settled = false
@@ -687,9 +710,9 @@ export class SshManager {
         socket.destroy()
       }, this.forwardOutTimeoutMs)
       timer.unref?.()
-      session.client.forwardOut('127.0.0.1', lp, rh, rp, (err, channel) => {
+      this.safeForwardOut(session.client, '127.0.0.1', lp, rh, rp, (err, channel) => {
         clearTimeout(timer)
-        if (settled) {
+        if (settled || socket.destroyed) {
           // Timed out already: the local client is gone, so drop the channel.
           channel?.destroy()
           return
@@ -701,8 +724,8 @@ export class SshManager {
         }
         socket.on('error', () => channel.destroy())
         channel.on('error', () => socket.destroy())
-        this.trackForwardSocket(session, socket)
-        this.trackForwardSocket(session, channel)
+        this.trackForwardSocket(session, socket, `local:${lp}`)
+        this.trackForwardSocket(session, channel, `local:${lp}`)
         socket.pipe(channel).pipe(socket)
       })
     })
@@ -720,6 +743,7 @@ export class SshManager {
     const failed: number[] = []
     const servers: Server[] = []
     for (const rule of rules) {
+      if (this.sessions.get(session.id) !== session) break
       if (!rule.localPort) continue
       const mode = rule.mode ?? 'local'
       if (mode === 'remote') {
@@ -729,12 +753,16 @@ export class SshManager {
       const created = this.openRule(session, rule)
       if (!created.length) continue
       const bound = await Promise.all(created.map((s) => this.waitForListen(s)))
-      if (bound.some((b) => !b)) {
+      if (this.sessions.get(session.id) !== session || bound.some((b) => !b)) {
         created.forEach((s) => s.close())
         failed.push(rule.localPort)
       } else {
         servers.push(...created)
       }
+    }
+    if (this.sessions.get(session.id) !== session) {
+      servers.forEach((s) => s.close())
+      return failed
     }
     if (servers.length) {
       session.forwardServers = (session.forwardServers ?? []).concat(servers)
@@ -752,7 +780,7 @@ export class SshManager {
     const mode = rule.mode ?? 'local'
     if (mode !== 'dynamic' && !rule.remotePort) return { ok: false, code: 'bad-port', error: 'missing remote port' }
     const key = `${mode}:${rule.localPort}`
-    if (session.runtimeRules?.has(key)) return { ok: false, code: 'already', error: 'already forwarding' }
+    if (session.runtimeRules?.has(key) || (mode === 'remote' && this.remoteForwardTable(session.client).has(rule.localPort))) return { ok: false, code: 'already', error: 'already forwarding' }
     // Remote (-R) forwards have no local listener: openRule returns [] for them,
     // so the forwardIn result has to be awaited here or a refused remote listen
     // port would be recorded as live.
@@ -776,7 +804,7 @@ export class SshManager {
       // A failed bind surfaces as an async 'error' after listen(); wait for all
       // servers to actually start listening (or roll back the ones that didn't).
       const bound = await Promise.all(servers.map((s) => this.waitForListen(s)))
-      if (bound.some((b) => !b)) {
+      if (this.sessions.get(sessionId) !== session || bound.some((b) => !b)) {
         servers.forEach((s) => s.close())
         return { ok: false, code: 'in-use', error: `local port ${rule.localPort} in use` }
       }
@@ -813,30 +841,35 @@ export class SshManager {
 
   /** Removes a port forward from a live session. Handles both runtime-added and
    *  host-configured rules by matching the local listener port. */
-  removeForward(sessionId: string, rule: { mode?: ForwardMode; localPort: number }): { ok: boolean; error?: string; code?: ForwardErrorCode } {
+  removeForward(sessionId: string, rule: { mode?: ForwardMode; localPort: number }): { ok: boolean; removed?: boolean; error?: string; code?: ForwardErrorCode } {
     const session = this.sessions.get(sessionId)
     if (!session) return { ok: false, code: 'no-session', error: 'session not found' }
+    let removed = false
     const mode = rule.mode ?? 'local'
     const key = `${mode}:${rule.localPort}`
     // Close any local/dynamic listener bound to this port (static or runtime).
     const owned = session.runtimeRules?.get(key)?.servers ?? []
     const port = rule.localPort
     const toClose = session.forwardServers?.filter((s) => {
+      if (mode === 'remote') return false
       const addr = s.address()
       const boundPort = addr && typeof addr !== 'string' ? addr.port : -1
       return owned.includes(s) || boundPort === port
     }) ?? []
+    removed = toClose.length > 0
     toClose.forEach((s) => s.close())
     if (toClose.length) {
       session.forwardServers = (session.forwardServers ?? []).filter((s) => !toClose.includes(s))
     }
     if (mode === 'remote') {
       const handler = session.remoteForwards?.get(port)
-      if (handler) this.unregisterRemoteForward(session.client, port, handler)
+      if (handler) { removed = true; this.unregisterRemoteForward(session.client, port, handler) }
       session.remoteForwards?.delete(port)
     }
-    session.runtimeRules?.delete(key)
-    return { ok: true }
+    if (session.runtimeRules?.delete(key)) removed = true
+    for (const socket of session.ruleSockets?.get(key) ?? []) socket.destroy()
+    session.ruleSockets?.delete(key)
+    return { ok: true, removed }
   }
 
   /** Remote (-R) handlers attached to each SSH client. A multiplexed master
@@ -886,14 +919,20 @@ export class SshManager {
   /** Remote forward (-R): listen on the server; each inbound connection is
    *  piped to the local destination. ssh2 reports these via a single client
    *  'tcp connection' event, keyed by the remote listen port. */
+  private readonly pendingRemoteForwards = new WeakMap<Client, Set<number>>()
+
   private openRemoteForward(session: Session, rule: HostForward): Promise<boolean> {
     const table = this.remoteForwardTable(session.client)
+    let pending = this.pendingRemoteForwards.get(session.client)
+    if (!pending) { pending = new Set(); this.pendingRemoteForwards.set(session.client, pending) }
+    if (table.has(rule.localPort) || pending.has(rule.localPort)) return Promise.resolve(false)
+    pending.add(rule.localPort)
     if (!session.remoteForwards) session.remoteForwards = new Map()
     const destHost = rule.remoteHost || '127.0.0.1'
     const destPort = rule.remotePort
     const handler = (inSock: Duplex): void => {
-      this.trackForwardSocket(session, inSock)
-      const dest = this.trackForwardSocket(session, new Socket())
+      this.trackForwardSocket(session, inSock, `remote:${rule.localPort}`)
+      const dest = this.trackForwardSocket(session, new Socket(), `remote:${rule.localPort}`)
       let settled = false
       // ssh2 imposes no connect timeout: a black-holed local destination would
       // leave the accepted remote channel hanging for the life of the session.
@@ -925,16 +964,22 @@ export class SshManager {
         inSock.pipe(dest).pipe(inSock)
       })
     }
-    session.remoteForwards.set(rule.localPort, handler)
-    table.set(rule.localPort, handler)
     return new Promise<boolean>((resolve) => {
-      session.client.forwardIn('127.0.0.1', rule.localPort, (err) => {
-        if (err) {
-          session.remoteForwards?.delete(rule.localPort)
-          if (table.get(rule.localPort) === handler) table.delete(rule.localPort)
+      let settled = false
+      const timer = setTimeout(() => { settled = true; resolve(false) }, this.forwardOutTimeoutMs)
+      timer.unref?.()
+      this.safeForwardIn(session.client, '127.0.0.1', rule.localPort, (err) => {
+        pending!.delete(rule.localPort)
+        clearTimeout(timer)
+        if (settled || this.sessions.get(session.id) !== session) {
+          if (!err) this.unregisterRemoteForward(session.client, rule.localPort, handler)
           resolve(false)
           return
         }
+        settled = true
+        if (err) { resolve(false); return }
+        session.remoteForwards!.set(rule.localPort, handler)
+        table.set(rule.localPort, handler)
         resolve(true)
       })
     })
@@ -942,17 +987,26 @@ export class SshManager {
 
   /** Remembers a socket opened by a forward so teardown can destroy it, and
    *  forgets it once the peer closes on its own. */
-  private trackForwardSocket<T extends Duplex>(session: Session, sock: T): T {
+  private trackForwardSocket<T extends Duplex>(session: Session, sock: T, key?: string): T {
     if (!session.forwardSockets) session.forwardSockets = new Set()
     session.forwardSockets.add(sock)
-    sock.once('close', () => session.forwardSockets?.delete(sock))
+    if (key) {
+      session.ruleSockets ??= new Map()
+      if (!session.ruleSockets.has(key)) session.ruleSockets.set(key, new Set())
+      session.ruleSockets.get(key)!.add(sock)
+    }
+    sock.once('close', () => {
+      session.forwardSockets?.delete(sock)
+      if (key) session.ruleSockets?.get(key)?.delete(sock)
+    })
     return sock
   }
 
   /** Minimal SOCKS5 server for dynamic forwarding (-D). Supports the standard
    *  handshake: version/method negotiation, then a CONNECT request whose
    *  destination is tunneled via forwardOut. NOAUTH only. */
-  private handleSocks(session: Session, socket: Socket): void {
+  private handleSocks(session: Session, socket: Socket, port = 0): void {
+    this.trackForwardSocket(session, socket, `dynamic:${port}`)
     let buf = Buffer.alloc(0)
     let greeted = false
     const onData = (chunk: Buffer): void => {
@@ -990,9 +1044,9 @@ export class SshManager {
         failReply()
       }, this.forwardOutTimeoutMs)
       timer.unref?.()
-      session.client.forwardOut('127.0.0.1', 0, req.host, req.port, (err, channel) => {
+      this.safeForwardOut(session.client, '127.0.0.1', 0, req.host, req.port, (err, channel) => {
         clearTimeout(timer)
-        if (settled) {
+        if (settled || socket.destroyed) {
           // Timed out already: the failure reply went out, drop the channel.
           channel?.destroy()
           return
@@ -1006,6 +1060,8 @@ export class SshManager {
         socket.write(Buffer.from([0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0]))
         socket.on('error', () => channel.destroy())
         channel.on('error', () => socket.destroy())
+        this.trackForwardSocket(session, socket, `dynamic:${port}`)
+        this.trackForwardSocket(session, channel, `dynamic:${port}`)
         // After the handshake, raw bytes flow both ways.
         socket.pipe(channel).pipe(socket)
       })
@@ -1025,6 +1081,7 @@ export class SshManager {
     // the listener alone leaves them running after the session is gone.
     session.forwardSockets?.forEach((s) => s.destroy())
     session.forwardSockets = undefined
+    session.ruleSockets = undefined
   }
 
   /** Drops everything a session owns apart from the SSH client itself: log
@@ -1415,9 +1472,15 @@ export class SshManager {
       const settle = (result: ConnectResult): void => {
         if (settled) return
         settled = true
+        clearTimeout(connectTimer)
         resolve(result)
       }
 
+      const connectTimer = setTimeout(() => {
+        this.disconnect(id)
+        settle({ ok: false, error: 'connect-timeout' })
+      }, params.readyTimeoutMs ?? 60_000)
+      connectTimer.unref?.()
       this.emit({ sessionId: id, status: 'connecting' })
 
       client.on('ready', () => {
@@ -1450,7 +1513,8 @@ export class SshManager {
               return settle({ ok: false, error: message })
             }
             const session = this.sessions.get(id)
-            if (session) session.stream = stream
+            if (!session || settled) { stream.close(); return settle({ ok: false, error: 'session-missing' }) }
+            session.stream = stream
 
             stream.on('data', (data: Buffer) => this.emitData(id, data.toString('utf8')))
             stream.stderr.on('data', (data: Buffer) => this.sendData(id, data.toString('utf8')))
@@ -1523,6 +1587,7 @@ export class SshManager {
                 }
               }
 
+              if (!session || this.sessions.get(id) !== session) return settle({ ok: false, error: 'session-missing' })
               // Send the per-host startup command(s) after the shell is ready. An
               // optional delay lets a slow login shell/MOTD finish first (values
               // up to a few seconds are typical for `wait`-style startup hooks).
@@ -1533,9 +1598,10 @@ export class SshManager {
                 else sendStartup()
               }
 
+              if (!session || this.sessions.get(id) !== session) return settle({ ok: false, error: 'session-missing' })
               this.emit({ sessionId: id, status: 'connected' })
               settle({ ok: true, sessionId: id, code: forwardCode, error: forwardError })
-            })()
+            })().catch((error: Error) => { this.disconnect(id); settle({ ok: false, error: friendlyError(error.message) }) })
           }
           )
         }
@@ -1609,8 +1675,14 @@ export class SshManager {
       const settle = (r: ConnectResult): void => {
         if (settled) return
         settled = true
+        clearTimeout(connectTimer)
         resolve(r)
       }
+      const connectTimer = setTimeout(() => {
+        this.disconnect(id)
+        settle({ ok: false, error: 'connect-timeout' })
+      }, params.readyTimeoutMs ?? 60_000)
+      connectTimer.unref?.()
       this.emit({ sessionId: id, status: 'connecting' })
       const x11 = params.x11Forward ? this.x11Options(client, id) : undefined
       const openShell = (withX11: boolean): void => {
@@ -1631,7 +1703,8 @@ export class SshManager {
             return settle({ ok: false, error: message })
           }
           const session = this.sessions.get(id)
-          if (session) session.stream = stream
+          if (!session || settled) { stream.close(); return settle({ ok: false, error: 'session-missing' }) }
+          session.stream = stream
           stream.on('data', (d: Buffer) => this.emitData(id, d.toString('utf8')))
           stream.stderr.on('data', (d: Buffer) => this.sendData(id, d.toString('utf8')))
           stream.on('close', () => {
@@ -1664,14 +1737,16 @@ export class SshManager {
                 forwardError = failed.join(',')
               }
             }
+            if (!session || this.sessions.get(id) !== session) return settle({ ok: false, error: 'session-missing' })
             if (params.onConnect) {
               const delay = params.onConnectDelayMs ?? 0
               if (delay > 0) setTimeout(() => stream.write(params.onConnect + '\n'), delay)
               else stream.write(params.onConnect + '\n')
             }
+            if (!session || this.sessions.get(id) !== session) return settle({ ok: false, error: 'session-missing' })
             this.emit({ sessionId: id, status: 'connected' })
             settle({ ok: true, sessionId: id, code: forwardCode, error: forwardError })
-          })()
+          })().catch((error: Error) => { this.disconnect(id); settle({ ok: false, error: friendlyError(error.message) }) })
         }
       )
       }
@@ -1746,6 +1821,8 @@ export class SshManager {
   }
 
   // ---- SFTP ----
+  sftpTimeoutMs = 15_000
+
   private getSftp(sessionId: string): Promise<SFTPWrapper> {
     const session = this.sessions.get(sessionId)
     if (!session) return Promise.reject(new Error('session-missing'))
@@ -1753,7 +1830,21 @@ export class SshManager {
     // Reuse an in-flight sftp() so concurrent callers don't open extra channels.
     if (session.sftpPromise) return session.sftpPromise
     session.sftpPromise = new Promise<SFTPWrapper>((res, rej) => {
-      session.client.sftp((err, sftp) => {
+      let expired = false
+      const timer = setTimeout(() => {
+        expired = true
+        session.sftpPromise = undefined
+        rej(new Error('sftp-timeout'))
+      }, this.sftpTimeoutMs)
+      timer.unref?.()
+      try { session.client.sftp((err, sftp) => {
+        clearTimeout(timer)
+        if (expired || this.sessions.get(sessionId) !== session) {
+          sftp?.on('error', () => {})
+          sftp?.end()
+          rej(new Error('session-missing'))
+          return
+        }
         if (err) {
           session.sftpPromise = undefined
           return rej(err)
@@ -1768,13 +1859,18 @@ export class SshManager {
             session.sftpPromise = undefined
           }
         }
+        sftp.on('error', invalidate)
         sftp.on('close', invalidate)
         sftp.on('end', invalidate)
         session.sftp = sftp
         res(sftp)
-      })
+      }) } catch (error) { clearTimeout(timer); rej(error) }
     })
-    return session.sftpPromise
+    const attempt = session.sftpPromise
+    void attempt.catch(() => {
+      if (session.sftpPromise === attempt) session.sftpPromise = undefined
+    })
+    return attempt
   }
 
   private posixJoin(dir: string, name: string): string {
@@ -2142,7 +2238,7 @@ export class SshManager {
           if (item.dir === 'up') await this.ensureRemoteDir(sftp, destDir)
           else await mkdir(this.longPath(destDir), { recursive: true })
           if (item.dir === 'up') {
-            write = sftp.createWriteStream(item.remote)
+            write = sftp.createWriteStream(item.remote, await this.remoteWriteOptions(sftp, item.remote))
             read = createReadStream(this.longPath(item.local))
           } else {
             write = createWriteStream(this.longPath(item.local))
@@ -2528,6 +2624,10 @@ export class SshManager {
           }
         }
       } else {
+        while (queue.length >= SshManager.QUEUE_MAX && !this.cancelledJobs.has(jobId)) {
+          await new Promise((r) => setTimeout(r, 15))
+        }
+        if (this.cancelledJobs.has(jobId)) return
         discovered++
         queue.push({ remote, local, name: basename(local) })
       }
@@ -2557,11 +2657,11 @@ export class SshManager {
           // replaced from the start. On error/cancel the partial is kept so the
           // next attempt can pick up from it.
           let offset = 0
+          remoteInfo = await this.statFile(sftp, item.remote)
           try {
             const localSize = (await stat(this.longPath(item.local))).size
             if (localSize > 0) {
-              const remote = await this.statFile(sftp, item.remote)
-              remoteInfo = remote
+              const remote = remoteInfo
               const prior = this.partialDownloads.get(partialKey)
               const resumable =
                 !!remote &&
@@ -2874,7 +2974,7 @@ export class SshManager {
             // in fsUtils, unit-tested in uploadPlan.test.ts: passing `start`
             // with ssh2's default 'w' truncated the file, and the resulting
             // size equalled the local one, so the corruption looked synced.
-            write = sftp.createWriteStream(item.remote, uploadStreamOptions(offset))
+            write = sftp.createWriteStream(item.remote, await this.remoteWriteOptions(sftp, item.remote, offset))
             read = offset
               ? createReadStream(this.longPath(item.local), { start: offset })
               : createReadStream(this.longPath(item.local))
@@ -3147,11 +3247,35 @@ export class SshManager {
     return { path: top, skipped }
   }
 
+  /** Preserve existing permissions; only a missing file gets the creation default. */
+  private async remoteWriteOptions(sftp: SFTPWrapper, path: string, offset = 0): Promise<ReturnType<typeof uploadStreamOptions>> {
+    const mode = await new Promise<number>((resolve, reject) => {
+      sftp.stat(path, (err, attrs) => {
+        if (err) {
+          if ((err as Error & { code?: number }).code === 2) resolve(0o644)
+          else reject(err)
+        } else resolve(attrs.mode & 0o7777)
+      })
+    })
+    return { ...uploadStreamOptions(offset), mode }
+  }
+
   /** Silent single-file upload (no progress); used for external-editor save-back. */
   async putFileSilent(sessionId: string, localPath: string, remoteDir: string, name: string): Promise<void> {
     const sftp = await this.getSftp(sessionId)
     const remote = this.posixJoin(remoteDir, name)
-    await this.pipeStream(randomUUID(), createReadStream(this.longPath(localPath)), sftp.createWriteStream(remote), () => undefined)
+    const options = await this.remoteWriteOptions(sftp, remote)
+    let read: Readable | undefined
+    let write: Writable | undefined
+    try {
+      write = sftp.createWriteStream(remote, options)
+      read = createReadStream(this.longPath(localPath))
+      await this.pipeStream(randomUUID(), read, write, () => undefined)
+    } catch (error) {
+      read?.destroy()
+      write?.destroy()
+      throw error
+    }
   }
 
   async mkdir(sessionId: string, path: string): Promise<void> {
@@ -3310,9 +3434,21 @@ export class SshManager {
     if (st.size > 2 * 1024 * 1024) {
       throw new Error('file-too-large')
     }
-    const buf = await new Promise<Buffer>((res, rej) =>
-      sftp.readFile(path, (e, d) => (e ? rej(e) : res(d as never)))
-    )
+    const buf = await new Promise<Buffer>((res, rej) => {
+      const stream = sftp.createReadStream(path)
+      const chunks: Buffer[] = []
+      let size = 0
+      stream.on('data', (chunk: Buffer) => {
+        size += chunk.length
+        if (size > 2 * 1024 * 1024) {
+          stream.destroy(new Error('file-too-large'))
+          return
+        }
+        chunks.push(chunk)
+      })
+      stream.on('error', rej)
+      stream.on('end', () => res(Buffer.concat(chunks)))
+    })
     return buf.toString('utf8')
   }
 
@@ -3498,7 +3634,7 @@ export class SshManager {
   historyList(): { sessionId: string; label: string; text: string }[] {
     const out: { sessionId: string; label: string; text: string }[] = []
     for (const [id, s] of this.sessions) {
-      if (s.history) out.push({ sessionId: id, label: s.label ?? '', text: s.history })
+      if (s.history) out.push({ sessionId: id, label: s.label ?? '', text: s.history.chunks.slice(s.history.head).join('') })
     }
     return out
   }
@@ -3506,37 +3642,39 @@ export class SshManager {
   // ---- tmux / screen session helpers (run over a separate exec channel) ----
 
   /** Runs a command on a dedicated shell channel and returns its stdout. */
-  private remoteExec(sessionId: string, cmd: string): Promise<string> {
+  private remoteExec(sessionId: string, cmd: string, timeoutMs = this.execTimeoutMs): Promise<string> {
     const session = this.sessions.get(sessionId)
     if (!session) return Promise.reject(new Error('session-missing'))
     return new Promise((resolve, reject) => {
-      session.client.exec(cmd, (err, stream) => {
-        if (err) return reject(err)
-        let out = ''
-        // The SSH2 spec makes exit-status optional, so a missing 'exit' event
-        // still resolves (back-compat); when present, a non-zero code is a
-        // failure — previously this was silently reported as success.
-        let exitCode: number | null = null
-        let settled = false
-        const settle = (e?: Error, value?: string): void => {
-          if (settled) return
-          settled = true
-          if (e) reject(e)
-          else resolve(value ?? out)
-        }
-        stream.on('data', (d: Buffer) => {
-          out += d.toString()
+      let channel: ClientChannel | undefined
+      let settled = false
+      let out = Buffer.alloc(0)
+      const finish = (error?: Error): void => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        if (error) reject(error)
+        else resolve(out.toString('utf8'))
+      }
+      const timer = setTimeout(() => {
+        finish(new Error('remote-timeout'))
+        try { channel?.close() } catch { /* already closed */ }
+      }, timeoutMs)
+      timer.unref?.()
+      try {
+        session.client.exec(cmd, (err, stream) => {
+          if (err) return finish(err)
+          channel = stream
+          if (settled) { stream.close(); return }
+          let exitCode: number | null = null
+          stream.on('data', (data: Buffer) => {
+            if (!settled && out.length < 65536) out = Buffer.concat([out, data.subarray(0, 65536 - out.length)])
+          })
+          stream.on('exit', (code: unknown) => { if (typeof code === 'number') exitCode = code })
+          stream.on('close', () => finish(exitCode !== null && exitCode !== 0 ? new Error(`remote-exit:${exitCode}`) : undefined))
+          stream.on('error', finish)
         })
-        stream.on('exit', (code: unknown) => {
-          if (typeof code === 'number') exitCode = code
-        })
-        // A machine code, not display text: callers that show it to the user
-        // (publish / revoke) translate it, so the wording isn't baked in here.
-        stream.on('close', () =>
-          settle(exitCode !== null && exitCode !== 0 ? new Error(`remote-exit:${exitCode}`) : undefined)
-        )
-        stream.on('error', (e: Error) => settle(e))
-      })
+      } catch (error) { finish(error as Error) }
     })
   }
 
@@ -3664,8 +3802,8 @@ export class SshManager {
   }
 
   /** Runs a command on a dedicated exec channel and returns its stdout. */
-  execCommand(sessionId: string, cmd: string): Promise<string> {
-    return this.remoteExec(sessionId, cmd)
+  execCommand(sessionId: string, cmd: string, timeoutMs = this.execTimeoutMs): Promise<string> {
+    return this.remoteExec(sessionId, cmd, timeoutMs)
   }
 
   /** Lists tmux session names on the remote, via a throwaway exec channel. */

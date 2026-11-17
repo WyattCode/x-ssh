@@ -85,3 +85,8 @@ describe('mainError table', () => {
     expect(mainErrorText('', t)).toBeUndefined()
   })
 })
+it('localizes the new SFTP handshake, exec timeout and rename refusal codes', () => {
+  expect(MAIN_ERROR_KEYS['sftp-timeout']).toBe('err.sftpTimeout')
+  expect(MAIN_ERROR_KEYS['remote-timeout']).toBe('err.remoteTimeout')
+  expect(MAIN_ERROR_KEYS['target-exists']).toBe('err.renameTargetExists')
+})

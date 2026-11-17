@@ -34,3 +34,11 @@ describe('decodeOsc52Payload', () => {
     expect(decodeOsc52Payload('5L2g5aW9')).toBe('你好')
   })
 })
+it('B10 requires opt-in and limits remote clipboard size and frequency', async () => {
+  const { createOsc52Gate } = await import('./osc52')
+  const gate = createOsc52Gate()
+  expect(gate('aGk=', false, 1000)).toBeNull()
+  expect(gate('aGk=', true, 1000)).toBe('hi')
+  expect(gate('aGk=', true, 1001)).toBeNull()
+  expect(gate('a'.repeat(100_000), true, 3000)).toBeNull()
+})

@@ -1,3 +1,4 @@
+import { validatePublicKey } from '../shared/publicKey'
 import { randomUUID } from 'node:crypto'
 import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
@@ -48,25 +49,19 @@ export class KeyManager {
     await this.ensureDir()
     const names = await readdir(this.keysDir)
     const labels = await this.readLabels()
-    // Concurrently describe every candidate (skipping .pub / hidden / scratch
-    // files) instead of spawning ssh-keygen serially, which made the host
-    // editor slow once a user had several keys.
-    const jobs: Promise<ManagedKey | null>[] = []
-    for (const n of names) {
-      if (shouldSkipKeyFile(n)) continue
-      jobs.push(
-        (async (): Promise<ManagedKey | null> => {
-          const p = join(this.keysDir, n)
-          try {
-            if (!(await stat(p)).isFile()) return null
-          } catch {
-            return null
-          }
-          return this.describe(p, n, labels[n])
-        })()
-      )
+    const candidates = names.filter((name) => !shouldSkipKeyFile(name))
+    const out: ManagedKey[] = []
+    const worker = async (): Promise<void> => {
+      for (;;) {
+        const n = candidates.shift()
+        if (n === undefined) return
+        const p = join(this.keysDir, n)
+        try {
+          if ((await stat(p)).isFile()) out.push(await this.describe(p, n, labels[n]))
+        } catch { /* vanished or unreadable */ }
+      }
     }
-    const out = (await Promise.all(jobs)).filter((k): k is ManagedKey => k != null)
+    await Promise.all([worker(), worker()])
     // Newest first when types/names are identical; keep insertion order stable.
     return out.sort((a, b) => (b.mtime ?? 0) - (a.mtime ?? 0))
   }
@@ -205,11 +200,11 @@ export class KeyManager {
     // protection the passphrase is for.
     let pair: { private: string; public: string }
     try {
-      pair = ssh2.utils.generateKeyPairSync(type, {
+      pair = await new Promise((resolve, reject) => ssh2.utils.generateKeyPair(type, {
         ...(opts.bits && type === 'rsa' ? { bits: opts.bits } : {}),
         ...(opts.passphrase ? { passphrase: opts.passphrase } : {}),
         comment: `x-ssh-${id}`
-      })
+      }, (error, result) => error ? reject(error) : resolve(result)))
     } catch {
       throw new Error('keygen-failed')
     }
@@ -261,10 +256,13 @@ export class KeyManager {
     await writeFile(priv, buf, { mode: 0o600 })
     const pubSrc = `${srcPath}.pub`
     try {
-      const pubBuf = await readFile(pubSrc)
-      await writeFile(`${priv}.pub`, pubBuf, { mode: 0o644 })
-    } catch {
-      /* no .pub alongside; fine */
+      const pubText = await readFile(pubSrc, 'utf8')
+      await writeFile(`${priv}.pub`, validatePublicKey(pubText) + '\n', { mode: 0o644 })
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        await rm(priv, { force: true })
+        throw error
+      }
     }
     // Reject a copy without a valid key marker (matches PEM / OpenSSH private keys).
     if (!isPrivateKey(buf)) {
@@ -272,7 +270,6 @@ export class KeyManager {
       await rm(`${priv}.pub`, { force: true }).catch(() => {})
       // Stable marker: main turns this into KeyErrorCode 'invalid-key'.
       throw new Error('invalid-key')
-      throw new Error('invalid-private-key')
     }
     const label = basename(srcPath).replace(/\.(pem|key|pub)$/i, '')
     try {
@@ -295,11 +292,12 @@ export class KeyManager {
     if (basename(id) !== id) throw new Error('bad-id')
     const priv = join(this.keysDir, id)
     try {
-      return (await readFile(`${priv}.pub`, 'utf8')).trim()
-    } catch {
+      return validatePublicKey(await readFile(`${priv}.pub`, 'utf8'))
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
       // No .pub alongside — derive it, which only works for passphrase-free keys.
       const { stdout } = await this.sshKeygen(['-y', '-P', '', '-f', priv])
-      return stdout.trim()
+      return validatePublicKey(stdout)
     }
   }
 

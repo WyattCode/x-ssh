@@ -20,6 +20,9 @@ export const MAIN_ERROR_KEYS: Record<string, string> = {
   // connection / network
   'rate-limited': 'err.rateLimited',
   'handshake-timeout': 'err.handshakeTimeout',
+  'sftp-timeout': 'err.sftpTimeout',
+  'remote-timeout': 'err.remoteTimeout',
+  'target-exists': 'err.renameTargetExists',
   'connect-timeout': 'err.connectTimeout',
   'conn-refused': 'err.connRefused',
   'dns-failed': 'err.dnsFailed',

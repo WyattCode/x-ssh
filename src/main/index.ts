@@ -1,4 +1,7 @@
-import { app, shell, BrowserWindow, ipcMain, dialog, nativeImage, nativeTheme, screen, Menu, Notification, Tray, globalShortcut, powerMonitor, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron'
+import { publishKeyCommand } from '../shared/publicKey'
+import { rendererConnLogPush } from './connLogIpc'
+import { renameNoReplace } from './localRename'
+import { app, shell, BrowserWindow, ipcMain, dialog, nativeImage, nativeTheme, screen, Menu, Notification, Tray, globalShortcut, powerMonitor, clipboard, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron'
 import { join, dirname, basename, isAbsolute, sep } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { tmpdir, homedir } from 'node:os'
@@ -8,7 +11,7 @@ import { spawn } from 'node:child_process'
 import { IPC, PREFS_ARG } from '../shared/ipc'
 import type { ConnectParams, Host, HostForward, ForwardMode, JumpConfig, KeyErrorCode, LocalEntry, Snippet, ThemePref, UiPrefs, UploadOverwrite } from '../shared/types'
 import { readLaunchTarget, targetFromUrl, PROTOCOL, compareVersions } from '../shared/launchTarget'
-import { isRendererSettableKey } from '../shared/settingsKeys'
+import { isRendererSettableKey, isRendererReadableKey } from '../shared/settingsKeys'
 import { resolveLang, type LangPref, type UiLang } from '../shared/lang'
 import { resolveDir, resolveInside } from '../shared/localPaths'
 import { extractBackupHosts } from '../shared/backup'
@@ -85,8 +88,7 @@ if (process.platform === 'win32') app.setAppUserModelId('com.x-ssh.app')
 let mainWindow: BrowserWindow | null = null
 
 /** Only the app's own top frame may talk to main. A navigated window (or an
- *  injected iframe) would otherwise inherit the full preload API, which with
- *  `sandbox: false` means filesystem and credential access. */
+ *  injected iframe) would otherwise inherit the privileged preload API. */
 function isTrustedIpcSender(e: IpcMainInvokeEvent | IpcMainEvent): boolean {
   const w = mainWindow
   if (!w || w.isDestroyed()) return false
@@ -910,7 +912,7 @@ async function detectHostOs(hostId: string, sessionId: string | undefined, at?: 
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
     const out = await Promise.race([
-      sshManager.execCommand(sessionId, OS_PROBE_COMMAND),
+      sshManager.execCommand(sessionId, OS_PROBE_COMMAND, 7500),
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => reject(new Error('timeout')), 8000)
       })
@@ -1152,8 +1154,8 @@ function createWindow(saved?: SavedBounds, prefs: UiPrefs = {}): void {
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#0e0f12' : '#f7f8fa',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     webPreferences: {
-      preload: join(__dirname, '../preload/index.mjs'),
-      sandbox: false,
+      preload: join(__dirname, '../preload/index.cjs'),
+      sandbox: true,
       contextIsolation: true,
       nodeIntegration: false,
       // Hand the renderer its startup preferences as a launch argument: the
@@ -1308,6 +1310,11 @@ function createWindow(saved?: SavedBounds, prefs: UiPrefs = {}): void {
 }
 
 function registerIpc(): void {
+  on(IPC.clipboardRead, (e) => { e.returnValue = clipboard.readText() })
+  on(IPC.clipboardWrite, (e, text: unknown) => {
+    if (typeof text === 'string' && text.length <= 2_000_000) clipboard.writeText(text)
+    e.returnValue = undefined
+  })
   // ---- Host store ----
   handle(IPC.hostsList, () => store.list())
   handle(IPC.hostsSecretsStatus, () => store.secretsStatus())
@@ -1638,7 +1645,7 @@ function registerIpc(): void {
       const to = resolveInside(base, newName)
       if (!from || !to) return { ok: false, error: 'invalid-name' }
       try {
-        await rename(from, to)
+        await renameNoReplace(from, to)
         return { ok: true }
       } catch (e) {
         return { ok: false, error: friendlyError((e as Error).message) }
@@ -2566,7 +2573,7 @@ function registerIpc(): void {
   // (Drag-out IPC removed — see the note by the retired staging cache above.)
 
   // ---- Settings ----
-  handle(IPC.settingsGet, (_e, key: string) => settings.get(key))
+  handle(IPC.settingsGet, (_e, key: string) => isRendererReadableKey(key) ? settings.get(key) : undefined)
   handle(IPC.settingsStatus, () => settings.status())
   handle(IPC.settingsSet, async (_e, key: string, value: unknown) => {
     // The settings map also holds the master-lock record, the connection audit
@@ -2614,10 +2621,7 @@ function registerIpc(): void {
     return { ok: true as const, dark: nativeTheme.shouldUseDarkColors }
   })
   handle(IPC.connLogList, async () => (await settings.get<ConnLogEntry[]>('connectionLog')) ?? [])
-  handle(IPC.connLogPush, async (_e, entry: ConnLogEntry) => {
-    await pushConnLog(entry)
-    return { ok: true }
-  })
+  handle(IPC.connLogPush, (_e, entry: ConnLogEntry) => rendererConnLogPush(entry, pushConnLog))
   handle(IPC.connLogClear, async () => {
     try {
       await settings.set('connectionLog', [])
@@ -2766,7 +2770,7 @@ function registerIpc(): void {
   })
   // Appends a public key to the authorized_keys of several saved hosts. Each is
   // connected with its own saved credentials, the key written via a shell
-  // here-doc (safe from quoting), then the one-shot session is torn down.
+  // quoted printf data, then the one-shot session is torn down.
   handle(IPC.keysPublish, async (_e, keyId: string, hostIds: string[]) => {
     let pub: string
     try {
@@ -2777,7 +2781,7 @@ function registerIpc(): void {
     if (!pub) return { ok: false, code: 'no-pubkey' }
     if (!sshManager) return { ok: false, code: 'not-ready' }
     const results = await withTempHosts(hostIds, async (sid) => {
-      const cmd = `umask 077; mkdir -p ~/.ssh && chmod 700 ~/.ssh\ncat >> ~/.ssh/authorized_keys <<'XSSH'\n${pub}\nXSSH\ntouch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys`
+      const cmd = publishKeyCommand(pub)
       await requireSshManager().execCommand(sid, cmd)
     })
     return { ok: true, results }

@@ -12,7 +12,7 @@ import { readFile } from 'node:fs/promises'
 import { builtinModules } from 'node:module'
 
 const files = process.argv.slice(2)
-if (!files.length) files.push('out/main/index.js', 'out/preload/index.mjs')
+if (!files.length) files.push('out/main/index.js', 'out/preload/index.cjs')
 
 const builtins = new Set([
   ...builtinModules,

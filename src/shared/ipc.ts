@@ -1,5 +1,7 @@
 /** Centralized IPC channel names so main/preload/renderer never drift. */
 export const IPC = {
+  clipboardRead: 'clipboard:readText',
+  clipboardWrite: 'clipboard:writeText',
   // Host store (invoke/handle)
   hostsList: 'hosts:list',
   hostsSecretsStatus: 'hosts:secretsStatus',
