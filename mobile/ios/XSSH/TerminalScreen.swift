@@ -206,10 +206,9 @@ struct TerminalScreen: View {
         // 液态玻璃,可交互:按住时整条会像系统工具栏那样微微放大、随手指流动。
         .glassEffect(.regular.interactive(), in: Capsule())
         .environment(\.colorScheme, .dark)
-        // 靠右下角,和主机页的「搜索 / 新建」、编辑页的「取消 / 保存」同一个位置(右边距同系统底栏的 28pt)。
-        // 底边也对齐:没有键盘时离屏幕底 28pt(系统底栏的位置,比安全区再往下 6pt);键盘弹着时浮在键盘上方 8pt。
-        .padding(.leading, 12).padding(.trailing, 28).padding(.bottom, bottomInset < 60 ? 28 - bottomInset : 8)
-        .frame(maxWidth: .infinity, alignment: .trailing)
+        // 这一排五个按钮居中(它比主机页的两颗按钮宽得多,靠右会偏)。
+        // 底边:没有键盘时离屏幕底 28pt(和系统底栏同一高度);键盘弹着时浮在键盘上方 8pt。
+        .padding(.horizontal, 12).padding(.bottom, bottomInset < 60 ? 28 - bottomInset : 8)
     }
 
     private func barButton(_ icon: String, _ label: LocalizedStringKey, on: Bool = false, role: ButtonRole? = nil,
