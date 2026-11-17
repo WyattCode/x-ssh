@@ -1,3 +1,35 @@
+# 会话记录:M3.198(2026-11-17,二轮复审指定的 5 项修复)
+
+> 工作目录 `/Users/wyatt/x-ssh-fix2`,分支 `fix-round2-review`,基线 `main d492acf`。按 F1 → F2 → F3 → B13 → B19 整理成 **5 个英文 conventional commits**。未 push、未发版、未改 main。
+> 桌面门禁:vitest **92 文件 / 843 passed / 2 skipped**(基线 826 passed / 2 skipped,新增 17 条);`npx tsc --noEmit`、node/web typecheck 干净。根 tsconfig 只有 references,因此另跑实际 node/web 项目检查,没有拿空根检查代替代码检查。
+> 没有安装依赖、没有动 node_modules 符号链接。`REVIEW_*`、`TASK_*`、`FIX2_REPORT.md`、`tmp-local/` 均不提交。测试记录和中间文件只放 tmp-local;本轮新增/修改的临时目录测试使用工作区 tmp-local,没有新建 /tmp 工件。
+
+## 一、修了什么
+
+1. **F1 / 连接与转发超时分界**:fresh / multiplex reuse 两条 shell 成功回调均停止连接 watchdog。握手与 shell 仍有建立上限,转发各自用既有的单项预算;慢转发不会把已就绪的 shell 拆掉。`round2Timeout.test.ts` 假时钟覆盖两个真实入口:连接预算 20ms,转发跨过预算后失败,仍返回 ok + forward:in-use。reuse 原实现先红;补齐 fresh 后做回退变异,两条都红,恢复全绿。
+2. **F2 / 主进程审计生产者**:SshManager 注入主进程 pushConnLog,只从真实 job 终态、静默回写成功、已绑定的配置转发与运行时增删产生记录。host/port/username 来自建立会话的主进程对象,不解析 label(兼容 IPv6)。job 保留身份快照到 finally,断线先删 session 也不丢终态;静默同步先记账后抑制 UI;早期异常有失败记录兜底。配置规则按单条成功点记账,同号 local 失败不吞掉 remote 成功记录。renderer connLog:push 仍返回 false,不存在恢复伪造通道。4 条行为测试先红后绿,另保留原拒绝伪造测试。
+3. **F3 / 桌面暂存替换**:uploadJob / sync-up / external-editor putFileSilent 共用 stagedUpload;先 realpath 保留既有远端链接的目标语义,保留原 mode,同目录 wx 创建 `.xssh-part-UUID`,完成且关闭后用 OpenSSH 原子 rename 替换。仅扩展不支持(code 8)时尝试 v3 不覆盖 rename;不删除原目标来凑成功。任何读写/取消/改名失败只尝试清理成功打开过的自有 temp。下载与 sync-down 同样暂存后本地 rename;可续传下载只续本进程记录的独立 part,不再截断/删除已有目标。pipeStream 不把未 finish 的 close 当成功,等关闭结果再提交。8 条新增测试覆盖三个上传失败入口、下载原文件保留、成功关闭+权限、独占创建失败不能删别人的文件、远端链接、无 close/无 unlink 回应时清理有界。原 B2/B8 行为测试迁移到暂存语义,测试数没有减少。
+4. **B13 / 本地路径能力收窄**:LocalAccess 只从系统选择结果授予目录根或单文件能力,同时核对词法路径和 realpath(含不存在目标的最近已有祖先),阻止 sibling、链接逃逸、授权根被替换。关闭窗口清授权。本地面板首次打开/越界导航改为系统选目录,不再隐式授权整个家目录;在所选根内的导航与操作保持原 API。单文件选择不授权整个父目录。外部拖放越界需系统选择核对原路径;混合文件/目录拖放可选工作区根,避免 Windows/Linux 不能在同一个对话框选两种类型的问题。3 条真实文件系统测试先红后绿(最初的红接缝按旧边界允许任意路径,不是 Electron 注入实测)。
+   - 逐调用点: SftpDrawer 的 local.home/list/readText/create/rename/delete/copyIn;SessionReplayDialog 的 pickFile/readText;拖入、local 面板上传、队列重试走 uploadPaths;远端拖到 local 与下载重试走 downloadTo;sync/watch/diffDirs 来自本地面板路径或 pickDirectory;DirDiffDialog 的目录来自 pickDirectory。上述路径都接根校验/原生选择兜底。保存/打开对话框驱动的 download/downloadMany/upload/uploadDir/uploadExtract 以原生选择结果授权;reveal 也核对能力。同步轮询、上传 worker、下载路径与本地删除点再次核对,不只检查启动 IPC。内部外部编辑暂存路径只由主进程创建,静默回写不受 renderer 的任意路径输入驱动。
+5. **B19 + F6 / mobile 自有残留回收**:上传独占建立 0600 的 `.xssh-owner-<128bit随机ID>` sidecar,写固定版本标记,part/old 与其共享 ID。列表只处理已验证标记的普通文件,不再按裸 part 后缀删用户文件。24h 年龄同时看服务端探针 mtime、租约 mtime、工件 mtime,不用手机墙钟;拿不到可信服务器 mtime 就不清。活跃上传登记保护,上传中刷新服务端租约。part/old 都过期回收;old 若目标已就位则删除,目标缺失则以不覆盖 rename 恢复,状态不明则保留。失败保留标记供以后重试。Rust 用例补齐归属、part/old 配对、24h 边界、活跃/近期写入、未知/倒退时间、唯一备份策略。
+
+## 二、决定不动什么,以及理由
+
+- **不自动认领无 marker 的旧版 part/old**:无法从后缀证明归属,贸然迁移正是 F6 的误删路径。旧无标记残留仍可人工删除;新版产生的 part 和 old 都进入同一 24h 策略。旧备份仍是唯一副本时采用恢复,不把“清理”实现成丢掉唯一好数据。
+- **不保留桌面上传按任意远端短文件猜测续传的行为**:不能证明已有前缀属于本次源文件;改为完整暂存替换。下载仍保留有版本记录的自有 part 续传。远端不支持安全覆盖时明确失败,不退回截断写或先删除目标。所有失败清理都是尽力而为,断线无法远程删除的 temp 可能残留。
+- **不扩大到这次未指定的 F4/F5/F7–F16**:例如 remote pending 预约泄漏、iOS OSC52、托盘/窗口时序仍是独立问题。这次没有把未修改条目宣称修好。
+- 不重做密钥库/凭据授权模型,也不改变已有原生对话框驱动的备份、密钥导入导出及会话日志流程。B13 修的是 renderer 路径参数直接取得本地文件能力的入口。
+
+## 三、踩坑与测试诚实边界
+
+- **mobile 是“加固无测”**:执行 `cd mobile/core && cargo test -p xssh-core --lib` 得到 `cargo: command not found`。测试先写,但没有 Rust RED/GREEN、编译或真 SFTP 成功声明;没有安装工具链。参照已锁定 russh-sftp 3.0.0 的公开源码核对 API,不能代替编译。
+- **ssh2 的 close 不是普通 fs Writable 的 close**:底层 CLOSE 报错时它可能只发 error,不发 close;清理等待/远程 unlink 必须有界,不能因为修暂存又让取消永远挂住。成功路径仍等关闭,出错不能改名提交半截数据。
+- **独占创建失败不代表拥有路径**:只在 stream 的 open 成功后才清理该临时路径。相撞/拒绝不能 unlink 可能属于别人的文件。
+- **审计归属不能在 job 结束时临时查 session**:disconnect 会先删 session;必须在注册 job 时保留主进程身份,最后统一释放。审计异常不能打断传输资源清理。
+- 桌面测试是可注入 SSH/SFTP 接缝与本地真实文件系统测试,不是 Electron 注入攻击/跨平台对话框/真实弱网服务器验证。仍需 Windows/macOS 真机交互、支持/不支持 posix-rename 的服务器、传输中断与 mobile 崩溃窗口验证。Node 的路径 API 无法承诺抵抗其他本地进程同时替换目录项的所有 TOCTOU。
+
+---
+
 # 会话记录:M3.197(2026-11-17,REVIEW_DGX B1–B24 全量修复)
 
 > 工作分支 `fix-all-review`,基线 `main ca8532b`。**未发版、未 push、未改 main**;版本仍 0.6.37。

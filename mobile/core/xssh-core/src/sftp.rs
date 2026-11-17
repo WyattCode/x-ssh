@@ -6,11 +6,12 @@
 //! 边读边写,不在内存里攒整份文件。
 
 use std::io::{Read, Write};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
+use std::collections::HashSet;
 use std::time::Duration;
 
 use russh_sftp::client::SftpSession;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncReadExt, AsyncWriteExt, AsyncSeekExt};
 
 use crate::ssh::SshError;
 
@@ -44,30 +45,69 @@ fn sftp_err(err: impl std::fmt::Display) -> SshError {
     SshError::Sftp(err.to_string())
 }
 
-/// Only expired regular staging files are disposable. Backups may be the sole copy.
-fn stale_part(name: &str, modified: u64, now: u64) -> bool {
-    let Some((_, suffix)) = name.rsplit_once(".xssh-part-") else { return false };
-    !suffix.is_empty() && suffix.bytes().all(|c| c.is_ascii_hexdigit())
-        && modified > 0 && now.saturating_sub(modified) > 24 * 60 * 60
+const OWNER_MAGIC: &[u8] = b"XSSH-STAGING-V1\n";
+const STAGING_TTL: u64 = 24 * 60 * 60;
+
+struct OwnedNames {
+    target: String,
+    part: String,
+    backup: String,
+    marker: String,
+}
+
+// Legacy suffixes without a marker are never evidence of ownership.
+fn owned_names(marker: &str) -> Option<OwnedNames> {
+    let (target, id) = marker.rsplit_once(".xssh-owner-")?;
+    if target.is_empty() || target == "." || target == ".." || target.contains('/') || id.len() != 32 || !id.bytes().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    Some(OwnedNames {
+        target: target.to_owned(),
+        part: format!("{target}.xssh-part-{id}"),
+        backup: format!("{target}.xssh-old-{id}"),
+        marker: marker.to_owned(),
+    })
+}
+
+fn expired_owned(magic: &[u8], lease_mtime: u64, artifact_mtime: u64, server_now: u64, active: bool) -> bool {
+    magic == OWNER_MAGIC && !active && lease_mtime > 0 && artifact_mtime > 0
+        && server_now.saturating_sub(lease_mtime.max(artifact_mtime)) > STAGING_TTL
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum BackupCleanup { Delete, Restore, Keep }
+fn backup_cleanup(target_exists_as_regular_file: Option<bool>) -> BackupCleanup {
+    match target_exists_as_regular_file {
+        Some(true) => BackupCleanup::Delete,
+        Some(false) => BackupCleanup::Restore,
+        None => BackupCleanup::Keep,
+    }
+}
+
+fn active_uploads() -> &'static Mutex<HashSet<String>> {
+    static ACTIVE: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    ACTIVE.get_or_init(|| Mutex::new(HashSet::new()))
+}
+struct ActiveUpload(String);
+impl ActiveUpload {
+    fn new(marker: String) -> Self {
+        active_uploads().lock().unwrap_or_else(|e| e.into_inner()).insert(marker.clone());
+        Self(marker)
+    }
+}
+impl Drop for ActiveUpload {
+    fn drop(&mut self) {
+        active_uploads().lock().unwrap_or_else(|e| e.into_inner()).remove(&self.0);
+    }
 }
 
 fn require_staging<T>(staged: Option<T>) -> Result<T, SshError> {
     staged.ok_or_else(|| SshError::Sftp("cannot-create-upload-temp".to_owned()))
 }
 
-/// 临时文件 / 备份文件名里的后缀:进程号 + 时间 + 递增计数。不是为了"猜不到"
-/// (独占创建本身就挡住了抢先放符号链接的人),只是让两次上传、两个进程不会互相踩到。
+/// 128 random bits plus exclusive creation; no client timestamp is used for expiry.
 fn unique_suffix() -> String {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    use std::time::{SystemTime, UNIX_EPOCH};
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let nanos = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
-    format!(
-        "{:x}{:x}{:x}",
-        std::process::id(),
-        nanos & 0xffff_ffff_ffff,
-        COUNTER.fetch_add(1, Ordering::Relaxed)
-    )
+    format!("{:032x}", rand::random::<u128>())
 }
 
 /// 拼路径:SFTP 路径总是 `/` 分隔,不管服务器是什么系统。
@@ -102,8 +142,18 @@ impl Sftp {
         self.block(self.session.canonicalize(".")).map_err(sftp_err)
     }
 
-    /// 列目录:目录在前,再按名字排(不分大小写);不含 `.` 和 `..`。
+    /// Listing only sweeps artifacts with our exclusive ownership sidecar.
     pub fn list(&self, path: &str) -> Result<Vec<RemoteEntry>, SshError> {
+        let dir = self.block(self.session.canonicalize(path)).unwrap_or_else(|_| path.to_owned());
+        let entries = self.read_entries(&dir)?;
+        if self.block(self.sweep_owned(&dir, &entries)) {
+            return self.read_entries(&dir);
+        }
+        Ok(entries)
+    }
+
+    /// 列目录:目录在前,再按名字排(不分大小写);不含 `.` 和 `..`。
+    fn read_entries(&self, path: &str) -> Result<Vec<RemoteEntry>, SshError> {
         let dir = self.block(self.session.read_dir(path)).map_err(sftp_err)?;
         let mut entries: Vec<RemoteEntry> = dir
             .filter(|entry| {
@@ -125,16 +175,77 @@ impl Sftp {
                 }
             })
             .collect();
-        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs()).unwrap_or(0);
-        entries.retain(|entry| {
-            if !entry.is_dir && !entry.is_link && stale_part(&entry.name, entry.modified, now) {
-                return self.block(self.session.remove_file(entry.path.clone())).is_err();
-            }
-            true
-        });
         entries.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase())));
         Ok(entries)
+    }
+
+    /// The probe mtime comes from this server, never from the phone's wall clock.
+    /// If the server refuses a probe or omits mtimes, cleanup is disabled.
+    async fn server_now(&self, dir: &str) -> Option<u64> {
+        let (mut file, temp, marker, mut lease) = self.create_temp(&join(dir, ".xssh-clock"), Some(0o600)).await?;
+        let now = file.metadata().await.ok().and_then(|m| m.mtime).map(u64::from);
+        let _ = file.shutdown().await;
+        let _ = lease.shutdown().await;
+        let _ = self.session.remove_file(temp).await;
+        let _ = self.session.remove_file(marker).await;
+        now.filter(|t| *t > 0)
+    }
+
+    async fn sweep_owned(&self, dir: &str, entries: &[RemoteEntry]) -> bool {
+        let candidates: Vec<_> = entries.iter().filter(|e| !e.is_dir && !e.is_link && owned_names(&e.name).is_some()).collect();
+        if candidates.is_empty() { return false; }
+        let Some(now) = self.server_now(dir).await else { return false; };
+        let mut changed = false;
+        for owner in candidates {
+            let Some(names) = owned_names(&owner.name) else { continue; };
+            let marker = join(dir, &names.marker);
+            let active = active_uploads().lock().unwrap_or_else(|e| e.into_inner()).contains(&marker);
+            if active || owner.size != OWNER_MAGIC.len() as u64 { continue; }
+            // Re-stat without following symlinks, then read a bounded marker.
+            let Ok(meta) = self.session.symlink_metadata(marker.clone()).await else { continue; };
+            if !meta.file_type().is_file() || meta.file_type().is_symlink() { continue; }
+            let lease_mtime = meta.mtime.map(u64::from).unwrap_or(0);
+            let Ok(mut lease) = self.session.open(marker.clone()).await else { continue; };
+            let mut magic = Vec::new();
+            let read = (&mut lease).take((OWNER_MAGIC.len() + 1) as u64).read_to_end(&mut magic).await;
+            let _ = lease.shutdown().await;
+            if read.is_err() { continue; }
+            if !expired_owned(&magic, lease_mtime, lease_mtime, now, active) { continue; }
+            for (name, backup) in [(&names.part, false), (&names.backup, true)] {
+                let artifact = join(dir, name);
+                let Ok(meta) = self.session.symlink_metadata(artifact.clone()).await else { continue; };
+                if !meta.file_type().is_file() || meta.file_type().is_symlink() { continue; }
+                if !expired_owned(&magic, lease_mtime, meta.mtime.map(u64::from).unwrap_or(0), now, active) { continue; }
+                // A fresh heartbeat between listing and deletion cancels cleanup.
+                let current = self.session.symlink_metadata(marker.clone()).await.ok();
+                if current.and_then(|m| m.mtime).map(u64::from) != Some(lease_mtime) { continue; }
+                let result = if backup {
+                    let target = join(dir, &names.target);
+                    let exists = match self.session.symlink_metadata(target.clone()).await {
+                        Ok(m) if m.file_type().is_file() && !m.file_type().is_symlink() => Some(true),
+                        Ok(_) => None,
+                        Err(_) => match self.session.try_exists(target.clone()).await {
+                            Ok(false) => Some(false),
+                            _ => None,
+                        },
+                    };
+                    match backup_cleanup(exists) {
+                        BackupCleanup::Delete => self.session.remove_file(artifact).await,
+                        BackupCleanup::Restore => self.session.rename(artifact, target).await,
+                        BackupCleanup::Keep => continue,
+                    }
+                } else {
+                    self.session.remove_file(artifact).await
+                };
+                changed |= result.is_ok();
+            }
+            // Keep failed deletions recoverable and retryable on a later visit.
+            if matches!(self.session.try_exists(join(dir, &names.part)).await, Ok(false))
+                && matches!(self.session.try_exists(join(dir, &names.backup)).await, Ok(false)) {
+                changed |= self.session.remove_file(marker).await.is_ok();
+            }
+        }
+        changed
     }
 
     /// 符号链接指向的是不是目录(列表里的链接要点得进去)。
@@ -180,17 +291,30 @@ impl Sftp {
         &self,
         target: &str,
         permissions: Option<u32>,
-    ) -> Option<(russh_sftp::client::fs::File, String)> {
+    ) -> Option<(russh_sftp::client::fs::File, String, String, russh_sftp::client::fs::File)> {
         use russh_sftp::protocol::{FileAttributes, OpenFlags};
         for _ in 0..4 {
-            let temp = format!("{target}.xssh-part-{}", unique_suffix());
-            let attributes = FileAttributes {
-                permissions: permissions.map(|p| p & 0o7777),
-                ..Default::default()
-            };
+            let id = unique_suffix();
+            let temp = format!("{target}.xssh-part-{id}");
+            let marker = format!("{target}.xssh-owner-{id}");
             let flags = OpenFlags::CREATE | OpenFlags::EXCLUDE | OpenFlags::WRITE;
-            if let Ok(file) = self.session.open_with_flags_and_attributes(temp.clone(), flags, attributes).await {
-                return Some((file, temp));
+            let owner_attrs = FileAttributes { permissions: Some(0o600), ..Default::default() };
+            let Ok(mut lease) = self.session.open_with_flags_and_attributes(marker.clone(), flags, owner_attrs).await else { continue; };
+            if async {
+                lease.write_all(OWNER_MAGIC).await?;
+                lease.flush().await
+            }.await.is_err() {
+                let _ = lease.shutdown().await;
+                let _ = self.session.remove_file(marker).await;
+                continue;
+            }
+            let attributes = FileAttributes { permissions: permissions.map(|p| p & 0o7777), ..Default::default() };
+            match self.session.open_with_flags_and_attributes(temp.clone(), flags, attributes).await {
+                Ok(file) => return Some((file, temp, marker, lease)),
+                Err(_) => {
+                    let _ = lease.shutdown().await;
+                    let _ = self.session.remove_file(marker).await;
+                }
             }
         }
         None
@@ -232,10 +356,12 @@ impl Sftp {
             // 整个上传期间 0600 的私钥 / 凭据文件的新内容是按服务端默认(通常 0644)躺在磁盘上的。
             //
             // Refuse if staging is unavailable: direct writes can destroy the original.
-            let (mut file, temp) = require_staging(
+            let (mut file, temp, marker, mut lease) = require_staging(
                 self.create_temp(&target, previous.as_ref().and_then(|m| m.permissions)).await
             )?;
 
+            let _active = ActiveUpload::new(marker.clone());
+            let mut heartbeat = std::time::Instant::now();
             let outcome = async {
                 let mut buffer = vec![0u8; CHUNK];
                 let mut done = 0u64;
@@ -246,6 +372,12 @@ impl Sftp {
                     }
                     file.write_all(&buffer[..n]).await.map_err(sftp_err)?;
                     done += n as u64;
+                    if heartbeat.elapsed() >= Duration::from_secs(60) {
+                        lease.rewind().await.map_err(sftp_err)?;
+                        lease.write_all(OWNER_MAGIC).await.map_err(sftp_err)?;
+                        lease.flush().await.map_err(sftp_err)?;
+                        heartbeat = std::time::Instant::now();
+                    }
                     if !progress(done, total) {
                         let _ = file.shutdown().await;
                         return Err(SshError::Cancelled);
@@ -256,11 +388,20 @@ impl Sftp {
             }
             .await;
 
-            let done = match outcome {
+            // Refresh the server-side lease before entering the backup/rename window.
+            let refreshed = async {
+                lease.rewind().await.map_err(sftp_err)?;
+                lease.write_all(OWNER_MAGIC).await.map_err(sftp_err)?;
+                lease.shutdown().await.map_err(sftp_err)
+            }.await;
+            let done = match outcome.and_then(|done| refreshed.map(|_| done)) {
                 Ok(done) => done,
                 Err(err) => {
                     // 取消、写失败、读本地失败:只收拾自己的临时文件,目标不动。
-                    let _ = self.session.remove_file(temp.clone()).await;
+                    let _ = file.shutdown().await;
+                    if self.session.remove_file(temp.clone()).await.is_ok() {
+                        let _ = self.session.remove_file(marker.clone()).await;
+                    }
                     return Err(err);
                 }
             };
@@ -269,11 +410,13 @@ impl Sftp {
             // 原来是先删目标再改名 —— 中间掉线或改名失败,原文件就没了。
             // 现在是**先把旧文件改名成备份、新文件改名过去、成功了才删备份**;
             // 新文件没能就位就把备份改回来,原文件任何时候都找得回。
-            let backup = format!("{target}.xssh-old-{}", unique_suffix());
+            let backup = format!("{target}.xssh-old-{}", marker.rsplit_once(".xssh-owner-").unwrap().1);
             let had_target = previous.is_some();
             let moved_aside = had_target && self.session.rename(target.clone(), backup.clone()).await.is_ok();
             if had_target && !moved_aside {
-                let _ = self.session.remove_file(temp.clone()).await;
+                if self.session.remove_file(temp.clone()).await.is_ok() {
+                    let _ = self.session.remove_file(marker.clone()).await;
+                }
                 return Err(SshError::Sftp("cannot-stage-existing-target".to_owned()));
             }
             if let Err(err) = self.session.rename(temp.clone(), target.clone()).await {
@@ -287,6 +430,7 @@ impl Sftp {
                 self.session.remove_file(backup.clone()).await.map_err(|err|
                     SshError::Sftp(format!("upload-complete-backup-retained:{backup}:{}", sftp_err(err))))?;
             }
+            let _ = self.session.remove_file(marker).await;
             // 权限再核一遍(创建时已经带上了;服务端要是忽略了那个属性,这里补上。拿不到原来的就随服务端默认)。
             if let Some(permissions) = previous.and_then(|before| before.permissions) {
                 let keep = russh_sftp::protocol::FileAttributes {
@@ -324,15 +468,34 @@ impl Sftp {
 
 #[cfg(test)]
 mod tests {
-    use super::{join, parent, unique_suffix, require_staging, stale_part};
+    use super::{join, parent, unique_suffix, require_staging, owned_names, expired_owned, backup_cleanup, BackupCleanup, OWNER_MAGIC};
 
     #[test]
-    fn b19_cleanup_only_expired_parts() {
-        assert!(stale_part("a.xssh-part-abc123", 1, 90000));
-        assert!(!stale_part("a.xssh-old-abc123", 1, 90000));
-        assert!(!stale_part("a.xssh-part-abc123", 89999, 90000));
-        assert!(!stale_part("a.xssh-part-not-ours", 1, 90000));
-        assert!(!stale_part("a.xssh-part-abc123", 0, 90000));
+    fn b19_cleanup_requires_ownership_and_server_age_for_parts_and_backups() {
+        let id = "0123456789abcdef0123456789abcdef";
+        let owner = format!("report.xssh-owner-{id}");
+        let names = owned_names(&owner).unwrap();
+        assert_eq!(names.part, format!("report.xssh-part-{id}"));
+        assert_eq!(names.backup, format!("report.xssh-old-{id}"));
+        assert!(expired_owned(OWNER_MAGIC, 1, 1, 90000, false));
+        assert!(!expired_owned(b"user file", 1, 1, 90000, false));
+        assert!(!expired_owned(OWNER_MAGIC, 89999, 1, 90000, false));
+        assert!(!expired_owned(OWNER_MAGIC, 1, 89999, 90000, false));
+        assert!(!expired_owned(OWNER_MAGIC, 1, 1, 90000, true));
+        assert!(!expired_owned(OWNER_MAGIC, 0, 1, 90000, false));
+        assert!(!expired_owned(OWNER_MAGIC, 90000, 90000, 1, false));
+        assert!(!expired_owned(OWNER_MAGIC, 1, 1, 86401, false));
+        assert!(owned_names("report.xssh-part-0123456789abcdef0123456789abcdef").is_none());
+        assert!(owned_names("report.xssh-part-deadbeef").is_none());
+        assert!(owned_names("report.xssh-old-deadbeef").is_none());
+        assert!(owned_names("report.xssh-owner-abc123").is_none());
+    }
+
+    #[test]
+    fn b19_never_discards_the_only_backup() {
+        assert_eq!(backup_cleanup(Some(true)), BackupCleanup::Delete);
+        assert_eq!(backup_cleanup(Some(false)), BackupCleanup::Restore);
+        assert_eq!(backup_cleanup(None), BackupCleanup::Keep);
     }
 
     #[test]
