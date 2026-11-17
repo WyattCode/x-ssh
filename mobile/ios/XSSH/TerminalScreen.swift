@@ -147,6 +147,8 @@ struct TerminalScreen: View {
             // 去掉系统给工具栏项套的玻璃圆泡,否则 logo + 主机名被裁在一个小圆里。
             .sharedBackgroundVisibility(.hidden)
             if !fold.isStandardPhone {
+                // 弹性空白:横向底栏时把按钮组推到右下角,和主机页、编辑页统一(竖条里它是零尺寸)。
+                ToolbarSpacer(.flexible, placement: .bottomBar)
                 // 返回主机列表是导航,键盘弹着、竖条放不下时让位:进溢出菜单。这时最需要的是键盘 / 快捷键两颗开关。
                 ToolbarItem(placement: .bottomBar) {
                     Button("Hosts", systemImage: "chevron.left", action: onBack)

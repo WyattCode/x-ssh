@@ -240,6 +240,8 @@ struct HostsView: View {
             // 内屏(两栏)里搜索和新建都放在右边那一侧的竖条里(RootView 的详情栏),只放一份,不在左栏再放一份;
             // 外屏(单栏)整个屏幕就是主机列表,按钮在它自己的竖条里。
             if !splitLayout {
+                // 弹性空白把这组按钮推到右下角,和新建 / 编辑主机页的取消、保存同一个位置(外屏竖条里它是零尺寸,不影响)。
+                ToolbarSpacer(.flexible, placement: .bottomBar)
                 ToolbarItem(placement: .bottomBar) {
                     Button(searching ? "Close Search" : "Search", systemImage: searching ? "xmark" : "magnifyingglass") {
                         searching.toggle()
