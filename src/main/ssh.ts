@@ -195,7 +195,8 @@ export class SshManager {
   constructor(
     private readonly sender: WebContents,
     private readonly knownHosts: KnownHosts,
-    private readonly auditSink?: (entry: AuditEntry) => Promise<void> | void
+    private readonly auditSink?: (entry: AuditEntry) => Promise<void> | void,
+    private readonly assertLocal?: (path: string) => Promise<void>
   ) {}
 
   private readonly jobAudits = new Map<string, { identity?: Session['auditIdentity']; direction: 'up' | 'down'; terminal: boolean }>()
@@ -2111,6 +2112,7 @@ export class SshManager {
   private async walkLocalTree(dir: string, base: string, map: Map<string, { size: number; mtimeMs: number }>): Promise<boolean> {
     let items: import('node:fs').Dirent[]
     try {
+      await this.assertLocal?.(dir)
       items = await readdir(this.longPath(dir), { withFileTypes: true })
     } catch {
       return false
@@ -2125,6 +2127,7 @@ export class SshManager {
         if (!(await this.walkLocalTree(abs, rel, map))) return false
       } else if (it.isFile()) {
         try {
+          await this.assertLocal?.(abs)
           const st = await stat(this.longPath(abs))
           map.set(rel, { size: st.size, mtimeMs: st.mtimeMs })
         } catch {
@@ -2310,7 +2313,11 @@ export class SshManager {
       if (this.cancelledJobs.has(jobId)) break
       try {
         if (d.dir === 'up') await this.deletePath(sessionId, this.posixJoin(remoteDir, d.rel), false)
-        else await unlink(this.longPath(this.safeLocalJoin(localDir, d.rel)))
+        else {
+          const target = this.safeLocalJoin(localDir, d.rel)
+          await this.assertLocal?.(target)
+          await unlink(this.longPath(target))
+        }
       } catch {
         errors++
       }
@@ -2642,6 +2649,7 @@ export class SshManager {
     const walk = async (remote: string, base: string, name: string, isDir: boolean, depth: number): Promise<void> => {
       if (this.cancelledJobs.has(jobId) || depth > 64) return
       const local = this.safeLocalJoin(base, name)
+      await this.assertLocal?.(local)
       if (isDir) {
         await mkdir(this.longPath(local), { recursive: true })
         let list: { filename: string; attrs: { size: number; isDirectory(): boolean } }[]
@@ -2703,6 +2711,7 @@ export class SshManager {
           // replaced from the start. On error/cancel the partial is kept so the
           // next attempt can pick up from it.
           let offset = 0
+          await this.assertLocal?.(item.local)
           remoteInfo = await this.statFile(sftp, item.remote)
           const localSize = await stat(this.longPath(stagedLocal)).then(s => s.size).catch(() => 0)
           if (remoteInfo && priorPartial && priorPartial.localSize === localSize && priorPartial.remoteSize === remoteInfo.size && priorPartial.remoteMtimeMs === remoteInfo.mtimeMs) offset = localSize
@@ -2923,6 +2932,7 @@ export class SshManager {
         const remote = this.posixJoin(remoteBase, name)
         let st: Awaited<ReturnType<typeof stat>>
         try {
+          await this.assertLocal?.(local)
           st = await stat(this.longPath(local))
         } catch {
           failures++ // unreadable / path too long — skip, don't fail the job
@@ -3316,6 +3326,7 @@ export class SshManager {
    * fails safely: standard SFTP rename may create a new target, but must not
    * remove an existing one to make room. */
   private async stagedUpload(sftp: SFTPWrapper, local: string, requestedTarget: string, job: string, delta: (n: number) => void): Promise<void> {
+    if (this.jobSession.has(job)) await this.assertLocal?.(local)
     const target = await new Promise<string>((resolve, reject) => sftp.realpath(requestedTarget, (error, path) => {
       if (!error) resolve(path)
       else if ((error as Error & { code?: number }).code === 2) resolve(requestedTarget)
@@ -3350,6 +3361,7 @@ export class SshManager {
   }
 
   private async stagedDownload(sftp: SFTPWrapper, remote: string, local: string, job: string, delta: (n: number) => void): Promise<void> {
+    await this.assertLocal?.(local)
     const temp = `${local}.xssh-part-${randomUUID()}`
     let read: Readable | undefined
     let write: Writable | undefined
