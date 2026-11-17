@@ -1252,7 +1252,7 @@ function createWindow(saved?: SavedBounds, prefs: UiPrefs = {}): void {
     return { action: 'deny' }
   })
 
-  sshManager = new SshManager(win.webContents, knownHosts)
+  sshManager = new SshManager(win.webContents, knownHosts, pushConnLog)
   targetSender = win.webContents
 
   // Flush any launch target (CLI `-c` / `x-ssh://`) once the renderer's listener

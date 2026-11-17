@@ -45,7 +45,18 @@ function sha256File(p: string): Promise<string> {
   })
 }
 
+interface AuditEntry {
+  at: number
+  event: 'transfer' | 'forward'
+  host: string
+  port: number
+  username: string
+  detail: string
+  bytes?: number
+}
+
 interface Session {
+  auditIdentity?: Pick<AuditEntry, 'host' | 'port' | 'username'>
   id: string
   client: Client
   stream?: ClientChannel
@@ -183,8 +194,31 @@ export class SshManager {
 
   constructor(
     private readonly sender: WebContents,
-    private readonly knownHosts: KnownHosts
+    private readonly knownHosts: KnownHosts,
+    private readonly auditSink?: (entry: AuditEntry) => Promise<void> | void
   ) {}
+
+  private readonly jobAudits = new Map<string, { identity?: Session['auditIdentity']; direction: 'up' | 'down'; terminal: boolean }>()
+
+  private registerJob(id: string, sessionId: string, direction: 'up' | 'down'): void {
+    this.jobSession.set(id, sessionId)
+    this.jobAudits.set(id, { identity: this.sessions.get(sessionId)?.auditIdentity, direction, terminal: false })
+  }
+
+  private finishJobAudit(id: string): void {
+    const job = this.jobAudits.get(id)
+    if (job && !job.terminal) this.writeAudit(job.identity, 'transfer', `${job.direction} failed-before-completion`)
+    this.jobAudits.delete(id)
+  }
+
+  private writeAudit(identity: Session['auditIdentity'], event: AuditEntry['event'], detail: string, bytes?: number): void {
+    if (!identity || !this.auditSink) return
+    try { void Promise.resolve(this.auditSink({ ...identity, at: Date.now(), event, detail, bytes })).catch(() => undefined) } catch { /* Audit failures must not break transport cleanup. */ }
+  }
+
+  private audit(sessionId: string, event: AuditEntry['event'], detail: string, bytes?: number): void {
+    this.writeAudit(this.sessions.get(sessionId)?.auditIdentity, event, detail, bytes)
+  }
 
   private emit(event: SessionEvent): void {
     if (!this.sender.isDestroyed()) {
@@ -748,6 +782,7 @@ export class SshManager {
       const mode = rule.mode ?? 'local'
       if (mode === 'remote') {
         if (!(await this.openRemoteForward(session, rule))) failed.push(rule.localPort)
+        else this.audit(session.id, 'forward', `open remote:${rule.localPort}`)
         continue
       }
       const created = this.openRule(session, rule)
@@ -758,6 +793,7 @@ export class SshManager {
         failed.push(rule.localPort)
       } else {
         servers.push(...created)
+        this.audit(session.id, 'forward', `open ${mode}:${rule.localPort}`)
       }
     }
     if (this.sessions.get(session.id) !== session) {
@@ -797,6 +833,7 @@ export class SshManager {
         remotePort: rule.remotePort || 0,
         servers: []
       })
+      this.audit(sessionId, 'forward', `add ${key}`)
       return { ok: true }
     }
     const servers = this.openRule(session, rule)
@@ -812,6 +849,7 @@ export class SshManager {
     }
     if (!session.runtimeRules) session.runtimeRules = new Map()
     session.runtimeRules.set(key, { mode, localPort: rule.localPort, remoteHost: rule.remoteHost || '127.0.0.1', remotePort: rule.remotePort || 0, servers })
+    this.audit(sessionId, 'forward', `add ${key}`)
     return { ok: true }
   }
 
@@ -869,6 +907,7 @@ export class SshManager {
     if (session.runtimeRules?.delete(key)) removed = true
     for (const socket of session.ruleSockets?.get(key) ?? []) socket.destroy()
     session.ruleSockets?.delete(key)
+    if (removed) this.audit(sessionId, 'forward', `remove ${key}`)
     return { ok: true, removed }
   }
 
@@ -1347,7 +1386,7 @@ export class SshManager {
       if (m) {
         m.refs++
         m.sessions.add(id)
-        const session: Session = { id, client: m.client }
+        const session: Session = { id, client: m.client, auditIdentity: { host: params.host, port: params.port || 22, username: params.username } }
         this.sessions.set(id, session)
         const port = params.port || 22
         session.label = `${params.username}@${params.host}${port !== 22 ? `:${port}` : ''}`
@@ -1356,7 +1395,7 @@ export class SshManager {
     }
 
     const client = new Client()
-    this.sessions.set(id, { id, client })
+    this.sessions.set(id, { id, client, auditIdentity: { host: params.host, port: params.port || 22, username: params.username } })
 
     const port = params.port || 22
     this.sessions.get(id)!.label =
@@ -1958,6 +1997,13 @@ export class SshManager {
   forwardOutTimeoutMs = 30_000
 
   private emitProgress(p: SftpProgress): void {
+    const owner = this.jobSession.get(p.id)
+    const job = this.jobAudits.get(p.id)
+    if (owner && (p.done || p.error) && !job?.terminal) {
+      this.writeAudit(job?.identity ?? this.sessions.get(owner)?.auditIdentity, 'transfer', `${p.direction} ${p.name} ${p.error || 'complete'}`, p.transferred)
+      if (job) job.terminal = true
+    }
+
     // Continuous-sync jobs run silently: no per-file progress, no UI toasts.
     if (this.quietJobs.has(p.id)) return
     // A big folder produces a progress tick per chunk per file — tens of
@@ -2132,7 +2178,7 @@ export class SshManager {
     rateBytesPerSec = 0,
     quiet = false
   ): Promise<{ cancelled: boolean; errors: number }> {
-    this.jobSession.set(jobId, sessionId)
+    this.registerJob(jobId, sessionId, 'up')
     if (quiet) this.quietJobs.add(jobId)
     if (rateBytesPerSec > 0) this.jobRate.set(jobId, rateBytesPerSec)
     // Release every mapping this method registers. All the exit paths use it:
@@ -2145,6 +2191,7 @@ export class SshManager {
       this.pausedJobs.delete(jobId)
       this.jobRate.delete(jobId)
       this.lastProgressAt.delete(jobId)
+      this.finishJobAudit(jobId)
       this.jobSession.delete(jobId)
       this.quietJobs.delete(jobId)
     }
@@ -2551,7 +2598,7 @@ export class SshManager {
     checksumFails: number
     walkError?: string
   }> {
-    this.jobSession.set(jobId, sessionId)
+    this.registerJob(jobId, sessionId, 'down')
     if (rateBytesPerSec > 0) this.jobRate.set(jobId, rateBytesPerSec)
     // Release every mapping registered above on any early exit (see syncJob's
     // releaseJob for why partial cleanup is not enough).
@@ -2559,6 +2606,7 @@ export class SshManager {
       this.cancelledJobs.delete(jobId)
       this.pausedJobs.delete(jobId)
       this.jobRate.delete(jobId)
+      this.finishJobAudit(jobId)
       this.jobSession.delete(jobId)
       this.lastProgressAt.delete(jobId)
     }
@@ -2766,6 +2814,7 @@ export class SshManager {
       this.cancelledJobs.delete(jobId)
       this.pausedJobs.delete(jobId)
       this.jobRate.delete(jobId)
+      this.finishJobAudit(jobId)
       this.jobSession.delete(jobId)
       this.lastProgressAt.delete(jobId)
     }
@@ -2850,7 +2899,7 @@ export class SshManager {
     rateBytesPerSec = 0,
     overwrite: UploadOverwrite = 'overwrite'
   ): Promise<{ files: number; failures: number; cancelled: boolean; walkError?: string }> {
-    this.jobSession.set(jobId, sessionId)
+    this.registerJob(jobId, sessionId, 'up')
     if (rateBytesPerSec > 0) this.jobRate.set(jobId, rateBytesPerSec)
     const conc = clampConcurrency(concurrency ?? SshManager.CONCURRENCY, SshManager.CONCURRENCY)
     // Machine token (see downloadJob): localized by the renderer.
@@ -3039,6 +3088,7 @@ export class SshManager {
       this.cancelledJobs.delete(jobId)
       this.pausedJobs.delete(jobId)
       this.jobRate.delete(jobId)
+      this.finishJobAudit(jobId)
       this.jobSession.delete(jobId)
       this.lastProgressAt.delete(jobId)
     }
@@ -3275,6 +3325,7 @@ export class SshManager {
       write = sftp.createWriteStream(remote, options)
       read = createReadStream(this.longPath(localPath))
       await this.pipeStream(randomUUID(), read, write, () => undefined)
+      this.audit(sessionId, 'transfer', `up ${remote} complete`)
     } catch (error) {
       read?.destroy()
       write?.destroy()
