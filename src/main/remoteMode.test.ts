@@ -1,18 +1,21 @@
 import { it, expect, vi } from 'vitest'
 import { mkdtemp, writeFile, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { resolve } from 'node:path'
 import { join } from 'node:path'
 import { Writable } from 'node:stream'
 vi.mock('electron', () => ({ app: { getPath: () => '/tmp' } }))
 const { SshManager } = await import('./ssh')
 it.each(['edit', 'upload', 'sync'])('B2 preserves private permissions through the %s entry point', async (kind) => {
-  const dir = await mkdtemp(join(tmpdir(), 'xssh-mode-'))
+  const dir = await mkdtemp(resolve('tmp-local/xssh-mode-'))
   try {
     const local = join(dir, 'key')
     await writeFile(local, 'new key material')
     const modes: number[] = []
     const sftp = {
+      realpath: (p: string, cb: Function) => cb(null, p),
       stat: (_: string, cb: Function) => cb(null, { mode: 0o100600, size: 0, mtime: 0 }),
+      ext_openssh_rename: (_a: string, _b: string, cb: Function) => cb(null),
+      unlink: (_p: string, cb: Function) => cb(null),
       mkdir: (_: string, cb: Function) => cb(null),
       createWriteStream: (_: string, opts?: { mode?: number }) => {
         modes.push(opts?.mode ?? 0o666)

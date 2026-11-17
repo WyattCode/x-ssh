@@ -1,4 +1,4 @@
-import { readFile, stat, readdir, mkdir, unlink } from 'node:fs/promises'
+import { readFile, stat, readdir, mkdir, unlink, rename } from 'node:fs/promises'
 import { createReadStream, createWriteStream } from 'node:fs'
 import { basename, dirname, join, resolve, relative, isAbsolute } from 'node:path'
 import { randomUUID, createHash, randomBytes } from 'node:crypto'
@@ -30,7 +30,7 @@ import {
   penaltyRetryDelayMs,
   passphraseConnectCode
 } from './friendlyError'
-import { posixJoin, parentOf, clampConcurrency, buildPackCommand, buildExtractCommand, treeDirMode, resumeOffset, uploadStreamOptions } from '../shared/fsUtils'
+import { posixJoin, parentOf, clampConcurrency, buildPackCommand, buildExtractCommand, treeDirMode, uploadStreamOptions } from '../shared/fsUtils'
 import { isLoopbackHost, localX11Target, parseX11Hello, readLocalX11Cookie, rewriteX11Hello } from './x11'
 import { ensureLocalXServer } from './x11Server'
 
@@ -45,7 +45,18 @@ function sha256File(p: string): Promise<string> {
   })
 }
 
+interface AuditEntry {
+  at: number
+  event: 'transfer' | 'forward'
+  host: string
+  port: number
+  username: string
+  detail: string
+  bytes?: number
+}
+
 interface Session {
+  auditIdentity?: Pick<AuditEntry, 'host' | 'port' | 'username'>
   id: string
   client: Client
   stream?: ClientChannel
@@ -183,8 +194,32 @@ export class SshManager {
 
   constructor(
     private readonly sender: WebContents,
-    private readonly knownHosts: KnownHosts
+    private readonly knownHosts: KnownHosts,
+    private readonly auditSink?: (entry: AuditEntry) => Promise<void> | void,
+    private readonly assertLocal?: (path: string) => Promise<void>
   ) {}
+
+  private readonly jobAudits = new Map<string, { identity?: Session['auditIdentity']; direction: 'up' | 'down'; terminal: boolean }>()
+
+  private registerJob(id: string, sessionId: string, direction: 'up' | 'down'): void {
+    this.jobSession.set(id, sessionId)
+    this.jobAudits.set(id, { identity: this.sessions.get(sessionId)?.auditIdentity, direction, terminal: false })
+  }
+
+  private finishJobAudit(id: string): void {
+    const job = this.jobAudits.get(id)
+    if (job && !job.terminal) this.writeAudit(job.identity, 'transfer', `${job.direction} failed-before-completion`)
+    this.jobAudits.delete(id)
+  }
+
+  private writeAudit(identity: Session['auditIdentity'], event: AuditEntry['event'], detail: string, bytes?: number): void {
+    if (!identity || !this.auditSink) return
+    try { void Promise.resolve(this.auditSink({ ...identity, at: Date.now(), event, detail, bytes })).catch(() => undefined) } catch { /* Audit failures must not break transport cleanup. */ }
+  }
+
+  private audit(sessionId: string, event: AuditEntry['event'], detail: string, bytes?: number): void {
+    this.writeAudit(this.sessions.get(sessionId)?.auditIdentity, event, detail, bytes)
+  }
 
   private emit(event: SessionEvent): void {
     if (!this.sender.isDestroyed()) {
@@ -748,6 +783,7 @@ export class SshManager {
       const mode = rule.mode ?? 'local'
       if (mode === 'remote') {
         if (!(await this.openRemoteForward(session, rule))) failed.push(rule.localPort)
+        else this.audit(session.id, 'forward', `open remote:${rule.localPort}`)
         continue
       }
       const created = this.openRule(session, rule)
@@ -758,6 +794,7 @@ export class SshManager {
         failed.push(rule.localPort)
       } else {
         servers.push(...created)
+        this.audit(session.id, 'forward', `open ${mode}:${rule.localPort}`)
       }
     }
     if (this.sessions.get(session.id) !== session) {
@@ -797,6 +834,7 @@ export class SshManager {
         remotePort: rule.remotePort || 0,
         servers: []
       })
+      this.audit(sessionId, 'forward', `add ${key}`)
       return { ok: true }
     }
     const servers = this.openRule(session, rule)
@@ -812,6 +850,7 @@ export class SshManager {
     }
     if (!session.runtimeRules) session.runtimeRules = new Map()
     session.runtimeRules.set(key, { mode, localPort: rule.localPort, remoteHost: rule.remoteHost || '127.0.0.1', remotePort: rule.remotePort || 0, servers })
+    this.audit(sessionId, 'forward', `add ${key}`)
     return { ok: true }
   }
 
@@ -869,6 +908,7 @@ export class SshManager {
     if (session.runtimeRules?.delete(key)) removed = true
     for (const socket of session.ruleSockets?.get(key) ?? []) socket.destroy()
     session.ruleSockets?.delete(key)
+    if (removed) this.audit(sessionId, 'forward', `remove ${key}`)
     return { ok: true, removed }
   }
 
@@ -1347,7 +1387,7 @@ export class SshManager {
       if (m) {
         m.refs++
         m.sessions.add(id)
-        const session: Session = { id, client: m.client }
+        const session: Session = { id, client: m.client, auditIdentity: { host: params.host, port: params.port || 22, username: params.username } }
         this.sessions.set(id, session)
         const port = params.port || 22
         session.label = `${params.username}@${params.host}${port !== 22 ? `:${port}` : ''}`
@@ -1356,7 +1396,7 @@ export class SshManager {
     }
 
     const client = new Client()
-    this.sessions.set(id, { id, client })
+    this.sessions.set(id, { id, client, auditIdentity: { host: params.host, port: params.port || 22, username: params.username } })
 
     const port = params.port || 22
     this.sessions.get(id)!.label =
@@ -1514,6 +1554,8 @@ export class SshManager {
             }
             const session = this.sessions.get(id)
             if (!session || settled) { stream.close(); return settle({ ok: false, error: 'session-missing' }) }
+            // Shell establishment ends the connection watchdog; forwards have their own budgets.
+            clearTimeout(connectTimer)
             session.stream = stream
 
             stream.on('data', (data: Buffer) => this.emitData(id, data.toString('utf8')))
@@ -1704,7 +1746,9 @@ export class SshManager {
           }
           const session = this.sessions.get(id)
           if (!session || settled) { stream.close(); return settle({ ok: false, error: 'session-missing' }) }
-          session.stream = stream
+          // Shell establishment ends the connection watchdog; forwards have their own budgets.
+            clearTimeout(connectTimer)
+            session.stream = stream
           stream.on('data', (d: Buffer) => this.emitData(id, d.toString('utf8')))
           stream.stderr.on('data', (d: Buffer) => this.sendData(id, d.toString('utf8')))
           stream.on('close', () => {
@@ -1954,6 +1998,13 @@ export class SshManager {
   forwardOutTimeoutMs = 30_000
 
   private emitProgress(p: SftpProgress): void {
+    const owner = this.jobSession.get(p.id)
+    const job = this.jobAudits.get(p.id)
+    if (owner && (p.done || p.error) && !job?.terminal) {
+      this.writeAudit(job?.identity ?? this.sessions.get(owner)?.auditIdentity, 'transfer', `${p.direction} ${p.name} ${p.error || 'complete'}`, p.transferred)
+      if (job) job.terminal = true
+    }
+
     // Continuous-sync jobs run silently: no per-file progress, no UI toasts.
     if (this.quietJobs.has(p.id)) return
     // A big folder produces a progress tick per chunk per file — tens of
@@ -1992,7 +2043,7 @@ export class SshManager {
    *  `${sessionId}\0${remotePath}`. */
   private partialDownloads = new Map<
     string,
-    { localSize: number; remoteSize: number; remoteMtimeMs: number }
+    { localSize: number; remoteSize: number; remoteMtimeMs: number; path?: string }
   >()
 
   private statSize(sftp: SFTPWrapper, path: string): Promise<number> {
@@ -2061,6 +2112,7 @@ export class SshManager {
   private async walkLocalTree(dir: string, base: string, map: Map<string, { size: number; mtimeMs: number }>): Promise<boolean> {
     let items: import('node:fs').Dirent[]
     try {
+      await this.assertLocal?.(dir)
       items = await readdir(this.longPath(dir), { withFileTypes: true })
     } catch {
       return false
@@ -2075,6 +2127,7 @@ export class SshManager {
         if (!(await this.walkLocalTree(abs, rel, map))) return false
       } else if (it.isFile()) {
         try {
+          await this.assertLocal?.(abs)
           const st = await stat(this.longPath(abs))
           map.set(rel, { size: st.size, mtimeMs: st.mtimeMs })
         } catch {
@@ -2128,7 +2181,7 @@ export class SshManager {
     rateBytesPerSec = 0,
     quiet = false
   ): Promise<{ cancelled: boolean; errors: number }> {
-    this.jobSession.set(jobId, sessionId)
+    this.registerJob(jobId, sessionId, 'up')
     if (quiet) this.quietJobs.add(jobId)
     if (rateBytesPerSec > 0) this.jobRate.set(jobId, rateBytesPerSec)
     // Release every mapping this method registers. All the exit paths use it:
@@ -2141,6 +2194,7 @@ export class SshManager {
       this.pausedJobs.delete(jobId)
       this.jobRate.delete(jobId)
       this.lastProgressAt.delete(jobId)
+      this.finishJobAudit(jobId)
       this.jobSession.delete(jobId)
       this.quietJobs.delete(jobId)
     }
@@ -2237,17 +2291,9 @@ export class SshManager {
           const destDir = item.dir === 'up' ? this.parentOf(item.remote) : this.parentOf(item.local)
           if (item.dir === 'up') await this.ensureRemoteDir(sftp, destDir)
           else await mkdir(this.longPath(destDir), { recursive: true })
-          if (item.dir === 'up') {
-            write = sftp.createWriteStream(item.remote, await this.remoteWriteOptions(sftp, item.remote))
-            read = createReadStream(this.longPath(item.local))
-          } else {
-            write = createWriteStream(this.longPath(item.local))
-            read = sftp.createReadStream(item.remote)
-          }
-          await this.pipeStream(jobId, read, write, (n) => {
-            bytesDone += n
-            emit(item.rel, item.dir)
-          })
+          const delta = (n: number): void => { bytesDone += n; emit(item.rel, item.dir) }
+          if (item.dir === 'up') await this.stagedUpload(sftp, item.local, item.remote, jobId, delta)
+          else await this.stagedDownload(sftp, item.remote, item.local, jobId, delta)
           filesDone++
         } catch {
           read?.destroy()
@@ -2267,7 +2313,11 @@ export class SshManager {
       if (this.cancelledJobs.has(jobId)) break
       try {
         if (d.dir === 'up') await this.deletePath(sessionId, this.posixJoin(remoteDir, d.rel), false)
-        else await unlink(this.longPath(this.safeLocalJoin(localDir, d.rel)))
+        else {
+          const target = this.safeLocalJoin(localDir, d.rel)
+          await this.assertLocal?.(target)
+          await unlink(this.longPath(target))
+        }
       } catch {
         errors++
       }
@@ -2504,8 +2554,7 @@ export class SshManager {
         try {
           readable.on('error', (e: Error) => finish(e))
           writable.on('error', (e: Error) => finish(e))
-          writable.on('finish', () => finish())
-          writable.on('close', () => finish())
+          writable.on('close', () => finish(writable.writableFinished ? undefined : new Error('transfer-closed-before-finish')))
           for await (const chunk of readable) {
             if (settled) return
             await waitUnpaused()
@@ -2547,7 +2596,7 @@ export class SshManager {
     checksumFails: number
     walkError?: string
   }> {
-    this.jobSession.set(jobId, sessionId)
+    this.registerJob(jobId, sessionId, 'down')
     if (rateBytesPerSec > 0) this.jobRate.set(jobId, rateBytesPerSec)
     // Release every mapping registered above on any early exit (see syncJob's
     // releaseJob for why partial cleanup is not enough).
@@ -2555,6 +2604,7 @@ export class SshManager {
       this.cancelledJobs.delete(jobId)
       this.pausedJobs.delete(jobId)
       this.jobRate.delete(jobId)
+      this.finishJobAudit(jobId)
       this.jobSession.delete(jobId)
       this.lastProgressAt.delete(jobId)
     }
@@ -2599,6 +2649,7 @@ export class SshManager {
     const walk = async (remote: string, base: string, name: string, isDir: boolean, depth: number): Promise<void> => {
       if (this.cancelledJobs.has(jobId) || depth > 64) return
       const local = this.safeLocalJoin(base, name)
+      await this.assertLocal?.(local)
       if (isDir) {
         await mkdir(this.longPath(local), { recursive: true })
         let list: { filename: string; attrs: { size: number; isDirectory(): boolean } }[]
@@ -2646,6 +2697,9 @@ export class SshManager {
         let write: Writable | undefined
         let remoteInfo: { size: number; mtimeMs: number } | null = null
         const partialKey = `${sessionId}\u0000${item.remote}`
+        const priorPartial = this.partialDownloads.get(partialKey)
+        const stagedLocal = priorPartial?.path ?? `${item.local}.xssh-part-${randomUUID()}`
+        let ownsLocalStage = !!priorPartial?.path
         try {
           emit(item.name)
           // Both streams are built here so a throwing constructor can't leave
@@ -2657,26 +2711,17 @@ export class SshManager {
           // replaced from the start. On error/cancel the partial is kept so the
           // next attempt can pick up from it.
           let offset = 0
+          await this.assertLocal?.(item.local)
           remoteInfo = await this.statFile(sftp, item.remote)
-          try {
-            const localSize = (await stat(this.longPath(item.local))).size
-            if (localSize > 0) {
-              const remote = remoteInfo
-              const prior = this.partialDownloads.get(partialKey)
-              const resumable =
-                !!remote &&
-                !!prior &&
-                prior.localSize === localSize &&
-                prior.remoteSize === remote.size &&
-                prior.remoteMtimeMs === remote.mtimeMs
-              if (resumable) offset = localSize
-              else await unlink(this.longPath(item.local))
-            }
-          } catch {
-            /* no existing local file — start fresh */
-          }
+          const localSize = await stat(this.longPath(stagedLocal)).then(s => s.size).catch(() => 0)
+          if (remoteInfo && priorPartial && priorPartial.localSize === localSize && priorPartial.remoteSize === remoteInfo.size && priorPartial.remoteMtimeMs === remoteInfo.mtimeMs) offset = localSize
+          else await unlink(this.longPath(stagedLocal)).catch(() => undefined)
           read = offset ? sftp.createReadStream(item.remote, { start: offset }) : sftp.createReadStream(item.remote)
-          write = createWriteStream(this.longPath(item.local), offset ? { flags: 'a' } : undefined)
+          read.on('error', () => undefined)
+          write = createWriteStream(this.longPath(stagedLocal), offset ? { flags: 'a' } : { flags: 'wx' })
+          write.once('open', () => { ownsLocalStage = true })
+          write.on('error', () => undefined)
+          const closed = new Promise<void>(resolve => write!.once('close', resolve))
           await this.pipeStream(
             jobId,
             read,
@@ -2687,6 +2732,9 @@ export class SshManager {
             }
           )
           filesDone++
+          await closed
+          if (this.cancelledJobs.has(jobId)) throw new Error(SshManager.CANCELLED_TEXT)
+          await rename(this.longPath(stagedLocal), this.longPath(item.local))
           this.partialDownloads.delete(partialKey)
           if (verifyChecksums) {
             try {
@@ -2698,19 +2746,25 @@ export class SshManager {
           }
         } catch {
           read?.destroy()
-          write?.destroy()
+          if (write && !(write as Writable & { closed?: boolean }).closed) {
+            const closed = new Promise<void>(resolve => write!.once('close', resolve))
+            write.destroy()
+            await closed
+          }
           // Remember what was interrupted, so a retry continues this exact
           // remote version rather than guessing from the file size.
-          if (remoteInfo) {
-            const localNow = await stat(this.longPath(item.local)).catch(() => null)
+          if (remoteInfo && ownsLocalStage) {
+            const localNow = await stat(this.longPath(stagedLocal)).catch(() => null)
             if (localNow) {
               this.partialDownloads.set(partialKey, {
+                path: stagedLocal,
                 localSize: localNow.size,
                 remoteSize: remoteInfo.size,
                 remoteMtimeMs: remoteInfo.mtimeMs
               })
             }
           }
+          if (!remoteInfo && ownsLocalStage) await unlink(this.longPath(stagedLocal)).catch(() => undefined)
           if (this.cancelledJobs.has(jobId)) return
           failures.push(item.name)
         }
@@ -2762,6 +2816,7 @@ export class SshManager {
       this.cancelledJobs.delete(jobId)
       this.pausedJobs.delete(jobId)
       this.jobRate.delete(jobId)
+      this.finishJobAudit(jobId)
       this.jobSession.delete(jobId)
       this.lastProgressAt.delete(jobId)
     }
@@ -2846,7 +2901,7 @@ export class SshManager {
     rateBytesPerSec = 0,
     overwrite: UploadOverwrite = 'overwrite'
   ): Promise<{ files: number; failures: number; cancelled: boolean; walkError?: string }> {
-    this.jobSession.set(jobId, sessionId)
+    this.registerJob(jobId, sessionId, 'up')
     if (rateBytesPerSec > 0) this.jobRate.set(jobId, rateBytesPerSec)
     const conc = clampConcurrency(concurrency ?? SshManager.CONCURRENCY, SshManager.CONCURRENCY)
     // Machine token (see downloadJob): localized by the renderer.
@@ -2877,6 +2932,7 @@ export class SshManager {
         const remote = this.posixJoin(remoteBase, name)
         let st: Awaited<ReturnType<typeof stat>>
         try {
+          await this.assertLocal?.(local)
           st = await stat(this.longPath(local))
         } catch {
           failures++ // unreadable / path too long — skip, don't fail the job
@@ -2930,7 +2986,6 @@ export class SshManager {
             // - keep: upload alongside under a fresh name (name (1).ext, ...).
             // - overwrite (default): resume partials; skip a remote file that is the
             //   same size *and* not older; otherwise write from the start / offset.
-            let offset = 0
             let localSize: number | null = null
             let localMtime = 0
             try {
@@ -2963,22 +3018,11 @@ export class SshManager {
                   emit(item.name)
                   continue
                 }
-                offset = resumeOffset(remoteSize, localSize)
+                // A complete staged replacement never resumes from an unrelated destination.
               }
             }
-            // Build both streams before piping, and destroy them here if
-            // either constructor throws — an orphaned stream leaks its fd and
-            // later emits 'error' with nobody listening, which is fatal.
-            // No cleanup path on failure: the source file is the user's.
-            // Both the offset decision and the stream flags are pure functions
-            // in fsUtils, unit-tested in uploadPlan.test.ts: passing `start`
-            // with ssh2's default 'w' truncated the file, and the resulting
-            // size equalled the local one, so the corruption looked synced.
-            write = sftp.createWriteStream(item.remote, await this.remoteWriteOptions(sftp, item.remote, offset))
-            read = offset
-              ? createReadStream(this.longPath(item.local), { start: offset })
-              : createReadStream(this.longPath(item.local))
-            await this.pipeStream(jobId, read, write, (n) => {
+            // Complete staged replacements do not reuse arbitrary remote prefixes.
+            await this.stagedUpload(sftp, item.local, item.remote, jobId, (n) => {
               bytesDone += n
               emit(item.name)
             })
@@ -3035,6 +3079,7 @@ export class SshManager {
       this.cancelledJobs.delete(jobId)
       this.pausedJobs.delete(jobId)
       this.jobRate.delete(jobId)
+      this.finishJobAudit(jobId)
       this.jobSession.delete(jobId)
       this.lastProgressAt.delete(jobId)
     }
@@ -3247,6 +3292,101 @@ export class SshManager {
     return { path: top, skipped }
   }
 
+  private stagingCleanupTimeoutMs = 2000
+
+  /** ssh2 deliberately omits close when CLOSE fails. Cleanup must also finish
+   * if a disconnected SFTP peer never answers the outstanding request. */
+  private closeStagingStream(write: Writable): Promise<void> {
+    if ((write as Writable & { isClosed?: boolean }).isClosed || write.closed) return Promise.resolve()
+    return new Promise(resolve => {
+      const done = (): void => {
+        clearTimeout(timer)
+        write.removeListener('close', done)
+        write.removeListener('error', done)
+        resolve()
+      }
+      const timer = setTimeout(done, this.stagingCleanupTimeoutMs)
+      timer.unref?.()
+      write.once('close', done)
+      write.once('error', done)
+      write.destroy()
+    })
+  }
+
+  private cleanupRemoteStage(sftp: SFTPWrapper, path: string): Promise<void> {
+    return new Promise(resolve => {
+      const done = (): void => { clearTimeout(timer); resolve() }
+      const timer = setTimeout(done, this.stagingCleanupTimeoutMs)
+      timer.unref?.()
+      try { sftp.unlink(path, done) } catch { done() }
+    })
+  }
+
+  /** Never write into the destination inode. An unsupported overwrite extension
+   * fails safely: standard SFTP rename may create a new target, but must not
+   * remove an existing one to make room. */
+  private async stagedUpload(sftp: SFTPWrapper, local: string, requestedTarget: string, job: string, delta: (n: number) => void): Promise<void> {
+    if (this.jobSession.has(job)) await this.assertLocal?.(local)
+    const target = await new Promise<string>((resolve, reject) => sftp.realpath(requestedTarget, (error, path) => {
+      if (!error) resolve(path)
+      else if ((error as Error & { code?: number }).code === 2) resolve(requestedTarget)
+      else reject(error)
+    }))
+    const options = await this.remoteWriteOptions(sftp, target)
+    const temp = `${target}.xssh-part-${randomUUID()}`
+    let read: Readable | undefined
+    let write: Writable | undefined
+    let ownsTemp = false
+    try {
+      write = sftp.createWriteStream(temp, { ...options, flags: 'wx' })
+      write.once('open', () => { ownsTemp = true })
+      write.on('error', () => undefined)
+      read = createReadStream(this.longPath(local))
+      await this.pipeStream(job, read, write, delta)
+      if (this.cancelledJobs.has(job)) throw new Error(SshManager.CANCELLED_TEXT)
+      await new Promise<void>((resolve, reject) => {
+        sftp.ext_openssh_rename(temp, target, error => {
+          if (!error) return resolve()
+          // Only unsupported-extension errors can use v3 no-replace rename.
+          if ((error as Error & { code?: number }).code !== 8) return reject(error)
+          sftp.rename(temp, target, e => e ? reject(e) : resolve())
+        })
+      })
+    } catch (error) {
+      read?.destroy()
+      if (write) await this.closeStagingStream(write)
+      if (ownsTemp) await this.cleanupRemoteStage(sftp, temp)
+      throw error
+    }
+  }
+
+  private async stagedDownload(sftp: SFTPWrapper, remote: string, local: string, job: string, delta: (n: number) => void): Promise<void> {
+    await this.assertLocal?.(local)
+    const temp = `${local}.xssh-part-${randomUUID()}`
+    let read: Readable | undefined
+    let write: Writable | undefined
+    let ownsTemp = false
+    try {
+      write = createWriteStream(this.longPath(temp), { flags: 'wx' })
+      write.once('open', () => { ownsTemp = true })
+      write.on('error', () => undefined)
+      const closed = new Promise<void>(resolve => write!.once('close', resolve))
+      read = sftp.createReadStream(remote)
+      await this.pipeStream(job, read, write, delta)
+      await closed
+      if (this.cancelledJobs.has(job)) throw new Error(SshManager.CANCELLED_TEXT)
+      await rename(this.longPath(temp), this.longPath(local))
+    } finally {
+      read?.destroy()
+      if (write && !(write as Writable & { closed?: boolean }).closed) {
+        const closed = new Promise<void>(resolve => write!.once('close', resolve))
+        write.destroy()
+        await closed
+      }
+      if (ownsTemp) await unlink(this.longPath(temp)).catch(() => undefined)
+    }
+  }
+
   /** Preserve existing permissions; only a missing file gets the creation default. */
   private async remoteWriteOptions(sftp: SFTPWrapper, path: string, offset = 0): Promise<ReturnType<typeof uploadStreamOptions>> {
     const mode = await new Promise<number>((resolve, reject) => {
@@ -3264,18 +3404,8 @@ export class SshManager {
   async putFileSilent(sessionId: string, localPath: string, remoteDir: string, name: string): Promise<void> {
     const sftp = await this.getSftp(sessionId)
     const remote = this.posixJoin(remoteDir, name)
-    const options = await this.remoteWriteOptions(sftp, remote)
-    let read: Readable | undefined
-    let write: Writable | undefined
-    try {
-      write = sftp.createWriteStream(remote, options)
-      read = createReadStream(this.longPath(localPath))
-      await this.pipeStream(randomUUID(), read, write, () => undefined)
-    } catch (error) {
-      read?.destroy()
-      write?.destroy()
-      throw error
-    }
+    await this.stagedUpload(sftp, localPath, remote, randomUUID(), () => undefined)
+    this.audit(sessionId, 'transfer', `up ${remote} complete`)
   }
 
   async mkdir(sessionId: string, path: string): Promise<void> {

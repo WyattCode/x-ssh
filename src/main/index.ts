@@ -1,6 +1,7 @@
 import { publishKeyCommand } from '../shared/publicKey'
 import { rendererConnLogPush } from './connLogIpc'
 import { renameNoReplace } from './localRename'
+import { LocalAccess } from './localAccess'
 import { app, shell, BrowserWindow, ipcMain, dialog, nativeImage, nativeTheme, screen, Menu, Notification, Tray, globalShortcut, powerMonitor, clipboard, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron'
 import { join, dirname, basename, isAbsolute, sep } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -47,6 +48,7 @@ const activeEdits = new Set<string>()
  *  final push + rm). Resolves once the file is safely off the local disk. */
 const editCleanups = new Map<string, () => Promise<void>>()
 let sshManager: SshManager | null = null
+const localAccess = new LocalAccess()
 
 /**
  * The window's SSH manager, for handlers that cannot run before it exists.
@@ -1252,7 +1254,7 @@ function createWindow(saved?: SavedBounds, prefs: UiPrefs = {}): void {
     return { action: 'deny' }
   })
 
-  sshManager = new SshManager(win.webContents, knownHosts)
+  sshManager = new SshManager(win.webContents, knownHosts, pushConnLog, path => localAccess.assert(path))
   targetSender = win.webContents
 
   // Flush any launch target (CLI `-c` / `x-ssh://`) once the renderer's listener
@@ -1266,6 +1268,7 @@ function createWindow(saved?: SavedBounds, prefs: UiPrefs = {}): void {
   }
 
   win.on('closed', () => {
+    localAccess.clear()
     // Persist session output so history search still finds it after a restart.
     //
     // Bounded by BYTES, not by entry count. A scrollback buffer for a busy
@@ -1539,6 +1542,43 @@ function registerIpc(): void {
    * refused. This is the difference between "delete what the user is looking
    * at" and "delete anything the user can reach".
    */
+  // A renderer path is a request, never a grant. Native selections authorize
+  // only the chosen root/file; canceled or changed selections do not authorize
+  // the original caller-supplied path.
+  async function chooseLocalDirectory(defaultPath?: string): Promise<string | undefined> {
+    const res = await dialog.showOpenDialog({ defaultPath, properties: ['openDirectory', 'createDirectory'] })
+    if (res.canceled || !res.filePaths[0]) return undefined
+    await localAccess.grantDirectory(res.filePaths[0])
+    return res.filePaths[0]
+  }
+  async function requireLocalDirectory(path: string): Promise<void> {
+    if (!await localAccess.allows(path)) {
+      const chosen = await chooseLocalDirectory(path)
+      if (!chosen || resolveDir(chosen) !== resolveDir(path)) throw new Error('local-path-denied')
+    }
+    await localAccess.assertTree(path)
+  }
+  async function requireLocalSources(paths: string[]): Promise<void> {
+    if (!Array.isArray(paths) || !paths.length || paths.length > 500 || paths.some(p => typeof p !== 'string' || !isAbsolute(p) || p.includes('\0'))) throw new Error('local-path-denied')
+    if (!(await Promise.all(paths.map(p => localAccess.allows(p)))).every(Boolean)) {
+      const directories = await Promise.all(paths.map(async p => (await stat(p)).isDirectory()))
+      if (directories.some(Boolean) && !directories.every(Boolean)) {
+        // Windows/Linux cannot select files and directories in one open dialog.
+        // A mixed drop can instead authorize its containing workspace root.
+        if (!await chooseLocalDirectory(dirname(paths[0]))) throw new Error('local-path-denied')
+      } else {
+        const res = await dialog.showOpenDialog({ defaultPath: paths[0], properties: [directories.every(Boolean) ? 'openDirectory' : 'openFile', 'multiSelections'] })
+        if (res.canceled || paths.length !== res.filePaths.length || paths.some(p => !res.filePaths.some(selected => resolveDir(selected) === resolveDir(p)))) throw new Error('local-path-denied')
+        for (const selected of res.filePaths) {
+          if ((await stat(selected)).isDirectory()) await localAccess.grantDirectory(selected)
+          else await localAccess.grantFile(selected)
+        }
+      }
+    }
+    for (const path of paths) await localAccess.assertTree(path)
+  }
+
+  let localHomeRoot: string | undefined
   const localListed = new Map<string, Set<string>>()
   function rememberLocalListing(dir: string, names: string[]): void {
     localListed.delete(dir)
@@ -1549,11 +1589,17 @@ function registerIpc(): void {
     }
   }
 
-  handle(IPC.localHome, () => homedir())
+  handle(IPC.localHome, async () => {
+    if (localHomeRoot && await localAccess.allows(localHomeRoot)) return localHomeRoot
+    localHomeRoot = await chooseLocalDirectory(homedir())
+    return localHomeRoot ?? ''
+  })
   handle(
     IPC.localList,
     async (_e, dir: string): Promise<{ path: string; entries: LocalEntry[] }> => {
-      const resolved = resolveDir(dir)
+      let resolved = resolveDir(dir)
+      if (resolved && !await localAccess.allows(resolved)) resolved = await chooseLocalDirectory(resolved) ?? null
+      if (resolved) await localAccess.assert(resolved)
       // Echo the caller's own path back rather than an empty one: the drawer
       // assigns `r.path` to its current directory, so returning '' would blank
       // the pane and make every later navigation a no-op with no explanation.
@@ -1566,6 +1612,7 @@ function registerIpc(): void {
         const withMeta = await Promise.all(
           names.map(async (d) => {
             try {
+              await localAccess.assert(join(resolved, d.name))
               const s = await stat(join(resolved, d.name))
               return {
                 name: d.name,
@@ -1598,6 +1645,7 @@ function registerIpc(): void {
       // listed directory. Normalize, and refuse embedded NULs.
       const target = resolveDir(p)
       if (!target) return { ok: false, error: 'path-invalid' }
+      await requireLocalSources([target])
       // Same ceiling as the remote side (sftpReadText): this feeds the compare
       // view, and an unbounded read of a big file stalls the whole main process.
       const info = await stat(target)
@@ -1612,6 +1660,7 @@ function registerIpc(): void {
   handle(IPC.localPickFile, async () => {
     const res = await dialog.showOpenDialog({ properties: ['openFile'] })
     if (res.canceled || !res.filePaths[0]) return { ok: false, canceled: true }
+    await localAccess.grantFile(res.filePaths[0])
     return { ok: true, path: res.filePaths[0] }
   })
   // ---- Local FS mutations (create / rename / delete) for the local pane ----
@@ -1626,6 +1675,7 @@ function registerIpc(): void {
       try {
         // 'wx' refuses an existing file: `writeFile(target, '')` silently
         // truncated whatever happened to share the name.
+        await localAccess.assert(target)
         if (kind === 'folder') await mkdir(target)
         else await writeFile(target, '', { flag: 'wx' })
         return { ok: true }
@@ -1645,6 +1695,8 @@ function registerIpc(): void {
       const to = resolveInside(base, newName)
       if (!from || !to) return { ok: false, error: 'invalid-name' }
       try {
+        await localAccess.assert(from)
+        await localAccess.assert(to)
         await renameNoReplace(from, to)
         return { ok: true }
       } catch (e) {
@@ -1664,6 +1716,7 @@ function registerIpc(): void {
       const target = resolveInside(base, name)
       if (!target) return { ok: false, error: 'invalid-name' }
       try {
+        await localAccess.assertTree(target)
         await rm(target, { recursive: isDir, force: isDir })
         return { ok: true }
       } catch (e) {
@@ -1688,6 +1741,8 @@ function registerIpc(): void {
         return { ok: false, error: 'bad-input' }
       }
       try {
+        await localAccess.assert(base)
+        await requireLocalSources(sources)
         for (const srcRaw of sources) {
           if (typeof srcRaw !== 'string' || !isAbsolute(srcRaw) || srcRaw.includes('\u0000')) {
             return { ok: false, error: 'bad-input' }
@@ -1710,6 +1765,7 @@ function registerIpc(): void {
             target = resolveInside(base, `${stem} (${n})${ext}`)
             if (!target || n > 999) return { ok: false, error: 'invalid-name' }
           }
+          await localAccess.assert(target)
           await cp(srcRaw, target, {
             recursive: true,
             // Preserve timestamps where the platform can; a copy that lands
@@ -2015,6 +2071,7 @@ function registerIpc(): void {
       const res = await dialog.showSaveDialog({ defaultPath: name })
       if (res.canceled || !res.filePath) return { ok: false, canceled: true }
       try {
+        await localAccess.grantOutputFile(res.filePath)
         // Save-As: one file into the chosen path (dir + chosen basename).
         const r = await requireSshManager().downloadJob(
           sessionId,
@@ -2044,6 +2101,11 @@ function registerIpc(): void {
       })
       if (res.canceled) return { ok: false, canceled: true, count: 0 }
       try {
+        for (const selected of res.filePaths) {
+          if ((await stat(selected)).isDirectory()) await localAccess.grantDirectory(selected)
+          else await localAccess.grantFile(selected)
+          await localAccess.assertTree(selected)
+        }
         const policy = await resolveUploadOverwrite(sessionId, remoteDir, res.filePaths.map((p) => basename(p)), overwrite)
         if (policy === 'cancel') return { ok: false, canceled: true, count: 0 }
         const r = await sshManager.uploadJob(sessionId, res.filePaths, remoteDir, randomUUID(), concurrency, await defaultTransferRate(), policy)
@@ -2076,6 +2138,8 @@ function registerIpc(): void {
         properties: ['openDirectory']
       })
       if (res.canceled || !res.filePaths[0]) return { ok: false, canceled: true }
+      await localAccess.grantDirectory(res.filePaths[0])
+      await localAccess.assertTree(res.filePaths[0])
       // Confirmation before overwriting existing local files in the target dir.
       if (!overwriteLocal && !(await confirmOverwriteLocal(items.map((it) => join(res.filePaths[0], it.name))))) {
         return { ok: false, canceled: true }
@@ -2100,6 +2164,7 @@ function registerIpc(): void {
         if (!target || !isAbsolute(target)) return { ok: false, error: 'path-invalid' }
         // showItemInFolder does not throw for a missing path — it just opens the
         // parent (or does nothing useful). Fail closed so the drawer toast fires.
+        await localAccess.assert(target)
         await access(target)
         shell.showItemInFolder(target)
         return { ok: true }
@@ -2122,6 +2187,7 @@ function registerIpc(): void {
       overwriteLocal?: boolean
     ) => {
       if (!sshManager) return { ok: false, error: 'window-not-ready' }
+      try { await requireLocalDirectory(targetDir) } catch { return { ok: false, error: 'local-path-denied' } }
       // Confirmation before overwriting existing local files in the target dir.
       if (!overwriteLocal && !(await confirmOverwriteLocal(items.map((it) => join(targetDir, it.name))))) {
         return { ok: false, canceled: true }
@@ -2148,6 +2214,11 @@ function registerIpc(): void {
       })
       if (res.canceled) return { ok: false, canceled: true, count: 0 }
       try {
+        for (const selected of res.filePaths) {
+          if ((await stat(selected)).isDirectory()) await localAccess.grantDirectory(selected)
+          else await localAccess.grantFile(selected)
+          await localAccess.assertTree(selected)
+        }
         const policy = await resolveUploadOverwrite(sessionId, remoteDir, res.filePaths.map((p) => basename(p)), overwrite)
         if (policy === 'cancel') return { ok: false, canceled: true, count: 0 }
         const r = await sshManager.uploadJob(sessionId, res.filePaths, remoteDir, randomUUID(), concurrency, await defaultTransferRate(), policy)
@@ -2168,6 +2239,7 @@ function registerIpc(): void {
     async (_e, sessionId: string, remoteDir: string, paths: string[], concurrency?: number, overwrite?: UploadOverwrite) => {
       if (!sshManager) return { ok: false, error: 'window-not-ready', count: 0 }
       try {
+        await requireLocalSources(paths)
         const policy = await resolveUploadOverwrite(sessionId, remoteDir, paths.map((p) => basename(p)), overwrite)
         if (policy === 'cancel') return { ok: false, canceled: true, count: 0 }
         const r = await sshManager.uploadJob(sessionId, paths, remoteDir, randomUUID(), concurrency, await defaultTransferRate(), policy)
@@ -2193,6 +2265,7 @@ function registerIpc(): void {
     ) => {
       if (!sshManager) return { ok: false, error: 'window-not-ready', count: 0 }
       try {
+        await requireLocalDirectory(localDir)
         const r = await sshManager.syncJob(sessionId, localDir, remoteDir, mode, deleteExtras, randomUUID(), concurrency, await defaultTransferRate())
         // A cancelled sync used to answer ok:true, so the UI reported success.
         if (r.cancelled) return { ok: false, canceled: true, count: 0 }
@@ -2218,6 +2291,7 @@ function registerIpc(): void {
     ) => {
       if (!sshManager) return { ok: false, error: 'window-not-ready' }
       try {
+        await requireLocalDirectory(localDir)
         const watchId = await sshManager.startWatchSync(sessionId, localDir, remoteDir, mode, deleteExtras, intervalSec)
         return { ok: true, watchId }
       } catch (e) {
@@ -2235,6 +2309,7 @@ function registerIpc(): void {
     async (_e, sessionId: string, localDir: string, remoteDir: string) => {
       if (!sshManager) return { ok: false, error: 'window-not-ready' }
       try {
+        await requireLocalDirectory(localDir)
         const r = await sshManager.diffDirs(sessionId, localDir, remoteDir)
         return { ok: true, ...r }
       } catch (e) {
@@ -2283,6 +2358,11 @@ function registerIpc(): void {
       })
       if (res.canceled || !res.filePaths[0]) return { ok: false, canceled: true }
       try {
+        for (const selected of res.filePaths) {
+          if ((await stat(selected)).isDirectory()) await localAccess.grantDirectory(selected)
+          else await localAccess.grantFile(selected)
+          await localAccess.assertTree(selected)
+        }
         const policy = await resolveUploadOverwrite(sessionId, remoteDir, res.filePaths.map((p) => basename(p)), overwrite)
         if (policy === 'cancel') return { ok: false, canceled: true }
         // Upload the archive into remoteDir, then extract it there.
@@ -2686,6 +2766,7 @@ function registerIpc(): void {
       title: await dl('pickBackupDir'),
       properties: ['openDirectory', 'createDirectory']
     })
+    if (!res.canceled && res.filePaths[0]) await localAccess.grantDirectory(res.filePaths[0])
     return res.canceled ? undefined : res.filePaths[0]
   })
 
