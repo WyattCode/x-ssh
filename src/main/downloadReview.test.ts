@@ -1,8 +1,11 @@
 import { it, expect, vi } from 'vitest'
 import { mkdtemp, writeFile, rm } from 'node:fs/promises'
+import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { resolve } from 'node:path'
 import { PassThrough } from 'node:stream'
+
+mkdirSync('tmp-local', { recursive: true })
 vi.mock('electron', () => ({ app: { getPath: () => '/tmp' } }))
 const { SshManager } = await import('./ssh')
 it('B8 records the remote version when a first download is interrupted', async () => {

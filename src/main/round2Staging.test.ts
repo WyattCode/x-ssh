@@ -1,7 +1,10 @@
 import { it, expect, vi } from 'vitest'
 import { mkdtemp, writeFile, rm, readFile } from 'node:fs/promises'
+import { mkdirSync } from 'node:fs'
 import { resolve, join } from 'node:path'
 import { Writable, Readable } from 'node:stream'
+
+mkdirSync('tmp-local', { recursive: true })
 vi.mock('electron', () => ({ app: { getPath: () => 'tmp-local' } }))
 const { SshManager } = await import('./ssh')
 it.each(['edit', 'upload', 'sync'])('F3 %s stages failures without truncating the target', async kind => {
