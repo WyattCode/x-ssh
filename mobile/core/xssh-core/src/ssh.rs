@@ -767,7 +767,7 @@ impl Ssh {
         let (mut reader, writer) = channel.split();
         self.runtime.spawn(async move { while reader.wait().await.is_some() {} });
 
-        Ok(Shell { runtime: self.runtime.clone(), channel: writer, events })
+        Ok(Shell { runtime: self.runtime.clone(), channel: writer, events, gone: false })
     }
 
     /// 开一条端口转发(本机 / 远端 / SOCKS)。失败不伤终端通道。
@@ -1064,6 +1064,8 @@ pub struct Shell {
     runtime: Arc<tokio::runtime::Runtime>,
     channel: russh::ChannelWriteHalf<client::Msg>,
     events: mpsc::UnboundedReceiver<ServerMsg>,
+    /// 已经把「连接断了」报给过调用方(只报一次)。
+    gone: bool,
 }
 
 impl Shell {
@@ -1093,7 +1095,26 @@ impl Shell {
 
     /// 非阻塞取一条服务端消息。
     pub fn poll_msg(&mut self) -> Option<ServerMsg> {
-        self.events.try_recv().ok()
+        match self.events.try_recv() {
+            Ok(msg) => {
+                if matches!(msg, ServerMsg::Disconnected) {
+                    self.gone = true;
+                }
+                Some(msg)
+            }
+            Err(mpsc::error::TryRecvError::Empty) => None,
+            // 发送端全没了 = russh 的会话循环已经退出。对方突然消失(进程被杀、机器重启)时,russh 关写端失败会
+            // 直接返回,**不调** `Handler::disconnected`,那条 `Disconnected` 就永远不来 —— 界面一直以为还连着。
+            // 这里补报一次。
+            Err(mpsc::error::TryRecvError::Disconnected) => {
+                if self.gone {
+                    None
+                } else {
+                    self.gone = true;
+                    Some(ServerMsg::Disconnected)
+                }
+            }
+        }
     }
 
     /// 半关闭(发送 EOF)。

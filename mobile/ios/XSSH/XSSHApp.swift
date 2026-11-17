@@ -547,6 +547,9 @@ struct RootView: View {
         }
         // 断开 / 取消之后回到主机列表:横屏 / 展开时抽屉是收起的,要滑出来让人重新选。
         let leaving = active?.id
+        // 已经结束的会话(连接失败 / 对方关了)在列表里本来就没有「连着」的那一行:不用放那一行的收场,
+        // 也不该为它震一下、再让右边空等大半秒。
+        let hasRow = active.flatMap { listActive($0) } != nil
         if sizeClass == .regular {
             // 内屏:和外屏同一套收场(列表里那一行放手 → 停一下 → 收起),只是没有翻页:
             //   0ms     会话(右边的终端)淡出;抽屉要是收着,同时滑出来(会话还在,收场完了才清掉,不在抽屉动画里换掉);
@@ -556,11 +559,11 @@ struct RootView: View {
             active?.wantsKeyboard = false
             withAnimation(.easeOut(duration: 0.2)) { active?.leaving = true }
             if listHidden { setDrawer(true) }
-            closeTask = Task { @MainActor in await sendOff(leaving, lead: listHidden ? 230 : 60) }
+            closeTask = Task { @MainActor in await sendOff(leaving, lead: listHidden ? 230 : 60, row: hasRow) }
         } else {
             // 外屏:翻页(系统的滑动)照旧;列表里这台那一行的收场放在翻页快到位的时候才开始 —— 那时列表已经看得见了,
             // 用户眼睛正落在那一行上(以前翻回来之后它还「连着」约半秒,然后猛地一变,最不顺的就是这里)。
-            closeTask = Task { @MainActor in await sendOff(leaving, lead: 230) }
+            closeTask = Task { @MainActor in await sendOff(leaving, lead: 230, row: hasRow) }
         }
     }
 
@@ -569,10 +572,16 @@ struct RootView: View {
     /// (早清的话外屏翻页中途详情页会先变成「没有会话」的空页面,闪一下)。收起的 0.22s 里状态行还显示着「✕ 已断开」,
     /// 收完了才把标志复位(同时复位的话,这一行会在淡出的最后一刻闪回「✓ 已连接」)。
     /// `try?` 会吞掉取消:每次等待之后都要自己检查,被打断(`finishCloseNow`)就退出。
-    private func sendOff(_ leaving: UUID?, lead: Int) async {
+    private func sendOff(_ leaving: UUID?, lead: Int, row: Bool) async {
         try? await Task.sleep(for: .milliseconds(lead))
         guard !Task.isCancelled else { return }
         guard active?.id == leaving else { closeTask = nil; return }
+        guard row else {
+            // 列表里没有这台的行可收:翻页 / 抽屉到位后直接清掉会话。
+            withAnimation(.smooth(duration: 0.25)) { active = nil }
+            closeTask = nil
+            return
+        }
         withAnimation(.smooth(duration: 0.32)) { closing = true }
         try? await Task.sleep(for: .milliseconds(440))
         guard !Task.isCancelled else { return }

@@ -18,6 +18,12 @@ struct KeyCapture: UIViewRepresentable {
     }
 
     func updateUIView(_ field: CaptureField, context: Context) {
+        // 换了会话(连着 A 时直接点 B):输入框是同一个,要改接到新会话上。以前它一直指着旧会话,
+        // 旧会话一被换掉就释放了,B 的终端里敲什么都发不出去。
+        if field.model !== model {
+            field.model = model
+            field.resetField()
+        }
         field.wanted = wantsKeyboard
         // 等视图进了窗口再要焦点;键盘开关由 `wantsKeyboard` 决定。
         DispatchQueue.main.async {
