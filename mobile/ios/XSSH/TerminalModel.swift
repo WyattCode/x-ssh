@@ -135,6 +135,8 @@ final class TerminalModel: Identifiable {
     /// 之后的变化(软键盘、折叠、拖拽分屏)防抖后再通知服务器,避免动画期间每帧发一次 SIGWINCH。
     func measured(cols: Int, rows: Int, cellPixels: (UInt32, UInt32)) {
         guard cols > 0, rows > 0 else { return }
+        // 用户已经取消 / 断开:收场动画那一小段里会话页还在,尺寸再变(抽屉滑出来)也不能再去连。
+        guard !userDisconnected else { return }
         cell = cellPixels
         let size = (cols, rows)
         if let m = measured, m == size { return }

@@ -44,6 +44,8 @@ struct TerminalScreen: View {
     @State private var scrolling = false
     @State private var barVisible = false
     @State private var barDragging = false
+    /// 页面底部的安全区(没有键盘时是主屏幕指示条那一段,键盘弹着时是键盘的高度):直板机的控制条按它决定离底多远。
+    @State private var bottomInset: CGFloat = 34
 
     private var metrics: TermMetrics { TermMetrics(fontSize: fontSize) }
 
@@ -70,6 +72,8 @@ struct TerminalScreen: View {
                     editMenu(size: size, m: m)
                 }
                 .frame(width: size.width, height: size.height, alignment: .topLeading)
+                // 「复制 / 粘贴」菜单的出现 / 消失要有过渡(以前没有动画事务,缩放淡入的过渡从来没生效,是一帧蹦出来的)。
+                .animation(.smooth(duration: 0.18), value: menuAnchor == nil)
                 // 长按选择文字(再拖动扩展),松手弹出「复制 / 粘贴」。放在高优先级:长按成功之后的拖动归它,不当成滚动。
                 .contentShape(Rectangle())
                 #if DEBUG
@@ -109,6 +113,10 @@ struct TerminalScreen: View {
                 .padding(.leading, usable.map { $0.minX - container.minX } ?? 0)
                 .padding(.top, usable.map { $0.minY - container.minY } ?? 0)
         }
+        // 页面尺寸要在挂底部控制条**之前**量(只量终端这一块):状态卡片的大小取自它。以前在控制条之后量,
+        // 量到的高度含控制条;「会话已结束」那张卡片按这个高度撑开,又把整页顶高一截,量到的更高……
+        // 直板机上会话一结束(对方关了 / 敲了 exit)界面就死循环卡住。
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { container = $0 }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 0) {
                 if model.showsKeys, model.state == .connected { TerminalKeyPanel(model: model) }
@@ -116,7 +124,7 @@ struct TerminalScreen: View {
                 if fold.isStandardPhone, showsControlBar { controlBar }
             }
         }
-        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { container = $0 }
+        .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.bottom } action: { bottomInset = $0 }
     }
 
     /// 外屏 / 直板机:用系统导航栏 + 工具栏(Duo 外屏上带图标的按钮自动竖排到右侧)。
@@ -147,6 +155,8 @@ struct TerminalScreen: View {
             // 去掉系统给工具栏项套的玻璃圆泡,否则 logo + 主机名被裁在一个小圆里。
             .sharedBackgroundVisibility(.hidden)
             if !fold.isStandardPhone {
+                // 弹性空白:横向底栏时把按钮组推到右下角,和主机页、编辑页统一(竖条里它是零尺寸)。
+                ToolbarSpacer(.flexible, placement: .bottomBar)
                 // 返回主机列表是导航,键盘弹着、竖条放不下时让位:进溢出菜单。这时最需要的是键盘 / 快捷键两颗开关。
                 ToolbarItem(placement: .bottomBar) {
                     Button("Hosts", systemImage: "chevron.left", action: onBack)
@@ -196,7 +206,9 @@ struct TerminalScreen: View {
         // 液态玻璃,可交互:按住时整条会像系统工具栏那样微微放大、随手指流动。
         .glassEffect(.regular.interactive(), in: Capsule())
         .environment(\.colorScheme, .dark)
-        .padding(.horizontal, 12).padding(.bottom, 8)
+        // 这一排五个按钮居中(它比主机页的两颗按钮宽得多,靠右会偏)。
+        // 底边:没有键盘时离屏幕底 28pt(和系统底栏同一高度);键盘弹着时浮在键盘上方 8pt。
+        .padding(.horizontal, 12).padding(.bottom, bottomInset < 60 ? 28 - bottomInset : 8)
     }
 
     private func barButton(_ icon: String, _ label: LocalizedStringKey, on: Bool = false, role: ButtonRole? = nil,

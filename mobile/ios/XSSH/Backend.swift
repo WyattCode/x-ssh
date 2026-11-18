@@ -59,7 +59,9 @@ final class Backend: @unchecked Sendable {
             exitStatus = nil
             do {
                 let session = try Session.connect(config: config)
-                let shell = try session.openShell(cols: cols, rows: rows, term: "xterm-256color")
+                let shell: Shell
+                do { shell = try session.openShell(cols: cols, rows: rows, term: "xterm-256color") }
+                catch { session.disconnect(); throw error }   // 连上了但开不了 shell:别留下一条没人管的连接
                 // 连接期间用户已经取消 / 换了一次连接:别留下一条没人管的会话。
                 guard isCurrent(gen) else { session.disconnect(); return }
                 self.session = session
