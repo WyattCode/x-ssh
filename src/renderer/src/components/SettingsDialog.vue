@@ -189,6 +189,15 @@ async function resetBinding(id: RebindableAction): Promise<void> {
 }
 const dialogEl = ref<HTMLElement>()
 
+// Each tab is its own page: opening one must start at its top, not wherever
+// the previous tab happened to be scrolled to.
+watch(
+  () => store.settingsTab,
+  () => {
+    if (dialogEl.value) dialogEl.value.scrollTop = 0
+  }
+)
+
 // Focus the dialog on open so Esc (bound below) works without a prior click.
 watch(
   () => store.settingsOpen,

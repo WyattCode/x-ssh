@@ -251,6 +251,10 @@ async function remove(mode: ForwardMode | undefined, localPort: number): Promise
   color: var(--text);
   font-size: 12px;
 }
+.fw-in:focus {
+  outline: none;
+  border-color: var(--accent);
+}
 .fw-in.grow {
   flex: 1 1 auto;
 }

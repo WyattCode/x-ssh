@@ -75,7 +75,7 @@ watch(
     <div ref="trapEl" tabindex="-1" class="tm-dialog" @keydown.esc="store.toggleTmux(false)">
       <div class="tm-head">
         <Icon name="terminal" :size="15" />
-        <span class="tm-title">{{ t('pal.tmux') }}</span>
+        <span class="tm-title">{{ t('pal.tmux').replace(/…$/, '') }}</span>
         <button class="tm-x" :title="t('fileDiff.close')" :aria-label="t('fileDiff.close')" @click="store.toggleTmux(false)"><Icon name="close" :size="14" /></button>
       </div>
       <div class="tm-body">
@@ -178,6 +178,10 @@ watch(
   display: flex;
   gap: 8px;
   margin-top: 2px;
+}
+.tm-new input:focus {
+  outline: none;
+  border-color: var(--accent);
 }
 .tm-new input {
   flex: 1;

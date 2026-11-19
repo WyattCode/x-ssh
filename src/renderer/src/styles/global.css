@@ -141,6 +141,12 @@ select {
   font-family: inherit;
   color: inherit;
 }
+/* No browser-default focus ring on text fields: each marks focus with its own
+   cue (see the focus floor below, which still rings checkboxes and the like). */
+input,
+textarea {
+  outline: none;
+}
 
 /* ---- Buttons: one family on every page and dialog ----
    Medium (32px) rounded rectangle; add `.pill` for a capsule when the button
@@ -264,17 +270,25 @@ select:focus-visible {
   outline-offset: 2px;
 }
 
-/* The floor for every remaining focusable thing. Component styles clear the
-   outline on their own inputs in 30 places, and because scoped CSS compiles
-   `.search` to `.search[data-v-*]` those rules OUTRANK a plain global selector —
-   so `!important` here is load-bearing, not laziness: an invisible keyboard
-   caret position is not a styling preference worth losing an argument over.
-   The offset is inset so rings inside tight rows and the drawer don't overflow,
-   and :focus-visible means pointer users never see it. (xterm's helper textarea
-   is opacity:0 at left:-9999em, so it cannot show a ring either.) */
-input:focus-visible,
-textarea:focus-visible,
-[tabindex]:focus-visible {
+/* The floor for every remaining focusable thing that is NOT a text field:
+   checkboxes, radios, sliders, colour/file pickers and [tabindex] surfaces.
+   Component styles clear the outline on their own controls, and because scoped
+   CSS compiles `.x` to `.x[data-v-*]` those rules OUTRANK a plain global
+   selector — so `!important` here is load-bearing.
+
+   Text fields are deliberately excluded. A text field always matches
+   :focus-visible (mouse clicks included), so a forced ring drew a hard 2px box
+   on every field in the app on top of the cue each one already has — tight
+   against the text in borderless rows (host editor name/host), clipped by
+   rounded panels (palette). Each text field marks focus itself instead: an
+   accent border where it has a border, an accent divider / row tint / container
+   border where it is borderless. A NEW text field must bring its own cue.
+
+   tabindex="-1" is excluded too: those are panels, dialogs and scroll areas
+   that only ever take focus from script (a keyboard user cannot Tab to them),
+   and ringing them drew a blue frame around a whole page or dialog. */
+input:is([type='checkbox'], [type='radio'], [type='range'], [type='color'], [type='file']):focus-visible,
+[tabindex]:not(input, textarea, [tabindex='-1']):focus-visible {
   outline: 2px solid var(--accent) !important;
   outline-offset: -2px !important;
 }
@@ -398,7 +412,7 @@ textarea:focus-visible,
 }
 .pm-dialog {
   width: min(380px, 92vw);
-  background-color: color-mix(in srgb, var(--bg-elev) 92%, transparent);
+  background-color: var(--bg-elev);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
   box-shadow: var(--shadow), 0 0 0 1px rgba(255, 255, 255, 0.04) inset;
@@ -486,4 +500,10 @@ textarea:focus-visible,
   margin-top: 12px;
   font-size: 12px;
   color: var(--danger);
+}
+
+/* Monospace fields hold addresses and commands, but their placeholder is a
+   sentence: in the mono face every Chinese character is spaced apart. */
+.mono::placeholder {
+  font-family: var(--font-ui);
 }

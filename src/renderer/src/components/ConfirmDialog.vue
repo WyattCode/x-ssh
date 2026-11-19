@@ -96,7 +96,7 @@ watch(
 }
 .dialog {
   width: min(400px, 90vw);
-  background-color: color-mix(in srgb, var(--bg-elev) 90%, transparent);
+  background-color: var(--bg-elev);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
   box-shadow: var(--shadow), 0 0 0 1px rgba(255, 255, 255, 0.04) inset;

@@ -232,7 +232,7 @@ function onKeydown(e: KeyboardEvent): void {
   max-width: 1000px;
   display: flex;
   flex-direction: column;
-  background-color: color-mix(in srgb, var(--bg-elev) 92%, transparent);
+  background-color: var(--bg-elev);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
   box-shadow: var(--shadow), 0 0 0 1px rgba(255, 255, 255, 0.04) inset;

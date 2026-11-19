@@ -251,10 +251,18 @@ const appearanceSummary = computed(() => {
   return font ? `${theme} · ${font}` : theme
 })
 
+// Twelve hues that stay apart at swatch size. '#4dabf7' and '#fab005' used to
+// be here and were near-twins of the first blue and the yellow; hosts saved
+// with them keep their colour (see `swatches`), they are just not offered.
 const COLORS = [
   '#6ea8fe', '#51cf66', '#ffd43b', '#ff6b6b', '#da77f2', '#3bc9db',
-  '#9c6ade', '#f783ac', '#ff922b', '#4dabf7', '#63e6be', '#fab005'
+  '#9c6ade', '#f783ac', '#ff922b', '#63e6be', '#a9744f', '#94a3b8'
 ]
+/** The offered colours, plus this host's own when it is not one of them (an
+ *  older palette entry) — otherwise nothing would show as selected. */
+const swatches = computed(() =>
+  form.color && !COLORS.includes(form.color) ? [...COLORS, form.color] : COLORS
+)
 
 function addForward(): void {
   form.forwards.push({ mode: 'local', localPort: 0, host: '', remotePort: 0 })
@@ -640,7 +648,7 @@ async function remove(): Promise<void> {
                   @blur="splitHostInput"
                 />
                 <span class="port">
-                  <label class="colon" for="he-port">:</label>
+                  <label class="colon" for="he-port">{{ t('host.port') }}</label>
                   <input id="he-port" v-model.number="form.port" class="r-input mono port-in" type="number" min="1" max="65535" :aria-label="t('host.port')" />
                 </span>
               </div>
@@ -761,7 +769,7 @@ async function remove(): Promise<void> {
                 <div class="swatches">
                   <button type="button" class="swatch none" :class="{ on: !form.color }" :title="t('host.colorNone')" @click="form.color = ''" />
                   <button
-                    v-for="c in COLORS"
+                    v-for="c in swatches"
                     :key="c"
                     type="button"
                     class="swatch"
@@ -1041,6 +1049,10 @@ async function remove(): Promise<void> {
   border: none;
   outline: none;
 }
+/* Borderless title field: focus is a thin accent underline, not a box. */
+.p-name:focus {
+  box-shadow: 0 1px 0 var(--accent);
+}
 .p-name::placeholder {
   color: var(--text-faint);
   font-weight: 600;
@@ -1132,11 +1144,12 @@ async function remove(): Promise<void> {
   flex: none;
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding-left: 10px;
+  gap: 8px;
+  padding-left: 12px;
   border-left: 1px solid var(--border);
 }
 .colon {
+  font-size: 12px;
   color: var(--text-faint);
 }
 .port-in {

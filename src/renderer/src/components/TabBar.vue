@@ -428,6 +428,9 @@ function cancelRename(): void {
   color: var(--text-faint);
   -webkit-app-region: no-drag;
 }
+.filter-box:focus-within {
+  border-color: var(--accent);
+}
 .filter-input {
   width: 128px;
   background: transparent;

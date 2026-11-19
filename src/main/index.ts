@@ -155,8 +155,8 @@ const TRAY_LABELS: Record<UiLang, { show: string; hide: string; palette: string;
  */
 const NL: Record<string, Record<UiLang, string>> = {
   overwriteLocalMsg: {
-    zh: '以下本地文件已存在,下载将覆盖:',
-    'zh-TW': '以下本機檔案已存在,下載將覆寫:',
+    zh: '以下本地文件已存在，下载将覆盖：',
+    'zh-TW': '以下本機檔案已存在，下載將覆寫：',
     en: 'These local files already exist and will be overwritten:'
   },
   overwrite: { zh: '覆盖', 'zh-TW': '覆寫', en: 'Overwrite' },
@@ -164,8 +164,8 @@ const NL: Record<string, Record<UiLang, string>> = {
   keepBoth: { zh: '保留两者', 'zh-TW': '兩者都保留', en: 'Keep both' },
   cancel: { zh: '取消', 'zh-TW': '取消', en: 'Cancel' },
   overwriteRemoteMsg: {
-    zh: '以下远端文件已存在,请选择处理方式:',
-    'zh-TW': '以下遠端檔案已存在,請選擇處理方式:',
+    zh: '以下远端文件已存在，请选择处理方式：',
+    'zh-TW': '以下遠端檔案已存在，請選擇處理方式：',
     en: 'These remote files already exist — choose how to handle them:'
   },
   exportHostsJson: { zh: '备份主机到 JSON', 'zh-TW': '備份主機為 JSON', en: 'Back up hosts to JSON' },
@@ -192,8 +192,8 @@ const NL: Record<string, Record<UiLang, string>> = {
     en: 'No auto-backup folder is set'
   },
   backupWriteFail: {
-    zh: '写入备份失败(目录不可用或磁盘已满)',
-    'zh-TW': '寫入備份失敗(目錄不可用或磁碟已滿)',
+    zh: '写入备份失败（目录不可用或磁盘已满）',
+    'zh-TW': '寫入備份失敗（目錄不可用或磁碟已滿）',
     en: 'Could not write the backup (folder unavailable or disk full)'
   },
   backupWriteFailTitle: {
@@ -202,8 +202,8 @@ const NL: Record<string, Record<UiLang, string>> = {
     en: 'Auto-backup failed'
   },
   backupWriteFailBody: {
-    zh: '无法写入备份文件,请检查备份目录权限或磁盘空间',
-    'zh-TW': '無法寫入備份檔,請檢查備份目錄權限或磁碟空間',
+    zh: '无法写入备份文件，请检查备份目录权限或磁盘空间',
+    'zh-TW': '無法寫入備份檔，請檢查備份目錄權限或磁碟空間',
     en: 'Could not write the backup file — check folder permissions or disk space'
   },
   globalShortcutFailTitle: {
@@ -212,8 +212,8 @@ const NL: Record<string, Record<UiLang, string>> = {
     en: 'Global hotkey not registered'
   },
   globalShortcutFailBody: {
-    zh: '已保存的呼出快捷键无法注册(可能被占用或不合法)',
-    'zh-TW': '已儲存的呼出快捷鍵無法註冊(可能已被佔用或不合法)',
+    zh: '已保存的呼出快捷键无法注册（可能被占用或不合法）',
+    'zh-TW': '已儲存的呼出快捷鍵無法註冊（可能已被佔用或不合法）',
     en: 'The saved show/hide hotkey could not be registered (taken or invalid)'
   },
   pickPrivateKey: { zh: '选择私钥', 'zh-TW': '選擇私鑰', en: 'Choose a private key' },

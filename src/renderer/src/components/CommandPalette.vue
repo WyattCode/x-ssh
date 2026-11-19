@@ -30,7 +30,7 @@ const activeHostId = computed(() => store.activePane?.params.hostId ?? null)
 
 type Item =
   | { kind: 'quick'; title: string; sub: string; params: ConnectParams }
-  | { kind: 'host'; title: string; sub: string; host: Host; known: boolean; live: boolean }
+  | { kind: 'host'; title: string; sub: string; tail: string; host: Host; known: boolean; live: boolean }
   | { kind: 'snippet'; title: string; sub: string; snippet: Snippet }
   | { kind: 'action'; title: string; sub: string; run: () => void; icon: string }
   | { kind: 'snapshot'; title: string; sub: string; id: string; icon: string }
@@ -147,7 +147,9 @@ const sections = computed<{ id: string; title: string; items: Item[] }[]>(() => 
     scored.map(({ h }) => ({
       kind: 'host' as const,
       title: h.label,
-      sub: `${hostAddr(h)}${h.group ? ` · ${h.group}` : ''}`,
+      sub: hostAddr(h),
+      // The group is a word, not an address: kept out of the monospace part.
+      tail: h.group ?? '',
       host: h,
       known: store.hostKeyKnown(h.host, h.port),
       live: liveHostIds.value.has(h.id)
@@ -288,6 +290,12 @@ const sections = computed<{ id: string; title: string; items: Item[] }[]>(() => 
 
 /** Flat list of actionable items (headers stripped) for keyboard navigation. */
 const items = computed<Item[]>(() => sections.value.flatMap((s) => s.items))
+
+/** What Enter does to the highlighted row: connect for a host, run otherwise. */
+const enterHint = computed(() => {
+  const k = items.value[selected.value]?.kind
+  return !k || k === 'host' || k === 'quick' ? t('pal.connect') : t('pal.run')
+})
 
 /** Running index of each section's first item in the flat list. */
 const sectionStarts = computed<number[]>(() => {
@@ -539,7 +547,7 @@ function onKey(e: KeyboardEvent): void {
       <!-- Broadcast command prompt -->
       <template v-if="broadcastOpen">
         <div class="pw-head">
-          <span class="pw-title">{{ t('pal.broadcast') }}</span>
+          <span class="pw-title">{{ t('pal.broadcast').replace(/…$/, '') }}</span>
         </div>
         <input
           ref="broadcastEl"
@@ -616,11 +624,12 @@ function onKey(e: KeyboardEvent): void {
                     <template v-else>{{ seg.text }}</template>
                   </template>
                 </span>
-                <span class="sub">
+                <span class="sub" :class="{ mono: item.kind === 'host' || item.kind === 'quick' || item.kind === 'snippet' }">
                   <template v-for="(seg, sk) in highlight(item.sub, qTrim)" :key="'s' + sk">
                     <mark v-if="seg.hit" class="match">{{ seg.text }}</mark>
                     <template v-else>{{ seg.text }}</template>
                   </template>
+                  <span v-if="item.kind === 'host' && item.tail" class="sub-tail"> · {{ item.tail }}</span>
                 </span>
               </span>
               <span v-if="item.kind === 'host' && item.live" class="live">
@@ -647,7 +656,7 @@ function onKey(e: KeyboardEvent): void {
         </div>
         <div class="hint">
           <span><span class="kbd">↑</span><span class="kbd">↓</span> {{ t('pal.nav') }}</span>
-          <span><span class="kbd">Enter</span> {{ t('pal.connect') }}</span>
+          <span><span class="kbd">Enter</span> {{ enterHint }}</span>
           <span><span class="kbd">Esc</span> {{ t('pal.close') }}</span>
           <button class="hint-new" @click="newHost">
             <Icon name="plus" :size="12" />{{ t('pal.newHostShort') }}
@@ -691,12 +700,9 @@ function onKey(e: KeyboardEvent): void {
   border-bottom: 1px solid var(--border);
   outline: none;
 }
-/* The global focus ring is a full 2px accent box. Here it was clipped by the
-   panel's rounded top corners (round on top, square below, uneven weight), and
-   the field is the panel's only text input anyway — mark focus on the divider
-   line instead. Needs !important + the extra class to beat the global floor. */
-.palette .search:focus-visible {
-  outline: none !important;
+/* Focus is marked on the divider line, not with a box: a ring here was
+   clipped by the panel's rounded top corners. */
+.search:focus {
   border-bottom-color: var(--accent);
 }
 .search::placeholder {
@@ -776,10 +782,17 @@ function onKey(e: KeyboardEvent): void {
 .sub {
   font-size: 11.5px;
   color: var(--text-faint);
-  font-family: var(--font-mono);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* Only addresses and command text are monospace; a sentence set in the mono
+   face spaces every Chinese character apart. */
+.sub.mono {
+  font-family: var(--font-mono);
+}
+.sub-tail {
+  font-family: var(--font-ui);
 }
 .match {
   background: transparent;
