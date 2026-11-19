@@ -1,3 +1,16 @@
+# 会话记录:M3.200(2026-11-19,连接弹窗(命令面板)外观整理:v0.6.41 已发)
+
+> 起因:用户截图指出连接弹窗的问题——搜索框一圈蓝色描边被圆角裁切、弹窗半透明透出背后内容、看不出哪台已连。
+> **真机没验过**:只有类型检查 + i18n 检查 + 对比度检查 + 构建;没人在装好的应用里看过效果。
+
+- 改动都在 `src/renderer/src/components/CommandPalette.vue` 和 `lib/i18n.ts`(新增 `pal.hostsRecent` / `pal.connected` / `pal.newHostShort`)。
+- 搜索框:用 `.palette .search:focus-visible { outline: none !important }` 压过 `global.css` 的全局聚焦描边(那条是 `!important` 的兜底规则,必须靠更高优先级 + `!important` 才盖得住),聚焦改为下边线变 accent。密码框、广播框共用 `.search`,一起变。
+- 弹窗背景由 90% 透明混色改为不透明 `--bg-elev`。
+- 「已连接」标记:只认 `status === 'connected'` 且带 `hostId` 的 pane;连接中的、直接输地址连的不标。回车仍然是再开一个连接,没改成跳到已有标签。
+- 端口 22 不显示;搜索本来就不匹配端口(`paletteHostScore`),所以不影响搜索。
+- 底部「新建主机」按钮:`onKey` 里 Enter 落在 `.hint-new` 上时直接放行,否则会去连高亮的主机。列表行自己(也是 button)用 Tab 聚焦后按 Enter 仍是激活高亮行而非聚焦行,这是原有行为,没动。
+- 已知没处理:列表最后一行被滚动区域切一半;底部提示的「Enter 连接」对命令片段/操作行措辞不准。
+
 # 会话记录:M3.199(2026-11-19,终端「选中即复制」与远端剪贴板:v0.6.39、v0.6.40 已发)
 
 > 起因:用户在 Codex / tmux 里右键被提示「程序占用了鼠标」,选完还得再点复制;随后又报「Codex 里选中没复制上」。
