@@ -34,7 +34,6 @@ export const RENDERER_SETTABLE_KEYS = new Set([
   'tmuxSessionName',
   // Terminal interaction
   'confirmPaste',
-  'copyOnSelect',
   'allowRemoteClipboard',
   'keybindings',
   'middleClickPaste',

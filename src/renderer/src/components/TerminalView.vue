@@ -13,6 +13,7 @@ import { themeFor } from '../lib/terminalThemes'
 import { useI18n } from '../lib/i18n'
 import { isImeKey } from '../lib/ime'
 import { createOsc52Gate } from '../lib/osc52'
+import { createReleaseCopy } from '../lib/releaseCopy'
 import { useSessions } from '../stores/sessions'
 import {
   DEFAULT_BINDINGS,
@@ -171,6 +172,8 @@ async function pasteClipboard(): Promise<void> {
 // newlines are legitimately part of a multi-line paste.
 function selectAll(): void {
   term?.selectAll()
+  // Selecting copies, same as a mouse selection (no mouse release to trigger it here).
+  void copySelection()
 }
 function clearTerm(): void {
   term?.clear()
@@ -489,6 +492,9 @@ onMounted(() => {
     fontSize: fontSize.value,
     theme: currentTheme(),
     allowProposedApi: true,
+    // macOS: Option+drag is the "select anyway" gesture while a program owns the
+    // mouse (Shift is the one on Windows/Linux and is built into xterm).
+    macOptionClickForcesSelection: true,
     // OSC 8 hyperlinks (what a program like Codex emits). Without this, xterm's
     // own default pops a native confirm() and then tries window.open(), which
     // the app denies — so the link asked scarily and then never opened.
@@ -509,19 +515,37 @@ onMounted(() => {
   term.loadAddon(new WebLinksAddon((_e, uri) => openLink(uri)))
   term.open(el.value)
 
-  // Auto-copy the selection to the clipboard when the option is on.
-  term.onSelectionChange(() => {
-    if (store.copyOnSelect) {
-      const sel = term?.getSelection()
-      if (sel) {
-        try {
-          window.api.clipboard.writeText(sel)
-        } catch {
-          toast(t('term.copyFail'), 'error')
-        }
-      }
-    }
+  // Whatever gets selected is copied when the mouse is released — always, on every
+  // platform (see lib/releaseCopy). While a program owns the mouse, the selection
+  // itself needs Shift (Windows/Linux) or Option (macOS) held while dragging.
+  const releaseCopy = createReleaseCopy({
+    getSelection: () => term?.getSelection() ?? '',
+    write: (text) => window.api.clipboard.writeText(text),
+    onError: () => toast(t('term.copyFail'), 'error')
   })
+  term.onSelectionChange(() => releaseCopy.selectionChanged())
+  el.value?.addEventListener(
+    'mousedown',
+    (e) => {
+      // Capture phase: runs before xterm's own mousedown handler, which may already
+      // select (double / triple click, Shift+click) — that change must count.
+      if (e.button === 0) releaseCopy.down()
+    },
+    { capture: true, signal: imeAbort.signal }
+  )
+  // One permanent listener (a per-press one-shot piles up when a release is lost
+  // outside the window). It ignores releases that did not start on the terminal.
+  document.addEventListener(
+    'mouseup',
+    (e) => {
+      if (e.button !== 0) return
+      // xterm finalises the selection in its own mouseup handler; look after it.
+      setTimeout(() => {
+        if (!unmounted) releaseCopy.up()
+      }, 0)
+    },
+    { capture: true, signal: imeAbort.signal }
+  )
 
   try {
     webgl = new WebglAddon()
@@ -884,7 +908,7 @@ onBeforeUnmount(() => {
         <button :disabled="!menu.hasSel && !menu.appCopy" @click="runMenu(copyFromMenu)">
           <span>{{ t('term.copy') }}</span><span class="k">{{ modKey }}+C</span>
         </button>
-        <div v-if="!menu.hasSel && !menu.appCopy && menu.mouseApp" class="hint">{{ t('term.shiftSelectHint') }}</div>
+        <div v-if="!menu.hasSel && !menu.appCopy && menu.mouseApp" class="hint">{{ t(isMac ? 'term.optionSelectHint' : 'term.shiftSelectHint') }}</div>
         <button @click="runMenu(pasteClipboard)">
           <span>{{ t('term.paste') }}</span><span class="k">{{ modKey }}+V</span>
         </button>

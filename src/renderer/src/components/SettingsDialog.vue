@@ -405,20 +405,6 @@ async function toggleAllowRemoteClipboard(): Promise<void> {
   }
 }
 
-async function toggleCopyOnSelect(): Promise<void> {
-  const next = !store.copyOnSelect
-  store.copyOnSelect = next
-  try {
-    const r = await window.api.settings.set('copyOnSelect', next)
-    if (r && r.ok === false) {
-      store.copyOnSelect = !next
-      toast(t('set.gen.writeFail'), 'error')
-    }
-  } catch {
-    store.copyOnSelect = !next
-    toast(t('set.gen.writeFail'), 'error')
-  }
-}
 async function toggleMiddleClickPaste(): Promise<void> {
   const next = !store.middleClickPaste
   store.middleClickPaste = next
@@ -1500,13 +1486,6 @@ function onLockPassEnter(e: KeyboardEvent): void {
                     <span class="r-desc">{{ t('set.term.allowRemoteClipboardDesc') }}</span>
                   </div>
                   <span class="switch" :class="{ on: store.allowRemoteClipboard }"><i /></span>
-                </label>
-                <label class="row toggle" @click="toggleCopyOnSelect">
-                  <div class="r-text">
-                    <span class="r-title">{{ t('set.term.copyOnSelect') }}</span>
-                    <span class="r-desc">{{ t('set.term.copyOnSelectDesc') }}</span>
-                  </div>
-                  <span class="switch" :class="{ on: store.copyOnSelect }"><i /></span>
                 </label>
                 <label class="row toggle" @click="toggleMiddleClickPaste">
                   <div class="r-text">
