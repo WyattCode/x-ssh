@@ -34,11 +34,67 @@ describe('decodeOsc52Payload', () => {
     expect(decodeOsc52Payload('5L2g5aW9')).toBe('你好')
   })
 })
-it('B10 requires opt-in and limits remote clipboard size and frequency', async () => {
-  const { createOsc52Gate } = await import('./osc52')
-  const gate = createOsc52Gate()
-  expect(gate('aGk=', false, 1000)).toBeNull()
-  expect(gate('aGk=', true, 1000)).toBe('hi')
-  expect(gate('aGk=', true, 1001)).toBeNull()
-  expect(gate('a'.repeat(100_000), true, 3000)).toBeNull()
+describe('createOsc52Gate (B10)', () => {
+  it('refuses everything while the setting is off', async () => {
+    const { createOsc52Gate } = await import('./osc52')
+    const gate = createOsc52Gate()
+    gate.userActed(true, 1000)
+    expect(gate.accept('aGk=', false, 1000)).toBeNull()
+  })
+
+  it('refuses a write the user did not just trigger', async () => {
+    const { createOsc52Gate, OSC52_USER_WINDOW_MS } = await import('./osc52')
+    const gate = createOsc52Gate()
+    // never touched the terminal: a banner / cat-ed file cannot set the clipboard
+    expect(gate.accept('aGk=', true, 1000)).toBeNull()
+    gate.userActed(true, 1000)
+    expect(gate.accept('aGk=', true, 1000 + OSC52_USER_WINDOW_MS + 1)).toBeNull()
+  })
+
+  it('honours a write right after a key or mouse action', async () => {
+    const { createOsc52Gate, OSC52_USER_WINDOW_MS } = await import('./osc52')
+    const gate = createOsc52Gate()
+    gate.userActed(true, 1000)
+    expect(gate.accept('aGk=', true, 1005)).toBe('hi')
+    expect(gate.accept('aGk=', true, 1000 + OSC52_USER_WINDOW_MS)).toBe('hi')
+  })
+
+  it('does not drop the second of two quick copies', async () => {
+    const { createOsc52Gate } = await import('./osc52')
+    const gate = createOsc52Gate()
+    gate.userActed(true, 1000)
+    expect(gate.accept('aGk=', true, 1010)).toBe('hi')
+    gate.userActed(true, 1200)
+    expect(gate.accept('5L2g5aW9', true, 1210)).toBe('你好')
+  })
+
+  it('keeps the size cap', async () => {
+    const { createOsc52Gate } = await import('./osc52')
+    const gate = createOsc52Gate()
+    gate.userActed(true, 3000)
+    expect(gate.accept('a'.repeat(100_000), true, 3000)).toBeNull()
+  })
+  it('a key press at a plain shell prompt opens no window (Enter on `cat file`)', async () => {
+    const { createOsc52Gate } = await import('./osc52')
+    const gate = createOsc52Gate()
+    gate.userActed(false, 1000)
+    expect(gate.accept('aGk=', true, 1005)).toBeNull()
+  })
+
+  it('a plain-prompt key press does not close a window a program action opened', async () => {
+    const { createOsc52Gate } = await import('./osc52')
+    const gate = createOsc52Gate()
+    gate.userActed(true, 1000)
+    gate.userActed(false, 1100)
+    expect(gate.accept('aGk=', true, 1200)).toBe('hi')
+  })
+})
+
+describe('programOwnsTerminal', () => {
+  it('is true on the alternate screen or with mouse tracking, false at a prompt', async () => {
+    const { programOwnsTerminal } = await import('./osc52')
+    expect(programOwnsTerminal({ mouseTracking: 'none', altScreen: false })).toBe(false)
+    expect(programOwnsTerminal({ mouseTracking: 'none', altScreen: true })).toBe(true)
+    expect(programOwnsTerminal({ mouseTracking: 'any', altScreen: false })).toBe(true)
+  })
 })

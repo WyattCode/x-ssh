@@ -388,7 +388,6 @@ interface State {
   sanitizePaste: boolean
   /** Auto-copy the terminal selection to the clipboard on select. */
   allowRemoteClipboard: boolean
-  copyOnSelect: boolean
   /** Middle mouse button pastes the clipboard (default on). */
   middleClickPaste: boolean
   /** Right mouse button pastes the clipboard instead of the context menu. */
@@ -484,8 +483,10 @@ export const useSessions = defineStore('sessions', {
     palettePasswordFor: null,
     confirmPaste: true,
     sanitizePaste: true,
-    allowRemoteClipboard: false,
-    copyOnSelect: false,
+    // On by default: TUIs that own the mouse (Codex, tmux, vim) copy by sending
+    // OSC 52, so with it off their own "copy" silently did nothing and users never
+    // knew why. Only an explicitly saved `false` turns it off.
+    allowRemoteClipboard: true,
     middleClickPaste: true,
     rightClickPaste: false,
     confirmClose: false,
@@ -722,8 +723,7 @@ export const useSessions = defineStore('sessions', {
       this.keybindings = (await window.api.settings.get<Record<string, string>>('keybindings')) ?? {}
       this.confirmPaste = cp !== false
       this.sanitizePaste = sp !== false
-      this.allowRemoteClipboard = (await window.api.settings.get<boolean>('allowRemoteClipboard')) === true
-      this.copyOnSelect = (await window.api.settings.get<boolean>('copyOnSelect')) === true
+      this.allowRemoteClipboard = (await window.api.settings.get<boolean>('allowRemoteClipboard')) !== false
       this.middleClickPaste = (await window.api.settings.get<boolean>('middleClickPaste')) !== false
       this.rightClickPaste = (await window.api.settings.get<boolean>('rightClickPaste')) === true
       this.confirmClose = (await window.api.settings.get<boolean>('confirmClose')) === true

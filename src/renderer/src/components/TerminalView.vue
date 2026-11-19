@@ -12,7 +12,8 @@ import { useToast } from '../composables/toast'
 import { themeFor } from '../lib/terminalThemes'
 import { useI18n } from '../lib/i18n'
 import { isImeKey } from '../lib/ime'
-import { createOsc52Gate } from '../lib/osc52'
+import { createOsc52Gate, programOwnsTerminal } from '../lib/osc52'
+import { createReleaseCopy } from '../lib/releaseCopy'
 import { useSessions } from '../stores/sessions'
 import {
   DEFAULT_BINDINGS,
@@ -84,6 +85,8 @@ function scanCwd(data: string): void {
 }
 
 const el = ref<HTMLDivElement>()
+/** Tells the remote-clipboard gate the user just acted on this terminal (set on mount). */
+let markUserAction: () => void = () => {}
 let term: Terminal | null = null
 /** Voice-input wiring; pastes go through it so they are never mistaken for dictation. */
 let imeBridge: ImeBridge | null = null
@@ -171,6 +174,8 @@ async function pasteClipboard(): Promise<void> {
 // newlines are legitimately part of a multi-line paste.
 function selectAll(): void {
   term?.selectAll()
+  // Selecting copies, same as a mouse selection (no mouse release to trigger it here).
+  void copySelection()
 }
 function clearTerm(): void {
   term?.clear()
@@ -286,6 +291,9 @@ function onAuxClick(e: MouseEvent): void {
   }
 }
 function runMenu(action: () => void): void {
+  // The menu sits outside the terminal element, so the listeners there never see
+  // its clicks — but choosing an item (Paste…) is the user acting on this terminal.
+  markUserAction()
   action()
   menu.open = false
   term?.focus()
@@ -489,6 +497,9 @@ onMounted(() => {
     fontSize: fontSize.value,
     theme: currentTheme(),
     allowProposedApi: true,
+    // macOS: Option+drag is the "select anyway" gesture while a program owns the
+    // mouse (Shift is the one on Windows/Linux and is built into xterm).
+    macOptionClickForcesSelection: true,
     // OSC 8 hyperlinks (what a program like Codex emits). Without this, xterm's
     // own default pops a native confirm() and then tries window.open(), which
     // the app denies — so the link asked scarily and then never opened.
@@ -513,19 +524,75 @@ onMounted(() => {
   term.loadAddon(new WebLinksAddon((_e, uri) => openLink(uri), { urlRegex }))
   term.open(el.value)
 
-  // Auto-copy the selection to the clipboard when the option is on.
-  term.onSelectionChange(() => {
-    if (store.copyOnSelect) {
-      const sel = term?.getSelection()
-      if (sel) {
-        try {
-          window.api.clipboard.writeText(sel)
-        } catch {
-          toast(t('term.copyFail'), 'error')
-        }
-      }
-    }
+  // Whatever gets selected is copied when the mouse is released — always, on every
+  // platform (see lib/releaseCopy). While a program owns the mouse, the selection
+  // itself needs Shift (Windows/Linux) or Option (macOS) held while dragging.
+  const releaseCopy = createReleaseCopy({
+    getSelection: () => term?.getSelection() ?? '',
+    write: (text) => window.api.clipboard.writeText(text),
+    onError: () => toast(t('term.copyFail'), 'error')
   })
+  term.onSelectionChange(() => releaseCopy.selectionChanged())
+  // Remote clipboard writes (OSC 52) are honoured only right after the user did
+  // something in THIS terminal — see lib/osc52. Real DOM input only: xterm's
+  // onData also fires for the terminal's automatic replies to remote queries,
+  // which the remote could use to open the window for itself.
+  const remoteClipboard = createOsc52Gate()
+  // Only an action made while a program already has the terminal opens the window:
+  // Enter on `cat file` at a shell prompt is a key press too, and must not.
+  markUserAction = () => {
+    if (!term) return
+    remoteClipboard.userActed(
+      programOwnsTerminal({
+        mouseTracking: term.modes.mouseTrackingMode,
+        altScreen: term.buffer.active.type === 'alternate'
+      })
+    )
+  }
+  /** A press that started on this terminal is still held. */
+  let pressedHere = false
+  el.value?.addEventListener('keydown', () => markUserAction(), {
+    capture: true,
+    signal: imeAbort.signal
+  })
+  // Runs before the terminal's own listener below (document capture comes first).
+  document.addEventListener(
+    'mousedown',
+    (e) => {
+      const inside = !!el.value && e.target instanceof Node && el.value.contains(e.target)
+      pressedHere = inside
+      if (inside) markUserAction()
+      // A press elsewhere: drop a terminal gesture whose release never arrived.
+      else releaseCopy.cancel()
+    },
+    { capture: true, signal: imeAbort.signal }
+  )
+  el.value?.addEventListener(
+    'mousedown',
+    (e) => {
+      // Capture phase: runs before xterm's own mousedown handler, which may already
+      // select (double / triple click, Shift+click) — that change must count.
+      if (e.button === 0) releaseCopy.down()
+    },
+    { capture: true, signal: imeAbort.signal }
+  )
+  // One permanent listener (a per-press one-shot piles up when a release is lost
+  // outside the window). It ignores releases that did not start on the terminal.
+  document.addEventListener(
+    'mouseup',
+    (e) => {
+      // A program's own copy (Codex) is sent when the drag is released, wherever
+      // the pointer ended up.
+      if (pressedHere) markUserAction()
+      pressedHere = false
+      if (e.button !== 0) return
+      // xterm finalises the selection in its own mouseup handler; look after it.
+      setTimeout(() => {
+        if (!unmounted) releaseCopy.up()
+      }, 0)
+    },
+    { capture: true, signal: imeAbort.signal }
+  )
 
   try {
     webgl = new WebglAddon()
@@ -545,15 +612,19 @@ onMounted(() => {
   // The base64 is decoded by lib/osc52, which tolerates the whitespace/newlines
   // some remotes (tmux wrapping, multi-line OSC) put inside it — atob() alone
   // threw on those and the copy failed silently.
-  const remoteClipboard = createOsc52Gate()
   term.parser.registerOscHandler(52, (data) => {
     const semi = data.indexOf(';')
     const payload = semi >= 0 ? data.slice(semi + 1) : data
-    const text = remoteClipboard(payload, store.allowRemoteClipboard)
-    // Query, empty, oversized or undecodable: nothing to copy, but the sequence
-    // is still ours — don't let xterm fall through to its own handling.
+    const text = remoteClipboard.accept(payload, store.allowRemoteClipboard)
+    // Query, empty, oversized, undecodable or not user-triggered: nothing to copy,
+    // but the sequence is still ours — don't let xterm fall through to its own handling.
     if (text === null) return true
-    window.api.clipboard.writeText(text)
+    try {
+      window.api.clipboard.writeText(text)
+    } catch {
+      toast(t('term.copyFail'), 'error')
+      return true
+    }
     lastAppCopy = { text, at: Date.now() }
     return true
   })
@@ -888,7 +959,7 @@ onBeforeUnmount(() => {
         <button :disabled="!menu.hasSel && !menu.appCopy" @click="runMenu(copyFromMenu)">
           <span>{{ t('term.copy') }}</span><span class="k">{{ modKey }}+C</span>
         </button>
-        <div v-if="!menu.hasSel && !menu.appCopy && menu.mouseApp" class="hint">{{ t('term.shiftSelectHint') }}</div>
+        <div v-if="!menu.hasSel && !menu.appCopy && menu.mouseApp" class="hint">{{ t(isMac ? 'term.optionSelectHint' : 'term.shiftSelectHint') }}</div>
         <button @click="runMenu(pasteClipboard)">
           <span>{{ t('term.paste') }}</span><span class="k">{{ modKey }}+V</span>
         </button>
