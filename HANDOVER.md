@@ -1,3 +1,30 @@
+# 会话记录:M3.202(2026-11-19,界面同类问题全面清理——聚焦蓝框、中文标点、透底、等宽字体:v0.6.43 已发)
+
+> 起因:v0.6.41 只修了命令面板一处的蓝框和英文逗号;用户随后在主机编辑页看到一模一样的问题,要求按「同类问题全软件排查」来做。
+> **验证方式**:这次是把构建产物真的开起来截图看的(见下「怎么走查」),不是只跑检查。
+
+## 根因与改法
+
+- **蓝框**:`styles/global.css` 有一条 `input:focus-visible, textarea:focus-visible, [tabindex]:focus-visible { outline … !important }` 的兜底规则。文本输入框永远匹配 `:focus-visible`(鼠标点击也算),于是每个输入框都被强制画 2px 框,叠在各组件自己的聚焦提示上。现在这条规则**只管非文本控件**(checkbox / radio / range / color / file)和 `tabindex` 不为 `-1` 的元素;文本输入框全局 `outline: none`,**各自负责聚焦提示**。新增文本输入框时必须自带提示(有边框的变 accent 边;无边框的用下划线 / 行底色 / 容器边框)。
+- 这次补了提示的:`HostEditor .p-name`(下划线)、`HistorySearch .bar:focus-within`、`TabBar .filter-box:focus-within`、`ForwardDialog .fw-in:focus`、`TmuxDialog .tm-new input:focus`、`CommandPalette .search:focus`。`TextEditor` 的编辑区没有额外提示,只有光标。
+- **`tabindex="-1"` 不再描边**:那些是只由脚本聚焦的面板 / 滚动区(设置页 `.content`、各对话框),之前会给整页画一个蓝框。
+- **中文标点**:`lib/i18n.ts` 的 zh / zh-TW 和 `src/main/index.ts` 里的中文字符串,紧邻汉字的 `, ; : ? ( )` 全部换成全角,共 339 行。**保留**「中文 (English)」这种括号里全是拉丁字母、前面带空格的写法。以后新增中文文案请直接用全角标点。
+- **透底**:没有自带 `backdrop-filter` 模糊却用了半透明背景的面板改为不透明:命令面板(0.6.41)、`ConfirmDialog .dialog`、`HistorySearch .panel`、`TextEditor .editor`、全局 `.pm-dialog`。带 14px 以上模糊的菜单 / toast / 缩放提示是有意的毛玻璃,没动。
+- **等宽字体里的中文**:等宽字体会把汉字逐个拉开。命令面板的说明文字、主机分组名、`.mono` 输入框的 placeholder 改用界面字体;只有地址和命令本身保持等宽。
+- 其它:主机编辑页端口前的冒号改成「端口」标签;颜色去掉两个近似色(`#4dabf7`、`#fab005`),换成 `#a9744f`、`#94a3b8`,旧颜色的主机通过 `swatches` 计算属性多显示一个色块保持可选中;设置页切换分页时滚动回顶;tmux / 广播框标题去掉菜单项带来的「…」;命令面板 Enter 提示按选中项显示「连接 / 执行」。
+
+## 怎么走查(下次照做)
+
+- 构建后用独立数据目录起一个实例,避开单实例锁和用户真实数据:`node_modules/electron/dist/electron.exe . --remote-debugging-port=9333 --user-data-dir=<临时目录>`,再通过 CDP(`Page.captureScreenshot` / `Runtime.evaluate` / `Input.*`)驱动和截图。
+- 要看「连上才有」的界面,用 `ssh2` 的 `Server` 在 127.0.0.1 起一个假服务器(接受任意密码,给一个回显 shell 和一个只读 SFTP 列表),再用 `window.api.hosts.save(...)` 塞几台演示主机。
+- 结束后只杀这个 electron.exe 和假服务器的 node 进程。
+
+## 没做 / 已知
+
+- **Android 的 `strings.xml` 有同样的半角标点**(zh、zh-Hant 各约 50 行),没改——改了要重新出 Android 包,等用户决定。
+- 没逐个截图看的:权限对话框、目录对比、公钥发布、会话回放、锁屏、文本编辑器。
+- SFTP 页头部的主机地址不显示端口(连非 22 端口也只显示 `user@host`),这次没动。
+
 # 会话记录:M3.201(2026-11-20,终端网址链接不再吞中文;iOS 审查收尾:v0.6.42 已发)
 
 > 起因:用户截图指出 `http://192.168.10.213:8888/v1。使用现有密钥…` 整句中文都带着下划线。
