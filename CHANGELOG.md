@@ -4,6 +4,8 @@
 版本号格式: MAJOR.MINOR.PATCH。功能(feature)加 MINOR,修复/打磨加 PATCH,破坏性改动加 MAJOR。
 ## [Unreleased]
 
+## [0.6.39] - 2026-11-19
+
 ### Changed
 - **终端里选中文字就自动复制,Windows 与 macOS 一致**。松开鼠标时有文字被选中(拖选、双击选词、三击选行、Shift+点击扩展、右键菜单的「全选」)就写进剪贴板,一次选择只写一次;只点一下、没选到新文字则不碰剪贴板。设置里的「选中即复制」开关随之移除(现在永远开着)。程序占用鼠标(tmux 鼠标模式、vim、Codex)时选文字仍要按住修饰键:Windows 用 Shift,**macOS 用 Option**(终端新增 `macOptionClickForcesSelection`,此前 Mac 上这种情况根本选不了字),右键菜单的提示按平台显示。
 
