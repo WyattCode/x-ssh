@@ -84,6 +84,16 @@ describe('releaseCopy', () => {
     expect(write).not.toHaveBeenCalled()
   })
 
+  it('forgets a gesture whose release was lost once a press starts elsewhere', () => {
+    const { c, write, select } = setup()
+    c.down()
+    select('abc')
+    // release never arrived; the user now clicks a button elsewhere in the window
+    c.cancel()
+    expect(c.up()).toBe(false)
+    expect(write).not.toHaveBeenCalled()
+  })
+
   it('handles one gesture at a time', () => {
     const { c, write, select } = setup()
     c.down()

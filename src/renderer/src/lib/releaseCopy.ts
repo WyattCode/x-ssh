@@ -26,6 +26,11 @@ export interface ReleaseCopy {
   down: () => void
   /** The terminal's selection changed (any reason). */
   selectionChanged: () => void
+  /**
+   * A press started somewhere else: forget a gesture whose release never arrived,
+   * so that unrelated release cannot copy the terminal's selection.
+   */
+  cancel: () => void
   /** Pointer released (anywhere). Returns true if text was copied. */
   up: () => boolean
 }
@@ -40,6 +45,10 @@ export function createReleaseCopy(deps: ReleaseCopyDeps): ReleaseCopy {
     },
     selectionChanged() {
       if (pressed) changed = true
+    },
+    cancel() {
+      pressed = false
+      changed = false
     },
     up() {
       // A release that did not start on the terminal must not copy its old selection.
