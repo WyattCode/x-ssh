@@ -509,7 +509,7 @@ onMounted(() => {
   // The addon's default pattern runs on until whitespace, so Chinese text glued
   // to a URL ("http://host/v1。使用...") was underlined and opened as part of it.
   // Only ASCII URL characters here; full-width punctuation and CJK end the link.
-  const urlRegex = /https?:\/\/[\x21-\x7e]*[A-Za-z0-9\/_~=&#%+-]/gi
+  const urlRegex = /https?:\/\/[^\s\u0080-\uffff\"'!*(){}|\\^<>`]*[^\s\u0080-\uffff\"':,.!?{}|\\^~\[\]`()<>]/gi
   term.loadAddon(new WebLinksAddon((_e, uri) => openLink(uri), { urlRegex }))
   term.open(el.value)
 
