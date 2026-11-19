@@ -2855,6 +2855,7 @@ M3.51 已有「用生物识别解锁」开关,连私钥密文(`lockedKeyData` / 
 - **安装包是 debug 签名**(仓库里没有发布签名钥匙)。`mobile/android/release/xssh-android-0.2.0-debug.apk`(+ `.sha256`)在本机,**被 `.gitignore` 的 `release` 规则忽略,不在仓库里**。已装 0.1.0 的设备同签名可 `adb install -r` 覆盖;**别的电脑的 debug 签名必须卸载重装,卸载会连同 Keystore 里的密钥一起删,已加密保存的密码全部作废**。
 - **GitHub Release 页面没建**(这台没有 `gh`,也没有别的凭据)。要发布 APK:在 GitHub 网页的 Releases 里选 `android-v0.2.0` 新建并上传 APK 和校验文件;`CHANGELOG.md` 的 `[0.2.0]` 一节可直接当发布说明。
 - **0.2.0 标签里的 APK 带的是旧 `.so`**(Rust 加固之前)。0.2.0 之后 `main` 上又有:`a93e2f5`(Kotlin 兜底 Rust panic)、`8734149`(合并 PR #41:Rust 加固)、`713d46c`(同步绑定注释)、`a114d9d`(光晕修复)。
+- **0.2.2 已发版,标签 `android-v0.2.2`**(`versionCode 4`,2026-11-19):只把 `values-zh` / `values-b+zh+Hant` 的 `strings.xml` 里紧邻汉字的半角标点换成全角(各 49 行),没动 Kotlin 和 Rust,`.so` 沿用 0.2.1 的。**没在真机上看过**(发版时没有设备在线);单测 155 项通过。新增中文文案请直接用全角标点。`:app:lintDebug` 目前本来就过不了(生成的 `uniffi/xssh_ffi.kt` 报 NewApi 等 29 个错),与这次无关。
 - **0.2.1 已发版,标签 `android-v0.2.1`**(`versionCode 3` / `versionName 0.2.1`,`mobile/android/CHANGELOG.md` 有 `[0.2.1]` 一节):带**加固后的 `.so`**,外加 `802a3a8`(连接中页「取消」加正文色 + 细边)和 `bcd455f`(加锁凭据首次读取挪出主线程)。**标签上的安装包**是 `mobile/android/release/xssh-android-0.2.1-debug.apk`(19,834,287 B,sha256 `31d36d7f…dad73b`,本机、被忽略);下面 Fold 上装的那份是标签之前的构建(没有 `bcd455f`)。GitHub Release 页面仍没建。构建时 `:app:assembleDebug :app:testDebugUnitTest` 全绿;包内 `lib/arm64-v8a/libxssh_ffi.so` 里查得到 `<redacted>`,确认不是旧库。**已覆盖安装到 Fold(11-14 22:34),真机验证还没做**。
 - 仓库根目录那个**不是我们提交的未跟踪文件 `arm64`** 已在 11-14 按用户确认删除;如果它又出现,先问清楚再动,别 `git add -A`。
 

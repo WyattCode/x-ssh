@@ -10,10 +10,10 @@
     <string name="edit_delete_confirm">确认删除这台主机</string>
     <string name="edit_err_address_empty">地址不能为空</string>
     <string name="edit_err_key_unusable">私钥无法使用</string>
-    <string name="edit_err_lock_off_failed">没能关掉这道锁,请重试。</string>
-    <string name="edit_err_lock_on_failed">没能打开这道锁,请重试。</string>
+    <string name="edit_err_lock_off_failed">没能关掉这道锁，请重试。</string>
+    <string name="edit_err_lock_on_failed">没能打开这道锁，请重试。</string>
     <string name="edit_err_no_key">还没有导入私钥</string>
-    <string name="edit_err_no_page">保存失败:找不到当前页面。</string>
+    <string name="edit_err_no_page">保存失败：找不到当前页面。</string>
     <string name="edit_err_read_file">读不了这个文件</string>
     <string name="edit_err_wrong_passphrase">私钥口令不对</string>
     <string name="edit_fingerprint">指纹</string>
@@ -61,21 +61,21 @@
     <string name="files_cannot_create_folder">无法创建文件夹「%1$s」</string>
     <string name="files_cannot_create_in_downloads">无法在下载目录里创建「%1$s」</string>
     <string name="files_cannot_read">读不到「%1$s」</string>
-    <string name="files_cannot_read_folder">读不到这个文件夹:%1$s</string>
+    <string name="files_cannot_read_folder">读不到这个文件夹：%1$s</string>
     <string name="files_cannot_write">无法写入「%1$s」</string>
     <string name="files_copy_current_path">复制当前路径</string>
     <string name="files_copy_path">复制路径</string>
     <string name="files_create">新建</string>
-    <string name="files_create_failed">新建失败:%1$s</string>
+    <string name="files_create_failed">新建失败：%1$s</string>
     <string name="files_delete">删除</string>
     <string name="files_delete_ellipsis">删除…</string>
-    <string name="files_delete_failed">删除失败:%1$s</string>
+    <string name="files_delete_failed">删除失败：%1$s</string>
     <string name="files_delete_folder_note">文件夹里的内容会一起删除。</string>
-    <string name="files_delete_one_title">删除「%1$s」?</string>
+    <string name="files_delete_one_title">删除「%1$s」？</string>
     <string name="files_disconnected">连接已断开</string>
     <string name="files_done">完成</string>
     <string name="files_download">下载</string>
-    <string name="files_download_failed">下载失败:%1$s</string>
+    <string name="files_download_failed">下载失败：%1$s</string>
     <string name="files_download_to">下载到…</string>
     <string name="files_downloaded_one">已下载「%1$s」到 %2$s</string>
     <string name="files_downloads_folder">下载 / %1$s</string>
@@ -87,7 +87,7 @@
     <string name="files_go_to_path_ellipsis">前往路径…</string>
     <string name="files_key_enter">回车</string>
     <string name="files_link">链接</string>
-    <string name="files_merge_folder">「%1$s」已存在,合并并替换同名文件?</string>
+    <string name="files_merge_folder">「%1$s」已存在，合并并替换同名文件？</string>
     <string name="files_modified">修改时间</string>
     <string name="files_name">名称</string>
     <string name="files_new_folder">新建文件夹</string>
@@ -95,16 +95,16 @@
     <string name="files_no_app">没有能打开「%1$s」的应用</string>
     <string name="files_nothing_to_download">没有可下载的文件</string>
     <string name="files_open">打开</string>
-    <string name="files_open_failed">打开失败:%1$s</string>
+    <string name="files_open_failed">打开失败：%1$s</string>
     <string name="files_path">路径</string>
     <string name="files_permissions">权限</string>
     <string name="files_pick_on_left">选择左边的文件</string>
     <string name="files_refresh">刷新</string>
     <string name="files_rename">重命名</string>
     <string name="files_rename_ellipsis">重命名…</string>
-    <string name="files_rename_failed">重命名失败:%1$s</string>
+    <string name="files_rename_failed">重命名失败：%1$s</string>
     <string name="files_replace">替换</string>
-    <string name="files_replace_one">替换「%1$s」?</string>
+    <string name="files_replace_one">替换「%1$s」？</string>
     <string name="files_retry">重试</string>
     <string name="files_select_all">全选</string>
     <string name="files_select_multiple">多选</string>
@@ -114,20 +114,20 @@
     <string name="files_time_this_year">M月d日 HH:mm</string>
     <string name="files_transfer_busy">还有传输没完成</string>
     <string name="files_share">分享</string>
-    <string name="files_share_failed">分享失败:%1$s</string>
+    <string name="files_share_failed">分享失败：%1$s</string>
     <string name="files_nothing_to_share">没有可分享的文件</string>
-    <string name="files_drag_cached_only">先分享或打开下载到本地,再拖出</string>
+    <string name="files_drag_cached_only">先分享或打开下载到本地，再拖出</string>
     <string name="files_cancel_all">全部取消</string>
     <string name="files_queue_n">还有 %1$d 批</string>
     <string name="files_up">上一级</string>
     <string name="files_upload">上传</string>
-    <string name="files_upload_failed">上传失败:%1$s</string>
+    <string name="files_upload_failed">上传失败：%1$s</string>
     <string name="files_upload_files">上传文件…</string>
     <string name="files_upload_folder">上传文件夹…</string>
     <string name="files_uploaded_one">已上传「%1$s」</string>
     <string name="font_noto">思源等宽</string>
-    <string name="font_persist_failed">字体设置没能保存,下次启动会恢复原样</string>
-    <string name="font_size_persist_failed">字号没能保存,下次启动会恢复原来的大小</string>
+    <string name="font_persist_failed">字体设置没能保存，下次启动会恢复原样</string>
+    <string name="font_size_persist_failed">字号没能保存，下次启动会恢复原来的大小</string>
     <string name="font_style">%1$s 风格</string>
     <string name="host_address">地址</string>
     <string name="host_after_connect">连接后</string>
@@ -135,7 +135,7 @@
     <string name="host_cancel">取消</string>
     <string name="host_close_search">关闭搜索</string>
     <string name="host_confirm_delete">确认删除</string>
-    <string name="host_confirm_delete_jump">确认删除(被 %1$d 台当作跳板)</string>
+    <string name="host_confirm_delete_jump">确认删除（被 %1$d 台当作跳板）</string>
     <string name="host_connect">连接</string>
     <string name="host_credentials">凭据</string>
     <string name="host_delete">删除</string>
@@ -153,7 +153,7 @@
     <string name="host_gate_jump_note">连接「%1$s」要先经过它。</string>
     <string name="host_gate_key_changed">主机密钥已改变</string>
     <string name="host_gate_last_recorded">上次记录</string>
-    <string name="host_gate_none">(无)</string>
+    <string name="host_gate_none">（无）</string>
     <string name="host_gate_received_now">这次收到</string>
     <string name="host_gate_retry">重试</string>
     <string name="host_gate_server_fingerprint">服务器指纹</string>
@@ -189,12 +189,12 @@
     <string name="term_need_key">需要私钥</string>
     <string name="term_need_passphrase">需要私钥口令</string>
     <string name="term_need_jump_credential">需要跳板机凭据</string>
-    <string name="host_err_disconnected">服务器中断了连接。可能是网络不稳定,或服务器限制了这次登录。</string>
-    <string name="host_err_timeout">连接超时。检查地址和端口对不对,以及手机到服务器的网络通不通。</string>
-    <string name="host_err_refused">服务器拒绝了连接。确认 SSH 服务已开启,端口是否正确。</string>
-    <string name="host_err_unreachable">连不到这个地址。检查网络,或确认服务器在线。</string>
-    <string name="host_err_auth">认证没通过。检查用户名,以及密码或私钥对不对。</string>
-    <string name="host_gate_still_trying">仍在尝试,可以取消。</string>
+    <string name="host_err_disconnected">服务器中断了连接。可能是网络不稳定，或服务器限制了这次登录。</string>
+    <string name="host_err_timeout">连接超时。检查地址和端口对不对，以及手机到服务器的网络通不通。</string>
+    <string name="host_err_refused">服务器拒绝了连接。确认 SSH 服务已开启，端口是否正确。</string>
+    <string name="host_err_unreachable">连不到这个地址。检查网络，或确认服务器在线。</string>
+    <string name="host_err_auth">认证没通过。检查用户名，以及密码或私钥对不对。</string>
+    <string name="host_gate_still_trying">仍在尝试，可以取消。</string>
     <string name="host_row_connecting">连接中…</string>
     <string name="host_row_confirm">等待确认</string>
     <string name="host_row_failed">连接失败</string>
@@ -212,11 +212,11 @@
     <string name="host_seal_failed">无法安全保存密码，已保留原来的密码。其他改动已保存。</string>
     <string name="host_username">用户名</string>
     <string name="hosts_persist_failed">主机列表保存失败</string>
-    <string name="hosts_load_failed">部分已保存的主机无法读取。磁盘上的文件未被覆盖;若主机缺失,请从备份恢复。</string>
+    <string name="hosts_load_failed">部分已保存的主机无法读取。磁盘上的文件未被覆盖；若主机缺失，请从备份恢复。</string>
     <string name="hosts_persist_refused">没能保存空的主机列表——磁盘上还有受保护的数据。</string>
     <string name="hosts_save_failed">没能保存主机列表。改动没有写入磁盘。</string>
     <string name="sidebar_persist_failed">没能保存侧边栏偏好。</string>
-    <string name="hosts_secret_seal_failed">新的密码/密钥没能安全保存,磁盘上仍是旧的。请重试。</string>
+    <string name="hosts_secret_seal_failed">新的密码/密钥没能安全保存，磁盘上仍是旧的。请重试。</string>
     <string name="main_sc_close_session">断开当前会话</string>
     <string name="main_sc_edit_host">编辑主机</string>
     <string name="main_sc_ime">终端里切换输入法 / 英文直通</string>
@@ -232,7 +232,7 @@
     <string name="set_done">完成</string>
     <string name="set_lang_system">跟随系统</string>
     <string name="set_language">语言</string>
-    <string name="lang_persist_failed">语言设置没能保存,下次启动会恢复原样</string>
+    <string name="lang_persist_failed">语言设置没能保存，下次启动会恢复原样</string>
     <string name="set_selected">已选中</string>
     <string name="set_terminal_font">终端字体</string>
     <string name="set_terminal_theme">终端配色</string>
@@ -248,12 +248,12 @@
     <string name="snip_edit_title">编辑片段</string>
     <string name="snip_empty">还没有片段。点 ＋ 把常用命令存下来，以后点一下就发出去。</string>
     <string name="snip_fill">填入</string>
-    <string name="snip_load_failed">部分已保存的命令片段无法读取。磁盘上的文件未被覆盖;若片段缺失,请从备份恢复。</string>
-    <string name="snip_name_label">名字(可不填)</string>
+    <string name="snip_load_failed">部分已保存的命令片段无法读取。磁盘上的文件未被覆盖；若片段缺失，请从备份恢复。</string>
+    <string name="snip_name_label">名字（可不填）</string>
     <string name="snip_name_placeholder">看 GPU</string>
     <string name="snip_new">新建片段</string>
     <string name="snip_run">执行</string>
-    <string name="snip_run_title">执行「%1$s」?</string>
+    <string name="snip_run_title">执行「%1$s」？</string>
     <string name="snip_save">保存</string>
     <string name="snip_save_failed">片段保存失败</string>
     <string name="snip_switch_confirm">执行前确认</string>
@@ -271,10 +271,10 @@
     <string name="tab_delete">删除</string>
     <string name="tab_delete_host">删除主机</string>
     <string name="tab_delete_host_session_note">它的会话会一起断开。</string>
-    <string name="tab_delete_host_title">删除「%1$s」?</string>
+    <string name="tab_delete_host_title">删除「%1$s」？</string>
     <string name="tab_delete_this_host">删除这台主机</string>
     <string name="tab_discard">放弃</string>
-    <string name="tab_discard_changes_title">放弃未保存的修改?</string>
+    <string name="tab_discard_changes_title">放弃未保存的修改？</string>
     <string name="tab_disconnect">断开</string>
     <string name="tab_disconnect_host">断开 %1$s</string>
     <string name="tab_dropped_key_name">拖入的私钥</string>
@@ -294,11 +294,11 @@
     <string name="tab_no_matching_hosts">没有匹配的主机</string>
     <string name="tab_open_session">打开会话</string>
     <string name="tab_save">保存</string>
-    <string name="tab_save_failed_no_page">保存失败:找不到当前页面。</string>
+    <string name="tab_save_failed_no_page">保存失败：找不到当前页面。</string>
     <string name="tab_search">搜索</string>
     <string name="tab_search_results">搜索结果</string>
     <string name="tab_sessions">会话</string>
-    <string name="tab_sidebar_persist_failed">侧边栏设置没能保存,下次启动会恢复原样</string>
+    <string name="tab_sidebar_persist_failed">侧边栏设置没能保存，下次启动会恢复原样</string>
     <string name="tab_show_sidebar">显示侧边栏</string>
     <string name="term_channel_desc">显示后台仍在连接的 SSH 会话</string>
     <string name="term_channel_name">会话保持</string>
@@ -312,7 +312,7 @@
     <string name="term_disconnected">已断开</string>
     <string name="term_reconnect_auth_failed">已断开 · 认证失败</string>
     <string name="term_err_cancelled">已全部断开</string>
-    <string name="term_err_core_missing">这个安装包里缺少 X-SSH 的连接组件,所以连不上。请重新安装应用。这不是你的服务器或网络的问题。</string>
+    <string name="term_err_core_missing">这个安装包里缺少 X-SSH 的连接组件，所以连不上。请重新安装应用。这不是你的服务器或网络的问题。</string>
     <string name="host_gate_details">详情</string>
     <string name="term_err_jump_gone">这台主机的跳板机已经删除了。</string>
     <string name="term_err_jump_key_passphrase_needed">跳板机「%1$s」的私钥有口令。</string>
@@ -321,7 +321,7 @@
     <string name="term_err_jump_no_password">跳板机「%1$s」还没有保存密码。</string>
     <string name="term_err_key_passphrase_needed">这把私钥有口令。</string>
     <string name="term_err_key_passphrase_wrong">私钥口令不对。</string>
-    <string name="term_err_no_fingerprint">服务端密钥校验未通过,但没拿到指纹(%1$s)。</string>
+    <string name="term_err_no_fingerprint">服务端密钥校验未通过，但没拿到指纹（%1$s）。</string>
     <string name="term_err_no_key">这台主机还没有导入私钥。</string>
     <string name="term_err_no_password">这台主机还没有保存密码。</string>
     <string name="term_err_unlock_failed">没能解锁已保存的凭据。</string>
@@ -337,10 +337,10 @@
     <string name="term_hide_keys">收起快捷键</string>
     <string name="term_ime_hint_direct">英文直通  Shift 切到输入法</string>
     <string name="term_ime_hint_ime">输入法  Ctrl+Shift+Space 切回英文</string>
-    <string name="term_jump_hop_failed">跳板机「%1$s」:%2$s</string>
+    <string name="term_jump_hop_failed">跳板机「%1$s」：%2$s</string>
     <string name="term_jump_tunnel_failed">跳板机「%1$s」连不到 %2$s。\n%3$s</string>
     <string name="term_key_enter">回车</string>
-    <string name="term_local_network_hint">%1$s\n\n没有本地网络权限,请在系统设置里允许后重试。</string>
+    <string name="term_local_network_hint">%1$s\n\n没有本地网络权限，请在系统设置里允许后重试。</string>
     <string name="term_menu_clear">清屏</string>
     <string name="term_menu_copy">复制</string>
     <string name="term_menu_edit_host">编辑主机…</string>
@@ -366,7 +366,7 @@
     <string name="term_split_pick">选择右侧会话</string>
     <string name="term_split_swap">交换左右</string>
     <string name="term_split_close">关闭此窗格</string>
-    <string name="term_split_unavailable">没有其他活动会话。先连上另一台主机,再在右侧打开。</string>
+    <string name="term_split_unavailable">没有其他活动会话。先连上另一台主机，再在右侧打开。</string>
     <string name="term_pane_left">左窗格</string>
     <string name="term_pane_right">右窗格</string>
     <string name="term_pane_focused">已聚焦</string>
@@ -379,16 +379,16 @@
         <item quantity="other">已清空 %1$d 批排队</item>
     </plurals>
     <plurals name="files_cancelled_downloaded">
-        <item quantity="other">已取消(已下载 %d 个)</item>
+        <item quantity="other">已取消（已下载 %d 个）</item>
     </plurals>
     <plurals name="files_cancelled_uploaded">
-        <item quantity="other">已取消(已上传 %d 个)</item>
+        <item quantity="other">已取消（已上传 %d 个）</item>
     </plurals>
     <plurals name="files_delete_n_ellipsis">
         <item quantity="other">删除 %d 项…</item>
     </plurals>
     <plurals name="files_delete_n_title">
-        <item quantity="other">删除 %d 项?</item>
+        <item quantity="other">删除 %d 项？</item>
     </plurals>
     <plurals name="files_download_n">
         <item quantity="other">下载 %d 项</item>
@@ -403,13 +403,13 @@
         <item quantity="other">%d 个文件</item>
     </plurals>
     <plurals name="files_replace_many">
-        <item quantity="other">替换 %d 个同名文件?</item>
+        <item quantity="other">替换 %d 个同名文件？</item>
     </plurals>
     <plurals name="files_selected_n">
         <item quantity="other">已选 %d 项</item>
     </plurals>
     <plurals name="files_uploaded_folder">
-        <item quantity="other">已上传「%1$s」(%2$d 个文件)</item>
+        <item quantity="other">已上传「%1$s」（%2$d 个文件）</item>
     </plurals>
     <plurals name="files_uploaded_many">
         <item quantity="other">已上传 %d 个文件</item>
@@ -445,17 +445,17 @@
     <string name="fwd_err_already">这条规则已经开着。</string>
     <string name="fwd_err_bad_port">端口要在 1 到 65535 之间。</string>
     <string name="fwd_err_denied">服务器拒绝了这条转发。</string>
-    <string name="fwd_hint_local">在本机监听,经 SSH 转到服务器视角的地址。</string>
-    <string name="fwd_hint_remote">在服务器监听,连回本机上的地址。</string>
-    <string name="fwd_hint_dynamic">在本机开 SOCKS5 代理,流量走这条 SSH。</string>
+    <string name="fwd_hint_local">在本机监听，经 SSH 转到服务器视角的地址。</string>
+    <string name="fwd_hint_remote">在服务器监听，连回本机上的地址。</string>
+    <string name="fwd_hint_dynamic">在本机开 SOCKS5 代理，流量走这条 SSH。</string>
     <string name="term_forwards">端口转发</string>
     <string name="term_menu_forwards">端口转发…</string>
     <string name="snap_title">会话快照</string>
     <string name="snap_save">保存</string>
     <string name="snap_default">快照</string>
-    <string name="snap_empty">还没有快照。连上主机后点「保存」,记下当前工作区。</string>
+    <string name="snap_empty">还没有快照。连上主机后点「保存」，记下当前工作区。</string>
     <string name="snap_delete">删除</string>
-    <string name="snap_delete_confirm">删除这份快照?</string>
+    <string name="snap_delete_confirm">删除这份快照？</string>
     <string name="snap_hosts_n">%d 台主机</string>
     <string name="snap_missing_n">%d 台已不在</string>
     <string name="snap_menu">快照</string>
