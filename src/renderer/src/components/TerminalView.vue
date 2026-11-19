@@ -506,7 +506,11 @@ onMounted(() => {
     searchHits.count = e.resultCount
   })
   // Plain http(s) text in the output takes the same route.
-  term.loadAddon(new WebLinksAddon((_e, uri) => openLink(uri)))
+  // The addon's default pattern runs on until whitespace, so Chinese text glued
+  // to a URL ("http://host/v1。使用...") was underlined and opened as part of it.
+  // Only ASCII URL characters here; full-width punctuation and CJK end the link.
+  const urlRegex = /https?:\/\/[\x21-\x7e]*[A-Za-z0-9\/_~=&#%+-]/gi
+  term.loadAddon(new WebLinksAddon((_e, uri) => openLink(uri), { urlRegex }))
   term.open(el.value)
 
   // Auto-copy the selection to the clipboard when the option is on.
