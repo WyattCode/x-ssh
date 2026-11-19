@@ -30,7 +30,7 @@ const activeHostId = computed(() => store.activePane?.params.hostId ?? null)
 
 type Item =
   | { kind: 'quick'; title: string; sub: string; params: ConnectParams }
-  | { kind: 'host'; title: string; sub: string; host: Host; known: boolean }
+  | { kind: 'host'; title: string; sub: string; host: Host; known: boolean; live: boolean }
   | { kind: 'snippet'; title: string; sub: string; snippet: Snippet }
   | { kind: 'action'; title: string; sub: string; run: () => void; icon: string }
   | { kind: 'snapshot'; title: string; sub: string; id: string; icon: string }
@@ -64,6 +64,27 @@ const pwEl = ref<HTMLInputElement>()
 const broadcastOpen = ref(false)
 const broadcastCmd = ref('')
 const broadcastEl = ref<HTMLInputElement>()
+
+/** Saved hosts that already have a connected pane, so the list can say so —
+ *  otherwise an open host looks identical to a closed one and gets reopened. */
+const liveHostIds = computed(() => {
+  const ids = new Set<string>()
+  for (const tab of store.tabs) {
+    for (const p of tab.panes) {
+      if (p.status === 'connected' && p.params.hostId) ids.add(p.params.hostId)
+    }
+  }
+  return ids
+})
+
+/** Port 22 is the default and says nothing; only a non-default port is shown. */
+const hostAddr = (h: Host): string =>
+  `${h.username}@${h.host}${h.port === 22 ? '' : `:${h.port}`}`
+
+function newHost(): void {
+  store.togglePalette(false)
+  emit('new-host')
+}
 
 const oneLine = (s: string): string => s.replace(/\s+/g, ' ').trim().slice(0, 60)
 
@@ -118,13 +139,18 @@ const sections = computed<{ id: string; title: string; items: Item[] }[]>(() => 
     .sort((a, b) => b.score - a.score)
   add(
     'hosts',
-    t('pal.hosts'),
+    // With no query the order is most-recently-used first; say so, or it
+    // reads as random.
+    // (Only when something has actually been used — a fresh list is in saved
+    // order, and calling that "recent" would be wrong.)
+    !q && store.hosts.some((h) => h.lastUsedAt) ? t('pal.hostsRecent') : t('pal.hosts'),
     scored.map(({ h }) => ({
       kind: 'host' as const,
       title: h.label,
-      sub: `${h.username}@${h.host}:${h.port}${h.group ? ` · ${h.group}` : ''}`,
+      sub: `${hostAddr(h)}${h.group ? ` · ${h.group}` : ''}`,
       host: h,
-      known: store.hostKeyKnown(h.host, h.port)
+      known: store.hostKeyKnown(h.host, h.port),
+      live: liveHostIds.value.has(h.id)
     }))
   )
 
@@ -495,6 +521,9 @@ function onKey(e: KeyboardEvent): void {
     selected.value =
       (selected.value - 1 + items.value.length) % Math.max(items.value.length, 1)
   } else if (e.key === 'Enter') {
+    // Enter on the footer's own button is that button's: without this, tabbing
+    // to 新建主机 and pressing Enter connected to the highlighted host instead.
+    if ((e.target as HTMLElement | null)?.closest('.hint-new')) return
     e.preventDefault()
     const item = items.value[selected.value]
     if (item) activate(item)
@@ -594,6 +623,9 @@ function onKey(e: KeyboardEvent): void {
                   </template>
                 </span>
               </span>
+              <span v-if="item.kind === 'host' && item.live" class="live">
+                <span class="live-dot" />{{ t('pal.connected') }}
+              </span>
               <span
                 v-if="item.kind === 'host'"
                 class="edit"
@@ -617,6 +649,9 @@ function onKey(e: KeyboardEvent): void {
           <span><span class="kbd">↑</span><span class="kbd">↓</span> {{ t('pal.nav') }}</span>
           <span><span class="kbd">Enter</span> {{ t('pal.connect') }}</span>
           <span><span class="kbd">Esc</span> {{ t('pal.close') }}</span>
+          <button class="hint-new" @click="newHost">
+            <Icon name="plus" :size="12" />{{ t('pal.newHostShort') }}
+          </button>
         </div>
       </template>
     </div>
@@ -638,7 +673,9 @@ function onKey(e: KeyboardEvent): void {
 }
 .palette {
   width: min(620px, 92vw);
-  background-color: color-mix(in srgb, var(--bg-elev) 90%, transparent);
+  /* Opaque: a see-through panel let the page behind (spinners, status text)
+     show through the host list. */
+  background-color: var(--bg-elev);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
   box-shadow: var(--shadow), 0 0 0 1px rgba(255, 255, 255, 0.04) inset;
@@ -654,6 +691,14 @@ function onKey(e: KeyboardEvent): void {
   border-bottom: 1px solid var(--border);
   outline: none;
 }
+/* The global focus ring is a full 2px accent box. Here it was clipped by the
+   panel's rounded top corners (round on top, square below, uneven weight), and
+   the field is the panel's only text input anyway — mark focus on the divider
+   line instead. Needs !important + the extra class to beat the global floor. */
+.palette .search:focus-visible {
+  outline: none !important;
+  border-bottom-color: var(--accent);
+}
 .search::placeholder {
   color: var(--text-faint);
 }
@@ -664,8 +709,8 @@ function onKey(e: KeyboardEvent): void {
 }
 .group {
   padding: 8px 12px 4px;
-  font-size: 10.5px;
-  color: var(--text-faint);
+  font-size: 11.5px;
+  color: var(--text-dim);
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
@@ -744,7 +789,9 @@ function onKey(e: KeyboardEvent): void {
 .edit {
   display: inline-flex;
   align-items: center;
-  opacity: 0;
+  /* Always there (dimmed), so editing is discoverable without first landing
+     on the row. */
+  opacity: 0.45;
   color: var(--text-faint);
   padding: 4px;
   border-radius: 5px;
@@ -779,6 +826,41 @@ function onKey(e: KeyboardEvent): void {
 }
 .hint .kbd {
   margin-right: 3px;
+}
+.hint {
+  align-items: center;
+}
+.hint-new {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  padding: 2px 8px;
+  border-radius: 5px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.hint-new:hover {
+  color: var(--text);
+  background: var(--selected);
+}
+.live {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 12%, transparent);
+}
+.live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
 }
 .pw-head {
   padding: 14px 18px 0;
