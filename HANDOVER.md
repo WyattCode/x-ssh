@@ -1,3 +1,26 @@
+# 会话记录:M3.203(2026-11-20,SFTP 上传一律失败 + Windows 同步下载失败:v0.6.44 已发)
+
+> 起因:用户截图——上传文件提示「1.png · 失败」「1 个文件失败」。
+> **验证方式**:用 Git for Windows 自带的真 OpenSSH `sftp-server.exe`(外面套一层 ssh2 `Server` 转发 subsystem),在 **Electron 自带的 Node**(`ELECTRON_RUN_AS_NODE=1 electron.exe node_modules/vitest/vitest.mjs run …`)里跑 `SshManager` 的全部 SFTP 操作。普通 Node 26 和 Electron 33 的 Node 20 在流事件上行为不同,不要只用 `npx vitest`。
+
+## 根因
+
+- **上传全挂(自 v0.6.38,提交 657d8d7「先写临时文件再改名」)**:`pipeStream` 的 `close` 处理要求 `writable.writableFinished`,但 ssh2 的 SFTP `WriteStream._final()` 里先 `destroy()` 再 `cb()`,正常结束只发 `close`、不发 `finish`,`writableFinished` 一直是 false → 每次都抛 `transfer-closed-before-finish`,临时文件被清掉。现在以 `writableFinished || (writableEnded && !errored)` 为成功。`writableEnded` 能代表「数据全写完」,因为只有在读完并等完 drain 之后才调 `end()`,而 `_final` 要等所有 `_write` 回调(服务器确认)之后才执行。
+- 之前测试全绿是因为用的是**模拟的 Writable**,它们会发 `finish`。新的 `src/main/uploadComplete.test.ts` 里 `ssh2LikeWrite` 模拟 ssh2 的真实行为。以后给 ssh2 流写测试,要模仿「`_final` 里销毁」。
+- **服务器不支持 `posix-rename@openssh.com`**:ssh2 的 `ext_openssh_rename` 在扩展没被通告时**同步抛** `Error("Server does not support this extended request")`(没有 `code`),旧代码只认 `code === 8`。新增 `replaceRemote()`:抛错 / code 8 → 退回普通 rename;目标已存在则先挪成 `.xssh-old-<uuid>`,改名成功后删,失败放回。手机端 Rust 早就是这个思路(`sftp.rs` 的 backup)。
+- **Windows 同步下载全挂(自 2026-09 daab5a0)**:`syncJob` 里 `this.parentOf(item.local)` 用 POSIX 函数算 Windows 路径的上一级,得 `/`,去 `mkdir C:\` → EPERM。改成 `dirname(item.local)`。
+
+## 这次排查过、结论正常的
+
+- 用真服务器跑了约 45 项:上传(小 / 大 / 空 / 文件夹 / 25 并发 / 中文空格名 / 覆盖 / keep)、下载(文件 / 文件夹 / 校验和 / 覆盖)、读写文本和二进制、putFileSilent、createFile、rename、chmod、删除、diffDirs、syncJob 三个方向 + deleteExtras + 嵌套、取消 / 暂停上传、取消下载。都正常。
+- 手机端 Rust:`cargo test -p xssh-core --test live_ssh -- --ignored`(要设 `XSSH_TEST_HOST/PORT/USER/KEY`)对同一个服务器跑 `cancelled_upload_leaves_the_target_alone` 和 `sftp_round_trip_alongside_shell`,通过。这两个测试默认 `ignored`,CI 不跑。
+
+## 已知 / 没动
+
+- 下载中途取消会在目标文件夹留下 `<name>.xssh-part-<uuid>`:是 `downloadJob` 有意保留以便续传(`partialDownloads`),不是 bug;但用户不再重试就一直留着。
+- 没有在用户的 DGX Spark 上实测;chmod / 保留权限只能在真 Linux 上验证(本机后端是 NTFS)。
+- Android 0.2.2 的 Kotlin 带了 11-17 同批提交,但 `.so` 仍是 11-14 的旧库。
+
 # 会话记录:M3.202(2026-11-19,界面同类问题全面清理——聚焦蓝框、中文标点、透底、等宽字体:v0.6.43 已发)
 
 > 起因:v0.6.41 只修了命令面板一处的蓝框和英文逗号;用户随后在主机编辑页看到一模一样的问题,要求按「同类问题全软件排查」来做。
