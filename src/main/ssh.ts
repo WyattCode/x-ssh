@@ -2288,7 +2288,9 @@ export class SshManager {
           emit(item.rel, item.dir)
           // Ensure the destination directory exists (files are shuffled, so a
           // deep file may be picked before its parents were created).
-          const destDir = item.dir === 'up' ? this.parentOf(item.remote) : this.parentOf(item.local)
+          // The remote side is POSIX; the local side is this machine's own (parentOf()
+          // on a Windows path returns '/', and mkdir('C:\') fails with EPERM).
+          const destDir = item.dir === 'up' ? this.parentOf(item.remote) : dirname(item.local)
           if (item.dir === 'up') await this.ensureRemoteDir(sftp, destDir)
           else await mkdir(this.longPath(destDir), { recursive: true })
           const delta = (n: number): void => { bytesDone += n; emit(item.rel, item.dir) }
@@ -2554,7 +2556,15 @@ export class SshManager {
         try {
           readable.on('error', (e: Error) => finish(e))
           writable.on('error', (e: Error) => finish(e))
-          writable.on('close', () => finish(writable.writableFinished ? undefined : new Error('transfer-closed-before-finish')))
+          // ssh2's SFTP WriteStream destroys itself inside _final(), so on a clean
+          // end it emits 'close' WITHOUT 'finish' and writableFinished stays
+          // false (checked under Electron's Node). "end() was called by us, after
+          // every chunk was written and acked, and nothing errored" is the real
+          // success condition; a stream torn down before that is a failure.
+          writable.on('close', () => {
+            const ended = writable.writableFinished || (writable.writableEnded && !writable.errored)
+            finish(ended ? undefined : new Error('transfer-closed-before-finish'))
+          })
           for await (const chunk of readable) {
             if (settled) return
             await waitUnpaused()
@@ -3344,20 +3354,62 @@ export class SshManager {
       read = createReadStream(this.longPath(local))
       await this.pipeStream(job, read, write, delta)
       if (this.cancelledJobs.has(job)) throw new Error(SshManager.CANCELLED_TEXT)
-      await new Promise<void>((resolve, reject) => {
-        sftp.ext_openssh_rename(temp, target, error => {
-          if (!error) return resolve()
-          // Only unsupported-extension errors can use v3 no-replace rename.
-          if ((error as Error & { code?: number }).code !== 8) return reject(error)
-          sftp.rename(temp, target, e => e ? reject(e) : resolve())
-        })
-      })
+      await this.replaceRemote(sftp, temp, target)
     } catch (error) {
       read?.destroy()
       if (write) await this.closeStagingStream(write)
       if (ownsTemp) await this.cleanupRemoteStage(sftp, temp)
       throw error
     }
+  }
+
+  /** Moves a fully written temp file onto its destination without ever writing
+   *  into the destination. Servers with posix-rename@openssh.com replace it in
+   *  one step. Others (Dropbear, many NAS / router firmwares) either answer
+   *  OP_UNSUPPORTED or, in ssh2, make the call throw because the extension was
+   *  never advertised — both mean "use plain rename". Plain SFTP v3 rename will
+   *  not replace an existing file, so an existing destination is first moved
+   *  aside and put back if the final rename fails. */
+  private replaceRemote(sftp: SFTPWrapper, temp: string, target: string): Promise<void> {
+    const rename = (from: string, to: string): Promise<void> =>
+      new Promise((resolve, reject) => sftp.rename(from, to, e => (e ? reject(e) : resolve())))
+    const unlink = (path: string): Promise<void> =>
+      new Promise(resolve => sftp.unlink(path, () => resolve()))
+    const fallback = async (): Promise<void> => {
+      try {
+        await rename(temp, target)
+        return
+      } catch (first) {
+        const exists = await new Promise<boolean>(resolve => sftp.stat(target, err => resolve(!err)))
+        if (!exists) throw first
+      }
+      const old = `${target}.xssh-old-${randomUUID()}`
+      await rename(target, old)
+      try {
+        await rename(temp, target)
+      } catch (e) {
+        await rename(old, target).catch(() => undefined)
+        throw e
+      }
+      await unlink(old)
+    }
+    return new Promise<void>((resolve, reject) => {
+      const unsupported = (error: unknown): boolean => {
+        const e = error as Error & { code?: number }
+        return e.code === 8 || (e.code === undefined && /does not support/i.test(e.message))
+      }
+      const useFallback = (): void => void fallback().then(resolve, reject)
+      try {
+        sftp.ext_openssh_rename(temp, target, error => {
+          if (!error) return resolve()
+          if (unsupported(error)) return useFallback()
+          reject(error)
+        })
+      } catch (error) {
+        if (unsupported(error)) return useFallback()
+        reject(error)
+      }
+    })
   }
 
   private async stagedDownload(sftp: SFTPWrapper, remote: string, local: string, job: string, delta: (n: number) => void): Promise<void> {
