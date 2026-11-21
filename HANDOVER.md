@@ -1,3 +1,22 @@
+# 会话记录:M3.206(2026-11-22,收起主机栏终端闪黑 + 失败提示前缀:v0.6.47 已发)
+
+## 做了什么(细节见 CHANGELOG [0.6.47])
+
+- `TerminalView.vue`:`paintNow()` 在 `fit.fit()` 之后和画布尺寸变化(`canvasRo`,device-pixel-content-box 的 ResizeObserver,建在 xterm 自己的之后)时同帧重画。原因:WebGL 渲染器改画布尺寸会清空画布,而它的重画排在下一帧。**调用的是 xterm 私有方法 `_core._renderService._renderRows`**(有保护,改名后不报错,只是闪黑会回来):升级 xterm 后要重新逐帧录屏确认。
+- `lib/ipcError.ts`(有测试):去掉 Electron 给 invoke 失败加的包装;用在 `HostEditor.vue`、`ForwardsPage.vue`、`SftpDrawer.vue`。
+
+## 验证
+
+- 逐帧录屏(CDP `Page.startScreencast`):修之前收起那一下有一帧终端亮像素为 0,修之后多次收起 / 展开没有空白帧。
+- 保存失败用只读的 hosts.json 真实触发过;端口转发和同步监视两处提示只改了代码,没触发。
+- 类型检查、构建通过;测试 926 通过,另 2 个是 `localAccess.test.ts` 的软链接 EPERM(原有)。
+
+## 没验证
+
+- 拖动主机栏宽度、调整窗口大小、并排面板没有单独录屏;跑 tmux / htop 的真实主机没看过。
+
+---
+
 # 会话记录:M3.205(2026-11-22,主机弹窗细节 + 主机栏图标加大:v0.6.46 已发)
 
 ## 做了什么(细节见 CHANGELOG [0.6.46])
