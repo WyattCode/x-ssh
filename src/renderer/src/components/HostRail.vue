@@ -388,7 +388,7 @@ const canSide = computed(() => store.activePane?.status === 'connected' && (stor
       <span class="rt-name">$ hosts<small>{{ store.hosts.length }}</small></span>
       <span class="rt-sort">
         <button class="rt-btn" :class="{ on: sortOpen }" :title="`${t('rail.sort')}: ${sortLabel(store.hostsSort)}`" :aria-label="t('rail.sort')" @click.stop="sortOpen = !sortOpen">
-          <Icon name="sort" :ink="10.1" :weight="1.3" />
+          <Icon name="sort" :ink="11.1" :weight="1.3" />
         </button>
         <template v-if="sortOpen">
           <div class="rail-overlay" @mousedown="sortOpen = false" />
@@ -410,10 +410,10 @@ const canSide = computed(() => store.activePane?.status === 'connected' && (stor
         :aria-pressed="store.sortLocked"
         @click="store.setSortLocked(!store.sortLocked)"
       >
-        <Icon :name="store.sortLocked ? 'lock' : 'unlock'" :ink="10.1" :weight="1.3" />
+        <Icon :name="store.sortLocked ? 'lock' : 'unlock'" :ink="11.1" :weight="1.3" />
       </button>
       <button class="rt-btn" :title="t('app.newConn')" :aria-label="t('app.newConn')" @click="emit('new-host')">
-        <Icon name="host-add" :ink="10.1" :weight="1.3" />
+        <Icon name="host-add" :ink="11.1" :weight="1.3" />
       </button>
     </div>
     <input

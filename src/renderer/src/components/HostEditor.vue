@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive, ref, watch, nextTick, computed } from 'vue'
+import { reactive, ref, watch, nextTick, computed, onMounted, onBeforeUnmount, onUpdated } from 'vue'
 import { useFocusTrap } from '../composables/focusTrap'
 
 import { useSessions } from '../stores/sessions'
@@ -102,6 +102,36 @@ const labelEl = ref<HTMLInputElement>()
 const panelEl = ref<HTMLElement>()
 useFocusTrap(panelEl, () => props.open)
 const tagInputEl = ref<HTMLInputElement>()
+// Scroll cues for the body: a hairline under the header once content runs beneath it, and a
+// "more below" pill while there is more to reach (the bar itself only shows while the pointer is over the body).
+const bodyEl = ref<HTMLElement>()
+const scrolled = ref(false)
+const moreBelow = ref(false)
+const pillEl = ref<HTMLButtonElement>()
+function measureBody(): void {
+  const el = bodyEl.value
+  if (!el) return
+  scrolled.value = el.scrollTop > 2
+  const more = el.scrollHeight - el.clientHeight - el.scrollTop > 12
+  // The pill is about to be removed while it holds focus (keyboard or click): a focused
+  // node leaving the DOM drops focus to <body>, and Esc is only heard inside the panel.
+  if (!more && moreBelow.value && pillEl.value && document.activeElement === pillEl.value) panelEl.value?.focus()
+  moreBelow.value = more
+}
+function scrollMore(): void {
+  const el = bodyEl.value
+  if (el) el.scrollTo({ top: el.scrollTop + Math.max(160, el.clientHeight * 0.8), behavior: 'smooth' })
+}
+onUpdated(measureBody)
+onMounted(() => window.addEventListener('resize', measureBody))
+onBeforeUnmount(() => window.removeEventListener('resize', measureBody))
+watch(
+  () => props.open,
+  (o) => {
+    if (o) void nextTick(measureBody)
+  },
+  { immediate: true }
+)
 const keyNameEl = ref<HTMLInputElement>()
 function closeKeySheet(): void {
   // A generate in flight owns the sheet: dismissing it would let the late
@@ -689,7 +719,7 @@ async function remove(): Promise<void> {
     <div v-if="open" class="layer" @mousedown.self="void requestClose()">
       <aside ref="panelEl" class="panel" role="dialog" aria-modal="true" aria-labelledby="he-kicker" tabindex="-1" @keydown.esc="void requestClose()" @keydown.enter="onEnter">
         <!-- Header: the host as a card shows it — avatar, name, address. -->
-        <header class="p-head">
+        <header class="p-head" :class="{ scrolled }">
           <OsIcon :os="host?.os" :color="form.color || undefined" :size="44" />
           <div class="p-title">
             <span id="he-kicker" class="p-kicker">{{ host ? t('host.titleEdit') : t('host.titleNew') }}</span>
@@ -704,7 +734,7 @@ async function remove(): Promise<void> {
           <button class="p-close" :title="t('host.cancel')" :aria-label="t('host.cancel')" @click="void requestClose()"><Icon name="close" :size="15" /></button>
         </header>
 
-        <div class="p-body">
+        <div ref="bodyEl" class="p-body" @scroll.passive="measureBody">
           <!-- ---- 连接 ---- -->
           <section class="group">
             <h3>{{ t('host.secConn') }}</h3>
@@ -1031,6 +1061,14 @@ async function remove(): Promise<void> {
           </section>
         </div>
 
+        <!-- Zero-height seam under the body: carries the fade and the "more below" pill, so
+             they sit on the body's edge whether or not the error banner is showing. -->
+        <div class="more-anchor">
+          <button v-if="moreBelow" ref="pillEl" type="button" class="more-pill" @click="scrollMore">
+            <Icon name="chevron-down" :size="12" />{{ t('host.moreBelow') }}
+          </button>
+        </div>
+
         <!-- Stays on screen after the toast fades: the panel itself must show
              that the save failed and why, or it looks like nothing happened. -->
         <div v-if="saveError" class="save-error" role="alert">{{ saveError }}</div>
@@ -1038,11 +1076,13 @@ async function remove(): Promise<void> {
         <footer class="p-foot">
           <button v-if="host" type="button" class="btn btn-danger" @click="remove">{{ t('host.delete') }}</button>
           <span class="spacer" />
+          <!-- The reason Save is off, in plain sight (the tooltip alone is easy to miss). -->
+          <span v-if="!saving && !canSave()" id="he-save-hint" class="save-hint">{{ saveBlockReason() }}</span>
           <button type="button" class="btn" @click="void requestClose()">{{ t('host.cancel') }}</button>
           <!-- One save button. A merge left a second copy here, so the footer
                showed two primary buttons and users could not tell which one
                actually saved. This one explains why it is disabled. -->
-          <button type="button" class="btn btn-primary" :disabled="!canSave() || saving" :title="canSave() ? undefined : saveBlockReason()" @click="save">{{ saving ? t('ed.saving') : t('host.save') }}</button>
+          <button type="button" class="btn btn-primary" :class="{ blocked: !saving && !canSave() }" :disabled="!canSave() || saving" :aria-describedby="!saving && !canSave() ? 'he-save-hint' : undefined" :title="canSave() ? undefined : saveBlockReason()" @click="save">{{ saving ? t('ed.saving') : t('host.save') }}</button>
         </footer>
 
         <!-- Generate a key: a small sheet over the panel. -->
@@ -1743,14 +1783,114 @@ input[type='number']::-webkit-inner-spin-button {
   font-family: var(--font-chrome);
   font-size: 12px;
 }
+/* The title is an input, so it says so: a light placeholder and a faint rule at rest
+   (a bold placeholder looked like a finished title), the white rule on focus. */
 .p-name {
   font-family: var(--font-chrome);
   font-size: 16px;
   font-weight: 700;
   caret-color: var(--cursor);
+  padding-bottom: 3px;
+  box-shadow: 0 1px 0 var(--border-strong);
+}
+.p-name::placeholder {
+  font-weight: 400;
+  color: var(--text-faint);
+}
+.p-name:hover {
+  box-shadow: 0 1px 0 var(--text-faint);
 }
 .p-name:focus {
   box-shadow: 0 1px 0 var(--text);
+}
+.p-head.scrolled {
+  box-shadow: 0 1px 0 var(--chrome-line);
+  position: relative;
+  z-index: 1;
+}
+/* The body's bar shows on hover or while scrolling, like the rail's, not all the time. */
+.p-body::-webkit-scrollbar-thumb {
+  background: transparent;
+}
+.p-body:hover::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  background-clip: padding-box;
+}
+.save-hint {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--text-faint);
+  margin-right: 4px;
+}
+/* Save with something still missing: a ghost outline, so it reads as unavailable and not as
+   a dimmed live button. Only this state — a button that is merely busy (saving, uploading
+   elsewhere in the app) keeps its fill, or it would flash to an outline on every action. */
+.p-foot .btn-primary.blocked {
+  opacity: 1;
+  color: var(--text-faint);
+  background: transparent;
+  border-color: var(--border-strong);
+}
+.more-anchor {
+  position: relative;
+  flex: none;
+  height: 0;
+}
+/* A fade over the foot of the scroll area, so a row that runs under the buttons reads
+   as "more below" and not as a cut-off. */
+.more-anchor::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 14px;
+  bottom: 0;
+  height: 24px;
+  background: linear-gradient(to bottom, transparent, var(--bg-elev) 85%);
+  pointer-events: none;
+}
+.more-pill {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 12px;
+  font-family: var(--font-chrome);
+  font-size: 12px;
+  color: var(--text-dim);
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-pill);
+}
+.more-pill:hover {
+  color: var(--text);
+}
+.tag-box {
+  min-height: 30px;
+  padding: 1px 6px;
+  background: var(--bg-elev-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+}
+.tag-box:hover {
+  border-color: var(--border);
+}
+.tag-box:focus-within {
+  border-color: var(--text);
+}
+.tag-box input {
+  padding: 0 4px;
+  font-family: var(--font-chrome);
+  font-size: 13.5px;
+  caret-color: var(--cursor);
 }
 .p-close {
   width: 28px;
@@ -1758,23 +1898,8 @@ input[type='number']::-webkit-inner-spin-button {
   border-radius: var(--radius-sm);
 }
 .p-body {
-  padding: 2px 20px 36px;
+  padding: 2px 20px 24px;
   gap: 18px;
-}
-/* A fade over the foot of the scroll area, so a row that runs under the buttons reads
-   as "more below" and not as a cut-off. */
-.p-foot {
-  position: relative;
-}
-.p-foot::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 14px;
-  top: -30px;
-  height: 30px;
-  background: linear-gradient(to bottom, transparent, var(--bg-elev));
-  pointer-events: none;
 }
 /* The fields are told apart from the labels: a faint tile, the frame turns white on focus. */
 .r-input {

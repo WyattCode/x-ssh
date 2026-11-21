@@ -66,14 +66,14 @@ function onEdgeDown(e: PointerEvent): void {
     <HostRail @new-host="emit('new-host')" @edit-host="(h) => emit('edit-host', h)" />
     <div class="rail-foot">
       <button class="rail-nav" :class="{ on: store.sheet === 'settings' }" :title="t('nav.settings')" :aria-label="t('nav.settings')" @click="store.toggleSettings()">
-        <Icon name="settings" :ink="10.1" :weight="1.3" />
+        <Icon name="settings" :ink="11.1" :weight="1.3" />
       </button>
       <button class="rail-nav" :class="{ on: store.sheet === 'forwards' }" :title="t('nav.forwards')" :aria-label="t('nav.forwards')" @click="store.openSheet(store.sheet === 'forwards' ? null : 'forwards')">
-        <Icon name="forward" :ink="10.1" :weight="1.3" /><span v-if="forwardCount" class="n">{{ forwardCount }}</span>
+        <Icon name="forward" :ink="11.1" :weight="1.3" /><span v-if="forwardCount" class="n">{{ forwardCount }}</span>
       </button>
       <span class="grow" />
       <button class="rail-nav" :title="t('theme.current', { name: themeName })" :aria-label="themeName" @click="setPref(THEME_CYCLE[pref].next)">
-        <Icon :name="THEME_CYCLE[pref].icon" :ink="10.1" :weight="1.3" />
+        <Icon :name="THEME_CYCLE[pref].icon" :ink="11.1" :weight="1.3" />
       </button>
       <!-- Fold button: duplicated the rail toggle at the top left of the tab bar (TabBar.vue, Ctrl/⌘+B), so it is off here.
       <button class="rail-nav" :title="t('rail.fold')" :aria-label="t('rail.fold')" @click="store.setTermSidebarHidden(true)">
