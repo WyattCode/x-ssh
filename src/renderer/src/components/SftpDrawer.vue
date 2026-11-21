@@ -15,6 +15,7 @@ import {
 import { sftpErrorText } from '../lib/sftpError'
 import { globMatch } from '../lib/glob'
 import { toPlain } from '../lib/plain'
+import { ipcReason } from '../lib/ipcError'
 import { isImeKey } from '../lib/ime'
 import { pruneSelection } from '../lib/selectionPrune'
 import { useFocusTrap } from '../composables/focusTrap'
@@ -1584,7 +1585,7 @@ async function stopWatch(): Promise<void> {
     }
     watchActive.value = false
   } catch (e) {
-    toast((e as Error).message || tt('sfp.syncFail'), 'error')
+    toast(ipcReason(e) || tt('sfp.syncFail'), 'error')
   }
 }
 function openHistory(): void {

@@ -2,6 +2,7 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { useSessions, forwardKey, type Pane, type ForwardGroup, type ForwardRow } from '../stores/sessions'
 import { useI18n } from '../lib/i18n'
+import { ipcReason } from '../lib/ipcError'
 import { useConfirm } from '../composables/confirm'
 import { useToast } from '../composables/toast'
 import type { ForwardMode, Host, HostForward } from '../../../shared/types'
@@ -68,7 +69,7 @@ async function remove(s: ForwardGroup, row: ForwardRow): Promise<void> {
       }
     }
   } catch (e) {
-    toast(String((e as Error)?.message ?? e), 'error')
+    toast(ipcReason(e) || String(e), 'error')
   } finally {
     busyKey.value = ''
   }

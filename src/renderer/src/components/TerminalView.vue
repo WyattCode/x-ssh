@@ -98,6 +98,19 @@ let fit: FitAddon | null = null
 let search: SearchAddon | null = null
 let webgl: WebglAddon | null = null
 let ro: ResizeObserver | null = null
+let canvasRo: ResizeObserver | null = null
+/** Draws the terminal right now instead of on xterm's next animation frame. Uses the render
+ *  service's own row painter (private, hence the guarded access): a miss only means the
+ *  usual next-frame redraw. */
+function paintNow(): void {
+  if (!term || !props.visible) return
+  try {
+    const rs = (term as unknown as { _core?: { _renderService?: { _renderRows?: (a: number, b: number) => void } } })._core?._renderService
+    rs?._renderRows?.(0, term.rows - 1)
+  } catch {
+    /* next frame's redraw covers it */
+  }
+}
 let offData: (() => void) | null = null
 let offLogFailed: (() => void) | null = null
 /** Removes the IME listeners added to xterm's textarea (and cancels a pending catch-up). */
@@ -409,7 +422,9 @@ function doFit(): void {
   if (!fit || !term || !props.visible) return
   try {
     fit.fit()
-    const size = `${props.sessionId}:${term.cols}x${term.rows}`
+    // fit() clears the renderer; repaint in this same frame.
+    paintNow()
+    const size =`${props.sessionId}:${term.cols}x${term.rows}`
     if (size !== sentSize) {
       sentSize = size
       window.api.ssh.resize(props.sessionId, term.cols, term.rows)
@@ -609,6 +624,23 @@ onMounted(() => {
   } catch {
     webgl = null
     /* WebGL unavailable — falls back to canvas/DOM renderer */
+  }
+  // The WebGL renderer sizes its canvas from its own device-pixel ResizeObserver and then
+  // asks for a redraw on the NEXT frame — resizing a canvas clears it, so one black frame
+  // was presented in between (folding the host rail made the whole terminal blink). This
+  // observer is created after xterm's, so it runs after it in the same delivery, and it
+  // repaints before the frame is shown.
+  try {
+    canvasRo = new ResizeObserver(() => paintNow())
+    for (const c of el.value.querySelectorAll('.xterm-screen canvas')) {
+      try {
+        canvasRo.observe(c, { box: 'device-pixel-content-box' })
+      } catch {
+        canvasRo.observe(c)
+      }
+    }
+  } catch {
+    canvasRo = null
   }
 
   // Honor OSC 52 clipboard writes from remote programs (tmux, vim, nvim's
@@ -919,6 +951,7 @@ onBeforeUnmount(() => {
   offData?.()
   offLogFailed?.()
   ro?.disconnect()
+  canvasRo?.disconnect()
   term?.dispose()
   term = null
   webgl = null

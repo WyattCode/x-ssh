@@ -10,6 +10,7 @@ import { isImeKey } from '../lib/ime'
 import { keyErrorMessage } from '../lib/keyError'
 import { jumpSelectBlocked, jumpSelectOptions, jumpUsedBy } from '../lib/jumpCandidates'
 import { toPlain } from '../lib/plain'
+import { ipcReason } from '../lib/ipcError'
 import Icon from './Icon.vue'
 import OsIcon from './OsIcon.vue'
 import { PRESETS } from '../lib/terminalThemes'
@@ -658,9 +659,10 @@ async function save(): Promise<void> {
     // Keep the raw reason in the console: "保存失败" alone is unactionable, and
     // IPC/clone errors carry no user-facing wording of their own.
     console.error('host save failed:', msg)
+    const reason = ipcReason(msg)
     saveError.value = msg.includes('secrets-')
       ? t('ed.saveFailSecret')
-      : `${t('ed.saveFail')}${msg ? ` — ${msg}` : ''}`
+      : `${t('ed.saveFail')}${reason ? ` — ${reason}` : ''}`
     toast(
       msg.includes('secrets-') ? t('ed.saveFailSecret') : t('ed.saveFail'),
       'error'
