@@ -278,7 +278,7 @@ function onKeydown(e: KeyboardEvent): void {
   padding: 0 16px;
   border-radius: var(--radius-sm);
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
   font-size: 13px;
   font-weight: 500;
 }

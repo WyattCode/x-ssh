@@ -308,9 +308,9 @@ async function clearAccent(): Promise<void> {
 }
 
 /** Swatch shown when no custom accent is set — must match the theme default
- *  in global.css (--accent is #6ea8fe dark / #2c68df light; both clear 4.5:1 as label text, which scripts/check-contrast.mjs enforces). */
+ *  in global.css (--accent is #d4d4d4 dark / #2c68df light; both clear 4.5:1 as label text, which scripts/check-contrast.mjs enforces). */
 const accentSwatch = computed(() =>
-  store.accentColor || (themeMode.value === 'light' ? '#2c68df' : '#6ea8fe')
+  store.accentColor || (themeMode.value === 'light' ? '#2c68df' : '#d4d4d4')
 )
 
 /** The surface the accent is read against when it is used as label text (66
@@ -1251,6 +1251,31 @@ function onLockPassEnter(e: KeyboardEvent): void {
             </section>
 
             <section class="group">
+              <h3>{{ t('set.hostList') }}</h3>
+              <div class="card">
+                <label class="row toggle" @click="store.setAutoGroup(!store.autoGroup)">
+                  <div class="r-text">
+                    <span class="r-title">{{ t('set.autoGroup') }}</span>
+                    <span class="r-desc">{{ t('set.autoGroupDesc') }}</span>
+                  </div>
+                  <span class="switch" :class="{ on: store.autoGroup }"><i /></span>
+                </label>
+                <div class="row">
+                  <div class="r-text">
+                    <span class="r-title">{{ t('set.hostSort') }}</span>
+                    <span class="r-desc">{{ t('set.hostSortDesc') }}</span>
+                  </div>
+                  <div class="seg">
+                    <button :class="{ on: store.hostsSort === 'name' }" @click="store.setHostsSort('name')">{{ t('hosts.sortName') }}</button>
+                    <button :class="{ on: store.hostsSort === 'recent' }" @click="store.setHostsSort('recent')">{{ t('hosts.sortRecent') }}</button>
+                    <button :class="{ on: store.hostsSort === 'address' }" @click="store.setHostsSort('address')">{{ t('hosts.sortAddress') }}</button>
+                    <button :class="{ on: store.hostsSort === 'custom' }" @click="store.setHostsSort('custom')">{{ t('hosts.sortCustom') }}</button>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="group">
               <h3>{{ t('set.grp.files') }}</h3>
               <div class="card">
                 <div class="row">
@@ -2133,6 +2158,7 @@ function onLockPassEnter(e: KeyboardEvent): void {
 }
 .switch.on i {
   transform: translateX(14px);
+  background: var(--accent-contrast);
 }
 /* Boxed fields */
 .box {
@@ -2435,5 +2461,130 @@ function onLockPassEnter(e: KeyboardEvent): void {
   .value {
     max-width: 160px;
   }
+  /* Narrow column (big app zoom): the control drops under its label instead of
+     squeezing the label into a column one character wide. */
+  .row {
+    flex-wrap: wrap;
+  }
+  .r-text {
+    flex: 1 1 200px;
+    min-width: 200px;
+  }
+}
+
+/* ================= C3 layer: flat, mono labels, hairlines ================= */
+.settings {
+  padding: 18px 28px 0;
+}
+.page-col {
+  gap: 12px;
+}
+.stabs {
+  gap: 2px;
+  border-bottom: 1px solid var(--chrome-line);
+  /* Narrow dialog (big app zoom): the tabs scroll sideways instead of being cut off. */
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.stabs button {
+  flex: none;
+}
+.stabs button {
+  height: 28px;
+  padding: 0 10px;
+  font-family: var(--font-chrome);
+  font-size: 13.5px;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+}
+.stabs button.on {
+  background: none;
+  box-shadow: inset 0 -2px 0 var(--cursor);
+}
+.stabs button.on :deep(svg) {
+  color: var(--cursor);
+}
+.inner {
+  gap: 20px;
+}
+.group h3 {
+  margin: 0 0 6px 2px;
+  font-family: var(--font-chrome);
+  font-size: 12px;
+  font-weight: 400;
+}
+.group h3::before {
+  content: '# ';
+}
+.card {
+  border-radius: var(--r-card);
+}
+.row {
+  min-height: 44px;
+  padding: 8px 14px;
+}
+.r-title {
+  font-family: var(--font-chrome);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.r-desc {
+  font-size: 12.5px;
+}
+.btn.sm {
+  height: 26px;
+  padding: 0 10px;
+  font-size: 13px;
+}
+.seg {
+  height: 28px;
+  background: var(--bg-elev-2);
+  border-color: transparent;
+}
+.seg button {
+  height: 22px;
+  padding: 0 10px;
+  border-radius: 4px;
+  font-family: var(--font-chrome);
+  font-size: 13px;
+}
+.seg button.on {
+  box-shadow: none;
+  background: var(--selected);
+}
+.switch.on {
+  background: var(--cursor);
+}
+.switch.on i {
+  background: var(--console);
+}
+.box {
+  height: 28px;
+  font-family: var(--font-chrome);
+  background: var(--bg-elev-2);
+  border-color: transparent;
+  caret-color: var(--cursor);
+}
+.box:focus {
+  border-color: var(--text);
+}
+.select-box {
+  height: 28px;
+  background: var(--bg-elev-2);
+  border-color: transparent;
+}
+.select-box:focus-within {
+  border-color: var(--text);
+}
+.select-box select {
+  font-family: var(--font-chrome);
+}
+.chip,
+.chip.mono,
+.chip.warn {
+  border-radius: 4px;
+  line-height: 20px;
+}
+.icon-x {
+  border-radius: var(--radius-sm);
 }
 </style>

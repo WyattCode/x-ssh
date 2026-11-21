@@ -10,6 +10,9 @@ import { mkdtemp, rm, readFile, stat, readdir, mkdir, unlink, rename, writeFile,
 import { existsSync, watchFile, unwatchFile } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { IPC, PREFS_ARG } from '../shared/ipc'
+import { COMPARE_METRICS, DEFAULT_COMPARE_SERVICE, isValidService, type CompareMetric } from '../shared/compare'
+import { dimHex } from '../shared/dim'
+import type { HostPatch } from '../shared/hostGroups'
 import type { ConnectParams, Host, HostForward, ForwardMode, JumpConfig, KeyErrorCode, LocalEntry, Snippet, ThemePref, UiPrefs, UploadOverwrite } from '../shared/types'
 import { readLaunchTarget, targetFromUrl, PROTOCOL, compareVersions } from '../shared/launchTarget'
 import { isRendererSettableKey, isRendererReadableKey } from '../shared/settingsKeys'
@@ -1073,7 +1076,7 @@ function applyThemeSource(pref: unknown): void {
 
 /** Reads the handful of preferences the renderer needs before its first paint. */
 async function readUiPrefs(): Promise<UiPrefs> {
-  const [theme, fontSize, zoom, sftpShowHidden, sftpWidth, lang, sidebarCollapsed, sidebarWidth, termSidebarHidden, hostsView, hostsSort] =
+  const [theme, fontSize, zoom, sftpShowHidden, sftpWidth, lang, sidebarCollapsed, sidebarWidth, termSidebarHidden, hostsSort] =
     await Promise.all([
       settings.get<ThemePref>('theme'),
       settings.get<number>('fontSize'),
@@ -1084,7 +1087,6 @@ async function readUiPrefs(): Promise<UiPrefs> {
       settings.get<boolean>('sidebarCollapsed'),
       settings.get<number>('sidebarWidth'),
       settings.get<boolean>('termSidebarHidden'),
-      settings.get<string>('hostsView'),
       settings.get<string>('hostsSort')
     ])
   return {
@@ -1098,7 +1100,6 @@ async function readUiPrefs(): Promise<UiPrefs> {
     sidebarCollapsed,
     sidebarWidth,
     termSidebarHidden,
-    hostsView,
     hostsSort
   }
 }
@@ -1153,8 +1154,11 @@ function createWindow(saved?: SavedBounds, prefs: UiPrefs = {}): void {
     // The first frame, before the renderer paints: match the theme it will use
     // (themeSource is already pinned to the saved choice) so a light-theme
     // launch doesn't flash dark. Same colors as --bg in styles/global.css.
-    backgroundColor: nativeTheme.shouldUseDarkColors ? '#0e0f12' : '#f7f8fa',
-    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#0a0a0a' : '#f7f8fa',
+    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : process.platform === 'win32' ? 'hidden' : 'default',
+    // Windows: no separate OS title bar — the tab bar is the title bar, and only
+    // the system's min / max / close buttons are drawn over its right end.
+    ...(process.platform === 'win32' ? { titleBarOverlay: windowOverlay() } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.cjs'),
       sandbox: true,
@@ -1168,6 +1172,14 @@ function createWindow(saved?: SavedBounds, prefs: UiPrefs = {}): void {
 
   if (restore?.maximized) win.maximize()
   mainWindow = win
+  if (process.platform === 'win32') {
+    // The caption buttons follow the theme (the overlay's colours are ours to set).
+    const syncOverlay = (): void => {
+      if (!win.isDestroyed()) win.setTitleBarOverlay(windowOverlay())
+    }
+    nativeTheme.on('updated', syncOverlay)
+    win.once('closed', () => nativeTheme.removeListener('updated', syncOverlay))
+  }
 
   // Dragging a URL onto the window navigates by default, and the newly loaded
   // page still gets `window.api` (the preload runs again). Refuse anything that
@@ -1312,7 +1324,44 @@ function createWindow(saved?: SavedBounds, prefs: UiPrefs = {}): void {
   })
 }
 
+/** The renderer's app zoom factor (1 = 100 %), as last reported over IPC. */
+let overlayFactor = 1
+
+/** How dark the dialogs' dim layers make the page (0 = none): the page's own scrim cannot reach
+ *  the OS-drawn caption buttons, so they are painted this much darker too. */
+let overlayDim = 0
+
+/** Windows caption-button strip: the tab bar's colour and height (TabBar.vue, --chrome), darkened
+ *  like the page while a dialog is up. The bar is 40 CSS px with a 1 px hairline as its last row;
+ *  the strip stops one px short of it (39 × the zoom factor), so the hairline runs under the
+ *  buttons too instead of ending where they begin. */
+function windowOverlay(): { color: string; symbolColor: string; height: number } {
+  const height = Math.round(39 * overlayFactor)
+  const base = nativeTheme.shouldUseDarkColors
+    ? { color: '#050505', symbolColor: '#e6e6e6' }
+    : { color: '#eef0f3', symbolColor: '#1a1d23' }
+  return overlayDim > 0
+    ? { color: dimHex(base.color, overlayDim), symbolColor: dimHex(base.symbolColor, overlayDim), height }
+    : { ...base, height }
+}
+
 function registerIpc(): void {
+  on(IPC.windowDim, (_e, dim: unknown) => {
+    if (process.platform !== 'win32' || typeof dim !== 'number' || !Number.isFinite(dim)) return
+    const next = Math.min(0.9, Math.max(0, Math.round(dim * 100) / 100))
+    if (next === overlayDim) return
+    overlayDim = next
+    const w = mainWindow
+    if (w && !w.isDestroyed()) w.setTitleBarOverlay(windowOverlay())
+  })
+  on(IPC.windowZoom, (_e, factor: unknown) => {
+    if (process.platform !== 'win32' || typeof factor !== 'number' || !Number.isFinite(factor)) return
+    // The ladder is 50…250 %; anything else is not ours.
+    if (factor < 0.4 || factor > 3.1) return
+    overlayFactor = factor
+    const w = mainWindow
+    if (w && !w.isDestroyed()) w.setTitleBarOverlay(windowOverlay())
+  })
   on(IPC.clipboardRead, (e) => { e.returnValue = clipboard.readText() })
   on(IPC.clipboardWrite, (e, text: unknown) => {
     if (typeof text === 'string' && text.length <= 2_000_000) clipboard.writeText(text)
@@ -1327,6 +1376,21 @@ function registerIpc(): void {
       store.save(host, password, passphrase)
   )
   handle(IPC.hostsDelete, (_e, id: string) => store.delete(id))
+  handle(IPC.hostsPatch, (_e, raw: unknown) => {
+    // Only group / order fields cross this door, whatever the renderer sends.
+    if (!Array.isArray(raw) || raw.length > 1000) throw new Error('invalid-patch')
+    const patches: HostPatch[] = []
+    for (const p of raw) {
+      if (!p || typeof p !== 'object' || typeof (p as HostPatch).id !== 'string') continue
+      const q = p as HostPatch
+      const o: HostPatch = { id: q.id }
+      if (typeof q.group === 'string') o.group = q.group
+      if (typeof q.groupLocked === 'boolean') o.groupLocked = q.groupLocked
+      if (q.order === null || (typeof q.order === 'number' && Number.isFinite(q.order))) o.order = q.order
+      patches.push(o)
+    }
+    return store.patch(patches)
+  })
   handle(IPC.hostsStatus, () => store.hostsStatus())
   handle(IPC.hostsReset, async () => {
     // Explicit recovery from an unreadable hosts.json, mirroring resetSecrets.
@@ -2042,6 +2106,21 @@ function registerIpc(): void {
   })
   on(IPC.sshAttach, (_e, sessionId: string) => {
     sshManager?.attach(sessionId)
+  })
+  handle(IPC.sshPing, async (_e, sessionId: unknown) => {
+    if (!sshManager || typeof sessionId !== 'string') return null
+    return sshManager.pingSession(sessionId)
+  })
+  handle(IPC.sshCompare, async (_e, sessionId: unknown, metric: unknown, service: unknown) => {
+    if (!sshManager || typeof sessionId !== 'string') return { ok: false, error: 'no-session' }
+    if (typeof metric !== 'string' || !(COMPARE_METRICS as string[]).includes(metric)) return { ok: false, error: 'invalid-metric' }
+    if (metric === 'service' && !isValidService(service)) return { ok: false, error: 'invalid-service' }
+    try {
+      const outputs = await sshManager.compareRun(sessionId, metric as CompareMetric, typeof service === 'string' ? service : DEFAULT_COMPARE_SERVICE)
+      return { ok: true, outputs }
+    } catch (e) {
+      return { ok: false, error: (e as Error).message }
+    }
   })
   handle(IPC.sshTmuxList, async (_e, sessionId: string) => {
     if (!sshManager) throw new Error('no-session')

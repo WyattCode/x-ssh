@@ -1,32 +1,27 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { useSessions, type AppPage } from '../stores/sessions'
+import { useSessions } from '../stores/sessions'
 import { useTheme } from '../composables/theme'
 import { useI18n } from '../lib/i18n'
 import { isMac } from '../composables/platform'
 import { useZoom } from '../composables/zoom'
 import Icon from './Icon.vue'
-import logoLight from '../assets/logo-light.png'
-import logoDark from '../assets/logo-dark.png'
-import markLight from '../assets/mark-light.svg'
-import markDark from '../assets/mark-dark.svg'
+import HostRail from './HostRail.vue'
+import type { Host } from '../../../shared/types'
 
-// `hidden`: the 终端 page's full-width mode (toggled from the tab bar).
+// The left column is the host rail, on every view: there is no page menu. Below
+// the list sit the things that are not hosts — settings, port forwarding, theme,
+// and folding the rail away.
+// `hidden`: the rail folded away (toggled from the tab bar, Ctrl/⌘+B).
 defineProps<{ hidden?: boolean }>()
+const emit = defineEmits<{ (e: 'new-host'): void; (e: 'edit-host', h: Host): void }>()
 const store = useSessions()
 const { pref, setPref } = useTheme()
 const { t } = useI18n()
 const { factor } = useZoom()
 
-// Same number as the 端口转发 page's title: saved rules plus live temporary ones.
+// Same number as the port-forwarding sheet's title: saved rules plus live temporary ones.
 const forwardCount = computed(() => store.forwardGroups.reduce((n, g) => n + g.rows.length, 0))
-const NAV = computed<{ id: AppPage; icon: string; label: string; count?: number }[]>(() => [
-  { id: 'hosts', icon: 'server', label: t('nav.hosts'), count: store.hosts.length },
-  { id: 'terminal', icon: 'terminal', label: t('nav.terminal'), count: store.tabs.length || undefined },
-  { id: 'sftp', icon: 'folder', label: 'SFTP' },
-  { id: 'forwards', icon: 'forward', label: t('nav.forwards'), count: forwardCount.value || undefined },
-  { id: 'settings', icon: 'settings', label: t('nav.settings') }
-])
 
 // Same cycle and icons as the Android app (ThemeMode.next): follow system →
 // light → dark → follow system.
@@ -35,10 +30,13 @@ const THEME_CYCLE = {
   light: { next: 'dark', icon: 'sun' },
   dark: { next: 'system', icon: 'moon' }
 } as const
+const themeName = computed(
+  () => ({ system: t('theme.system'), light: t('theme.light'), dark: t('theme.dark') })[pref.value]
+)
+
 // ---- Drag the right edge to resize; remembered on release ----
 const dragging = ref(false)
 function onEdgeDown(e: PointerEvent): void {
-  if (store.sidebarCollapsed) return
   const startX = e.clientX
   const startW = store.sidebarWidth
   const el = e.currentTarget as HTMLElement
@@ -56,59 +54,32 @@ function onEdgeDown(e: PointerEvent): void {
   el.addEventListener('pointerup', up)
   el.addEventListener('pointercancel', up)
 }
-
-// Literal keys (not 'theme.' + id) so lint:i18n can check they exist.
-const themeName = computed(
-  () => ({ system: t('theme.system'), light: t('theme.light'), dark: t('theme.dark') })[pref.value]
-)
 </script>
 
 <template>
   <aside
     class="sidebar"
-    :class="{ collapsed: store.sidebarCollapsed, mac: isMac, hidden, dragging, instant: store.page === 'terminal' }"
-    :style="[store.sidebarCollapsed ? undefined : { width: store.sidebarWidth + 'px' }, isMac ? { '--zf': factor } : undefined]"
+    :class="{ mac: isMac, hidden, dragging }"
+    :style="[{ width: store.sidebarWidth + 'px' }, isMac ? { '--zf': factor } : undefined]"
   >
-    <div v-if="!store.sidebarCollapsed" class="edge" @pointerdown.prevent="onEdgeDown" />
-    <div class="brand">
-      <template v-if="!store.sidebarCollapsed">
-        <img class="lockup dark-only" :src="logoDark" alt="X-SSH" draggable="false" />
-        <img class="lockup light-only" :src="logoLight" alt="X-SSH" draggable="false" />
-      </template>
-      <template v-else>
-        <img class="mark dark-only" :src="markDark" alt="X-SSH" draggable="false" />
-        <img class="mark light-only" :src="markLight" alt="X-SSH" draggable="false" />
-      </template>
-    </div>
-
-    <nav class="nav">
-      <button
-        v-for="item in NAV"
-        :key="item.id"
-        class="nav-item"
-        :class="{ on: store.page === item.id }"
-        :title="store.sidebarCollapsed ? item.label : undefined"
-        @click="store.setPage(item.id)"
-      >
-        <Icon :name="item.icon" :size="18" />
-        <span class="label">{{ item.label }}</span>
-        <span v-if="item.count" class="count">{{ item.count }}</span>
+    <div class="edge" @pointerdown.prevent="onEdgeDown" />
+    <HostRail @new-host="emit('new-host')" @edit-host="(h) => emit('edit-host', h)" />
+    <div class="rail-foot">
+      <button class="rail-nav" :class="{ on: store.sheet === 'settings' }" :title="t('nav.settings')" :aria-label="t('nav.settings')" @click="store.toggleSettings()">
+        <Icon name="settings" :ink="10.1" :weight="1.3" />
       </button>
-    </nav>
-
-    <div class="foot">
-      <button class="foot-btn" :title="t('theme.current', { name: themeName })" @click="setPref(THEME_CYCLE[pref].next)">
-        <Icon :name="THEME_CYCLE[pref].icon" :size="17" />
-        <span class="label">{{ themeName }}</span>
+      <button class="rail-nav" :class="{ on: store.sheet === 'forwards' }" :title="t('nav.forwards')" :aria-label="t('nav.forwards')" @click="store.openSheet(store.sheet === 'forwards' ? null : 'forwards')">
+        <Icon name="forward" :ink="10.1" :weight="1.3" /><span v-if="forwardCount" class="n">{{ forwardCount }}</span>
       </button>
-      <button
-        class="foot-btn"
-        :title="store.sidebarCollapsed ? t('nav.expand') : t('nav.collapse')"
-        @click="store.setSidebarCollapsed(!store.sidebarCollapsed)"
-      >
-        <Icon name="sidebar" :size="17" />
-        <span class="label">{{ t('nav.collapse') }}</span>
+      <span class="grow" />
+      <button class="rail-nav" :title="t('theme.current', { name: themeName })" :aria-label="themeName" @click="setPref(THEME_CYCLE[pref].next)">
+        <Icon :name="THEME_CYCLE[pref].icon" :ink="10.1" :weight="1.3" />
       </button>
+      <!-- Fold button: duplicated the rail toggle at the top left of the tab bar (TabBar.vue, Ctrl/⌘+B), so it is off here.
+      <button class="rail-nav" :title="t('rail.fold')" :aria-label="t('rail.fold')" @click="store.setTermSidebarHidden(true)">
+        <Icon name="sidebar" :size="18" />
+      </button>
+      -->
     </div>
   </aside>
 </template>
@@ -119,42 +90,23 @@ const themeName = computed(
   flex: none;
   display: flex;
   flex-direction: column;
-  width: 224px;
-  padding: 18px 12px 12px;
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--bg-elev) 70%, transparent), transparent 60%),
-    color-mix(in srgb, var(--bg-elev) 55%, var(--bg));
-  border-right: 1px solid var(--border);
-  transition: width 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
-  /* Labels clip while collapsing, but the resize edge pokes 3px outside. */
+  padding: 0 10px;
+  background: var(--bg-elev);
+  border-right: 1px solid var(--chrome-line);
+  /* A big app zoom shrinks the window in CSS pixels: the rail may not eat more than
+     two fifths of it (the terminal needs the rest). */
+  max-width: 40vw;
+  /* Collapsing is instant: animating the width slides the terminal a fraction of
+     a pixel per frame, and its WebGL text shimmers the whole way. */
   overflow: visible;
 }
-.nav,
-.brand,
-.foot {
-  overflow: hidden;
-}
-.sidebar.collapsed {
-  width: 64px;
-}
-/* macOS: the traffic lights are drawn by the OS at a fixed size (~65px wide,
-   ~20px tall), so the rail and the header must clear them at any app zoom
-   (--zf = zoom factor): 80px / --zf keeps 80 real pixels when zoomed out. */
-.sidebar.collapsed.mac {
-  width: calc(80px / var(--zf));
-}
-.sidebar.mac {
-  padding-top: max(18px, calc(23px / var(--zf) - 5px));
-}
 .sidebar.dragging {
-  transition: none;
   user-select: none;
 }
-/* On the 终端 page collapse / expand is instant: animating the width slides
-   the terminal a fraction of a pixel per frame, and its WebGL text shimmers
-   the whole way. */
-.sidebar.instant {
-  transition: none;
+/* Gone at once, not animated: the terminal re-fits to the new width, and a
+   width transition would send the server a burst of resizes. */
+.sidebar.hidden {
+  display: none;
 }
 /* Resize edge: a 6px strip over the border; the line lights up on hover / drag. */
 .edge {
@@ -178,123 +130,50 @@ const themeName = computed(
 }
 .edge:hover::after,
 .dragging .edge::after {
-  background: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--cursor) 55%, transparent);
 }
-/* Gone at once, not animated: the terminal re-fits to the new width, and a
-   width transition would send the server a burst of resizes (visible redraws). */
-.sidebar.hidden {
-  display: none;
-}
-.brand {
+/* The foot is a band of the status line's height: its hairline and its icons sit on the
+   same lines as the status line's (they end at the same bottom edge). */
+.rail-foot {
   display: flex;
   align-items: center;
-  height: 40px;
-  padding: 0 8px;
-  margin-bottom: 22px;
+  flex: none;
+  gap: 0;
+  height: var(--band-bot);
+  margin: 0 -10px;
+  padding: 0 10px;
+  border-top: 1px solid var(--chrome-line);
 }
-.collapsed .brand {
-  justify-content: center;
-  padding: 0;
+.rail-foot .grow {
+  flex: 1;
 }
-.lockup {
-  height: 30px;
-  width: auto;
-  user-select: none;
-}
-.mark {
-  height: 26px;
-  width: auto;
-  user-select: none;
-}
-.light-only {
-  display: none;
-}
-:root[data-theme='light'] .light-only {
-  display: inline;
-}
-:root[data-theme='light'] .dark-only {
-  display: none;
-}
-.nav {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.nav-item,
-.foot-btn {
+.rail-nav {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 12px;
-  height: 42px;
-  padding: 0 12px;
-  border-radius: 9px;
-  font-size: 14px;
-  color: var(--text-dim);
-  white-space: nowrap;
-  transition:
-    background 0.16s var(--ease),
-    color 0.16s var(--ease),
-    transform 0.16s var(--ease);
-}
-.nav-item:hover,
-.foot-btn:hover {
-  background: var(--hover);
-  color: var(--text);
-}
-.nav-item:active,
-.foot-btn:active {
-  background: var(--selected);
-  transform: scale(0.97);
-}
-/* macOS 27: the selected row is a soft fill and its icon takes the color —
-   no marker bar. */
-.nav-item.on {
-  color: var(--text);
-  background: var(--selected);
-}
-.nav-item.on :deep(svg) {
-  color: var(--accent);
-}
-.label {
-  flex: 1;
-  text-align: left;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.count {
-  min-width: 22px;
-  padding: 1px 7px;
-  border-radius: var(--r-pill);
-  font-size: 11.5px;
-  text-align: center;
-  color: var(--text-faint);
-  background: var(--bg-elev-2);
-  font-variant-numeric: tabular-nums;
-}
-.nav-item.on .count {
-  color: var(--text-dim);
-  background: var(--selected);
-}
-.collapsed .nav-item,
-.collapsed .foot-btn {
   justify-content: center;
-  padding: 0;
+  gap: 5px;
+  min-width: 34px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  transition: background 0.16s, color 0.16s, transform 0.3s cubic-bezier(0.3, 1.35, 0.5, 1);
 }
-.collapsed .label,
-.collapsed .count {
-  display: none;
+.rail-nav:hover,
+.rail-nav.on {
+  color: var(--text);
+  background: var(--hover);
 }
-.foot {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin-top: auto;
-  padding-top: 10px;
-  border-top: 1px solid var(--border);
+.rail-nav.on {
+  color: var(--cursor);
 }
-.foot-btn {
-  height: 38px;
-  font-size: 13px;
+.rail-nav:active {
+  transform: scale(0.92);
+}
+.rail-nav .n {
+  font-family: var(--font-chrome);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 </style>

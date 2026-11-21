@@ -247,6 +247,50 @@ const sections = computed<{ id: string; title: string; items: Item[] }[]>(() => 
       run: () => store.toggleReplay(true)
     })
   }
+  // The terminal page's own switches, so everything the prototype put in the
+  // palette is here too: fold the host rail, files, forwards, settings.
+  if (store.tabs.length && matchesAction('收起 展开 主机栏 侧栏 hide show hosts rail sidebar focus')) {
+    actions.push({
+      kind: 'action',
+      title: t('pal.fold'),
+      sub: t('pal.foldDesc'),
+      icon: 'sidebar',
+      run: () => {
+        store.setPage('terminal')
+        store.setTermSidebarHidden(!store.termSidebarHidden)
+      }
+    })
+  }
+  if (store.activePane?.status === 'connected' && matchesAction('文件 sftp files 上传 下载 upload')) {
+    actions.push({
+      kind: 'action',
+      title: t('pal.files'),
+      sub: t('pal.filesDesc'),
+      icon: 'folder',
+      run: () => {
+        store.setPage('terminal')
+        store.toggleSftp()
+      }
+    })
+  }
+  if (matchesAction('端口转发 forward port tunnel 隧道')) {
+    actions.push({
+      kind: 'action',
+      title: t('nav.forwards'),
+      sub: t('pal.forwardsDesc'),
+      icon: 'forward',
+      run: () => store.setPage('forwards')
+    })
+  }
+  if (matchesAction('设置 settings preferences 偏好')) {
+    actions.push({
+      kind: 'action',
+      title: t('nav.settings'),
+      sub: t('pal.settingsDesc'),
+      icon: 'settings',
+      run: () => store.toggleSettings()
+    })
+  }
   add('actions', t('pal.actions'), actions)
 
   // Named session snapshots: capture & restore the whole tab layout.
@@ -402,6 +446,18 @@ function activateHost(h: Host): void {
   )
 }
 
+/** Side by side needs a live session to put the host beside. */
+const canSide = computed(() => store.activePane?.status === 'connected' && (store.active?.panes.length ?? 0) < 8)
+
+async function openBeside(h: Host): Promise<void> {
+  const tab = store.active
+  if (!tab) return
+  store.togglePalette(false)
+  const r = await store.splitWithHost(tab.id, h)
+  if (r === 'needs-password') toast(t('cmp.needsPassword', { name: h.label }), 'error')
+  else if (r === 'unavailable') toast(t('cmp.unavailable'), 'error')
+}
+
 function activate(item: Item): void {
   if (item.kind === 'quick') {
     // Quick connect always prompts for a password.
@@ -534,7 +590,11 @@ function onKey(e: KeyboardEvent): void {
     if ((e.target as HTMLElement | null)?.closest('.hint-new')) return
     e.preventDefault()
     const item = items.value[selected.value]
-    if (item) activate(item)
+    if (item) {
+      // Shift+Enter on a host puts it beside the current session.
+      if (e.shiftKey && item.kind === 'host' && canSide.value) void openBeside(item.host)
+      else activate(item)
+    }
   } else if (e.key === 'Escape') {
     store.togglePalette(false)
   }
@@ -657,9 +717,10 @@ function onKey(e: KeyboardEvent): void {
         <div class="hint">
           <span><span class="kbd">↑</span><span class="kbd">↓</span> {{ t('pal.nav') }}</span>
           <span><span class="kbd">Enter</span> {{ enterHint }}</span>
+          <span v-if="canSide"><span class="kbd">Shift</span><span class="kbd">Enter</span> {{ t('pal.side') }}</span>
           <span><span class="kbd">Esc</span> {{ t('pal.close') }}</span>
           <button class="hint-new" @click="newHost">
-            <Icon name="plus" :size="12" />{{ t('pal.newHostShort') }}
+            <Icon name="plus" :ink="13" :weight="1.6" />{{ t('pal.newHostShort') }}
           </button>
         </div>
       </template>
@@ -671,8 +732,7 @@ function onKey(e: KeyboardEvent): void {
 .overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.4);
-  backdrop-filter: blur(2px);
+  background: rgba(0, 0, 0, 0.5);
   display: flex;
   justify-content: center;
   align-items: flex-start;
@@ -682,14 +742,18 @@ function onKey(e: KeyboardEvent): void {
 }
 .palette {
   width: min(620px, 92vw);
-  /* Opaque: a see-through panel let the page behind (spinners, status text)
-     show through the host list. */
-  background-color: var(--bg-elev);
-  border: 1px solid var(--border-strong);
+  /* Frosted glass, but heavily blurred and nearly opaque: a clear panel let the
+     page behind (spinners, status text) read through the host list. */
+  background-color: color-mix(in srgb, var(--bg-elev) 88%, transparent);
+  backdrop-filter: blur(20px) saturate(1.2);
+  -webkit-backdrop-filter: blur(20px) saturate(1.2);
+  font-family: var(--font-chrome);
+  border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: var(--radius);
   box-shadow: var(--shadow), 0 0 0 1px rgba(255, 255, 255, 0.04) inset;
   overflow: hidden;
-  animation: pop-in 0.16s cubic-bezier(0.2, 0.8, 0.3, 1);
+  transform-origin: 50% 0;
+  animation: pop-in 0.46s cubic-bezier(0.3, 1.35, 0.5, 1);
 }
 .search {
   width: 100%;
@@ -843,19 +907,23 @@ function onKey(e: KeyboardEvent): void {
 .hint {
   align-items: center;
 }
+/* The way to add a host is a real button, not a footnote: full-size label, a frame, the primary colour on hover. */
 .hint-new {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  margin-left: auto;
-  padding: 2px 8px;
-  border-radius: 5px;
-  font-size: 11px;
-  color: var(--text-dim);
+  gap: 8px;
+  height: 32px;
+  margin: -4px 0 -4px auto;
+  padding: 0 14px;
+  border-radius: var(--radius-sm);
+  font-size: 13.5px;
+  color: var(--text);
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border-strong);
 }
 .hint-new:hover {
-  color: var(--text);
   background: var(--selected);
+  border-color: var(--text-faint);
 }
 .live {
   display: inline-flex;

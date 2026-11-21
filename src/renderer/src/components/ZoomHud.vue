@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { useZoom, zoomFactor, ZOOM_MIN, ZOOM_MAX, ZOOM_STEP } from '../composables/zoom'
+import { useZoom, zoomFactor, ZOOM_MIN_PCT, ZOOM_MAX_PCT, ZOOM_DEFAULT_PCT } from '../composables/zoom'
 import { useI18n } from '../lib/i18n'
 import Icon from './Icon.vue'
 
@@ -8,14 +8,15 @@ import Icon from './Icon.vue'
 // its own buttons) and fades by itself. It is counter-scaled with CSS `zoom`,
 // so it stays the same size while the whole UI grows and shrinks behind it —
 // like a browser's own zoom bubble.
-const { level, percent, hudOpen, bump, reset, setHover } = useZoom()
+const { level, percent, hudOpen, step, reset, setHover } = useZoom()
 const { t } = useI18n()
 
 const counterScale = computed(() => 1 / zoomFactor(level.value))
-/** Position of the current level / of 100 % along the track, 0…100. */
-const along = (l: number): number => ((l - ZOOM_MIN) / (ZOOM_MAX - ZOOM_MIN)) * 100
-const fill = computed(() => along(level.value))
-const home = along(0)
+/** Position of a percentage along the track, 0…100. */
+const along = (p: number): number => ((p - ZOOM_MIN_PCT) / (ZOOM_MAX_PCT - ZOOM_MIN_PCT)) * 100
+const fill = computed(() => along(percent.value))
+/** The mark on the track is the default (what reset returns to). */
+const home = along(ZOOM_DEFAULT_PCT)
 </script>
 
 <template>
@@ -30,7 +31,7 @@ const home = along(0)
         @mouseenter="setHover(true)"
         @mouseleave="setHover(false)"
       >
-        <button class="zb" :disabled="level <= ZOOM_MIN" :title="t('zoom.out')" :aria-label="t('zoom.out')" @click="bump(-ZOOM_STEP)">
+        <button class="zb" :disabled="percent <= ZOOM_MIN_PCT" :title="t('zoom.out')" :aria-label="t('zoom.out')" @click="step(-1)">
           <Icon name="minus" :size="15" />
         </button>
         <div class="readout">
@@ -40,11 +41,11 @@ const home = along(0)
             <span class="home" :style="{ left: home + '%' }" />
           </span>
         </div>
-        <button class="zb" :disabled="level >= ZOOM_MAX" :title="t('zoom.in')" :aria-label="t('zoom.in')" @click="bump(ZOOM_STEP)">
+        <button class="zb" :disabled="percent >= ZOOM_MAX_PCT" :title="t('zoom.in')" :aria-label="t('zoom.in')" @click="step(1)">
           <Icon name="plus" :size="15" />
         </button>
         <Transition name="zreset">
-          <button v-if="level !== 0" class="reset" @click="reset">{{ t('zoom.reset') }}</button>
+          <button v-if="percent !== ZOOM_DEFAULT_PCT" class="reset" @click="reset">{{ t('zoom.reset') }}</button>
         </Transition>
       </div>
     </Transition>
@@ -60,7 +61,10 @@ const home = along(0)
   left: 0;
   right: 0;
   display: flex;
-  justify-content: center;
+  /* Top right, clear of the first lines of a terminal (the prompt sits at the left). */
+  justify-content: flex-end;
+  padding-right: 16px;
+  box-sizing: border-box;
   pointer-events: none;
   z-index: 120;
 }

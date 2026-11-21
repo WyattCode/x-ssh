@@ -54,6 +54,8 @@ const form = reactive({
   auth: 'password' as AuthMethod,
   keyPath: '' as string | undefined,
   group: '',
+  /** The user decided the group (picked one, or "no group"); the name rule then leaves it. */
+  groupLocked: false,
   tags: [] as string[],
   jumpHostId: '',
   color: '',
@@ -95,7 +97,7 @@ watch(
 /** Guards against a second save (Enter / Save) while hosts.save is in flight. */
 const saving = ref(false)
 /** Which 更多选项 rows are open (each opens in place under its row). */
-const sections = reactive({ keys: false, proxy: false, forwards: false, onConnect: false, appearance: false })
+const sections = reactive({ keys: false, jump: false, proxy: false, forwards: false, onConnect: false, appearance: false })
 const labelEl = ref<HTMLInputElement>()
 const panelEl = ref<HTMLElement>()
 useFocusTrap(panelEl, () => props.open)
@@ -153,6 +155,7 @@ watch(
       auth: h?.auth ?? 'password',
       keyPath: h?.keyPath ?? '',
       group: h?.group ?? '',
+      groupLocked: !!h?.groupLocked,
       tags: [...(h?.tags ?? [])],
       jumpHostId: h?.jumpHostId ?? '',
       color: h?.color ?? '',
@@ -180,6 +183,7 @@ watch(
     password.value = ''
     passphrase.value = ''
     proxyPassCleared.value = false
+    newGroupMode.value = false
     // The panel is a persistent component, so a failure banner from the last
     // host would otherwise still be on screen for the next one.
     saveError.value = ''
@@ -192,6 +196,66 @@ watch(
     })
   }
 )
+
+// ---- Group: pick one of the groups in use, none, or follow the name; new ones are typed here ----
+const NEW_GROUP = '__new__'
+const NO_GROUP = '__none__'
+const newGroupMode = ref(false)
+const newGroupDraft = ref('')
+const newGroupEl = ref<HTMLInputElement>()
+const groupNames = computed(() =>
+  store.railGroups().filter((g) => g.name !== t('app.ungrouped')).map((g) => g.name)
+)
+const groupOptions = computed(() => {
+  const names = [...groupNames.value]
+  const cur = form.group.trim()
+  if (cur && !names.some((n) => n.toLowerCase() === cur.toLowerCase())) names.push(cur)
+  return names
+})
+/** The group the name rule puts this host in, to say so on the "auto" option. */
+const autoGroupOfHost = computed(() => {
+  const id = props.host?.id
+  if (!id || form.group.trim() || form.groupLocked) return ''
+  return store.railGroups().find((g) => g.auto && g.hosts.some((x) => x.id === id))?.name ?? ''
+})
+const groupSelect = computed({
+  get: (): string => {
+    if (newGroupMode.value) return NEW_GROUP
+    const cur = form.group.trim()
+    if (cur) return groupOptions.value.find((n) => n.toLowerCase() === cur.toLowerCase()) ?? cur
+    return form.groupLocked ? NO_GROUP : ''
+  },
+  set: (v: string) => {
+    if (v === NEW_GROUP) {
+      newGroupMode.value = true
+      newGroupDraft.value = ''
+      void nextTick(() => newGroupEl.value?.focus())
+      return
+    }
+    newGroupMode.value = false
+    if (v === '') Object.assign(form, { group: '', groupLocked: false })
+    else if (v === NO_GROUP) Object.assign(form, { group: '', groupLocked: true })
+    else Object.assign(form, { group: v, groupLocked: true })
+  }
+})
+function commitNewGroup(): void {
+  const name = newGroupDraft.value.trim().slice(0, 40)
+  newGroupMode.value = false
+  if (name) Object.assign(form, { group: name, groupLocked: true })
+}
+function onNewGroupKey(e: KeyboardEvent): void {
+  if (isImeKey(e)) return
+  if (e.key === 'Enter') {
+    // Ours, not the editor's "Enter saves".
+    e.preventDefault()
+    e.stopPropagation()
+    commitNewGroup()
+  } else if (e.key === 'Escape') {
+    e.preventDefault()
+    e.stopPropagation()
+    newGroupMode.value = false
+  }
+}
 
 // One hop only, like Android: a jump host must not jump itself, and a host that
 // others already tunnel through may not start a nest of its own (its existing
@@ -237,6 +301,12 @@ function onHostPaste(): void {
 }
 
 // One-line summaries shown on the closed 更多选项 rows.
+/** The jump row's value, shown on the row itself like the other disclosure rows. */
+const jumpSummary = computed(() => {
+  if (!form.jumpHostId) return t('host.jumpNone')
+  if (jumpGone.value) return t('host.jumpDeleted')
+  return store.hosts.find((h) => h.id === form.jumpHostId)?.label ?? t('host.jumpDeleted')
+})
 const proxySummary = computed(() =>
   form.proxyOn && form.proxyHost.trim()
     ? `${form.proxyType === 'http' ? 'HTTP' : 'SOCKS5'} ${form.proxyHost.trim()}:${form.proxyPort || ''}`
@@ -499,6 +569,9 @@ async function save(): Promise<void> {
     auth: form.auth,
     keyPath: form.auth === 'key' ? form.keyPath : undefined,
     group: form.group.trim() || undefined,
+    groupLocked: form.groupLocked || undefined,
+    // Kept as it was: the hand-made order is changed in the rail.
+    order: props.host?.order,
     tags: form.tags.length ? [...form.tags] : undefined,
     jumpHostId: form.jumpHostId || undefined,
     color: form.color.trim() || undefined,
@@ -743,10 +816,30 @@ async function remove(): Promise<void> {
           <section class="group">
             <h3>{{ t('host.secOrganize') }}</h3>
             <div class="card">
-              <label class="row">
-                <span class="r-label">{{ t('host.group') }}</span>
-                <input v-model="form.group" class="r-input" :placeholder="t('host.groupPh')" spellcheck="false" />
-              </label>
+              <div class="row">
+                <label class="r-label" for="he-group">{{ t('host.group') }}</label>
+                <input
+                  v-if="newGroupMode"
+                  id="he-group"
+                  ref="newGroupEl"
+                  v-model="newGroupDraft"
+                  class="r-input"
+                  :placeholder="t('host.groupNewPh')"
+                  maxlength="40"
+                  spellcheck="false"
+                  @keydown="onNewGroupKey"
+                  @blur="commitNewGroup"
+                />
+                <div v-else class="r-select grp-select">
+                  <select id="he-group" v-model="groupSelect">
+                    <option value="">{{ autoGroupOfHost ? `${t('host.groupAuto')} · ${autoGroupOfHost}` : t('host.groupAuto') }}</option>
+                    <option v-for="g in groupOptions" :key="g" :value="g">{{ g }}</option>
+                    <option :value="NO_GROUP">{{ t('host.groupNone') }}</option>
+                    <option :value="NEW_GROUP">{{ t('host.groupNew') }}</option>
+                  </select>
+                  <Icon name="chevron-down" :size="14" class="caret" />
+                </div>
+              </div>
               <div class="row" @click.self="tagInputEl?.focus()">
                 <label class="r-label" for="he-tags">{{ t('host.tags') }}</label>
                 <span class="tag-box" @click.self="tagInputEl?.focus()">
@@ -788,10 +881,15 @@ async function remove(): Promise<void> {
           <section class="group">
             <h3>{{ t('host.secMore') }}</h3>
             <div class="card">
-              <div class="row" :title="jumpBlocked ? undefined : t('host.jumpHint')">
+              <!-- Same pattern as the other rows below: summary + chevron, the choice opens underneath. -->
+              <button type="button" class="row disclosure" :title="jumpBlocked ? undefined : t('host.jumpHint')" @click="sections.jump = !sections.jump">
                 <span class="r-label wide">{{ t('host.jump') }}</span>
-                <div class="r-select end">
-                  <select v-model="form.jumpHostId" :disabled="jumpBlocked">
+                <span class="r-summary">{{ jumpSummary }}</span>
+                <Icon name="chevron-right" :size="14" class="chev" :class="{ open: sections.jump }" />
+              </button>
+              <div v-if="sections.jump" class="sub">
+                <div class="r-select">
+                  <select v-model="form.jumpHostId" :disabled="jumpBlocked" :aria-label="t('host.jump')">
                     <option value="">{{ t('host.jumpNone') }}</option>
                     <option v-for="j in jumpOptions" :key="j.id" :value="j.id">{{ j.label }} · {{ j.username }}@{{ j.host }}</option>
                     <option v-for="j in jumpCandidates" :key="j.id" :value="j.id">{{ j.label }} · {{ j.username }}@{{ j.host }}</option>
@@ -990,18 +1088,23 @@ async function remove(): Promise<void> {
   inset: 0;
   z-index: 110;
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 0;
   background: rgba(0, 0, 0, 0.32);
 }
+/* A dialog in the middle of the window (a sheet from the side is a phone's habit). */
 .panel {
   position: relative;
   display: flex;
   flex-direction: column;
-  width: min(520px, calc(100vw - 64px));
-  height: 100%;
+  width: min(660px, calc(100vw - 48px));
+  height: min(840px, calc(100vh - 80px));
+  overflow: hidden;
   background: var(--bg);
-  border-left: 1px solid var(--border);
-  box-shadow: -24px 0 60px -30px rgba(0, 0, 0, 0.55);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
 }
 .sheet-enter-active,
 .sheet-leave-active {
@@ -1017,7 +1120,7 @@ async function remove(): Promise<void> {
 }
 .sheet-enter-from .panel,
 .sheet-leave-to .panel {
-  transform: translateX(28px);
+  transform: scale(0.985);
 }
 
 /* ---- Header ---- */
@@ -1539,6 +1642,7 @@ input[type='number']::-webkit-inner-spin-button {
 }
 .switch:checked::after {
   transform: translateX(14px);
+  background: var(--accent-contrast);
 }
 .switch:focus-visible {
   outline: 2px solid var(--accent);
@@ -1618,5 +1722,141 @@ input[type='number']::-webkit-inner-spin-button {
   justify-content: flex-end;
   gap: 8px;
   margin-top: 14px;
+}
+
+/* ================= C3 layer: flat sheet, mono labels ================= */
+.layer {
+  background: rgba(0, 0, 0, 0.6);
+}
+.panel {
+  background: var(--bg-elev);
+  /* Never taller than the window minus a clear margin: the dialog floats, it does
+     not hang off the tab bar. */
+  height: min(760px, calc(100vh - 140px));
+  border-color: var(--border-strong);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.07), 0 28px 80px rgba(0, 0, 0, 0.7);
+}
+.p-head {
+  padding: 16px 20px 12px;
+}
+.p-kicker {
+  font-family: var(--font-chrome);
+  font-size: 12px;
+}
+.p-name {
+  font-family: var(--font-chrome);
+  font-size: 16px;
+  font-weight: 700;
+  caret-color: var(--cursor);
+}
+.p-name:focus {
+  box-shadow: 0 1px 0 var(--text);
+}
+.p-close {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+}
+.p-body {
+  padding: 2px 20px 36px;
+  gap: 18px;
+}
+/* A fade over the foot of the scroll area, so a row that runs under the buttons reads
+   as "more below" and not as a cut-off. */
+.p-foot {
+  position: relative;
+}
+.p-foot::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 14px;
+  top: -30px;
+  height: 30px;
+  background: linear-gradient(to bottom, transparent, var(--bg-elev));
+  pointer-events: none;
+}
+/* The fields are told apart from the labels: a faint tile, the frame turns white on focus. */
+.r-input {
+  height: 30px;
+  padding: 0 10px;
+  background: var(--bg-elev-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+}
+.r-input:hover {
+  border-color: var(--border);
+}
+.r-input:focus {
+  border-color: var(--text);
+}
+.port-in {
+  width: 64px;
+}
+.sub .r-select select {
+  height: 32px;
+  padding: 0 28px 0 10px;
+  background: var(--bg-elev-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+}
+.sub .r-select select:focus-visible {
+  border-color: var(--text);
+}
+.sub .r-select .caret {
+  right: 10px;
+}
+/* The group dropdown sits in the row like a field. */
+.grp-select select {
+  height: 30px;
+  padding: 0 28px 0 10px;
+  background: var(--bg-elev-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+}
+.grp-select select:hover {
+  border-color: var(--border);
+}
+.grp-select select:focus-visible {
+  border-color: var(--text);
+}
+.grp-select .caret {
+  right: 10px;
+}
+.group h3,
+.key-sheet h3 {
+  margin: 0 0 6px 2px;
+  font-family: var(--font-chrome);
+  font-size: 12px;
+  font-weight: 400;
+}
+.group h3::before {
+  content: '# ';
+}
+.card {
+  background: var(--bg);
+  border-radius: var(--r-card);
+}
+.row {
+  min-height: 40px;
+}
+.r-label,
+.r-input,
+.box {
+  font-family: var(--font-chrome);
+  font-size: 13.5px;
+  caret-color: var(--cursor);
+}
+.seg button,
+.chip {
+  font-family: var(--font-chrome);
+  font-size: 13px;
+}
+.chip {
+  border-radius: 4px;
+}
+.p-foot {
+  background: var(--bg-elev);
+  border-top-color: var(--chrome-line);
 }
 </style>

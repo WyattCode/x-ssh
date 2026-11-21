@@ -35,8 +35,12 @@ const props = withDefaults(
     visible: boolean
     /** Whether this pane holds focus (only one pane per tab does). */
     focused?: boolean
+    /** Side by side with another pane: the input target shows a solid block
+     *  cursor (the others keep xterm's hollow outline), whatever cursor style
+     *  the user picked for single sessions. */
+    solidCursor?: boolean
   }>(),
-  { focused: true }
+  { focused: true, solidCursor: false }
 )
 const emit = defineEmits<{ (e: 'cwd', payload: { sessionId: string; path: string }): void }>()
 
@@ -492,7 +496,8 @@ onMounted(() => {
     lineHeight: 1.25,
     letterSpacing: 0,
     cursorBlink: true,
-    cursorStyle: store.terminalCursor,
+    cursorStyle: props.solidCursor ? 'block' : store.terminalCursor,
+    cursorInactiveStyle: 'outline',
     scrollback: 10000,
     fontSize: fontSize.value,
     theme: currentTheme(),
@@ -827,6 +832,20 @@ watch(
   }
 )
 
+// Asked from outside (a host opened from the rail): take the keyboard if this
+// is the pane that should have it. Twice: once now, once after a connect that
+// is still mounting the terminal has settled.
+watch(
+  () => store.termFocusTick,
+  () => {
+    if (!props.focused || !props.visible) return
+    nextTick(() => term?.focus())
+    setTimeout(() => {
+      if (props.focused && props.visible) term?.focus()
+    }, 120)
+  }
+)
+
 // Clicking a sibling pane makes this one active → pull focus to it.
 watch(
   () => props.focused,
@@ -881,9 +900,9 @@ watch(
   }
 )
 watch(
-  () => store.terminalCursor,
-  (c) => {
-    if (term) term.options.cursorStyle = c
+  () => [store.terminalCursor, props.solidCursor] as const,
+  ([c, solid]) => {
+    if (term) term.options.cursorStyle = solid ? 'block' : c
   }
 )
 

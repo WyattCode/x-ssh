@@ -210,4 +210,13 @@ watch(
   font-size: 11px;
   margin: 0;
 }
+
+/* C3: mono chrome, flat shapes (tokens already carry the radii). */
+.tm-dialog {
+  font-family: var(--font-chrome);
+}
+.tm-title {
+  font-family: var(--font-chrome);
+  font-weight: 700;
+}
 </style>

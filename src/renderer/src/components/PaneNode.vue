@@ -4,6 +4,7 @@ import { computed, ref, defineAsyncComponent } from 'vue'
 import { useSessions, isTrustingPane } from '../stores/sessions'
 import { useI18n } from '../lib/i18n'
 import { childSizes } from '../lib/paneLayout'
+import { hostEnv } from '../lib/hostEnv'
 import { connectActions, type ConnectAction } from '../lib/connectActions'
 import type { LayoutNode } from '../lib/paneLayout'
 import type { Tab } from '../stores/sessions'
@@ -36,6 +37,24 @@ const pane = computed(() => {
   return n.kind === 'leaf' ? props.tab.panes.find((p) => p.id === n.paneId) : undefined
 })
 const grows = computed(() => (split.value ? childSizes(split.value) : []))
+
+// ---- Side by side: what each pane says about itself ----
+const multi = computed(() => props.tab.panes.length > 1)
+const savedHost = computed(() => {
+  const id = pane.value?.params.hostId
+  return id ? store.hosts.find((h) => h.id === id) : undefined
+})
+const paneName = computed(() => {
+  const p = pane.value
+  if (!p) return ''
+  return savedHost.value?.label ?? `${p.params.username}@${p.params.host}`
+})
+const paneEnv = computed(() => hostEnv(savedHost.value))
+/** Round trip of this pane's own link (side by side, the status line only has the focused one). */
+const paneMs = computed(() => {
+  const p = pane.value
+  return p?.status === 'connected' && p.sshSessionId ? store.latency[p.sshSessionId] : null
+})
 
 const isFocused = computed(
   () => props.tabActive && pane.value?.id === props.tab.activePaneId
@@ -144,23 +163,32 @@ const splitEl = ref<HTMLElement>()
     :style="{ flexGrow: '1' }"
     @mousedown="store.setActivePane(tab.id, pane.id)"
   >
-    <button
-      v-if="tab.panes.length > 1"
-      class="pane-x"
-      :title="t('app.closePaneTip', { key: `${modKey}+Shift+W` })"
-      :aria-label="t('app.closePaneTip', { key: `${modKey}+Shift+W` })"
-      @mousedown.stop
-      @click="store.closePane(pane.id)"
-    >
-      <Icon name="close" :size="13" />
-    </button>
+    <header v-if="multi" class="pane-head" :class="{ on: isFocused }">
+      <div class="ph-main">
+        <span class="ph-dot" :class="pane.status" />
+        <h3 class="ph-name" :title="paneName">{{ paneName }}</h3>
+        <span v-if="paneEnv?.prod" class="ph-prod">{{ paneEnv.label }}</span>
+        <span v-if="paneMs" class="ph-ms">{{ paneMs }} ms</span>
+      </div>
+      <button
+        class="ph-btn"
+        :title="t('app.closePaneTip', { key: `${modKey}+Shift+W` })"
+        :aria-label="t('app.closePaneTip', { key: `${modKey}+Shift+W` })"
+        @mousedown.stop
+        @click="store.closePane(pane.id)"
+      >
+        <Icon name="close" :size="14" />
+      </button>
+    </header>
 
+    <div class="pane-term">
     <TerminalView
       v-if="pane.sshSessionId"
       :key="pane.sshSessionId"
       :session-id="pane.sshSessionId"
       :visible="tabActive"
       :focused="tabActive && pane.id === tab.activePaneId"
+      :solid-cursor="multi"
       @cwd="emit('cwd', $event)"
     />
 
@@ -171,7 +199,7 @@ const splitEl = ref<HTMLElement>()
 
     <div v-else-if="pane.status === 'error'" class="idle">
       <div class="idle-card">
-        <div class="idle-title">{{ tab.title }}</div>
+        <div class="idle-title">{{ paneName }}</div>
         <!-- Which machine failed. The "closed" card always showed this; the
              failure card did not, so two tabs with the same title were
              indistinguishable at exactly the moment it mattered. -->
@@ -230,7 +258,7 @@ const splitEl = ref<HTMLElement>()
     <div v-else-if="pane.status === 'closed'" class="idle">
       <div class="idle-card">
         <div class="idle-icon"><Icon name="server" :size="24" /></div>
-        <div class="idle-title">{{ tab.title }}</div>
+        <div class="idle-title">{{ paneName }}</div>
         <div class="idle-sub">
           {{ pane.params.username }}@{{ pane.params.host }}<template v-if="pane.params.port !== 22">:{{ pane.params.port }}</template>
         </div>
@@ -245,6 +273,8 @@ const splitEl = ref<HTMLElement>()
         </button>
       </div>
     </div>
+    </div>
+
   </div>
 
   <!-- Branch: nested split container with a draggable divider between children -->
@@ -290,12 +320,99 @@ const splitEl = ref<HTMLElement>()
 }
 .pane-cell {
   position: relative;
-  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  background: var(--console);
   overflow: hidden;
 }
+/* The terminal area. The terminal itself fills it; connecting / failed cards are
+   positioned against it so they never sit under the head or the meta row. */
+.pane-term {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+.pane-term > :deep(.term-wrap) {
+  position: absolute;
+  inset: 0;
+  width: auto;
+  height: auto;
+}
+/* The input target is told apart by a lifted head (not a bright border): the
+   focused pane's head is --bg-elev-2, the others' stay on the console's own tone. */
 .pane-cell.focused {
-  box-shadow: inset 0 0 0 1.5px var(--accent);
   z-index: 1;
+}
+/* Side by side (C3): a slim name strip per pane, one hairline between them; the
+   pane that is not taking input dims instead of being boxed. */
+.pane-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 30px;
+  padding: 0 4px 0 14px;
+  font-family: var(--font-chrome);
+  color: var(--text-faint);
+  background: var(--console);
+}
+.pane-head.on {
+  color: var(--text);
+}
+.ph-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ph-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-faint);
+}
+.ph-dot.connected {
+  background: var(--ok);
+}
+.ph-dot.connecting {
+  background: var(--warn);
+}
+.ph-dot.error {
+  background: var(--danger);
+}
+.ph-name {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 400;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ph-prod {
+  flex: none;
+  font-size: 12px;
+  color: var(--prod);
+}
+.ph-ms {
+  flex: none;
+  margin-left: 2px;
+  font-size: 12px;
+  color: var(--ok);
+  font-variant-numeric: tabular-nums;
+}
+.ph-btn {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  color: var(--text-faint);
+}
+.ph-btn:hover {
+  background: var(--selected);
+  color: var(--text);
 }
 /* Recede every pane except the focused one so the active terminal stands out. */
 .pane-cell.multi:not(.focused)::after {
@@ -309,8 +426,7 @@ const splitEl = ref<HTMLElement>()
 }
 .pane-split {
   display: flex;
-  gap: 1px;
-  background: var(--border);
+  background: var(--console);
 }
 /* Absolute-fill the stage. Declared after .pane-cell/.pane-split so it wins at
    equal specificity whether the root is a single leaf or a split branch. */
@@ -327,7 +443,8 @@ const splitEl = ref<HTMLElement>()
 .pane-divider {
   position: relative;
   flex: none;
-  background: transparent;
+  /* The one visible line between two panes (the container has no gap of its own). */
+  background: var(--chrome-line);
   z-index: 2;
 }
 .pane-divider.row {
@@ -370,25 +487,6 @@ const splitEl = ref<HTMLElement>()
   width: 100%;
   height: 2px;
 }
-.pane-x {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  z-index: 6;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  border-radius: 5px;
-  color: var(--text-faint);
-  background: var(--bg-elev);
-  border: none;
-  cursor: pointer;
-}
-.pane-x:hover {
-  color: var(--text);
-}
 .state {
   position: absolute;
   inset: 0;
@@ -420,7 +518,7 @@ const splitEl = ref<HTMLElement>()
   justify-content: center;
   padding: 24px;
   overflow: auto;
-  background: var(--bg);
+  background: var(--console);
 }
 .idle-card {
   display: flex;

@@ -26,8 +26,8 @@ describe('terminalThemes', () => {
   it('themeFor picks presets and falls back to system', () => {
     expect(themeFor('dark', 'nord').background).toBe('#2e3440')
     expect(themeFor('light', '').background).toBe('#f7f8fa')
-    expect(themeFor('dark', '').background).toBe('#0e0f12')
-    expect(themeFor('dark', 'missing').background).toBe('#0e0f12')
+    expect(themeFor('dark', '').background).toBe('#000000')
+    expect(themeFor('dark', 'missing').background).toBe('#000000')
   })
 
   it('fills bright* so xterm gets a full 16-color theme', () => {

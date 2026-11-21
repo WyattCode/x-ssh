@@ -81,4 +81,10 @@ const { list, dismiss } = useToast()
   opacity: 0;
   transform: translateY(-6px);
 }
+
+/* C3: mono chrome, flat shapes (tokens already carry the radii). */
+.toast {
+  font-family: var(--font-chrome);
+  font-size: 12.5px;
+}
 </style>

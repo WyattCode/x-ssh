@@ -58,7 +58,9 @@ export const RENDERER_SETTABLE_KEYS = new Set([
   'fileOpeners',
   // Misc UI
   'hostsSort',
-  'hostsView',
+  'autoGroup',
+  'sortLocked',
+  'groupOrder',
   'sidebarCollapsed',
   'sidebarWidth',
   'termSidebarHidden',

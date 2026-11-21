@@ -156,5 +156,14 @@ function onKey(e: KeyboardEvent): void {
   padding: 6px 14px; border-radius: 6px; font-size: 13px; cursor: pointer;
   border: 1px solid var(--border); background: var(--bg-elev); color: var(--text);
 }
-.sv-btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.sv-btn.primary { background: var(--accent); color: var(--accent-contrast); border-color: var(--accent); }
+
+/* C3: mono chrome, flat shapes (tokens already carry the radii). */
+.sv {
+  font-family: var(--font-chrome);
+}
+.sv-title {
+  font-family: var(--font-chrome);
+  font-weight: 700;
+}
 </style>

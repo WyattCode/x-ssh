@@ -106,6 +106,11 @@ export const IPC = {
   imeTraceEnabled: 'ime:traceEnabled', // renderer -> main : is voice-input tracing switched on?
   sshResize: 'ssh:resize', // renderer -> main : pty resize
   sshAttach: 'ssh:attach', // renderer -> main : listener ready, flush buffered output
+  hostsPatch: 'hosts:patch', // renderer -> main : group / order changes for several hosts in one write
+  windowDim: 'window:dim', // renderer -> main : a dialog's dim layer is up (the OS-drawn caption buttons follow it)
+  windowZoom: 'window:zoom', // renderer -> main : the app zoom factor changed (Windows caption buttons follow it)
+  sshPing: 'ssh:ping', // round-trip time of a live session, in ms (null when it cannot be measured)
+  sshCompare: 'ssh:compare', // run one fixed comparison probe (service version / disk use) on a live session
   sshTmuxList: 'ssh:tmuxList', // list remote tmux sessions
   sshTmuxAttach: 'ssh:tmuxAttach', // attach-or-create a remote tmux session
   sshForwardAdd: 'ssh:forwardAdd', // start a port forward on the live session

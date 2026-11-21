@@ -367,4 +367,13 @@ function eta(x: SftpProgress): string {
   overflow-wrap: anywhere;
   word-break: break-word;
 }
+
+/* C3: mono chrome, flat shapes (tokens already carry the radii). */
+.tpanel {
+  font-family: var(--font-chrome);
+}
+.tp-title {
+  font-family: var(--font-chrome);
+  font-weight: 700;
+}
 </style>

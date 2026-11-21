@@ -335,4 +335,13 @@ watch(
 .kp-result.bad {
   color: var(--danger);
 }
+
+/* C3: mono chrome, flat shapes (tokens already carry the radii). */
+.kp-dialog {
+  font-family: var(--font-chrome);
+}
+.kp-title {
+  font-family: var(--font-chrome);
+  font-weight: 700;
+}
 </style>

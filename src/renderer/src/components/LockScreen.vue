@@ -161,7 +161,7 @@ const onKey = (e: KeyboardEvent): void => {
   justify-content: center;
   border-radius: var(--radius-sm);
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
   font-size: 13.5px;
   font-weight: 500;
 }
@@ -175,5 +175,14 @@ const onKey = (e: KeyboardEvent): void => {
   font-size: 11px;
   color: var(--text-faint);
   text-align: center;
+}
+
+/* C3: mono chrome, flat shapes (tokens already carry the radii). */
+.lock-card {
+  font-family: var(--font-chrome);
+}
+.lock-title {
+  font-family: var(--font-chrome);
+  font-weight: 700;
 }
 </style>

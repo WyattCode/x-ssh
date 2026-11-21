@@ -475,4 +475,106 @@ async function add(): Promise<void> {
 .del:active:not(:disabled) {
   transform: scale(0.92);
 }
+
+/* ================= C3 layer: flat sections, hairlines, mono ================= */
+.fw-page {
+  font-family: var(--font-chrome);
+}
+/* The dialog's close button sits at the top right. */
+.page-head {
+  padding-right: 40px;
+}
+.wrap {
+  padding: 18px 28px 40px;
+  gap: 12px;
+}
+.card {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+}
+.form {
+  padding: 12px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+}
+.field {
+  gap: 4px;
+  font-size: 12px;
+}
+.field input,
+.field select {
+  height: 30px;
+  font-family: var(--font-chrome);
+  font-size: 13.5px;
+  background: var(--bg-elev-2);
+  border-color: transparent;
+  caret-color: var(--cursor);
+}
+.field input:focus,
+.field select:focus {
+  border-color: var(--text);
+}
+.check {
+  font-size: 13px;
+}
+.empty {
+  padding: 64px 0;
+  font-size: 13.5px;
+}
+.empty-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--r-card);
+}
+.section {
+  padding: 0;
+  border-bottom: 1px solid var(--chrome-line);
+}
+.sec-head {
+  gap: 10px;
+  padding: 8px 4px;
+}
+.sec-title b {
+  font-size: 13.5px;
+  font-weight: 700;
+}
+.sec-title small {
+  font-size: 12px;
+}
+.live {
+  padding: 0;
+  background: none;
+  font-size: 12px;
+}
+.live.on {
+  background: none;
+}
+.rule {
+  padding: 6px 4px 6px 46px;
+  gap: 12px;
+  border-radius: var(--radius-sm);
+}
+.mode,
+.mode.remote,
+.mode.dynamic {
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  font-size: 12px;
+}
+.text {
+  font-size: 13px;
+}
+.badge {
+  padding: 0;
+  border: none;
+  font-size: 12px;
+}
+.del {
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-sm);
+}
 </style>

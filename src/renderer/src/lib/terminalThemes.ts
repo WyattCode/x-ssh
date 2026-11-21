@@ -34,27 +34,27 @@ export interface TerminalPreset {
 }
 
 const systemDark: TerminalPalette = {
-  background: '#0e0f12',
-  foreground: '#e6e8ec',
-  cursor: '#6ea8fe',
-  cursorAccent: '#0e0f12',
-  selectionBackground: 'rgba(110,168,254,0.28)',
-  black: '#16181d',
-  brightBlack: '#656b78',
+  background: '#000000',
+  foreground: '#e9e9e9',
+  cursor: '#23d18b',
+  cursorAccent: '#000000',
+  selectionBackground: 'rgba(255,255,255,0.22)',
+  black: '#151515',
+  brightBlack: '#6f6f6f',
   red: '#ff6b6b',
   green: '#51cf66',
   yellow: '#ffd43b',
   blue: '#6ea8fe',
   magenta: '#da77f2',
   cyan: '#3bc9db',
-  white: '#e6e8ec',
+  white: '#e9e9e9',
   brightRed: '#ff6b6b',
   brightGreen: '#51cf66',
   brightYellow: '#ffd43b',
   brightBlue: '#6ea8fe',
   brightMagenta: '#da77f2',
   brightCyan: '#3bc9db',
-  brightWhite: '#e6e8ec'
+  brightWhite: '#e9e9e9'
 }
 
 const systemLight: TerminalPalette = {

@@ -4,6 +4,7 @@ import { mkdir, copyFile } from 'node:fs/promises'
 import { parseJson, readDurable, writeDurable } from './durableFile'
 import { buildSshConfig } from '../shared/sshConfigExport'
 import type { Host, HostOs } from '../shared/types'
+import { applyHostPatches, type HostPatch } from '../shared/hostGroups'
 
 /**
  * Drop the fields that describe the *current session* rather than the saved
@@ -295,6 +296,22 @@ export class HostStore {
       if (lost) {
         throw new Error('secrets-not-persisted: secret did not reach the vault')
       }
+    }
+    return this.list()
+  }
+
+  /** Group / order changes for several hosts in one write (the rail's batch move and drag
+   *  and drop). Nothing else about a host is touched, secrets included. */
+  async patch(patches: HostPatch[]): Promise<Host[]> {
+    await this.ensureLoaded()
+    const hostsBefore = this.hosts
+    this.hosts = applyHostPatches(this.hosts, patches)
+    try {
+      await this.persist()
+    } catch (e) {
+      // A hosts.json that was not written must not stay half-applied in memory.
+      if ((e as DiskError).hostsUnwritten) this.hosts = hostsBefore
+      throw e
     }
     return this.list()
   }

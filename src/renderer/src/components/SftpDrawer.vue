@@ -43,6 +43,7 @@ const sftpErr = (err: string | undefined, fallbackKey: string): string =>
 const props = defineProps<{ sessionId?: string; open: boolean; terminalCwd?: string; reloadKey?: number; page?: boolean }>()
 const emit = defineEmits<{
   (e: 'close'): void
+  (e: 'toggle-full'): void
   (e: 'edit-file', payload: { path: string; name: string }): void
   (e: 'edit-external', payload: { path: string; name: string }): void
   (e: 'open-with', payload: { path: string; name: string; ext: string }): void
@@ -1825,7 +1826,8 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
         <button class="ib" :class="{ active: moreMenu.open }" :title="tt('sfp.more')" :aria-label="tt('sfp.more')" @click.stop="openMore"><Icon name="more-horizontal" :size="15" /></button>
         <button v-if="page" class="btn btn-primary pill up-btn" :disabled="busy" @click="uploadPick"><Icon name="upload" :size="14" />{{ tt('sfp.upload') }}</button>
         <button v-else class="ib" :title="tt('sfp.upload')" :aria-label="tt('sfp.upload')" :disabled="busy" @click="uploadPick"><Icon name="upload" :size="15" /></button>
-        <button v-if="!page" class="ib" :title="tt('sfp.close')" :aria-label="tt('sfp.close')" @click="emit('close')"><Icon name="close" :size="15" /></button>
+        <button class="ib" :title="page ? tt('files.dock') : tt('files.expand')" :aria-label="page ? tt('files.dock') : tt('files.expand')" @click="emit('toggle-full')"><Icon :name="page ? 'columns' : 'layout'" :size="15" /></button>
+        <button class="ib" :title="tt('sfp.close')" :aria-label="tt('sfp.close')" @click="emit('close')"><Icon name="close" :size="15" /></button>
       </div>
     </header>
 
@@ -2319,15 +2321,18 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
   gap: 12px;
 }
 /* Drawer: a flat column on the right of the terminal page. */
+/* Docked: a column beside the terminals (the stage is a flex row), so it pushes
+   them over instead of covering their right-hand columns or a whole split pane. */
 .sftp.drawer {
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
+  position: relative;
+  flex: none;
+  align-self: stretch;
+  /* A big app zoom (or a small window) shrinks the stage in CSS pixels: the panel keeps its
+     width only while the terminals still get at least 40 % of the stage. */
+  max-width: 60%;
   z-index: 50;
   background: var(--bg-elev);
   border-left: 1px solid var(--border);
-  box-shadow: -12px 0 34px -14px rgba(0, 0, 0, 0.45);
 }
 .resize-handle {
   position: absolute;
@@ -2352,7 +2357,9 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
 }
 .drawer .toolbar {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  /* The title takes what its words need (never one character per line); the tools get the rest and
+     wrap onto a second row when the panel is narrow. */
+  grid-template-columns: auto minmax(0, 1fr);
   grid-template-areas: 'title tools' 'nav nav';
   row-gap: 8px;
   padding: 10px 10px 10px 14px;
@@ -2360,8 +2367,10 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
 }
 .bar-title {
   grid-area: title;
+  align-self: center;
   font-size: 13px;
   font-weight: 600;
+  white-space: nowrap;
 }
 .nav-grp {
   grid-area: nav;
@@ -2374,8 +2383,11 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
 .tools {
   grid-area: tools;
   flex: none;
+  min-width: 0;
   display: flex;
   align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 2px;
 }
 /* Path: a filled field holding the breadcrumb (or the typed path while editing). */
@@ -2410,6 +2422,10 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
   /* Deep paths overflow at the right edge; anchoring to the end keeps the
      current directory visible instead of clipping it. */
   justify-content: flex-end;
+  /* What does not fit goes out through a fade, not as a stub of a letter. The fade is over
+     padding, so a path that fits is not touched by it. */
+  padding-left: 12px;
+  mask-image: linear-gradient(to right, transparent 0, #000 12px);
 }
 .crumb {
   flex: 0 1 auto;
@@ -2437,9 +2453,10 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
   color: var(--text);
   font-weight: 600;
 }
-/* Older segments give up their width first, so the tail stays readable. */
+/* Older segments keep their whole name (they are cut off at the edge, faded, instead of being
+   squeezed down to one letter and an ellipsis). */
 .crumb:not(.last) {
-  flex-shrink: 99;
+  flex: none;
 }
 .crumbs .sep {
   flex: none;
@@ -3499,5 +3516,140 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
   max-width: 100%;
   max-height: 68vh;
   object-fit: contain;
+}
+
+/* ================= C3 layer: flat panes, hairlines, mono chrome ================= */
+/* The page is a tabindex surface only so it can take keys; the global focus
+   floor drew a white frame around the whole page. */
+.sftp.sftp:focus-visible {
+  outline: none !important;
+}
+.sftp {
+  font-family: var(--font-chrome);
+}
+.sftp.page {
+  gap: 8px;
+}
+.bar-title {
+  font-size: 13.5px;
+  font-weight: 700;
+}
+.path-field {
+  height: 30px;
+  background: var(--bg-elev-2);
+  border-color: transparent;
+  border-radius: var(--radius-sm);
+}
+.path-field.editing {
+  border-color: var(--text);
+  box-shadow: none;
+}
+.path-input {
+  caret-color: var(--cursor);
+}
+.crumb {
+  height: 24px;
+  border-radius: 4px;
+  font-size: 13px;
+}
+.ib {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+}
+.ib.active,
+.ib.starred {
+  color: var(--cursor);
+}
+.btn.sm {
+  height: 26px;
+  padding: 0 10px;
+  font-size: 13px;
+}
+.resume-bar {
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+}
+.panes {
+  gap: 8px;
+}
+.pane {
+  background: var(--bg-elev);
+  border-radius: var(--r-card);
+}
+.pane-head {
+  height: 44px;
+}
+.drawer .pane-head {
+  height: 40px;
+}
+.pane-head :deep(.os-tile) {
+  border-radius: 5px;
+}
+.ph-title {
+  font-size: 13.5px;
+  font-weight: 700;
+}
+.ph-sub {
+  font-size: 12px;
+}
+.filter {
+  height: 28px;
+  background: var(--bg-elev-2);
+  border-color: transparent;
+  border-radius: var(--radius-sm);
+}
+.filter:focus-within {
+  border-color: var(--text);
+}
+.filter input {
+  font-family: var(--font-chrome);
+  font-size: 13px;
+  caret-color: var(--cursor);
+}
+.cols {
+  height: 28px;
+}
+.col {
+  font-family: var(--font-chrome);
+  font-size: 12px;
+}
+.body {
+  padding: 2px 4px;
+}
+.row {
+  height: 28px;
+  border-radius: var(--radius-sm);
+  font-size: 13.5px;
+}
+.row .name {
+  font-size: 13.5px;
+}
+.foot {
+  height: 30px;
+  font-size: 12px;
+}
+.send {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+}
+.tf {
+  border-radius: var(--radius-sm);
+}
+.ctx,
+.more-menu,
+.hist-menu,
+.bm-menu,
+.loc-menu {
+  border-radius: var(--r-menu);
+}
+.dlg {
+  border-radius: var(--radius);
+  font-family: var(--font-chrome);
+}
+.dlg h3 {
+  font-size: 14px;
+  font-weight: 700;
 }
 </style>

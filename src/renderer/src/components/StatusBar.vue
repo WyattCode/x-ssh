@@ -3,6 +3,7 @@ import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import { useSessions } from '../stores/sessions'
 import { useI18n } from '../lib/i18n'
 import { liveForwardCount } from '../lib/forwards'
+import { routeOf } from '../lib/route'
 import Icon from './Icon.vue'
 
 const store = useSessions()
@@ -65,6 +66,19 @@ const hostLabel = computed(() => {
   const portText = p.port !== 22 ? `:${p.port}` : ''
   return `${p.username}@${p.host}${portText}`
 })
+// 本机 › 跳板 › 目标: the path the session really takes, and how long a round trip
+// over it takes (measured by main; a dash until the first reading arrives).
+const targetName = computed(() => {
+  const p = pane.value?.params
+  if (!p) return ''
+  const h = p.hostId ? store.hosts.find((x) => x.id === p.hostId) : undefined
+  return h?.label ?? `${p.username}@${p.host}`
+})
+const route = computed(() => (pane.value ? routeOf(pane.value.params, store.hosts) : { hops: [], direct: true }))
+const latency = computed(() => {
+  const id = pane.value?.sshSessionId
+  return id && connected.value ? store.latency[id] : undefined
+})
 const uptime = computed(() => {
   if (!connectedAt.value) return ''
   const s = Math.max(0, Math.floor((now.value - connectedAt.value) / 1000))
@@ -105,23 +119,18 @@ const keyKnown = computed(() => {
   return store.hostKeyKnown(p.host, p.port || 22)
 })
 
-// Host colour for the current tab, if any (identity marker, not link state).
-// Falls back to the accent colour, the same way host cards do.
-const hostColor = computed(() => {
-  const id = tab.value?.hostId
-  return (id ? store.hosts.find((h) => h.id === id)?.color : undefined) || 'var(--accent)'
-})
-
 // Running SFTP transfers across all panes (opens the global transfers panel).
 const activeTransfers = computed(() => store.transfers.filter((x) => !x.done && !x.error))
 </script>
 
 <template>
   <div class="statusbar">
-    <span v-if="hostLabel" class="seg host" :style="{ '--host': hostColor }">
-      <span class="host-bar" />
+    <span v-if="hostLabel" class="seg host">
       <span class="link" :class="linkState" :title="t(linkTip)" />
-      <span class="host-text">{{ hostLabel }}</span>
+      <span class="host-text" :title="hostLabel">
+        <template v-for="(hop, i) in [t('status.local'), ...route.hops]" :key="i">{{ hop }}<span class="sep"> › </span></template><b>{{ targetName }}</b>
+      </span>
+      <span v-if="latency" class="latency">{{ latency }} ms</span>
       <span v-if="uptime" class="uptime">{{ uptime }}</span>
     </span>
     <span v-else class="seg dim">{{ t('status.none') }}</span>
@@ -169,11 +178,13 @@ const activeTransfers = computed(() => store.transfers.filter((x) => !x.done && 
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 24px;
-  padding: 0 10px;
-  font-size: 11px;
-  background: var(--bg-elev);
-  border-top: 1px solid var(--border);
+  height: var(--band-bot);
+  flex: none;
+  padding: 0 16px;
+  font-family: var(--font-chrome);
+  font-size: 12.5px;
+  background: var(--chrome);
+  border-top: 1px solid var(--chrome-line);
   color: var(--text-dim);
   user-select: none;
 }
@@ -196,15 +207,6 @@ const activeTransfers = computed(() => store.transfers.filter((x) => !x.done && 
 .host-text {
   overflow: hidden;
   text-overflow: ellipsis;
-}
-/* The host's own colour, kept as a thin bar so the identity marker is not
-   mistaken for the link state (the dot beside it is the link state). */
-.host-bar {
-  width: 3px;
-  height: 12px;
-  border-radius: 1.5px;
-  background: var(--host, var(--accent));
-  flex: none;
 }
 .link {
   width: 7px;
@@ -229,6 +231,17 @@ const activeTransfers = computed(() => store.transfers.filter((x) => !x.done && 
   background: transparent;
   box-shadow: inset 0 0 0 1px var(--text-faint);
   opacity: 0.8;
+}
+.host-text .sep {
+  color: var(--text-faint);
+}
+.host-text b {
+  font-weight: 600;
+  color: var(--text);
+}
+.latency {
+  margin-left: 6px;
+  color: var(--ok);
 }
 .uptime {
   margin-left: 4px;

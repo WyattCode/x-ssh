@@ -5,7 +5,10 @@ import { useI18n } from '../lib/i18n'
 import { isMac } from '../composables/platform'
 import { useZoom } from '../composables/zoom'
 import { isImeKey } from '../lib/ime'
+import { hostEnv } from '../lib/hostEnv'
+import type { Host } from '../../../shared/types'
 import Icon from './Icon.vue'
+import SplitHostPicker from './SplitHostPicker.vue'
 
 const store = useSessions()
 const { t } = useI18n()
@@ -127,10 +130,26 @@ function doSplit(dir: 'row' | 'col'): void {
   layoutMenu.open = false
   if (store.active) store.splitPane(store.active.id, dir)
 }
+/** "Side by side with another host": the layout menu hands over to the host picker. */
+const picker = reactive({ open: false, x: 0, y: 0 })
+function openPicker(): void {
+  picker.x = layoutMenu.x
+  picker.y = layoutMenu.y
+  layoutMenu.open = false
+  picker.open = true
+}
 function applyPreset(rows: number, cols: number): void {
   layoutMenu.open = false
   void store.applyLayoutPreset(rows, cols)
 }
+
+/** Production hosts carry a warm tag in their tab: the one environment that
+ *  must not be mistaken for another. */
+function tabHost(tab: Tab): Host | undefined {
+  return tab.hostId ? store.hosts.find((h) => h.id === tab.hostId) : undefined
+}
+const isProd = (tab: Tab): boolean => !!hostEnv(tabHost(tab))?.prod
+const prodLabel = (tab: Tab): string => hostEnv(tabHost(tab))?.label ?? ''
 
 /** A tab's own accent color (from its saved host), if any. */
 function hostColor(tab: Tab): string | undefined {
@@ -169,6 +188,16 @@ function cancelRename(): void {
 
 <template>
   <div class="tabbar" :class="{ mac: underLights }" :style="barStyle">
+    <!-- Fold / unfold the host rail (Ctrl+B outside a live terminal). -->
+    <button
+      class="rail-toggle"
+      :class="{ on: !store.termSidebarHidden }"
+      :title="store.termSidebarHidden ? t('nav.exitFocus') : t('rail.fold')"
+      :aria-label="store.termSidebarHidden ? t('nav.exitFocus') : t('rail.fold')"
+      @click="store.setTermSidebarHidden(!store.termSidebarHidden)"
+    >
+      <Icon name="sidebar" :ink="10.1" :weight="1.3" />
+    </button>
     <div class="tabs">
       <div
         v-for="tab in visibleTabs"
@@ -204,17 +233,19 @@ function cancelRename(): void {
           @blur="commitRename"
         />
         <span v-else class="label">{{ tab.title }}</span>
+        <span v-if="isProd(tab)" class="prod">{{ prodLabel(tab) }}</span>
+        <span v-if="tabStatus(tab) === 'connected'" class="cursor" :class="{ off: tab.id !== store.activeId }" aria-hidden="true" />
         <span class="close" :title="t('tabbar.close')" @click.stop="store.closeTabSafe(tab.id)"><Icon name="close" :size="13" /></span>
       </div>
     </div>
     <button class="new" :title="t('tabbar.newConn', { key: `${modKey}+K` })" :aria-label="t('tabbar.newConn', { key: `${modKey}+K` })" @click="store.togglePalette(true)">
-      <Icon name="plus" :size="17" />
+      <Icon name="plus" :ink="10.1" :weight="1.3" />
     </button>
     <div class="drag-spacer" />
     <div class="right-tools">
       <!-- Tab search and layouts only mean something once there are tabs. -->
       <button v-if="store.tabs.length" class="tool" :class="{ on: filterOpen }" :title="t('tabbar.filter')" :aria-label="t('tabbar.filter')" @click="toggleFilter">
-        <Icon name="search" :size="16" />
+        <Icon name="search" :ink="10.1" :weight="1.3" />
       </button>
       <div v-if="filterOpen" class="filter-box">
         <Icon name="search" :size="14" />
@@ -235,7 +266,7 @@ function cancelRename(): void {
         :title="t('tabbar.layout')" :aria-label="t('tabbar.layout')"
         @click.stop="openLayoutMenu"
       >
-        <Icon name="layout" :size="16" />
+        <Icon name="layout" :ink="10.1" :weight="1.3" />
       </button>
       <button
         v-if="store.activePane?.status === 'connected'"
@@ -244,19 +275,9 @@ function cancelRename(): void {
         :title="t('tabbar.sftp')" :aria-label="t('tabbar.sftp')"
         @click="store.toggleSftp()"
       >
-        <Icon name="folder" :size="16" />
+        <Icon name="folder" :ink="10.1" :weight="1.3" />
       </button>
 
-      <!-- 专注模式: hides the sidebar so the terminal takes the whole window
-           (not "全屏", which reads as the window going full screen); remembered. -->
-      <button
-        class="tool"
-        :class="{ on: store.termSidebarHidden }"
-        :title="store.termSidebarHidden ? t('nav.exitFocus') : t('nav.focus')" :aria-label="store.termSidebarHidden ? t('nav.exitFocus') : t('nav.focus')"
-        @click="store.setTermSidebarHidden(!store.termSidebarHidden)"
-      >
-        <Icon name="focus" :size="16" />
-      </button>
     </div>
   </div>
 
@@ -264,12 +285,15 @@ function cancelRename(): void {
     <div ref="layoutMenuEl" class="ctx layout-menu" :style="{ left: layoutMenu.x + 'px', top: layoutMenu.y + 'px' }" @mousedown.stop>
       <button :disabled="!canLayout" @click="doSplit('row')">{{ t('tabbar.splitAction') }}</button>
       <button :disabled="!canLayout" @click="doSplit('col')">{{ t('tabbar.splitColAction') }}</button>
+      <button :disabled="!canLayout" @click="openPicker">{{ t('cmp.add') }}</button>
       <div class="sep" />
       <button v-for="p in presets" :key="p.label" :disabled="!canLayout" @click="applyPreset(p.rows, p.cols)">
         {{ t('tabbar.preset', { n: p.label }) }}
       </button>
     </div>
   </div>
+
+  <SplitHostPicker :open="picker.open" :x="picker.x" :y="picker.y" @close="picker.open = false" />
 
   <div v-if="menu.open" class="ctx-overlay" @mousedown="menu.open = false" @contextmenu.prevent="menu.open = false">
     <div ref="menuEl" class="ctx" :style="{ left: menu.x + 'px', top: menu.y + 'px' }" @mousedown.stop>
@@ -288,16 +312,67 @@ function cancelRename(): void {
 .tabbar {
   display: flex;
   align-items: center;
-  height: 40px;
-  padding: 0 8px;
-  gap: 6px;
-  background: var(--bg-elev);
-  border-bottom: 1px solid var(--border);
+  height: var(--band-top);
+  padding: 0;
+  gap: 0;
+  font-family: var(--font-chrome);
+  background: var(--chrome);
+  /* The hairline is drawn inside the bar's last row, not as a border, so the bar's content is the
+     full 40px and its icons sit on the same centre line as the system's caption buttons. */
+  box-shadow: inset 0 -1px 0 var(--chrome-line);
   -webkit-app-region: drag;
+}
+.rail-toggle {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 40px;
+  height: 100%;
+  /* The chrome icons are drawn as bright as the system's own caption buttons beside them. */
+  color: var(--text);
+  border-right: 1px solid var(--chrome-line);
+  -webkit-app-region: no-drag;
+}
+.rail-toggle:hover,
+.rail-toggle.on {
+  color: var(--text);
+}
+.prod {
+  flex: none;
+  font-size: 12px;
+  color: var(--prod);
+}
+/* The blinking block after the active host, as in the phone apps. */
+.cursor {
+  flex: none;
+  width: 6px;
+  height: 12px;
+  border-radius: 1px;
+  background: var(--cursor);
+  animation: cur-blink 1.1s steps(1) infinite;
+}
+/* Only the active tab blinks; the others keep the space so the tabs do not
+   change width when the selection moves. */
+.cursor.off {
+  visibility: hidden;
+  animation: none;
+}
+@keyframes cur-blink {
+  50% {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cursor {
+    animation: none;
+  }
 }
 /* Reserve room for the native macOS traffic lights (hiddenInset title bar). */
 .tabbar.mac {
   padding-left: 72px;
+}
+.tabs {
+  height: 100%;
 }
 .tabbar.mac > * {
   position: relative;
@@ -305,8 +380,8 @@ function cancelRename(): void {
 }
 .tabs {
   display: flex;
-  align-items: center;
-  gap: 4px;
+  align-items: stretch;
+  gap: 0;
   overflow-x: auto;
   scrollbar-width: none;
   -webkit-app-region: no-drag;
@@ -318,23 +393,28 @@ function cancelRename(): void {
   display: flex;
   align-items: center;
   gap: 7px;
-  height: 28px;
-  padding: 0 8px 0 10px;
-  max-width: 190px;
-  border-radius: var(--radius-sm);
+  padding: 0 6px 0 14px;
+  max-width: 220px;
   color: var(--text-dim);
-  border: 1px solid transparent;
+  border-right: 1px solid var(--chrome-line);
   box-sizing: border-box;
   cursor: default;
   transition: background 0.12s, color 0.12s;
 }
 .tab:hover {
-  background: var(--bg-elev-2);
+  background: var(--hover);
 }
+/* Selected: the tab melts into the terminal below it (same pure black). */
 .tab.active {
-  background: var(--bg-elev-2);
+  background: var(--console);
   color: var(--text);
-  border-color: var(--border);
+  animation: tab-in 0.4s cubic-bezier(0.3, 1.35, 0.5, 1);
+}
+@keyframes tab-in {
+  from {
+    opacity: 0.4;
+    transform: translateY(5px);
+  }
 }
 .tab.dragging {
   opacity: 0.5;
@@ -351,6 +431,12 @@ function cancelRename(): void {
 }
 .tab {
   position: relative;
+  /* Tabs give up width (labels ellipsize) before the strip starts to scroll. */
+  min-width: 96px;
+}
+.new,
+.tool {
+  flex: none;
 }
 .dot {
   width: 7px;
@@ -358,11 +444,14 @@ function cancelRename(): void {
   border-radius: 50%;
   flex: none;
 }
+/* The host's own colour, as a hairline along the tab's foot (not another marker
+   beside the status dot and the cursor). */
 .tcolor {
-  flex: none;
-  width: 3px;
-  height: 14px;
-  border-radius: 2px;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
   opacity: 0.9;
 }
 .pane-count {
@@ -376,12 +465,13 @@ function cancelRename(): void {
   border-radius: 4px;
   background: var(--bg);
   border: 1px solid var(--border);
-  font-size: 11px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
   color: var(--text-dim);
 }
 .label {
-  font-size: 12.5px;
+  min-width: 0;
+  font-size: 13.5px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -394,7 +484,7 @@ function cancelRename(): void {
   border: 1px solid var(--accent);
   border-radius: 4px;
   color: var(--text);
-  font-size: 12px;
+  font-size: 13px;
   outline: none;
 }
 .close {
@@ -405,12 +495,7 @@ function cancelRename(): void {
   height: 18px;
   border-radius: 5px;
   color: var(--text-faint);
-  opacity: 0;
-  transition: opacity 0.14s, background 0.14s, color 0.14s;
-}
-.tab:hover .close,
-.tab.active .close {
-  opacity: 1;
+  transition: background 0.14s, color 0.14s;
 }
 .close:hover {
   background: var(--border-strong);
@@ -421,6 +506,7 @@ function cancelRename(): void {
   align-items: center;
   gap: 5px;
   height: 28px;
+  margin-right: 6px;
   padding: 0 8px;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
@@ -437,13 +523,13 @@ function cancelRename(): void {
   border: none;
   outline: none;
   color: var(--text);
-  font-size: 12px;
+  font-size: 13px;
 }
 .filter-input::placeholder {
   color: var(--text-faint);
 }
 .filter-count {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-faint);
   font-variant-numeric: tabular-nums;
 }
@@ -453,30 +539,45 @@ function cancelRename(): void {
   justify-content: center;
   width: 28px;
   height: 28px;
-  color: var(--text-dim);
+  color: var(--text);
   border-radius: var(--radius-sm);
   transition: background 0.14s, color 0.14s;
   -webkit-app-region: no-drag;
 }
+/* The tools are icons only: cells of the bar's own height, one hairline's worth of nothing
+   between them, so every icon sits on the bar's centre line. */
+.tool {
+  width: var(--band-top);
+  height: 100%;
+  border-radius: 0;
+}
 .right-tools {
   display: flex;
   align-items: center;
-  gap: 6px;
+  height: 100%;
   -webkit-app-region: no-drag;
   flex: none;
 }
-.new:hover,
 .tool:hover {
   background: var(--hover);
   color: var(--text);
 }
-.new:active,
-.tool:active {
-  background: var(--selected);
-}
 .tool.on {
+  color: var(--cursor);
+}
+/* The new-tab button: the rounded square tile, with room around it so it is not joined to the last tab. */
+.new {
+  width: 28px;
+  height: 28px;
+  margin: 0 16px 0 14px;
+  border-radius: var(--radius-sm);
+}
+.new:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.new:active {
   background: var(--selected);
-  color: var(--accent);
 }
 .drag-spacer {
   flex: 1;
@@ -504,7 +605,7 @@ function cancelRename(): void {
   width: 100%;
   padding: 7px 10px;
   border-radius: var(--r-item);
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text);
   text-align: left;
 }

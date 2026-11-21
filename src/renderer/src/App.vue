@@ -25,14 +25,18 @@ import PublishKeyDialog from './components/PublishKeyDialog.vue'
 import SessionReplayDialog from './components/SessionReplayDialog.vue'
 import SettingsDialog from './components/SettingsDialog.vue'
 import StatusBar from './components/StatusBar.vue'
+import CompareBar from './components/CompareBar.vue'
 import Icon from './components/Icon.vue'
+import ModalShell from './components/ModalShell.vue'
+import StartScreen from './components/StartScreen.vue'
 import PaneNode from './components/PaneNode.vue'
 import TransferPanel from './components/TransferPanel.vue'
 import SnippetVarsDialog from './components/SnippetVarsDialog.vue'
 import TooltipLayer from './components/TooltipLayer.vue'
 import LockScreen from './components/LockScreen.vue'
 import ZoomHud from './components/ZoomHud.vue'
-import { useZoom, ZOOM_STEP } from './composables/zoom'
+import { useZoom } from './composables/zoom'
+import { watchCaptionDim } from './composables/captionDim'
 import { useI18n } from './lib/i18n'
 import { useToast } from './composables/toast'
 import { collectPaneIds } from './lib/paneLayout'
@@ -43,9 +47,7 @@ import {
   type RebindableAction
 } from './lib/shortcuts'
 import AppSidebar from './components/AppSidebar.vue'
-import HostsPage from './components/HostsPage.vue'
 import ForwardsPage from './components/ForwardsPage.vue'
-import OsIcon from './components/OsIcon.vue'
 import type { Host } from '../../shared/types'
 
 // Neither of these can be on screen at startup — a restored tab comes back
@@ -68,48 +70,6 @@ function openErr(err?: string): string {
 
 // Modifier symbol shown in hints (⌘ on macOS, Ctrl elsewhere).
 const modKey = isMac ? '⌘' : 'Ctrl'
-
-// ---- SFTP page: which live session it browses ----
-/** Every connected pane, labelled by its tab (a split tab lists each pane). */
-const connectedPanes = computed(() =>
-  store.tabs.flatMap((tab) =>
-    tab.panes
-      .filter((p) => p.status === 'connected' && p.sshSessionId)
-      .map((pane) => ({ tab, pane, host: store.hosts.find((h) => h.id === pane.params.hostId) }))
-  )
-)
-/** The page follows the active pane when it's live, like the drawer does. */
-const sftpPane = computed(() =>
-  store.activePane?.status === 'connected' && store.activePane.sshSessionId ? store.activePane : undefined
-)
-function pickSftpPane(tabId: string, paneId: string): void {
-  store.setActive(tabId)
-  store.setActivePane(tabId, paneId)
-}
-// Arriving on SFTP with a dead / no active pane: take the first live one.
-watch(
-  () => [store.page, connectedPanes.value.length] as const,
-  ([page]) => {
-    if (page === 'sftp' && !sftpPane.value && connectedPanes.value.length) {
-      const first = connectedPanes.value[0]
-      pickSftpPane(first.tab.id, first.pane.id)
-    }
-  }
-)
-function connectForSftp(h: Host): Promise<void> {
-  return store.openSftpFor(h)
-}
-/** Online dot on the host picker, same meaning as on 连接 (no probe of its own). */
-const pickState = (h: Host): string => store.reach[h.id] ?? 'unknown'
-const sftpHosts = computed(() => [...store.hosts].sort((a, b) => (b.lastUsedAt ?? 0) - (a.lastUsedAt ?? 0)))
-
-// Closing the last terminal goes back to the host list rather than an empty page.
-watch(
-  () => store.tabs.length,
-  (n, before) => {
-    if (!n && before && store.page === 'terminal') store.setPage('hosts')
-  }
-)
 
 const editorOpen = ref(false)
 const editingHost = ref<Host | null>(null)
@@ -175,7 +135,7 @@ watch(bannerShown, (shown) => {
   // dialog all bind Esc/Enter on their own element, so taking focus away
   // silently disables those keys while the dialog is still up. The host
   // editor's root is `.layer`, everything else uses `.overlay`.
-  if (document.querySelector('.overlay, .layer')) return
+  if (document.querySelector('.overlay, .layer, .modal-layer')) return
   // Nor from someone mid-word in any other field (a rename box, the SFTP
   // filter…). The dead terminal is exactly what we do want to take it from,
   // and focus sits in its hidden textarea — hence the .xterm exception.
@@ -214,13 +174,29 @@ watch(
 // which also shows the percentage pill — see composables/zoom.ts.
 const zoom = useZoom()
 
+// One mouse-wheel notch is 100 units; a touchpad sends dozens of small ones per
+// gesture. Collect them and step once per 100, so a flick does not run the whole
+// ladder. A pause forgets the remainder.
+let wheelAcc = 0
+let wheelIdle: ReturnType<typeof setTimeout> | undefined
 function onWheel(e: WheelEvent): void {
   // ⌘ (macOS) / Ctrl (elsewhere) + wheel zooms the whole UI. On macOS we require
   // ⌘ specifically so Ctrl+wheel stays free for macOS's system screen zoom.
   if (!appMod(e)) return
   e.preventDefault()
   e.stopPropagation()
-  zoom.bump(e.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP)
+  // deltaMode 1 = lines (three lines per notch → 102), 2 = pages.
+  const unit = e.deltaMode === 1 ? 34 : e.deltaMode === 2 ? 100 : 1
+  const d = e.deltaY * unit
+  if (!d) return
+  if (Math.sign(d) !== Math.sign(wheelAcc)) wheelAcc = 0
+  wheelAcc += d
+  clearTimeout(wheelIdle)
+  wheelIdle = setTimeout(() => (wheelAcc = 0), 250)
+  while (Math.abs(wheelAcc) >= 100) {
+    zoom.step(wheelAcc < 0 ? 1 : -1)
+    wheelAcc -= Math.sign(wheelAcc) * 100
+  }
 }
 
 function onNetworkOnline(): void {
@@ -265,11 +241,21 @@ function onGlobalKey(e: KeyboardEvent): void {
     return
   }
 
+  // Ctrl/⌘+B folds the host rail on the terminal page. Hard-wired: Ctrl+B is
+  // tmux's prefix, so inside a live terminal it still goes to the shell.
+  if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'b' && !store.sheet) {
+    if (!(inTerminal && store.activePane?.status === 'connected')) {
+      e.preventDefault()
+      store.setTermSidebarHidden(!store.termSidebarHidden)
+      return
+    }
+  }
+
   // Dispatch a matching chord to its handler. Ctrl+W respects a live terminal
   // (werase) via a flag on the handler.
-  // Terminals stay mounted behind the other pages; the shortcuts that act on
-  // one (close, split, focus…) only apply where you can see it.
-  const onTerm = store.page === 'terminal'
+  // Terminals stay mounted behind a sheet; the shortcuts that act on one (close,
+  // split, focus…) only apply while you can see it.
+  const onTerm = !store.sheet
   const handlers: Record<RebindableAction, () => void> = {
     palette: () => store.togglePalette(),
     palette2: () => store.togglePalette(),
@@ -306,18 +292,22 @@ function onGlobalKey(e: KeyboardEvent): void {
     closePane: () => {
       if (onTerm && store.activePane) store.closePane(store.activePane.id)
     },
-    // The drawer on the terminal page; from anywhere else, the SFTP page.
-    sftp: () => (onTerm ? store.toggleSftp() : store.setPage('sftp')),
+    sftp: () => store.toggleSftp(),
     history: () => store.toggleHistory(),
     settings: () => store.toggleSettings(),
     shortcuts: () => store.toggleSettings(true, 'keys'),
-    zoomIn: () => zoom.bump(ZOOM_STEP),
-    zoomOut: () => zoom.bump(-ZOOM_STEP),
+    zoomIn: () => zoom.step(1),
+    zoomOut: () => zoom.step(-1),
     zoomReset: () => zoom.reset()
   }
+  // Settings / forwards is a dialog over the shell: only the chords that belong to
+  // it (open/close, zoom) work behind it. Ctrl+K would open the palette under the
+  // dim layer, Ctrl+W would close a tab nobody can see.
+  const SHEET_CHORDS: RebindableAction[] = ['settings', 'shortcuts', 'zoomIn', 'zoomOut', 'zoomReset']
   for (const id of REBINDABLE_ACTIONS) {
     if (chordMatches(e, effective(id))) {
       e.preventDefault()
+      if (store.sheet && !SHEET_CHORDS.includes(id)) return
       handlers[id]()
       return
     }
@@ -366,13 +356,43 @@ watch(
   { immediate: true }
 )
 
+// Round-trip time of the sessions on screen, for the footer / pane meta rows.
+// Only the active tab's live sessions, only while the window is visible: each reading is a throwaway exec channel.
+const LATENCY_EVERY = 15_000
+const liveSessionIds = computed(() =>
+  (store.active?.panes ?? []).filter((p) => p.status === 'connected' && p.sshSessionId).map((p) => p.sshSessionId as string)
+)
+function pollLatency(): void {
+  if (document.visibilityState === 'hidden') return
+  const ids = liveSessionIds.value
+  if (ids.length) void store.refreshLatency(ids)
+}
+let latencyTimer: ReturnType<typeof setInterval> | undefined
+watch(liveSessionIds, (ids, old) => {
+  if (ids.join() !== (old ?? []).join()) pollLatency()
+})
+onMounted(() => {
+  latencyTimer = setInterval(pollLatency, LATENCY_EVERY)
+})
+onBeforeUnmount(() => {
+  if (latencyTimer) clearInterval(latencyTimer)
+})
+
+let stopCaptionDim: (() => void) | undefined
+onMounted(() => {
+  stopCaptionDim = watchCaptionDim(document.body)
+})
+onBeforeUnmount(() => stopCaptionDim?.())
+
 const booted = ref(false)
 onMounted(async () => {
   // The preload already applied the launch-time zoom before the first paint;
   // the stored value wins if it differs (a renderer reload after the user
   // zoomed carries stale launch prefs).
-  const storedZoom = Number(await window.api.settings.get<number>('zoom'))
-  if (Number.isFinite(storedZoom) && storedZoom !== zoom.level.value) zoom.restore(storedZoom)
+  const storedRaw = await window.api.settings.get<number>('zoom')
+  // Never saved: keep the default the preload applied (Number(null) would read as 0).
+  const storedZoom = storedRaw === undefined || storedRaw === null ? NaN : Number(storedRaw)
+  if (Number.isFinite(storedZoom)) zoom.restore(storedZoom)
   await Promise.all([
     store.loadHosts(),
     store.loadSecretsStatus(),
@@ -444,10 +464,8 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="app" :class="{ 'no-sidebar': store.page === 'terminal' && store.termSidebarHidden }">
-    <!-- macOS: a strip to drag the window by on pages without a tab bar. -->
-    <div v-if="store.page !== 'terminal'" class="mac-drag" />
-    <AppSidebar :hidden="store.page === 'terminal' && store.termSidebarHidden" />
+  <div class="app" :class="{ 'no-sidebar': store.termSidebarHidden }">
+    <AppSidebar :hidden="store.termSidebarHidden" @new-host="openNewHost" @edit-host="openEditHost" />
 
     <div class="workspace">
       <div v-if="!store.networkOnline" class="offline-banner">
@@ -455,10 +473,12 @@ onBeforeUnmount(() => {
         <span>{{ t('app.networkOffline') }}</span>
       </div>
 
-      <!-- 终端: kept mounted on every page (v-show) so sessions and scrollback live on. -->
-      <section v-show="store.page === 'terminal'" class="page term-page">
+      <!-- The one shell: tabs, the stage, the status line. Settings and port forwarding
+           open as sheets over it; the host rail is the only list of hosts. -->
+      <section class="page term-page">
         <TabBar />
         <main class="stage">
+          <div class="console">
           <div class="main-area">
             <!-- A tab holds a nested split tree of panes rendered recursively. -->
             <template v-for="tab in store.tabs" :key="tab.id">
@@ -468,17 +488,13 @@ onBeforeUnmount(() => {
                 :tab="tab"
                 :root="true"
                 :path="[]"
-                :tab-active="tab.id === store.activeId && store.page === 'terminal'"
+                :tab-active="tab.id === store.activeId"
                 :mod-key="modKey"
                 @cwd="onCwd"
               />
             </template>
 
-            <div v-if="!store.tabs.length" class="term-empty">
-              <span class="term-empty-icon"><Icon name="terminal" :size="26" /></span>
-              <p>{{ t('term.empty') }}</p>
-              <button class="btn btn-tinted pill" @click="store.setPage('hosts')">{{ t('nav.hosts') }}</button>
-            </div>
+            <StartScreen v-if="!store.tabs.length" @new-host="openNewHost" />
 
             <!-- Disconnected banner for the active pane -->
             <div v-if="bannerShown" class="closed-banner">
@@ -491,79 +507,46 @@ onBeforeUnmount(() => {
               <span class="banner-dim">{{ t('app.orClose', { keys: `${modKey}+W` }) }}</span>
             </div>
           </div>
+          </div>
 
+          <!-- Files: docked beside the terminal, or expanded to fill the stage. -->
+          <div v-if="store.sftpOpen && store.sftpFull && store.activePane?.status === 'connected'" class="files-full">
+            <SftpDrawer
+              page
+              :session-id="store.activePane?.sshSessionId"
+              :open="true"
+              :terminal-cwd="activeCwd"
+              :reload-key="sftpReloadKey"
+              @close="store.toggleSftp(false)"
+              @toggle-full="store.setSftpFull(false)"
+              @edit-file="onEditFile"
+              @edit-external="onEditExternal"
+              @open-with="onOpenWith"
+              @cd-terminal="onCdTerminal"
+            />
+          </div>
           <SftpDrawer
-            v-if="store.page === 'terminal' && store.sftpOpen && store.activePane?.status === 'connected'"
+            v-else-if="store.sftpOpen && store.activePane?.status === 'connected'"
             :session-id="store.activePane?.sshSessionId"
             :open="store.sftpOpen"
             :terminal-cwd="activeCwd"
             :reload-key="sftpReloadKey"
             @close="store.toggleSftp(false)"
+            @toggle-full="store.setSftpFull(true)"
             @edit-file="onEditFile"
             @edit-external="onEditExternal"
             @open-with="onOpenWith"
             @cd-terminal="onCdTerminal"
           />
         </main>
+        <CompareBar />
         <StatusBar />
       </section>
 
-      <HostsPage v-if="store.page === 'hosts' && booted" class="page" @new-host="openNewHost" @edit-host="openEditHost" />
-
-      <section v-if="store.page === 'sftp'" class="page sftp-page">
-        <header class="page-head">
-          <h1>SFTP</h1>
-          <nav v-if="connectedPanes.length" class="sessions">
-            <button
-              v-for="c in connectedPanes"
-              :key="c.pane.id"
-              class="session"
-              :class="{ on: sftpPane?.id === c.pane.id }"
-              @click="pickSftpPane(c.tab.id, c.pane.id)"
-            >
-              <OsIcon :os="c.host?.os" :color="c.host?.color" :size="22" />
-              <span>{{ c.tab.title }}</span>
-            </button>
-          </nav>
-        </header>
-        <div v-if="sftpPane" class="sftp-body">
-          <SftpDrawer
-            page
-            :session-id="sftpPane.sshSessionId"
-            :open="true"
-            :terminal-cwd="activeCwd"
-            :reload-key="sftpReloadKey"
-            @edit-file="onEditFile"
-            @edit-external="onEditExternal"
-            @open-with="onOpenWith"
-            @cd-terminal="onCdTerminal"
-          />
-        </div>
-        <div v-else class="sftp-pick">
-          <p>{{ t('sftpPage.pick') }}</p>
-          <div class="pick-grid">
-            <button
-              v-for="h in sftpHosts"
-              :key="h.id"
-              class="pick"
-              :class="{ busy: store.sftpConnecting === h.id }"
-              :disabled="!!store.sftpConnecting"
-              @click="connectForSftp(h)"
-            >
-              <OsIcon :os="h.os" :color="h.color" :size="34" />
-              <span class="pick-main">
-                <b><span class="pdot" :class="pickState(h)" />{{ h.label }}</b>
-                <small>{{ h.username }}@{{ h.host }}</small>
-              </span>
-            </button>
-          </div>
-        </div>
-      </section>
-
-      <ForwardsPage v-if="store.page === 'forwards'" class="page" />
-
-      <SettingsDialog />
     </div>
+
+    <ModalShell :open="store.sheet === 'settings'" :width="940" tall @close="store.toggleSettings(false)"><SettingsDialog /></ModalShell>
+    <ModalShell :open="store.sheet === 'forwards'" :width="760" tall @close="store.openSheet(null)"><ForwardsPage /></ModalShell>
 
     <CommandPalette @new-host="openNewHost" @edit-host="openEditHost" />
         <HostEditor :open="editorOpen" :host="editingHost" @close="editorOpen = false" />
@@ -611,175 +594,41 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
 }
-.term-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 14px;
-  height: 100%;
-  font-size: 13px;
-  color: var(--text-faint);
-}
-.term-empty p {
-  margin: 0;
-}
-.term-empty-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 56px;
-  height: 56px;
-  border-radius: 16px;
-  color: var(--text-dim);
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
-}
-.sftp-page {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  width: 100%;
-  max-width: 1320px;
-  margin: 0 auto;
-  padding: 24px 36px 28px;
-}
-.sessions {
-  display: flex;
-  gap: 6px;
-  min-width: 0;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-.session {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 32px;
-  padding: 0 12px 0 5px;
-  border-radius: var(--r-pill);
-  font-size: 13px;
-  color: var(--text-dim);
-  white-space: nowrap;
-  transition: background 0.16s var(--ease), color 0.16s var(--ease);
-}
-.session:hover {
-  color: var(--text);
-  background: var(--hover);
-}
-.session.on {
-  color: var(--text);
-  background: var(--selected);
-}
-.session :deep(.os-tile) {
-  border-radius: var(--r-pill);
-}
-.sftp-body {
-  flex: 1;
-  min-height: 0;
-}
-.sftp-pick {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-.sftp-pick p {
-  margin: 0;
-  font-size: 13px;
-  color: var(--text-faint);
-}
-.pick-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 10px;
-}
-.pick {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 14px;
-  text-align: left;
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
-  border-radius: var(--r-menu);
-  transition: border-color 0.18s var(--ease), background 0.18s var(--ease), transform 0.18s var(--ease), box-shadow 0.18s var(--ease);
-}
-/* Same hover as the host cards on the 连接 page. */
-.pick:hover {
-  border-color: var(--border-strong);
-  background: color-mix(in srgb, var(--text) 3%, var(--bg-elev));
-  transform: translateY(-1px);
-  box-shadow: 0 10px 24px -18px rgba(0, 0, 0, 0.55);
-}
-.pick:active {
-  transform: scale(0.99);
-}
-.pick:disabled {
-  cursor: default;
-}
-.pick:disabled:not(.busy) {
-  opacity: 0.55;
-}
-.pick.busy {
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
-  animation: pick-busy 1.2s ease-in-out infinite;
-}
-@keyframes pick-busy {
-  50% {
-    opacity: 0.6;
-  }
-}
-.pick-main b {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-}
-.pdot {
-  flex: none;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: transparent;
-  box-shadow: inset 0 0 0 1.5px var(--text-faint);
-}
-.pdot.online {
-  background: var(--ok);
-  box-shadow: none;
-}
-.pdot.offline {
-  background: var(--text-faint);
-  box-shadow: none;
-}
-.pick-main {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-.pick-main b {
-  font-size: 13.5px;
-  font-weight: 600;
-  color: var(--text);
-}
-.pick-main small {
-  font-size: 12px;
-  color: var(--text-faint);
-  font-family: var(--font-mono);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
 .stage {
   position: relative;
   display: flex;
   flex: 1;
   min-height: 0;
+  background: var(--console);
+}
+/* The file view expanded over the stage (the terminals stay mounted underneath). */
+.files-full {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  padding: 10px 14px 12px;
   background: var(--bg);
+}
+.files-full > :deep(.sftp) {
+  flex: 1;
+  min-height: 0;
+}
+/* The terminal block. One session: a framed console with its own bar. Side by
+   side: no frame here, each pane is its own framed box (see PaneNode). */
+.console {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
 }
 .main-area {
   position: relative;
   flex: 1;
   min-width: 0;
+  min-height: 0;
 }
 .state {
   display: flex;
@@ -832,7 +681,7 @@ onBeforeUnmount(() => {
 }
 .banner-btn:hover {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
 }
 .banner-dim {
   color: var(--text-faint);

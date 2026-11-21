@@ -185,4 +185,13 @@ watch(
   font-size: 11.5px;
   margin: 0;
 }
+
+/* C3: mono chrome, flat shapes (tokens already carry the radii). */
+.rp-dialog {
+  font-family: var(--font-chrome);
+}
+.rp-title {
+  font-family: var(--font-chrome);
+  font-weight: 700;
+}
 </style>

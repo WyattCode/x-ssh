@@ -22,4 +22,7 @@ if (typeof navigator !== 'undefined') {
 // the stylesheet makes room for them and marks where the window can be dragged.
 if (/mac/i.test(navigator.platform || navigator.userAgent)) document.documentElement.classList.add('mac')
 
+// Windows: the same, with the caption buttons overlaid at the top right.
+if (window.api?.platform === 'win32') document.documentElement.classList.add('win')
+
 createApp(App).use(createPinia()).mount('#app')

@@ -1,9 +1,16 @@
 <script setup lang="ts">
+import { computed, ref } from 'vue'
+import { snapIcon } from '../lib/iconSnap'
 /**
  * Unified thin-line icon set (feather-style: 24×24, currentColor stroke,
  * round caps/joins) for a consistent, refined look.
  */
-withDefaults(defineProps<{ name: string; size?: number }>(), { size: 16 })
+const props = withDefaults(defineProps<{ name: string; size?: number; ink?: number; weight?: number }>(), { size: 16, ink: 0, weight: 0 })
+
+// Ink extent (width, height) of each glyph in its 24-unit grid, measured from the paths. Two icons
+// at the same box size are not the same size to the eye (a settings glyph spans 22 units, a plus 14):
+// `ink` asks for the glyph itself to be that many px wide, whichever icon it is.
+const EXT: Record<string, [number, number]> = {'host-add':[20, 17], plus:[14, 14], minus:[14, 0], list:[17, 12], forward:[16, 16], monitor:[18, 16], focus:[19, 16], image:[16, 16], 'file-text':[16, 20], database:[16, 18], 'arrow-left':[14, 12], sort:[18, 16], sidebar:[18, 18], layers:[20, 18], tag:[18.2, 18.2], close:[12, 12], keyboard:[20, 14], moon:[18, 18], folder:[20, 18], 'folder-open':[20, 17], 'folder-up':[20, 18], 'folder-plus':[20, 18], zip:[16, 19], archive:[16, 16], file:[16, 20], home:[18, 18], refresh:[18, 18], upload:[18, 18], download:[18, 18], 'arrow-up':[14, 14], 'arrow-down':[14, 14], sync:[22, 20], search:[18, 18], edit:[18, 17.1], terminal:[16, 14], 'arrow-right':[14, 12], 'chevron-up':[12, 6], 'chevron-down':[12, 6], 'chevron-right':[6, 12], server:[18, 16], code:[20, 12], sun:[20, 20], settings:[22, 18], eye:[20, 14], 'corner-down-right':[16, 16], 'alert-triangle':[20.9, 18.1], 'more-horizontal':[14, 0], clock:[20, 20], split:[18, 16], rows:[18, 16], shield:[16, 20], book:[16, 20], zap:[18, 20], check:[16, 11], auto:[16.4, 16.4], 'check-all':[15.8, 14], info:[2, 8], copy:[16, 18], trash:[18, 20], lock:[16, 19], unlock:[16, 19.1], play:[12, 14], pause:[8, 14], send:[20, 20], layout:[18, 18], columns:[18, 18], grid:[16, 16], 'wifi-off':[22, 22], diff:[16, 16]}
 
 const P: Record<string, string> = {
   plus: 'M12 5v14 M5 12h14',
@@ -18,6 +25,7 @@ const P: Record<string, string> = {
   'file-text': 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M8 13h8 M8 17h5',
   database: 'M12 3c4.4 0 8 1.3 8 3s-3.6 3-8 3-8-1.3-8-3 3.6-3 8-3z M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6 M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3',
   'arrow-left': 'M19 12H5 M11 18l-6-6 6-6',
+  sort: 'M7 4v16 M3 16l4 4 4-4 M17 20V4 M13 8l4-4 4 4',
   sidebar: 'M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z M9 3v18',
   layers: 'M12 3 2 8l10 5 10-5z M2 16l10 5 10-5 M2 12l10 5 10-5',
   tag: 'M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z|M7.5 7.5h.01',
@@ -28,6 +36,8 @@ const P: Record<string, string> = {
   folder: 'M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z',
   'folder-open': 'M6 14l1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2',
   'folder-up': 'M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z|M12 17.5V12 M9.6 14 12 11.5 14.4 14',
+  // A server with a plus: "add a host" (the tab bar's plain plus is "new tab"; the two must not look alike).
+  'host-add': 'M4 3h12a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z|M4 14h8a2 2 0 0 1 2 2v1a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-1a2 2 0 0 1 2-2z|M19 14v6 M16 17h6',
   'folder-plus': 'M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z|M12 10v6 M9 13h6',
   zip: 'M10 2h4l1 2h3a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h4z|M12 2v2 M12 4v2 M12 6v2 M12 8v2 M9 13h6 M10 17h4',
   archive: 'M4 5h16v3H4z M6 8v11a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V8 M10 12h4',
@@ -76,21 +86,52 @@ const P: Record<string, string> = {
   pause: 'M8 5v14 M16 5v14',
    send: 'M22 2 11 13 M22 2 15 22 11 13 2 9z',
    layout: 'M3 4a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z M3 9h18 M9 21V9',
+  columns: 'M4 3h16a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z M12 3v18',
    grid: 'M4 4h7v7H4z M13 4h7v7h-7z M4 13h7v7H4z M13 13h7v7h-7z',
     'wifi-off':
       'M1 1l22 22 M16.72 11.06 19 12.55 M5 12.55a10.94 10.94 0 0 1 5.17-2.39 M10.71 5.05 22.58 9 M1.42 9a15.91 15.91 0 0 1 4.7-2.88 M8.53 16.11a6 6 0 0 1 6.95 0 M12 20h.01',
     diff: 'M4 4h7v16H4z M13 4h7v16h-7z|M7 9h1 M7 13h1 M16 9h1 M16 13h1 M16 17h1'
 }
+
+// Crisp at any screen: the box and the stroke are whole DEVICE pixels, not whole CSS pixels. At 120 %
+// zoom on a 150 % display one CSS pixel is 1.8 device pixels, so a "round" CSS size still lands between
+// pixels and every line is smeared over two. `devicePixelRatio` already holds the page zoom; it is read
+// again when the window or the zoom changes (both resize the page).
+const dprTick = ref(0)
+if (typeof window !== 'undefined') {
+  window.addEventListener('resize', () => dprTick.value++)
+  // Dragged to a screen with another scale: the ratio changes without a resize.
+  const watchRatio = (): void => {
+    window.matchMedia?.(`(resolution: ${window.devicePixelRatio}dppx)`)?.addEventListener('change', () => { dprTick.value++; watchRatio() }, { once: true })
+  }
+  watchRatio()
+}
+const dpr = (): number => {
+  void dprTick.value
+  return (typeof window !== 'undefined' && window.devicePixelRatio) || 1
+}
+
+/** The box asked for, in CSS px: as given, or the one that makes the glyph `ink` px across. */
+const wanted = computed(() => {
+  if (!props.ink) return props.size
+  const e = EXT[props.name]
+  return e ? (props.ink * 24) / Math.max(e[0], e[1], 1) : props.size
+})
+const snapped = computed(() => snapIcon(wanted.value, props.weight || (1.7 * wanted.value) / 24, dpr()))
+/** Box in CSS px: a whole number of device pixels. */
+const box = computed(() => snapped.value.boxCss)
+/** Stroke in grid units: a whole number of device pixels. */
+const strokeW = computed(() => snapped.value.strokeUnits)
 </script>
 
 <template>
   <svg
-    :width="size"
-    :height="size"
+    :width="box"
+    :height="box"
     viewBox="0 0 24 24"
     fill="none"
     stroke="currentColor"
-    stroke-width="1.7"
+    :stroke-width="strokeW"
     stroke-linecap="round"
     stroke-linejoin="round"
     aria-hidden="true"

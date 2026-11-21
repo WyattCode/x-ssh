@@ -5,6 +5,17 @@ import { useToast } from '../composables/toast'
 import { useConfirm } from '../composables/confirm'
 import { useSnippetVars } from '../composables/snippetVars'
 import { clampConcurrency } from '../../../shared/fsUtils'
+import { DEFAULT_COMPARE_SERVICE, compareCommandLabels, isValidService, type CompareMetric } from '../../../shared/compare'
+import {
+  DEFAULT_HOSTS_SORT,
+  buildGroups,
+  insertBefore,
+  isHostsSort,
+  patchesForOrder,
+  reorderGroupNames,
+  type HostPatch,
+  type HostsSort
+} from '../../../shared/hostGroups'
 import {
   decideStatusEvent,
   isPermanentConnectCode,
@@ -225,6 +236,23 @@ export interface Tab {
   activePaneId: string
 }
 
+/** One host's answer to a comparison probe, shown under the side-by-side panes. */
+export interface CompareItem {
+  paneId: string
+  /** What the panes are called in the summary (the host's name). */
+  name: string
+  /** The commands as a person would type them (same order as `outputs`). */
+  commands: string[]
+  /** null = that command failed or the pane was not connected. */
+  outputs: (string | null)[]
+}
+export interface CompareResult {
+  metric: CompareMetric
+  service: string
+  items: CompareItem[]
+  at: number
+}
+
 export type CursorStyle = 'bar' | 'block' | 'underline'
 
 /** A serializable tab layout (secrets stripped) used for persistence/snapshots. */
@@ -271,15 +299,17 @@ export interface DownloadQueueOp {
 
 export type SettingsTab = 'general' | 'terminal' | 'connection' | 'keys' | 'security'
 
-/** The page the left sidebar shows. */
+/** What the app can be asked to show. There is one shell (host rail, tabs, status
+ *  line); 'settings' and 'forwards' open as side sheets over it, 'sftp' expands
+ *  the file view, and 'hosts' / 'terminal' just mean "the shell, nothing on top". */
 export type AppPage = 'hosts' | 'terminal' | 'sftp' | 'forwards' | 'settings'
-export type HostsView = 'grid' | 'list'
-export const SIDEBAR_DEFAULT_W = 224
-export const SIDEBAR_MIN_W = 180
-export const SIDEBAR_MAX_W = 360
+export type Sheet = 'settings' | 'forwards' | null
+export const SIDEBAR_DEFAULT_W = 280
+export const SIDEBAR_MIN_W = 220
+export const SIDEBAR_MAX_W = 420
 export const clampSidebarWidth = (w: number): number =>
   Math.round(Math.min(SIDEBAR_MAX_W, Math.max(SIDEBAR_MIN_W, w)))
-export type HostsSort = 'recent' | 'name' | 'address'
+export type { HostsSort }
 
 /** Startup layout from main's launch prefs (read synchronously by the preload),
  *  so the first frame already has the saved sidebar / view — loading them
@@ -296,18 +326,29 @@ interface State {
   hostsBad: boolean
   tabs: Tab[]
   activeId: string | null
-  /** Sidebar page. Terminals stay mounted (hidden) on every other page. */
-  page: AppPage
-  /** Where「设置」returns to when toggled off (Ctrl+, twice). */
-  prevPage: AppPage
+  /** The side sheet over the shell, if any. */
+  sheet: Sheet
+  /** The file view fills the stage instead of docking as a side panel. */
+  sftpFull: boolean
   sidebarCollapsed: boolean
   /** On the 终端 page the sidebar can be hidden entirely (terminal full width);
    *  remembered, so every session opens the way it was last left. */
   termSidebarHidden: boolean
   /** Sidebar width when expanded (dragged by its right edge). */
   sidebarWidth: number
-  hostsView: HostsView
   hostsSort: HostsSort
+  /** Hosts whose names share a prefix and a trailing number form a group by themselves. */
+  autoGroup: boolean
+  /** Sort 自定义: locked = the order cannot be changed by accident (no handles, no dragging). */
+  sortLocked: boolean
+  /** The hand-made order of the groups (names), used by the sort 自定义. */
+  groupOrder: string[]
+  termFocusTick: number
+  /** Round-trip time per live ssh session id, in ms (null = not measurable). */
+  latency: Record<string, number | null>
+  /** Last side-by-side comparison per tab, and which probe is running. */
+  compare: Record<string, CompareResult | undefined>
+  comparing: string
   /** Background online probe results, by host id (see main/reachability.ts). */
   reach: Record<string, Reachability>
   /** Saved host being connected from 打开 SFTP (buttons show busy meanwhile). */
@@ -426,13 +467,20 @@ export const useSessions = defineStore('sessions', {
   hostsBad: false,
     tabs: [],
     activeId: null,
-    page: 'hosts',
-    prevPage: 'hosts',
+    sheet: null,
+    sftpFull: false,
     sidebarCollapsed: bootPrefs.sidebarCollapsed === true,
     termSidebarHidden: bootPrefs.termSidebarHidden === true,
     sidebarWidth: bootWidth > 0 ? clampSidebarWidth(bootWidth) : SIDEBAR_DEFAULT_W,
-    hostsView: bootPrefs.hostsView === 'list' ? 'list' : 'grid',
-    hostsSort: bootPrefs.hostsSort === 'name' || bootPrefs.hostsSort === 'address' ? bootPrefs.hostsSort : 'recent',
+    latency: {},
+    /** Bumped to ask the focused terminal to take the keyboard (after a host is opened from the rail). */
+    termFocusTick: 0,
+    compare: {},
+    comparing: '',
+    hostsSort: isHostsSort(bootPrefs.hostsSort) ? bootPrefs.hostsSort : DEFAULT_HOSTS_SORT,
+    autoGroup: true,
+    sortLocked: true,
+    groupOrder: [],
     reach: {},
     sftpConnecting: '',
     paletteOpen: false,
@@ -733,19 +781,22 @@ export const useSessions = defineStore('sessions', {
       // after a crash, and the launch prefs are from window creation): applied
       // only when the stored value exists and differs — on a normal launch they
       // match and nothing moves.
-      const [sc, ts, swRaw, hv, hs] = await Promise.all([
+      const [sc, ts, swRaw, hs] = await Promise.all([
         window.api.settings.get<boolean>('sidebarCollapsed'),
         window.api.settings.get<boolean>('termSidebarHidden'),
         window.api.settings.get<number>('sidebarWidth'),
-        window.api.settings.get<string>('hostsView'),
         window.api.settings.get<string>('hostsSort')
       ])
       if (typeof sc === 'boolean' && sc !== this.sidebarCollapsed) this.sidebarCollapsed = sc
       if (typeof ts === 'boolean' && ts !== this.termSidebarHidden) this.termSidebarHidden = ts
       const sw = Number(swRaw)
       if (sw > 0 && clampSidebarWidth(sw) !== this.sidebarWidth) this.sidebarWidth = clampSidebarWidth(sw)
-      if ((hv === 'grid' || hv === 'list') && hv !== this.hostsView) this.hostsView = hv
-      if ((hs === 'recent' || hs === 'name' || hs === 'address') && hs !== this.hostsSort) this.hostsSort = hs
+      if (isHostsSort(hs) && hs !== this.hostsSort) this.hostsSort = hs
+      // On unless switched off; the hand-made group order is a list of names.
+      this.autoGroup = (await window.api.settings.get<boolean>('autoGroup')) !== false
+      this.sortLocked = (await window.api.settings.get<boolean>('sortLocked')) !== false
+      const go = await window.api.settings.get<unknown>('groupOrder')
+      this.groupOrder = Array.isArray(go) ? go.filter((x): x is string => typeof x === 'string') : []
       this.transferRateKbps =
         (await window.api.settings.get<number>('transferRateKbps')) ?? 0
       this.minimizeToTray = (await window.api.settings.get<boolean>('minimizeToTray')) === true
@@ -1437,6 +1488,8 @@ export const useSessions = defineStore('sessions', {
     setActive(id: string): void {
       if (this.activeId === id) return
       this.activeId = id
+      // Another tab: its terminal, not the expanded file view of the last one.
+      this.sftpFull = false
       this.persistTabs()
     },
     setActivePane(tabId: string, paneId: string): void {
@@ -1458,6 +1511,11 @@ export const useSessions = defineStore('sessions', {
     },
     toggleSftp(open?: boolean): void {
       this.sftpOpen = open ?? !this.sftpOpen
+      if (!this.sftpOpen) this.sftpFull = false
+    },
+    setSftpFull(v: boolean): void {
+      this.sftpFull = v
+      if (v) this.sftpOpen = true
     },
     /** A connect-failure card asked the user to fix this saved host; App.vue
      *  opens the editor for it (see lib/connectActions.ts). */
@@ -1467,19 +1525,28 @@ export const useSessions = defineStore('sessions', {
     clearHostEditorIntent(): void {
       this.hostEditorIntent = null
     },
-    /** Settings is a sidebar page now; toggling it off goes back to where you were. */
+    /** Settings is a side sheet over the shell; toggling it off just closes it. */
     toggleSettings(open?: boolean, tab?: SettingsTab): void {
       if (tab) this.settingsTab = tab
-      const want = open ?? this.page !== 'settings'
-      if (want) this.setPage('settings')
-      else if (this.page === 'settings') this.setPage(this.prevPage === 'settings' ? 'hosts' : this.prevPage)
+      const want = open ?? this.sheet !== 'settings'
+      this.openSheet(want ? 'settings' : null)
     },
+    /** One side sheet at a time. */
+    openSheet(sheet: Sheet): void {
+      this.sheet = sheet
+      this.settingsOpen = sheet === 'settings'
+      if (sheet) this.paletteOpen = false
+    },
+    /** Kept for the places that still ask for a "page": there is only the shell, so
+     *  this closes any sheet, and the pages that became views open as such. */
     setPage(page: AppPage): void {
-      if (page === this.page) return
-      if (page === 'settings') this.prevPage = this.page
-      this.page = page
-      this.settingsOpen = page === 'settings'
-      this.paletteOpen = false
+      // Not the palette: a password prompt the caller just opened is the palette.
+      if (page === 'settings' || page === 'forwards') {
+        this.openSheet(page)
+        return
+      }
+      this.openSheet(null)
+      if (page === 'sftp' && this.activePane?.status === 'connected') this.setSftpFull(true)
     },
     setSidebarCollapsed(v: boolean): void {
       const prev = this.sidebarCollapsed
@@ -1527,21 +1594,23 @@ export const useSessions = defineStore('sessions', {
         toast(t('set.gen.writeFail'), 'error')
       })
     },
-    setHostsView(v: HostsView): void {
-      const prev = this.hostsView
-      this.hostsView = v
-      void window.api.settings.set('hostsView', v).then((r) => {
+    setSortLocked(v: boolean): void {
+      const prev = this.sortLocked
+      this.sortLocked = v
+      void window.api.settings.set('sortLocked', v).then((r) => {
         if (r && r.ok === false) {
-          this.hostsView = prev
+          this.sortLocked = prev
           toast(t('set.gen.writeFail'), 'error')
         }
       }).catch(() => {
-        this.hostsView = prev
+        this.sortLocked = prev
         toast(t('set.gen.writeFail'), 'error')
       })
     },
     setHostsSort(v: HostsSort): void {
       const prev = this.hostsSort
+      // Coming to 自定义 means "I am going to arrange": the handles are there from the start.
+      if (v === 'custom' && prev !== 'custom' && this.sortLocked) this.setSortLocked(false)
       this.hostsSort = v
       void window.api.settings.set('hostsSort', v).then((r) => {
         if (r && r.ok === false) {
@@ -1552,6 +1621,67 @@ export const useSessions = defineStore('sessions', {
         this.hostsSort = prev
         toast(t('set.gen.writeFail'), 'error')
       })
+    },
+    setAutoGroup(v: boolean): void {
+      const prev = this.autoGroup
+      this.autoGroup = v
+      void window.api.settings.set('autoGroup', v).then((r) => {
+        if (r && r.ok === false) {
+          this.autoGroup = prev
+          toast(t('set.gen.writeFail'), 'error')
+        }
+      }).catch(() => {
+        this.autoGroup = prev
+        toast(t('set.gen.writeFail'), 'error')
+      })
+    },
+    /** The groups as the rail shows them (names, members, sort). */
+    railGroups(): ReturnType<typeof buildGroups> {
+      return buildGroups(this.hosts, {
+        sort: this.hostsSort,
+        autoOn: this.autoGroup,
+        groupOrder: this.groupOrder,
+        ungroupedLabel: t('app.ungrouped')
+      })
+    },
+    /** Group / order changes for several hosts in one write. */
+    async patchHosts(patches: HostPatch[]): Promise<boolean> {
+      if (!patches.length) return true
+      try {
+        this.hosts = await window.api.hosts.patch(patches)
+        return true
+      } catch {
+        toast(t('rail.moveFail'), 'error')
+        return false
+      }
+    },
+    /** Puts hosts in a group (or in none: '') as the user's own decision. */
+    async moveHostsToGroup(ids: string[], group: string): Promise<boolean> {
+      return this.patchHosts(ids.map((id) => ({ id, group, groupLocked: true })))
+    },
+    /** Drag and drop: put `ids` into `group` ('' = none) before `beforeId` (null = at the end),
+     *  and make the result the hand-made order. */
+    async dropHosts(ids: string[], group: string, beforeId: string | null): Promise<boolean> {
+      const target = this.railGroups().find((g) => (g.name === t('app.ungrouped') ? '' : g.name).toLowerCase() === group.toLowerCase())
+      const current = (target?.hosts ?? []).map((h) => h.id)
+      // "Before one of the hosts being moved" means before the next one that stays.
+      let before = beforeId
+      while (before && ids.includes(before)) {
+        const i: number = current.indexOf(before)
+        before = i >= 0 ? (current[i + 1] ?? null) : null
+      }
+      const ordered = insertBefore(current, ids, before)
+      const ok = await this.patchHosts(patchesForOrder(ordered, group, ids))
+      // A dropped order only means something under the sort that reads it.
+      if (ok && this.hostsSort !== 'custom') this.setHostsSort('custom')
+      return ok
+    },
+    /** Drag a group heading before another (null = last); only the hand-made order reads this. */
+    reorderGroup(name: string, beforeName: string | null): void {
+      const shown = this.railGroups().map((g) => g.name).filter((n) => n !== t('app.ungrouped'))
+      this.groupOrder = reorderGroupNames(shown, name, beforeName)
+      void window.api.settings.set('groupOrder', [...this.groupOrder])
+      if (this.hostsSort !== 'custom') this.setHostsSort('custom')
     },
     /** Drop cached probe results so the UI shows unknown until a fresh probe lands. */
     clearReach(ids: string[]): void {
@@ -1756,7 +1886,11 @@ export const useSessions = defineStore('sessions', {
     /** Opens a tab (single pane) and connects it. Returns the new tab id.
      *  Switches to the 终端 page unless `stay` (e.g. connecting from the SFTP page). */
     async openConnection(params: ConnectParams, title: string, opts: { stay?: boolean } = {}): Promise<string> {
-      if (!opts.stay) this.setPage('terminal')
+      if (!opts.stay) {
+        this.setPage('terminal')
+        // Opening a host means "show me its terminal", not its files.
+        this.sftpFull = false
+      }
       const paneId = uid('pane')
       const tab: Tab = {
         id: uid('tab'),
@@ -1800,6 +1934,99 @@ export const useSessions = defineStore('sessions', {
       // Same as applyLayoutPreset: without this, restoreTabs comes back to a
       // single pane after a split-only session.
       this.persistTabs()
+    },
+
+    /** The focused terminal takes the keyboard: opening a host from the rail leaves
+     *  DOM focus on the rail's button, and typing would go nowhere. */
+    focusTerminal(): void {
+      this.termFocusTick++
+    },
+
+    /** Puts another saved host beside the focused pane of a tab: the side-by-side
+     *  view for comparing two machines. The new pane connects with that host's
+     *  own settings (jump host, key, saved password) exactly like opening it from
+     *  the library. A password host with no saved password cannot be asked for
+     *  inside a split, so it answers 'needs-password' and the caller says so.
+     *  The new pane takes the keyboard at once (a host-key card or a slow connect
+     *  must not leave typing going to the old pane); if the connect fails, focus
+     *  goes back and the pane shows its own error card ('failed'). */
+    async splitWithHost(tabId: string, host: Host, dir: SplitDir = 'row'): Promise<'connected' | 'failed' | 'needs-password' | 'unavailable'> {
+      const tab = this.tabs.find((t) => t.id === tabId)
+      if (!tab || tab.panes.length >= 8) return 'unavailable'
+      if (host.auth === 'password' && !host.hasSavedPassword) return 'needs-password'
+      const src = tab.panes.find((p) => p.id === tab.activePaneId) ?? tab.panes[0]
+      if (!src) return 'unavailable'
+      const paneId = uid('pane')
+      tab.layout = splitLeaf(tab.layout, src.id, dir, paneId)
+      tab.panes.push({
+        id: paneId,
+        status: 'connecting',
+        params: {
+          host: host.host,
+          port: host.port,
+          username: host.username,
+          auth: host.auth,
+          keyPath: host.keyPath,
+          hostId: host.id,
+          agentForward: host.agentForward,
+          x11Forward: host.x11Forward,
+          onConnect: host.onConnect,
+          onConnectDelayMs: host.onConnectDelayMs
+        }
+      })
+      tab.activePaneId = paneId
+      await this.runConnect(paneId)
+      const t = this.tabs.find((x) => x.id === tabId)
+      const p = t?.panes.find((x) => x.id === paneId)
+      const failed = p?.status === 'error'
+      // An unknown host key is not a failure yet: the pane waits for the user's
+      // trust, and keeps the keyboard so the connection lands focused.
+      const waitingForTrust = failed && p?.errorCode === 'host_key_unknown'
+      if (t && failed && !waitingForTrust && t.activePaneId === paneId && t.panes.some((x) => x.id === src.id)) t.activePaneId = src.id
+      this.persistTabs()
+      return failed && !waitingForTrust ? 'failed' : 'connected'
+    },
+
+    /** Measures the round trip of these live sessions (one at a time per session;
+     *  a failure just leaves null, the footer then shows a dash). */
+    async refreshLatency(sessionIds: string[]): Promise<void> {
+      await Promise.all(
+        sessionIds.map(async (id) => {
+          const ms = await window.api.ssh.ping(id).catch(() => null)
+          // The session may have closed while we waited: do not resurrect its entry.
+          if (this.paneBySession(id)?.status === 'connected') this.latency[id] = ms
+          else delete this.latency[id]
+        })
+      )
+    },
+
+    /** Runs one comparison probe on every connected pane of the tab and keeps the
+     *  answers for the results strip. Probes go over their own exec channels, never
+     *  the terminals, so nothing is typed into a shell and a half-typed command at
+     *  a prompt is left alone. */
+    async runCompare(tabId: string, metric: CompareMetric, serviceName?: string): Promise<boolean> {
+      const tab = this.tabs.find((t) => t.id === tabId)
+      if (!tab || this.comparing) return false
+      const service = (serviceName ?? this.compare[tabId]?.service ?? DEFAULT_COMPARE_SERVICE).trim()
+      if (metric === 'service' && !isValidService(service)) return false
+      const live = tab.panes.filter((p) => p.status === 'connected' && p.sshSessionId)
+      if (!live.length) return false
+      this.comparing = tabId
+      try {
+        const labels = compareCommandLabels(metric, service)
+        const items: CompareItem[] = await Promise.all(
+          live.map(async (p) => {
+            const host = p.params.hostId ? this.hosts.find((h) => h.id === p.params.hostId) : undefined
+            const name = host?.label ?? (p.params.username ? p.params.username + '@' : '') + p.params.host
+            const r = await window.api.ssh.compare(p.sshSessionId!, metric, service).catch(() => null)
+            return { paneId: p.id, name, commands: labels, outputs: r && r.ok ? r.outputs : labels.map(() => null) }
+          })
+        )
+        this.compare[tabId] = { metric, service, items, at: Date.now() }
+        return true
+      } finally {
+        this.comparing = ''
+      }
     },
 
     /** Sends a single command line to every connected pane across all tabs

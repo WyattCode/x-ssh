@@ -56,6 +56,11 @@ export interface Host {
   keyPath?: string
   /** Optional grouping label for the palette & welcome list. */
   group?: string
+  /** The user decided this host's group (picked one, or chose "no group"): the name-based
+   *  automatic grouping leaves it alone. See shared/hostGroups.ts. */
+  groupLocked?: boolean
+  /** Position among its group in the hand-made order (sort "自定义"). */
+  order?: number
   /** Id of another saved Host to tunnel through (ProxyJump). */
   jumpHostId?: string
   /** Tunnel this connection through an HTTP/SOCKS5 proxy instead of a direct link. */
@@ -364,7 +369,6 @@ export interface UiPrefs {
   sidebarCollapsed?: boolean
   sidebarWidth?: number
   termSidebarHidden?: boolean
-  hostsView?: string
   hostsSort?: string
 }
 

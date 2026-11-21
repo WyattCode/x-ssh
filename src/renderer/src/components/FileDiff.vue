@@ -155,4 +155,13 @@ const result = computed(() => diffLines(props.remoteContent, props.localContent)
 .fd-body tr.del .fd-glyph {
   color: var(--danger);
 }
+
+/* C3: mono chrome, flat shapes (tokens already carry the radii). */
+.fd-dialog {
+  font-family: var(--font-chrome);
+}
+.fd-title {
+  font-family: var(--font-chrome);
+  font-weight: 700;
+}
 </style>

@@ -137,7 +137,7 @@ watch(
 }
 .confirm {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
   font-weight: 500;
 }
 .confirm:hover {
@@ -145,5 +145,14 @@ watch(
 }
 .confirm.danger {
   background: var(--danger);
+}
+
+/* C3: mono chrome, flat shapes (tokens already carry the radii). */
+.dialog {
+  font-family: var(--font-chrome);
+}
+.title {
+  font-family: var(--font-chrome);
+  font-weight: 700;
 }
 </style>

@@ -265,4 +265,9 @@ onMounted(() => nextTick(() => dialogEl.value?.focus()))
   cursor: pointer;
 }
 
+
+/* C3: mono chrome, flat shapes (tokens already carry the radii). */
+.pm-dialog {
+  font-family: var(--font-chrome);
+}
 </style>

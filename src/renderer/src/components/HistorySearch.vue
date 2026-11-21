@@ -340,7 +340,7 @@ function onKey(e: KeyboardEvent): void {
   margin-left: 8px;
   padding: 2px 10px;
   border: 1px solid var(--border-strong);
-  border-radius: var(--r-pill);
+  border-radius: 4px;
   font-size: 12px;
   color: var(--accent);
   transition: background 0.16s var(--ease);
@@ -406,5 +406,16 @@ function onKey(e: KeyboardEvent): void {
   border-radius: 4px;
   font-size: 10.5px;
   margin-right: 2px;
+}
+
+/* C3: mono chrome, flat shapes (tokens already carry the radii). */
+.panel {
+  font-family: var(--font-chrome);
+}
+.in {
+  caret-color: var(--cursor);
+}
+.count {
+  border-radius: 4px;
 }
 </style>

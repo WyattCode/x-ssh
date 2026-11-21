@@ -1,6 +1,9 @@
 """
 X-SSH 图标生成器:一套几何 + 配色,产出所有平台的图标文件。
 
+(注:桌面 / 托盘图标、横向 logo(logo-*.png、mark-*.svg、Android logo_lockup_*、iOS lockup.png)现在
+出自 build/icon-src/flat/ 里的扁平版脚本 make.cjs / lockup.cjs;再运行本脚本会把它们覆盖回旧的渐变银色版本。)
+
     python build/icon-src/make_icons.py        (需要 Python 3 + Pillow + numpy)
 
 新标识是两根交叉的银色条(白天 / 夜间两套配色,见 reference/)。几何是从参考图拟合出来的:

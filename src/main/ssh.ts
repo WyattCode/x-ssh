@@ -30,6 +30,7 @@ import {
   penaltyRetryDelayMs,
   passphraseConnectCode
 } from './friendlyError'
+import { COMPARE_METRICS, compareCommands, type CompareMetric } from '../shared/compare'
 import { posixJoin, parentOf, clampConcurrency, buildPackCommand, buildExtractCommand, treeDirMode, uploadStreamOptions } from '../shared/fsUtils'
 import { isLoopbackHost, localX11Target, parseX11Hello, readLocalX11Cookie, rewriteX11Hello } from './x11'
 import { ensureLocalXServer } from './x11Server'
@@ -269,11 +270,25 @@ export class SshManager {
    *  output and flush what arrived since the shell opened. */
   attach(sessionId: string): void {
     const session = this.sessions.get(sessionId)
-    if (!session || session.attached) return
+    if (!session) return
+    if (session.attached) {
+      // A terminal was mounted again for a live session (its tab went side by side,
+      // so the pane tree changed shape and the old terminal was torn down). Give the
+      // new one what the old was showing: the retained output, replayed in order.
+      // Only the screen state matters, and the app's own startup clears the screen
+      // once, so the replay lands on the same picture.
+      const h = session.history
+      const text = h ? h.chunks.slice(h.head).join('') : ''
+      if (text && !this.sender.isDestroyed()) this.sender.send(IPC.sshData, { sessionId, data: text })
+      return
+    }
     session.attached = true
     const buf = session.pendingBuf
     session.pendingBuf = undefined
-    if (buf) this.sendData(sessionId, buf)
+    // Straight to the renderer: sendData would append this text to the history and
+    // the log a second time (it was recorded when it first arrived), and a later
+    // replay would then show it twice.
+    if (buf && !this.sender.isDestroyed()) this.sender.send(IPC.sshData, { sessionId, data: buf })
   }
 
   /** The human label (user@host[:port]) for a session, if still live. */
@@ -3981,6 +3996,35 @@ export class SshManager {
       }
       run().catch((e: Error) => finish(e))
     })
+  }
+
+  /** Round-trip time of a live session in ms: how long a no-op exec takes to come
+   *  back over the existing link. It is a few protocol round trips rather than one
+   *  (ssh2 has no public ping), so it reads a little high, but it is the real path
+   *  through any jump host, which a TCP/ICMP probe of the target is not. */
+  async pingSession(sessionId: string): Promise<number | null> {
+    if (!this.sessions.has(sessionId)) return null
+    const t0 = performance.now()
+    try {
+      await this.remoteExec(sessionId, 'true', 5000)
+    } catch {
+      return null
+    }
+    return Math.max(1, Math.round(performance.now() - t0))
+  }
+
+  /** One comparison probe: the fixed commands for `metric` (see shared/compare.ts),
+   *  each on its own exec channel. A command that fails comes back as null so the
+   *  other still shows. */
+  async compareRun(sessionId: string, metric: CompareMetric, service: string): Promise<(string | null)[]> {
+    if (!this.sessions.has(sessionId)) throw new Error('no-session')
+    if (!COMPARE_METRICS.includes(metric)) throw new Error('invalid-metric')
+    const commands = compareCommands(metric, service) // throws on a bad service name
+    const out: (string | null)[] = []
+    for (const cmd of commands) {
+      out.push(await this.remoteExec(sessionId, cmd, 8000).then((s) => s.replace(/\r/g, '').trimEnd(), () => null))
+    }
+    return out
   }
 
   /** Runs a command on a dedicated exec channel and returns its stdout. */

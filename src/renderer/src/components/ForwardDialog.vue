@@ -218,7 +218,7 @@ async function remove(mode: ForwardMode | undefined, localPort: number): Promise
   font-weight: 600;
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 14%, transparent);
-  border-radius: 999px;
+  border-radius: 4px;
 }
 .fw-rule {
   flex: 1;
@@ -251,6 +251,11 @@ async function remove(mode: ForwardMode | undefined, localPort: number): Promise
   color: var(--text);
   font-size: 12px;
 }
+/* The mode drop-down must not shrink below its label (the flex row squeezed it). */
+select.fw-in {
+  flex: none;
+  min-width: 104px;
+}
 .fw-in:focus {
   outline: none;
   border-color: var(--accent);
@@ -279,5 +284,14 @@ async function remove(mode: ForwardMode | undefined, localPort: number): Promise
   color: var(--danger);
   font-size: 11.5px;
   margin: 0;
+}
+
+/* C3: mono chrome, flat shapes (tokens already carry the radii). */
+.fw-dialog {
+  font-family: var(--font-chrome);
+}
+.fw-title {
+  font-family: var(--font-chrome);
+  font-weight: 700;
 }
 </style>

@@ -1,5 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils, webFrame } from 'electron'
 import { IPC, PREFS_ARG } from '../shared/ipc'
+import { ZOOM_DEFAULT_PCT, levelToFactor, percentToLevel, snapLevel } from '../shared/zoom'
+import type { HostPatch } from '../shared/hostGroups'
 import type {
   ConnectParams,
   ConnectResult,
@@ -66,6 +68,8 @@ const api = {
     save: (host: Host, password?: string, passphrase?: string): Promise<Host[]> =>
       ipcRenderer.invoke(IPC.hostsSave, host, password, passphrase),
     delete: (id: string): Promise<Host[]> => ipcRenderer.invoke(IPC.hostsDelete, id),
+    /** Group / order changes for several hosts at once (one write). */
+    patch: (patches: HostPatch[]): Promise<Host[]> => ipcRenderer.invoke(IPC.hostsPatch, patches),
     importSshConfig: (): Promise<{
       ok: boolean
       count: number
@@ -210,6 +214,13 @@ const api = {
       ipcRenderer.on(IPC.sshEvent, listener)
       return () => ipcRenderer.removeListener(IPC.sshEvent, listener)
     },
+    ping: (sessionId: string): Promise<number | null> => ipcRenderer.invoke(IPC.sshPing, sessionId),
+    compare: (
+      sessionId: string,
+      metric: 'service' | 'disk',
+      service: string
+    ): Promise<{ ok: true; outputs: (string | null)[] } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC.sshCompare, sessionId, metric, service),
     tmuxList: (sessionId: string): Promise<string[]> =>
       ipcRenderer.invoke(IPC.sshTmuxList, sessionId),
     tmuxAttach: (sessionId: string, name: string): Promise<{ ok: boolean }> =>
@@ -406,9 +417,18 @@ const api = {
   getPathForFile: (file: File): string => webUtils.getPathForFile(file),
   /** Host OS, so the renderer can pick the right modifier (⌘ on macOS, Ctrl elsewhere). */
   platform: process.platform,
+  /** How dark the dialogs' dim layers make the window now (0 = none, 0.6 = one dialog): the
+   *  Windows caption buttons are drawn that much darker, to match. */
+  setCaptionDim: (alpha: number): void => ipcRenderer.send(IPC.windowDim, alpha),
   zoom: {
     get: (): number => webFrame.getZoomLevel(),
-    set: (level: number): void => webFrame.setZoomLevel(level)
+    // Always a level on the 10 % ladder, whoever asks. Main is told the factor so the
+    // Windows caption buttons stay as tall as the (zoomed) tab bar.
+    set: (level: number): void => {
+      const snapped = snapLevel(level)
+      webFrame.setZoomLevel(snapped)
+      ipcRenderer.send(IPC.windowZoom, levelToFactor(snapped))
+    }
   },
   clipboard: {
     readText: (): string => ipcRenderer.sendSync(IPC.clipboardRead),
@@ -419,8 +439,12 @@ const api = {
 // The saved zoom goes on before the page's first paint; restored later from
 // App.vue it showed one frame at 100 % and then jumped.
 {
-  const z = Number(api.prefs.zoom)
-  if (Number.isFinite(z) && z !== 0) webFrame.setZoomLevel(z)
+  // Nothing saved yet: open at the default (120 %; the type and spacing were too
+  // small at Chromium's 100 % on most screens). A saved level — including an explicit
+  // 0 — wins, moved onto the 10 % ladder (older versions saved half-level steps).
+  const saved = api.prefs.zoom as unknown
+  const z = saved === undefined || saved === null ? NaN : Number(saved)
+  api.zoom.set(Number.isFinite(z) ? z : percentToLevel(ZOOM_DEFAULT_PCT))
 }
 
 contextBridge.exposeInMainWorld('api', api)

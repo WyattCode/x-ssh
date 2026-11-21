@@ -8,41 +8,58 @@
    * context menu, search placeholders. `npm run check:contrast` re-verifies the
    * pairs below, including the duplicated light block, so a "slightly softer"
    * tweak can't quietly walk back under it. */
-  --bg: #0e0f12;
-  --bg-elev: #16181d;
-  --bg-elev-2: #1d2027;
-  --border: #262a33;
-  --border-strong: #333844;
-  --text: #e6e8ec;
-  --text-dim: #9aa1ad;
-  --text-faint: #828791;
-  --accent: #6ea8fe;
-  --accent-soft: rgba(110, 168, 254, 0.14);
+  --bg: #0a0a0a; /* workspace (pages other than the terminal) */
+  --bg-elev: #111111; /* host rail, panels */
+  --bg-elev-2: #1a1a1a; /* detail panels, the focused pane's head */
+  --border: #262626;
+  --border-strong: #333333;
+  --text: #f0f0f0;
+  --text-dim: #ababab;
+  --text-faint: #8d8d8d;
+  --accent: #d4d4d4;
+  --accent-soft: rgba(212, 212, 212, 0.14);
+  /* The terminal block: a console well, its bars, and its hairlines. */
+  --console: #000000;
+  --console-top: #050505;
+  --console-rule: #1f1f1f;
+  /* C3: the terminal chrome (tabs, rail, status line) is pure black and set in
+     the monospaced face, like the phone apps. */
+  --chrome: #050505;
+  --chrome-line: #1f1f1f;
+  --cursor: #23d18b;
+  /* The window's two bands: the tab bar and the host rail's header share the top one, the status
+     line and the rail's foot share the bottom one (their hairlines run across the whole window). */
+  --band-top: 40px;
+  --band-bot: 40px;
+  --font-chrome: 'Cascadia Mono', 'JetBrains Mono', 'SFMono-Regular', Consolas, 'Microsoft YaHei UI', monospace;
+  /* Production marker (the one environment that must not be mistaken). */
+  --prod: #e5ae91;
+  --prod-bg: #30221c;
   /* Text on an accent-filled surface. White suits both default accents; when
      a custom (possibly light) accent is set, App.vue recomputes this from the
      accent's luminance so the label stays readable. */
-  --accent-contrast: #fff;
+  --accent-contrast: #111;
   --danger: #ff6b6b;
-  --ok: #51cf66;
-  --warn: #ffd43b;
+  --ok: #23d18b;
+  --warn: #e5c07b;
   /* Scrim that recedes an unfocused split pane (darkens on the dark surface). */
-  --scrim: rgba(0, 0, 0, 0.3);
+  --scrim: rgba(0, 0, 0, 0.5);
   /* Selected thumb of a segmented control: lifted off its track. */
   --thumb: var(--bg-elev-2);
   /* Corner radii, macOS 27 style: nested shapes are concentric (inner radius =
      outer radius − the padding between them), compact controls are rounded
      rectangles, standout controls are capsules. */
-  --radius: 12px; /* dialogs, larger panels */
-  --radius-sm: 8px; /* medium controls: text fields, selects, buttons, rows */
-  --r-card: 16px; /* content cards */
-  --r-tile: 11px; /* icon tiles inside a card (concentric fallback) */
-  --r-menu: 12px; /* menus / popovers */
-  --r-item: 7px; /* rows inside a menu: --r-menu − its 5px padding */
+  --radius: 8px; /* dialogs, larger panels */
+  --radius-sm: 6px; /* medium controls: text fields, selects, buttons, rows */
+  --r-card: 8px; /* content cards */
+  --r-tile: 6px; /* icon tiles inside a card */
+  --r-menu: 8px; /* menus / popovers */
+  --r-item: 5px; /* rows inside a menu */
   --r-pill: 999px; /* capsules */
   /* Interaction states, shared by every page: a neutral hover layer, a
      stronger one for the selected item, one curve for all motion. */
   --hover: color-mix(in srgb, var(--text) 5%, transparent);
-  --selected: color-mix(in srgb, var(--text) 9%, transparent);
+  --selected: #242424;
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
   --shadow: 0 18px 50px -12px rgba(0, 0, 0, 0.6);
   --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica,
@@ -66,6 +83,15 @@
   --accent: #2c68df;
   --accent-soft: rgba(44, 104, 223, 0.1);
   --accent-contrast: #fff;
+  --console: #f7f8fa;
+  --console-top: #eef0f3;
+  --console-rule: #dfe2e8;
+  --chrome: #eef0f3;
+  --chrome-line: #dfe2e8;
+  --cursor: #1a833a;
+  --prod: #9a4a1c;
+  --prod-bg: #fbe9df;
+  --selected: color-mix(in srgb, var(--text) 9%, transparent);
   --shadow: 0 18px 50px -12px rgba(20, 30, 60, 0.18);
   --scrim: rgba(20, 24, 32, 0.055);
   --thumb: #ffffff;
@@ -86,7 +112,16 @@
     --text-faint: #6a6f77;
     --accent: #2c68df;
     --accent-soft: rgba(44, 104, 223, 0.1);
-  --accent-contrast: #fff;
+    --accent-contrast: #fff;
+    --console: #f7f8fa;
+    --console-top: #eef0f3;
+    --console-rule: #dfe2e8;
+    --chrome: #eef0f3;
+    --chrome-line: #dfe2e8;
+    --cursor: #1a833a;
+    --prod: #9a4a1c;
+    --prod-bg: #fbe9df;
+    --selected: color-mix(in srgb, var(--text) 9%, transparent);
     --shadow: 0 18px 50px -12px rgba(20, 30, 60, 0.18);
     --scrim: rgba(20, 24, 32, 0.055);
     --thumb: #ffffff;
@@ -156,10 +191,11 @@ textarea {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  height: 32px;
-  padding: 0 14px;
+  height: 30px;
+  padding: 0 12px;
   border-radius: var(--radius-sm);
-  font-size: 13px;
+  font-family: var(--font-chrome);
+  font-size: 13.5px;
   white-space: nowrap;
   color: var(--text-dim);
   background: transparent;
@@ -181,13 +217,13 @@ textarea {
 }
 /* Primary: the one action a view is for (save, add, confirm). */
 .btn-primary {
-  color: #fff;
+  color: var(--accent-contrast);
   font-weight: 500;
   background: var(--accent);
   border-color: transparent;
 }
 .btn-primary:hover:not(:disabled) {
-  color: #fff;
+  color: var(--accent-contrast);
   background: var(--accent);
   border-color: transparent;
   filter: brightness(1.08);
@@ -212,8 +248,9 @@ textarea {
   background: color-mix(in srgb, var(--danger) 12%, transparent);
   border-color: transparent;
 }
+/* C3: no capsules; "pill" now only asks for the standout look of a lone button. */
 .btn.pill {
-  border-radius: var(--r-pill);
+  border-radius: var(--radius-sm);
 }
 
 /* ---- Page header: the same title row on 端口转发 / SFTP / 设置 ---- */
@@ -229,18 +266,17 @@ textarea {
   align-items: center;
   gap: 10px;
   margin: 0;
-  font-size: 22px;
-  font-weight: 650;
+  font-family: var(--font-chrome);
+  font-size: 15px;
+  font-weight: 700;
   color: var(--text);
   white-space: nowrap;
 }
 .page-head .count {
-  padding: 1px 8px;
-  border-radius: var(--r-pill);
+  font-family: var(--font-chrome);
   font-size: 12px;
-  font-weight: 500;
-  color: var(--text-dim);
-  background: var(--hover);
+  font-weight: 400;
+  color: var(--text-faint);
   font-variant-numeric: tabular-nums;
 }
 .page-head .page-actions {
@@ -287,6 +323,11 @@ select:focus-visible {
    tabindex="-1" is excluded too: those are panels, dialogs and scroll areas
    that only ever take focus from script (a keyboard user cannot Tab to them),
    and ringing them drew a blue frame around a whole page or dialog. */
+/* Surfaces that only ever take focus from script (dialogs, sheets, scroll areas)
+   get no browser-default ring either: the UA draws an orange frame round them. */
+[tabindex='-1']:focus-visible {
+  outline: none;
+}
 input:is([type='checkbox'], [type='radio'], [type='range'], [type='color'], [type='file']):focus-visible,
 [tabindex]:not(input, textarea, [tabindex='-1']):focus-visible {
   outline: 2px solid var(--accent) !important;
@@ -310,6 +351,10 @@ input:is([type='checkbox'], [type='radio'], [type='range'], [type='color'], [typ
 ::-webkit-scrollbar-track {
   background: transparent;
 }
+/* Where a horizontal and a vertical bar meet: the default is a white square. */
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
 
 .kbd {
   display: inline-flex;
@@ -319,7 +364,7 @@ input:is([type='checkbox'], [type='radio'], [type='range'], [type='color'], [typ
   height: 18px;
   padding: 0 5px;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-dim);
   background: var(--bg-elev-2);
   border: 1px solid var(--border);
@@ -390,6 +435,14 @@ input:is([type='checkbox'], [type='radio'], [type='range'], [type='color'], [typ
   margin-top: 22px;
   -webkit-app-region: drag;
 }
+/* ---- Windows window chrome: caption buttons overlaid (see main/index.ts) ---- */
+:root.win .sidebar .brand {
+  -webkit-app-region: drag;
+}
+/* The tab bar runs under the caption buttons: keep its tools clear of them. */
+:root.win .tabbar {
+  padding-right: calc(100vw - env(titlebar-area-width, 100vw));
+}
 /* 专注模式 hides the sidebar: the tab bar makes room for the buttons instead. */
 :root.mac .no-sidebar .tabbar {
   padding-left: 78px;
@@ -402,8 +455,7 @@ input:is([type='checkbox'], [type='radio'], [type='range'], [type='color'], [typ
 .pm-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.4);
-  backdrop-filter: blur(2px);
+  background: rgba(0, 0, 0, 0.5);
   display: flex;
   justify-content: center;
   align-items: flex-start;
@@ -418,13 +470,15 @@ input:is([type='checkbox'], [type='radio'], [type='range'], [type='color'], [typ
   box-shadow: var(--shadow), 0 0 0 1px rgba(255, 255, 255, 0.04) inset;
   padding: 16px 18px 18px;
   outline: none;
+  animation: pop-in 0.3s cubic-bezier(0.3, 1.35, 0.5, 1);
 }
 .pm-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 15px;
-  font-weight: 600;
+  font-family: var(--font-chrome);
+  font-size: 14px;
+  font-weight: 700;
 }
 .pm-x {
   display: inline-flex;
@@ -446,10 +500,11 @@ input:is([type='checkbox'], [type='radio'], [type='range'], [type='color'], [typ
   margin-top: 18px;
 }
 .pm-btn {
-  height: 32px;
-  padding: 0 16px;
+  height: 30px;
+  padding: 0 14px;
   border-radius: var(--radius-sm);
-  font-size: 13px;
+  font-family: var(--font-chrome);
+  font-size: 13.5px;
 }
 .pm-btn.ghost {
   color: var(--text-dim);
@@ -461,7 +516,7 @@ input:is([type='checkbox'], [type='radio'], [type='range'], [type='color'], [typ
 }
 .pm-btn.primary {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
   font-weight: 500;
 }
 .pm-btn.primary:hover {
@@ -478,19 +533,19 @@ input:is([type='checkbox'], [type='radio'], [type='range'], [type='color'], [typ
   margin-top: 12px;
 }
 .dialog-field > span {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-dim);
 }
 
 .dialog-field input {
-  height: 32px;
+  height: 30px;
   padding: 0 10px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--bg-elev-2);
   color: var(--text);
   font-family: var(--font-mono);
-  font-size: 12.5px;
+  font-size: 13.5px;
   outline: none;
 }
 .dialog-field input:focus {
@@ -498,7 +553,7 @@ input:is([type='checkbox'], [type='radio'], [type='range'], [type='color'], [typ
 }
 .pm-err {
   margin-top: 12px;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--danger);
 }
 
@@ -506,4 +561,27 @@ input:is([type='checkbox'], [type='radio'], [type='range'], [type='color'], [typ
    sentence: in the mono face every Chinese character is spaced apart. */
 .mono::placeholder {
   font-family: var(--font-ui);
+}
+
+/* Environment marker (生产 / 测试 / 开发 ...): a small neutral tag; production
+   gets the warm tone, the one environment that must not be mistaken. */
+.env-tag {
+  display: inline-flex;
+  align-items: center;
+  width: max-content;
+  max-width: 100%;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: var(--selected);
+  color: var(--accent);
+}
+.env-tag.prod {
+  background: var(--prod-bg);
+  color: var(--prod);
 }
