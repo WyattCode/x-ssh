@@ -193,6 +193,7 @@ function onKey(e: KeyboardEvent): void {
 }
 /* Centred in the page, a little above the middle. */
 .col {
+  container-type: inline-size;
   width: min(520px, 100%);
   min-height: 100%;
   padding: 32px 32px 12vh;
@@ -295,6 +296,12 @@ h2 {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* Too narrow for a name column AND an address: back to name, then address, then time. */
+@container (max-width: 440px) {
+  .item b {
+    flex: 0 1 auto;
+  }
 }
 .item small {
   flex: 1 1 0;

@@ -1336,7 +1336,19 @@ let overlayDim = 0
  *  the strip stops one px short of it (39 × the zoom factor), so the hairline runs under the
  *  buttons too instead of ending where they begin. */
 function windowOverlay(): { color: string; symbolColor: string; height: number } {
-  const height = Math.floor(39 * overlayFactor)
+  // The strip is sized in DIPs but painted in whole device pixels, and Windows paints one row
+  // more than asked for. Leave that row (and the rounding) out of the strip, measured on the
+  // screen the window is on, so it never reaches the bar's 1 px hairline: at 120, 180 and 200 %
+  // a plain Math.floor(39 * factor) still covered the hairline's top row.
+  const scale = (() => {
+    try {
+      const w = mainWindow
+      return (w && !w.isDestroyed() ? screen.getDisplayMatching(w.getBounds()) : screen.getPrimaryDisplay()).scaleFactor || 1
+    } catch {
+      return 1
+    }
+  })()
+  const height = Math.max(8, Math.floor((39 * overlayFactor * scale - 1) / scale))
   const base = nativeTheme.shouldUseDarkColors
     ? { color: '#050505', symbolColor: '#e6e6e6' }
     : { color: '#eef0f3', symbolColor: '#1a1d23' }
