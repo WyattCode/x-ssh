@@ -123,13 +123,58 @@ function scrollMore(): void {
   const el = bodyEl.value
   if (el) el.scrollTo({ top: el.scrollTop + Math.max(160, el.clientHeight * 0.8), behavior: 'smooth' })
 }
+// ---- Categories (left column) ----
+const TABS = ['conn', 'org', 'net', 'term'] as const
+type Tab = (typeof TABS)[number]
+const tab = ref<Tab>('conn')
+const tabLabel = (tb: Tab): string =>
+  ({ conn: t('host.secConn'), org: t('host.secOrganize'), net: t('host.secNet'), term: t('host.secTerm') })[tb]
+/** A dot on a category that holds a non-default choice, so settings out of sight are not forgotten. */
+function tabMarked(tb: Tab): boolean {
+  if (tb === tab.value) return false
+  if (tb === 'org') return form.tags.length > 0 || !!form.color || groupSelect.value !== ''
+  if (tb === 'net') return !!form.jumpHostId || form.proxyOn || form.forwards.length > 0 || form.agentForward || form.x11Forward
+  if (tb === 'term') return !!form.onConnect.trim() || !!form.terminalTheme || !!form.terminalFontFamily.trim()
+  return false
+}
+function onTabKey(e: KeyboardEvent): void {
+  const step = e.key === 'ArrowDown' ? 1 : e.key === 'ArrowUp' ? -1 : 0
+  if (!step) return
+  e.preventDefault()
+  const next = TABS[(TABS.indexOf(tab.value) + step + TABS.length) % TABS.length]
+  tab.value = next
+  void nextTick(() => document.getElementById(`he-tab-${next}`)?.focus())
+}
+watch(tab, (tb) => {
+  // Two settings on a screen of their own: nothing to gain from keeping them folded.
+  if (tb === 'term') sections.onConnect = sections.appearance = true
+  if (bodyEl.value) bodyEl.value.scrollTop = 0
+})
+let bodyRo: ResizeObserver | null = null
 onUpdated(measureBody)
 onMounted(() => window.addEventListener('resize', measureBody))
-onBeforeUnmount(() => window.removeEventListener('resize', measureBody))
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', measureBody)
+  bodyRo?.disconnect()
+})
 watch(
   () => props.open,
   (o) => {
-    if (o) void nextTick(measureBody)
+    bodyRo?.disconnect()
+    bodyRo = null
+    if (o) {
+      tab.value = 'conn'
+      void nextTick(() => {
+        measureBody()
+        // The body's own box never changes; what grows is a category inside it (a row
+        // opened, a category switched to). Watch those.
+        const el = bodyEl.value
+        if (!el) return
+        bodyRo = new ResizeObserver(() => measureBody())
+        bodyRo.observe(el)
+        for (const s of el.children) bodyRo.observe(s)
+      })
+    }
   },
   { immediate: true }
 )
@@ -736,10 +781,31 @@ async function remove(): Promise<void> {
           <button class="p-close" :title="t('host.cancel')" :aria-label="t('host.cancel')" @click="void requestClose()"><Icon name="close" :size="15" /></button>
         </header>
 
-        <div ref="bodyEl" class="p-body" @scroll.passive="measureBody">
+        <!-- Categories on the left, one of them at a time on the right: the dialog keeps one
+             height and nothing sits below a fold. -->
+        <div class="p-split">
+        <nav class="p-nav" role="tablist" aria-orientation="vertical" @keydown="onTabKey">
+          <button
+            v-for="tb in TABS"
+            :id="`he-tab-${tb}`"
+            :key="tb"
+            type="button"
+            role="tab"
+            class="p-tab"
+            :class="{ on: tab === tb }"
+            :aria-selected="tab === tb"
+            :tabindex="tab === tb ? 0 : -1"
+            @click="tab = tb"
+          >
+            <span>{{ tabLabel(tb) }}</span>
+            <!-- Something is set in a category you are not looking at. -->
+            <span v-if="tabMarked(tb)" class="p-tab-dot" aria-hidden="true" />
+          </button>
+        </nav>
+        <div class="p-main">
+        <div ref="bodyEl" class="p-body" role="tabpanel" :aria-labelledby="`he-tab-${tab}`" @scroll.passive="measureBody">
           <!-- ---- 连接 ---- -->
-          <section class="group">
-            <h3>{{ t('host.secConn') }}</h3>
+          <section v-show="tab === 'conn'" class="group">
             <div class="card">
               <div class="row">
                 <label class="r-label" for="he-host">{{ t('host.host') }}</label>
@@ -845,8 +911,7 @@ async function remove(): Promise<void> {
           </section>
 
           <!-- ---- 整理 ---- -->
-          <section class="group">
-            <h3>{{ t('host.secOrganize') }}</h3>
+          <section v-show="tab === 'org'" class="group">
             <div class="card">
               <div class="row">
                 <label class="r-label" for="he-group">{{ t('host.group') }}</label>
@@ -909,9 +974,8 @@ async function remove(): Promise<void> {
             </div>
           </section>
 
-          <!-- ---- 更多选项: one row each, opened in place ---- -->
-          <section class="group">
-            <h3>{{ t('host.secMore') }}</h3>
+          <!-- ---- 网络: one row each, opened in place ---- -->
+          <section v-show="tab === 'net'" class="group">
             <div class="card">
               <!-- Same pattern as the other rows below: summary + chevron, the choice opens underneath. -->
               <button type="button" class="row disclosure" :title="jumpBlocked ? undefined : t('host.jumpHint')" @click="sections.jump = !sections.jump">
@@ -1017,6 +1081,22 @@ async function remove(): Promise<void> {
                 <button type="button" class="add-line" @click="addForward">{{ t('set.gen.addForward') }}</button>
               </div>
 
+              <label class="row">
+                <span class="r-label wide">{{ t('host.agentForward') }}</span>
+                <input v-model="form.agentForward" type="checkbox" class="switch" />
+              </label>
+
+              <label class="row">
+                <span class="r-label wide">{{ t('host.x11Forward') }}</span>
+                <input v-model="form.x11Forward" type="checkbox" class="switch" />
+              </label>
+              <p class="sub-hint jump-hint">{{ t('host.x11ForwardHint') }}</p>
+            </div>
+          </section>
+
+          <!-- ---- 终端 ---- -->
+          <section v-show="tab === 'term'" class="group">
+            <div class="card">
               <button type="button" class="row disclosure" @click="sections.onConnect = !sections.onConnect">
                 <span class="r-label wide">{{ t('host.onConnect') }}</span>
                 <span class="r-summary mono">{{ onConnectSummary }}</span>
@@ -1048,17 +1128,6 @@ async function remove(): Promise<void> {
                   <input v-model="form.terminalFontFamily" class="box grow" :placeholder="t('host.termFontPh')" spellcheck="false" />
                 </div>
               </div>
-
-              <label class="row">
-                <span class="r-label wide">{{ t('host.agentForward') }}</span>
-                <input v-model="form.agentForward" type="checkbox" class="switch" />
-              </label>
-
-              <label class="row">
-                <span class="r-label wide">{{ t('host.x11Forward') }}</span>
-                <input v-model="form.x11Forward" type="checkbox" class="switch" />
-              </label>
-              <p class="sub-hint jump-hint">{{ t('host.x11ForwardHint') }}</p>
             </div>
           </section>
         </div>
@@ -1069,6 +1138,8 @@ async function remove(): Promise<void> {
           <button v-if="moreBelow" ref="pillEl" type="button" class="more-pill" @click="scrollMore">
             <Icon name="chevron-down" :size="12" />{{ t('host.moreBelow') }}
           </button>
+        </div>
+        </div>
         </div>
 
         <!-- Stays on screen after the toast fades: the panel itself must show
@@ -1985,5 +2056,130 @@ input[type='number']::-webkit-inner-spin-button {
 .p-foot {
   background: var(--bg-elev);
   border-top-color: var(--chrome-line);
+}
+
+/* ================= Split layout: categories left, one category right ================= */
+.panel {
+  width: min(680px, calc(100vw - 48px));
+  /* One height for every category, so switching does not resize the dialog. */
+  height: min(520px, calc(100vh - 140px));
+}
+.p-split {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  border-top: 1px solid var(--chrome-line);
+}
+.p-nav {
+  flex: none;
+  width: 132px;
+  padding: 10px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-right: 1px solid var(--chrome-line);
+}
+.p-tab {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-chrome);
+  font-size: 13.5px;
+  color: var(--text-dim);
+  text-align: left;
+}
+.p-tab:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+.p-tab.on {
+  color: var(--text);
+  background: var(--bg-elev-2);
+}
+.p-tab-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--cursor);
+}
+.p-main {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.p-body {
+  padding: 6px 16px 24px 4px;
+}
+/* The split's own top line marks the header edge; no second one when scrolled. */
+.p-head.scrolled {
+  box-shadow: none;
+}
+/* Fields: no fill, a hairline frame. A lighter tile read as a grey patch on a black-and-line
+   interface; the frame alone marks the field, brighter on hover, white on focus. */
+.r-input,
+.tag-box,
+.grp-select select,
+.sub .r-select:not(.box-select) select,
+.box,
+.box-select {
+  background: transparent;
+  border: 1px solid var(--border-strong);
+}
+.r-input:hover,
+.tag-box:hover,
+.grp-select select:hover,
+.sub .r-select:not(.box-select) select:hover,
+.box:hover,
+.box-select:hover {
+  border-color: var(--text-faint);
+}
+.r-input:focus,
+.tag-box:focus-within,
+.grp-select select:focus-visible,
+.sub .r-select:not(.box-select) select:focus-visible,
+.box:focus,
+.box-select:focus-within {
+  border-color: var(--text);
+}
+/* The private-key picker (a button, or a select once keys exist) is a field like the rest;
+   it used to be bare text in the row. */
+.r-pick,
+.row > .r-select:not(.grp-select) select {
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+}
+.row > .r-select:not(.grp-select) select {
+  padding-right: 28px;
+}
+.row > .r-select:not(.grp-select) .caret {
+  right: 10px;
+}
+.r-pick:hover,
+.row > .r-select:not(.grp-select) select:hover {
+  border-color: var(--text-faint);
+}
+.r-pick:focus-visible,
+.row > .r-select:not(.grp-select) select:focus-visible {
+  border-color: var(--text);
+}
+/* A transparent select would hand its (absent) fill to the native list. */
+.panel select option {
+  background: var(--bg-elev);
+  color: var(--text);
+}
+/* Inside a category the rows stand on the dialog itself: no card around them. */
+.card {
+  background: transparent;
+  border: none;
+  border-radius: 0;
 }
 </style>

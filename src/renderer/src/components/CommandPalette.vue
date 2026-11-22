@@ -13,7 +13,6 @@ import { useI18n } from '../lib/i18n'
 import { useToast } from '../composables/toast'
 import { useConfirm } from '../composables/confirm'
 import Icon from './Icon.vue'
-import OsIcon from './OsIcon.vue'
 import type { ConnectParams, Host, Snippet } from '../../../shared/types'
 
 const store = useSessions()
@@ -32,14 +31,13 @@ type Item =
   | { kind: 'quick'; title: string; sub: string; params: ConnectParams }
   | { kind: 'host'; title: string; sub: string; tail: string; host: Host; known: boolean; live: boolean }
   | { kind: 'snippet'; title: string; sub: string; snippet: Snippet }
-  | { kind: 'action'; title: string; sub: string; run: () => void; icon: string }
+  | { kind: 'action'; title: string; sub: string; run: () => void; icon: string; keepOpen?: boolean }
   | { kind: 'snapshot'; title: string; sub: string; id: string; icon: string }
 
 const query = ref('')
 const selected = ref(0)
-// Highlighting must use the same trimmed query as scoring, or a trailing space
-// makes the marks disagree with what actually matched.
-const qTrim = computed(() => query.value.trim())
+// Highlighting must use the same trimmed query as scoring (qTrim, below), or a trailing
+// space makes the marks disagree with what actually matched.
 const inputEl = ref<HTMLInputElement>()
 const listEl = ref<HTMLDivElement>()
 
@@ -77,6 +75,36 @@ const liveHostIds = computed(() => {
   return ids
 })
 
+/** The connected pane of a host, the one in front first: Enter on a host that is already
+ *  open goes there instead of opening it a second time. */
+function livePane(hostId: string): { tabId: string; paneId: string; current: boolean } | null {
+  const hit = (tabId: string, paneId: string): { tabId: string; paneId: string; current: boolean } => ({
+    tabId,
+    paneId,
+    current: store.activeId === tabId && store.active?.activePaneId === paneId
+  })
+  const act = store.active
+  if (act) {
+    const front = act.panes.find((p) => p.id === act.activePaneId)
+    if (front?.status === 'connected' && front.params.hostId === hostId) return hit(act.id, front.id)
+  }
+  for (const tab of store.tabs) {
+    const p = tab.panes.find((x) => x.status === 'connected' && x.params.hostId === hostId)
+    if (p) return hit(tab.id, p.id)
+  }
+  return null
+}
+function switchTo(hostId: string): boolean {
+  const lp = livePane(hostId)
+  if (!lp) return false
+  store.togglePalette(false)
+  store.setPage('terminal')
+  store.setActive(lp.tabId)
+  store.setActivePane(lp.tabId, lp.paneId)
+  store.termFocusTick++
+  return true
+}
+
 /** Port 22 is the default and says nothing; only a non-default port is shown. */
 const hostAddr = (h: Host): string =>
   `${h.username}@${h.host}${h.port === 22 ? '' : `:${h.port}`}`
@@ -110,11 +138,15 @@ function highlight(text: string, query: string): { text: string; hit: boolean }[
   return segs
 }
 
+/** "> …" searches what the palette can do (actions, snippets, snapshots) and leaves hosts out. */
+const actionMode = computed(() => query.value.trimStart().startsWith('>') || query.value.trimStart().startsWith('＞'))
+const qTrim = computed(() => (actionMode.value ? query.value.trimStart().slice(1) : query.value).trim())
+
 const sections = computed<{ id: string; title: string; items: Item[] }[]>(() => {
-  const q = query.value.trim()
+  const q = qTrim.value
   const out: { id: string; title: string; items: Item[] }[] = []
   const add = (id: string, title: string, items: Item[]): void => {
-    if (items.length) out.push({ id, title, items })
+    if (items.length && !(actionMode.value && (id === 'quick' || id === 'hosts'))) out.push({ id, title, items })
   }
 
   const parsed = parseTarget(q)
@@ -226,6 +258,9 @@ const sections = computed<{ id: string; title: string; items: Item[] }[]>(() => 
       title: t('pal.broadcast'),
       sub: t('pal.broadcastDesc'),
       icon: 'send',
+      // Its prompt is inside the palette: closing first left the prompt to appear on the NEXT
+      // open, where a typed host name + Enter went to every session instead.
+      keepOpen: true,
       run: openBroadcast
     })
   }
@@ -335,11 +370,19 @@ const sections = computed<{ id: string; title: string; items: Item[] }[]>(() => 
 /** Flat list of actionable items (headers stripped) for keyboard navigation. */
 const items = computed<Item[]>(() => sections.value.flatMap((s) => s.items))
 
-/** What Enter does to the highlighted row: connect for a host, run otherwise. */
-const enterHint = computed(() => {
-  const k = items.value[selected.value]?.kind
-  return !k || k === 'host' || k === 'quick' ? t('pal.connect') : t('pal.run')
-})
+/** What Enter does to a row, in a word: shown on the highlighted row and in the footer. */
+function enterVerb(item: Item | undefined): string {
+  if (!item || item.kind === 'quick') return t('pal.connect')
+  if (item.kind !== 'host') return t('pal.run')
+  const lp = item.live ? livePane(item.host.id) : null
+  return lp ? (lp.current ? t('pal.current') : t('pal.switch')) : t('pal.connect')
+}
+const selItem = computed(() => items.value[selected.value])
+const enterHint = computed(() => enterVerb(selItem.value))
+function editHost(h: Host): void {
+  store.togglePalette(false)
+  emit('edit-host', h)
+}
 
 /** Running index of each section's first item in the flat list. */
 const sectionStarts = computed<number[]>(() => {
@@ -392,6 +435,8 @@ watch(
       store.paletteSeed = null
       selected.value = 0
       pending.value = null
+      // Never reopen into a prompt left over from last time.
+      broadcastOpen.value = false
       password.value = ''
       remember.value = true
       const quick = store.paletteQuick
@@ -464,7 +509,8 @@ function activate(item: Item): void {
     pending.value = { params: item.params, title: item.params.host }
     nextTick(() => pwEl.value?.focus())
   } else if (item.kind === 'host') {
-    activateHost(item.host)
+    // Already open: go to it. (A second session of the same host is Shift+Enter, beside.)
+    if (!switchTo(item.host.id)) activateHost(item.host)
   } else if (item.kind === 'snippet') {
     store.togglePalette(false)
     void store.sendSnippet(item.snippet)
@@ -472,7 +518,7 @@ function activate(item: Item): void {
     store.togglePalette(false)
     void store.openSnapshot(item.id)
   } else {
-    store.togglePalette(false)
+    if (!item.keepOpen) store.togglePalette(false)
     item.run()
   }
 }
@@ -595,6 +641,12 @@ function onKey(e: KeyboardEvent): void {
       if (e.shiftKey && item.kind === 'host' && canSide.value) void openBeside(item.host)
       else activate(item)
     }
+  } else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'e') {
+    const item = selItem.value
+    if (item?.kind === 'host') {
+      e.preventDefault()
+      editHost(item.host)
+    }
   } else if (e.key === 'Escape') {
     store.togglePalette(false)
   }
@@ -667,40 +719,42 @@ function onKey(e: KeyboardEvent): void {
               @click="activate(item)"
               @mousemove="selected = sectionStarts[si] + ii"
             >
-              <!-- Hosts look as they do on 连接: their OS tile. -->
-              <OsIcon v-if="item.kind === 'host'" :os="item.host.os" :color="item.host.color" :size="30" />
+              <!-- One line per row. A host leads with its state (green = a session is open),
+                   everything else with a small glyph. -->
+              <span
+                v-if="item.kind === 'host'"
+                class="dot"
+                :class="{ on: item.live }"
+                :title="item.live ? t('pal.connected') : undefined"
+              />
               <span v-else class="icon" :class="item.kind">
                 <Icon
                   :name="
                     item.kind === 'quick' ? 'arrow-right' : item.kind === 'snippet' ? 'zap' : item.icon
                   "
-                  :size="15"
+                  :size="14"
                 />
               </span>
-              <span class="text">
-                <span class="title">
-                  <template v-for="(seg, sk) in highlight(item.title, qTrim)" :key="'t' + sk">
-                    <mark v-if="seg.hit" class="match">{{ seg.text }}</mark>
-                    <template v-else>{{ seg.text }}</template>
-                  </template>
-                </span>
-                <span class="sub" :class="{ mono: item.kind === 'host' || item.kind === 'quick' || item.kind === 'snippet' }">
-                  <template v-for="(seg, sk) in highlight(item.sub, qTrim)" :key="'s' + sk">
-                    <mark v-if="seg.hit" class="match">{{ seg.text }}</mark>
-                    <template v-else>{{ seg.text }}</template>
-                  </template>
-                  <span v-if="item.kind === 'host' && item.tail" class="sub-tail"> · {{ item.tail }}</span>
-                </span>
+              <span class="title">
+                <template v-for="(seg, sk) in highlight(item.title, qTrim)" :key="'t' + sk">
+                  <mark v-if="seg.hit" class="match">{{ seg.text }}</mark>
+                  <template v-else>{{ seg.text }}</template>
+                </template>
               </span>
-              <span v-if="item.kind === 'host' && item.live" class="live">
-                <span class="live-dot" />{{ t('pal.connected') }}
+              <span class="sub" :class="{ mono: item.kind === 'host' || item.kind === 'quick' || item.kind === 'snippet' }">
+                <template v-for="(seg, sk) in highlight(item.sub, qTrim)" :key="'s' + sk">
+                  <mark v-if="seg.hit" class="match">{{ seg.text }}</mark>
+                  <template v-else>{{ seg.text }}</template>
+                </template>
               </span>
+              <!-- What Enter does here, on the highlighted row only. -->
+              <span v-if="sectionStarts[si] + ii === selected" class="verb">{{ enterVerb(item) }} ↵</span>
               <span
                 v-if="item.kind === 'host'"
                 class="edit"
-                :title="t('pal.edit')"
-                @click.stop="emit('edit-host', item.host); store.togglePalette(false)"
-              ><Icon name="edit" :size="14" /></span>
+                :title="`${t('pal.edit')} (Ctrl+E)`"
+                @click.stop="editHost(item.host)"
+              ><Icon name="edit" :size="13" /></span>
               <span
                 v-if="item.kind === 'snapshot'"
                 class="edit"
@@ -715,12 +769,13 @@ function onKey(e: KeyboardEvent): void {
           </div>
         </div>
         <div class="hint">
-          <span><span class="kbd">↑</span><span class="kbd">↓</span> {{ t('pal.nav') }}</span>
-          <span><span class="kbd">Enter</span> {{ enterHint }}</span>
-          <span v-if="canSide"><span class="kbd">Shift</span><span class="kbd">Enter</span> {{ t('pal.side') }}</span>
-          <span><span class="kbd">Esc</span> {{ t('pal.close') }}</span>
+          <span><span class="kbd">↑↓</span> {{ t('pal.nav') }}</span>
+          <span v-if="selItem"><span class="kbd">Enter</span> {{ enterHint }}</span>
+          <!-- Only where they apply: beside needs a live session, edit needs a host. -->
+          <span v-if="canSide && selItem?.kind === 'host'"><span class="kbd">Shift Enter</span> {{ t('pal.side') }}</span>
+          <span v-if="selItem?.kind === 'host'"><span class="kbd">Ctrl E</span> {{ t('pal.edit') }}</span>
           <button class="hint-new" @click="newHost">
-            <Icon name="plus" :ink="13" :weight="1.6" />{{ t('pal.newHostShort') }}
+            <Icon name="plus" :ink="11" :weight="1.4" />{{ t('pal.newHostShort') }}
           </button>
         </div>
       </template>
@@ -945,6 +1000,97 @@ function onKey(e: KeyboardEvent): void {
 }
 .pw-head {
   padding: 14px 18px 0;
+}
+
+/* ================= Compact rows: one line each ================= */
+/* The last visible row fades out instead of being cut by the footer. */
+.list {
+  padding: 4px 6px 16px;
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 20px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 20px), transparent);
+}
+/* Like the host rail: the bar shows while the pointer is over the list. */
+.list::-webkit-scrollbar-thumb {
+  background: transparent;
+}
+.list:hover::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  background-clip: padding-box;
+}
+.group {
+  padding: 8px 10px 4px;
+  font-size: 12px;
+  color: var(--text-faint);
+  text-transform: none;
+  letter-spacing: 0;
+}
+.row {
+  gap: 10px;
+  height: 34px;
+  padding: 0 10px;
+}
+.dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin: 0 4px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--text-faint) 55%, transparent);
+}
+.dot.on {
+  background: var(--ok);
+}
+.icon {
+  width: 15px;
+  height: 15px;
+  border-radius: 0;
+  background: none;
+}
+.title {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.sub {
+  flex: 1 1 0;
+  min-width: 0;
+  font-size: 12px;
+  text-align: right;
+}
+.verb {
+  flex: none;
+  font-size: 12px;
+  color: var(--ok);
+}
+/* The pencil is for the pointer; the keyboard has Ctrl+E. Only on the row in hand. */
+.edit {
+  flex: none;
+  display: none;
+  opacity: 1;
+  padding: 3px;
+}
+.row:hover .edit,
+.row.sel .edit {
+  display: inline-flex;
+}
+.hint {
+  gap: 14px;
+  padding: 8px 14px;
+  font-size: 12px;
+}
+/* Adding a host is a quiet entry at the end of the hints, not the loudest thing here. */
+.hint-new {
+  gap: 6px;
+  height: 24px;
+  margin: 0 0 0 auto;
+  padding: 0 8px;
+  font-size: 12px;
+  color: var(--text-dim);
+  background: none;
+  border: none;
+}
+.hint-new:hover {
+  color: var(--text);
+  background: var(--hover);
 }
 .pw-title {
   font-size: 13px;

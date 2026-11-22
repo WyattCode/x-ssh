@@ -394,10 +394,11 @@ function scheduleFit(): void {
   const oneOff = now - lastSizeChange > 150
   lastSizeChange = now
   if (fitTimer) clearTimeout(fitTimer)
-  if (oneOff) doFit()
+  if (oneOff) fitDeferred()
   fitTimer = setTimeout(() => {
     fitTimer = null
-    doFit()
+    // A stream that has settled; a one-off already has its own deferred fit waiting.
+    if (!pendingFit) fitDeferred()
   }, 90)
 }
 /** The size last sent to the server, so a fit that changes nothing doesn't
@@ -418,20 +419,75 @@ let sentSize = ''
  * fit.fit() also clears the renderer before resizing, so the old-sized frame
  * never flashes stretched over the new grid.
  */
-function doFit(): void {
+function doFit(paint = true): void {
+  cancelPendingFit()
   if (!fit || !term || !props.visible) return
   try {
     fit.fit()
     // fit() clears the renderer; repaint in this same frame.
-    paintNow()
-    const size =`${props.sessionId}:${term.cols}x${term.rows}`
-    if (size !== sentSize) {
-      sentSize = size
-      window.api.ssh.resize(props.sessionId, term.cols, term.rows)
-    }
+    if (paint) paintNow()
+    sendSize(term.cols, term.rows)
   } catch {
     /* container not measurable yet */
   }
+}
+function sendSize(cols: number, rows: number): void {
+  const size = `${props.sessionId}:${cols}x${rows}`
+  if (size === sentSize) return
+  sentSize = size
+  window.api.ssh.resize(props.sessionId, cols, rows)
+}
+
+/**
+ * A one-step width change (folding / showing the host rail, the file panel) with a
+ * full-screen program running: resizing the local grid at once reflows every line to the new
+ * width, and the program's own redraw only lands a round trip later — in between, the screen
+ * shows wrapped, scrolled garbage (read as the terminal "flashing", worst on the right).
+ *
+ * So the server is told the new size first and the local grid keeps its old one until the
+ * answer arrives; resize and redraw are then applied together and painted as one frame. A
+ * program that sends nothing back (idle `cat`, a dead session) is resized after a short wait.
+ */
+const DEFER_FIT_MS = 120
+let pendingFit: ReturnType<typeof setTimeout> | null = null
+function cancelPendingFit(): void {
+  if (pendingFit) clearTimeout(pendingFit)
+  pendingFit = null
+}
+function fitDeferred(): void {
+  if (!fit || !term || !props.visible) return
+  let d: { cols: number; rows: number } | undefined
+  try {
+    d = fit.proposeDimensions()
+  } catch {
+    d = undefined
+  }
+  if (!d || !Number.isFinite(d.cols) || !Number.isFinite(d.rows)) return
+  if (d.cols === term.cols && d.rows === term.rows) {
+    // Back at the size the grid already has (toggled twice quickly).
+    cancelPendingFit()
+    sendSize(d.cols, d.rows)
+    return
+  }
+  sendSize(d.cols, d.rows)
+  if (pendingFit) clearTimeout(pendingFit)
+  pendingFit = setTimeout(() => {
+    pendingFit = null
+    if (!unmounted) doFit()
+  }, DEFER_FIT_MS)
+}
+/** Output while a deferred fit waits: apply the fit, then this output, then paint once. */
+function writeWithPendingFit(data: string): void {
+  if (!term) return
+  doFit(false)
+  try {
+    const core = (term as unknown as { _core?: { writeSync?: (d: string) => void } })._core
+    if (core?.writeSync) core.writeSync(data)
+    else term.write(data)
+  } catch {
+    term.write(data)
+  }
+  paintNow()
 }
 
 /**
@@ -808,7 +864,8 @@ onMounted(() => {
   })
   offData = window.api.ssh.onData((payload) => {
     if (payload.sessionId === props.sessionId) {
-      term?.write(payload.data)
+      if (pendingFit) writeWithPendingFit(payload.data)
+      else term?.write(payload.data)
       scanCwd(payload.data)
       // Keep pinned to the newest output unless the user is reading scrollback.
       if (followOutput.value && !scrolledUp.value) term?.scrollToBottom()
@@ -849,7 +906,7 @@ watch(
   () =>
     nextTick(() => {
       lastSizeChange = performance.now()
-      doFit()
+      fitDeferred()
     })
 )
 
@@ -952,6 +1009,7 @@ onBeforeUnmount(() => {
   offLogFailed?.()
   ro?.disconnect()
   canvasRo?.disconnect()
+  cancelPendingFit()
   term?.dispose()
   term = null
   webgl = null
