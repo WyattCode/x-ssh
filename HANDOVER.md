@@ -1,3 +1,23 @@
+# 会话记录:M3.214(2026-11-23,主机栏品牌色 + 工具图标圆角高亮 + 统一提示框:v0.6.55 已发)
+
+## 做了什么(细节见 CHANGELOG [0.6.55])
+
+- `HostRail.vue`:去掉 0.6.50 加的 `.rail-os :deep(.os-tile)` 中性色覆盖(品牌色回到 `OsIcon` 自己的逻辑),只留圆角 6 和 `svg` 68%;`setRowTip()`(`@pointerenter`,先于 `TooltipLayer` 的 `mouseover` 执行)按行里地址 / 名字是否被截断(`scrollWidth > clientWidth`)设置 `row.title`;`.rail-more` 有自己的 `title`。
+- `TabBar.vue`:`.tool::before`(inset 6px、圆角)承担悬停 / 选中底色;焦点框 `outline-offset: -6px; border-radius: 12px`。
+- `TooltipLayer.vue`(早就存在的统一提示层,不是系统提示):`.rail-host` 内的提示贴在行右边;`splitTip()`(新 `lib/tooltipText.ts` + 测试)把括号里的快捷键拆成 `<kbd>`;**修了嵌套 title 的 Bug**:`onOver` 里目标在已悬停元素内部、且找到的带 title 祖先包含该元素时,视为仍在悬停,不切换。
+- i18n:`rail.hint` 改为「并排打开 (Shift+点击)」(三语种)。
+
+## 验证
+
+- 真实鼠标移动(`mv.cjs` + CDP `mouseMoved`):行 → 「…」→ 行 → 右上角工具;长地址行(测试配置里手加的 `gpu-cluster-17`)显示完整地址。浅色主题:主机行提示、布局图标高亮、「+」的提示。类型检查、构建通过;测试 929 通过,另 2 个是 `localAccess.test.ts` 的软链接 EPERM(原有)。
+
+## 没验证 / 已知
+
+- 英文 / 繁体下的提示文案、右上角文件图标的悬停、提示框在窗口右边缘附近的位置;`splitTip` 靠关键词判断括号里是不是快捷键。
+- 品牌色:测试环境只有 Ubuntu 橙和通用图标,NVIDIA 绿、CentOS 等没亲眼核对。
+
+---
+
 # 会话记录:M3.213(2026-11-22,细线按屏幕缩放算 + 启动页窄栏:v0.6.54 已发)
 
 ## 做了什么(细节见 CHANGELOG [0.6.54])
