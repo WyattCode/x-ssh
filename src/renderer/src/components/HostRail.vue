@@ -480,7 +480,7 @@ const canSide = computed(() => store.activePane?.status === 'connected' && (stor
             <span v-if="selecting" class="rail-cb" :class="{ on: selected.has(h.id) }" aria-hidden="true"><Icon v-if="selected.has(h.id)" name="check" :size="11" /></span>
             <span v-else-if="showGrips" class="grip" aria-hidden="true">⋮⋮</span>
             <span class="rail-os">
-              <OsIcon :os="h.os" :color="h.color" :size="26" />
+              <OsIcon :os="h.os" :color="h.color" :size="28" />
               <span class="dot" :class="stateOf(h)" :title="stateOf(h)" />
             </span>
             <span class="rail-name">
@@ -1049,6 +1049,11 @@ const canSide = computed(() => store.activePane?.status === 'connected' && (stor
   background: var(--bg-elev-2);
   box-shadow: inset 0 0 0 1px var(--border-strong);
   border-radius: 6px;
+}
+/* The mark fills most of the tile (it was about half), so the systems can be told apart. */
+.rail-os :deep(.os-tile svg) {
+  width: 68%;
+  height: 68%;
 }
 .rail-host:hover .rail-os :deep(.os-tile),
 .rail-host.on .rail-os :deep(.os-tile) {

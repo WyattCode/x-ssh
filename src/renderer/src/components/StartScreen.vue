@@ -256,15 +256,18 @@ kbd {
   color: var(--text-faint);
 }
 h2 {
-  margin: 22px 0 4px 10px;
+  margin: 22px 0 4px;
   font-size: 12px;
   font-weight: 400;
   color: var(--text-faint);
 }
+/* Rows are inset by their own padding and pulled back out by the same amount, so their TEXT
+   lines up with the logo and the field above, while the hover tile spills a little past it. */
 .list {
   display: flex;
   flex-direction: column;
   gap: 1px;
+  margin: 0 -10px;
 }
 .item {
   display: flex;
@@ -282,8 +285,9 @@ h2 {
 .item.busy {
   opacity: 0.6;
 }
+/* A fixed name column: every address starts at the same x. */
 .item b {
-  flex: 0 1 auto;
+  flex: 0 0 190px;
   min-width: 0;
   font-size: 13.5px;
   font-weight: 400;
@@ -327,7 +331,7 @@ h2 {
   flex-direction: column;
   align-items: flex-start;
   gap: 12px;
-  margin: 24px 0 0 10px;
+  margin: 24px 0 0;
   font-size: 14px;
   color: var(--text-dim);
 }
@@ -335,7 +339,7 @@ h2 {
   display: flex;
   flex-wrap: wrap;
   gap: 8px 20px;
-  margin: 26px 0 0 10px;
+  margin: 26px 0 0;
   padding: 0;
   list-style: none;
   font-size: 12px;

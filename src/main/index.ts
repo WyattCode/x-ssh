@@ -1336,7 +1336,7 @@ let overlayDim = 0
  *  the strip stops one px short of it (39 × the zoom factor), so the hairline runs under the
  *  buttons too instead of ending where they begin. */
 function windowOverlay(): { color: string; symbolColor: string; height: number } {
-  const height = Math.round(39 * overlayFactor)
+  const height = Math.floor(39 * overlayFactor)
   const base = nativeTheme.shouldUseDarkColors
     ? { color: '#050505', symbolColor: '#e6e6e6' }
     : { color: '#eef0f3', symbolColor: '#1a1d23' }
