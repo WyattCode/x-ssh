@@ -480,7 +480,7 @@ const canSide = computed(() => store.activePane?.status === 'connected' && (stor
             <span v-if="selecting" class="rail-cb" :class="{ on: selected.has(h.id) }" aria-hidden="true"><Icon v-if="selected.has(h.id)" name="check" :size="11" /></span>
             <span v-else-if="showGrips" class="grip" aria-hidden="true">⋮⋮</span>
             <span class="rail-os">
-              <OsIcon :os="h.os" :color="h.color" :size="24" />
+              <OsIcon :os="h.os" :color="h.color" :size="26" />
               <span class="dot" :class="stateOf(h)" :title="stateOf(h)" />
             </span>
             <span class="rail-name">
@@ -1045,7 +1045,7 @@ const canSide = computed(() => store.activePane?.status === 'connected' && (stor
 /* One quiet tile for every system: the mark stays, its brand colour and tinted
    background do not (a column of olive, tan, red and teal tiles outweighed the names). */
 .rail-os :deep(.os-tile) {
-  color: var(--text-dim);
+  color: color-mix(in srgb, var(--text) 82%, transparent);
   background: var(--bg-elev-2);
   box-shadow: inset 0 0 0 1px var(--border-strong);
   border-radius: 6px;
