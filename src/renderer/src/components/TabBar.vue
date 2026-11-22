@@ -580,8 +580,29 @@ function cancelRename(): void {
   flex: none;
 }
 .tool:hover {
-  background: var(--hover);
   color: var(--text);
+}
+/* The highlight is the same rounded 28px tile as the new-tab button, not the whole cell: a
+   full-height square with hard corners touched the bar's top and bottom lines. It is the
+   tile for hover and for the open state alike. */
+.tool {
+  position: relative;
+  isolation: isolate;
+}
+.tool::before {
+  content: '';
+  position: absolute;
+  inset: 6px;
+  z-index: -1;
+  border-radius: var(--radius-sm);
+  transition: background 0.14s;
+}
+.tool:hover::before,
+.tool.on::before {
+  background: var(--hover);
+}
+.tool.on:hover {
+  color: var(--cursor);
 }
 .tool.on {
   color: var(--cursor);
@@ -593,8 +614,8 @@ function cancelRename(): void {
 .rail-toggle:focus-visible {
   /* Same weight and colour as every other button's ring, only drawn inward. */
   outline: 2px solid var(--accent);
-  outline-offset: -7px;
-  border-radius: 13px;
+  outline-offset: -6px;
+  border-radius: 12px;
 }
 /* The new-tab button: the rounded square tile, with room around it so it is not joined to the last tab. */
 .new {

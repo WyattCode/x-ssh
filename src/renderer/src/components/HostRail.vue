@@ -235,6 +235,20 @@ function stateOf(h: Host): string {
 const currentHostId = computed(() => store.activePane?.params.hostId)
 const address = (h: Host): string => `${h.username}@${h.host}${h.port && h.port !== 22 ? ':' + h.port : ''}`
 
+/** The row's tooltip, decided when the pointer arrives (it has to exist before the tooltip layer
+ *  reads it, which is why this is a pointer handler and not a template binding): normally the
+ *  side-by-side hint; when the address (or else the name) is cut off by the row, that text in
+ *  full, since the row cannot show it. */
+function setRowTip(e: PointerEvent, h: Host): void {
+  const row = e.currentTarget as HTMLElement | null
+  if (!row) return
+  const cut = (sel: string): boolean => {
+    const el = row.querySelector<HTMLElement>(sel)
+    return !!el && el.scrollWidth > el.clientWidth
+  }
+  row.title = cut('.rail-name small') ? address(h) : cut('.rail-label') ? h.label : t('rail.hint')
+}
+
 // ---- Quick connect: an address typed in the filter ----
 const quickTarget = computed(() => {
   const q = query.value.trim()
@@ -470,7 +484,7 @@ const canSide = computed(() => store.activePane?.status === 'connected' && (stor
             'drop-before': !drop.header && drop.group === realGroup(g.name) && drop.before === h.id,
             'drop-end': !drop.header && drop.group === realGroup(g.name) && drop.before === null && i === g.hosts.length - 1 && dragIds.length > 0
           }"
-          :title="`${address(h)} — ${t('rail.hint')}`"
+          @pointerenter="setRowTip($event, h)"
           @contextmenu.prevent="openMenu($event, h)"
           @dragover="onRowDragOver($event, g.name, g.hosts, i)"
           @drop="onRowDrop"
@@ -488,7 +502,7 @@ const canSide = computed(() => store.activePane?.status === 'connected' && (stor
               <small>{{ address(h) }}</small>
             </span>
           </button>
-          <button type="button" class="rail-more" :class="{ open: menu.open && menu.host?.id === h.id }" :aria-label="`${t('hosts.more')} ${h.label}`" @click.stop="openMenu($event, h)">
+          <button type="button" class="rail-more" :class="{ open: menu.open && menu.host?.id === h.id }" :title="t('hosts.more')" :aria-label="`${t('hosts.more')} ${h.label}`" @click.stop="openMenu($event, h)">
             <Icon name="more-horizontal" :size="16" />
           </button>
         </div>
@@ -1042,22 +1056,15 @@ const canSide = computed(() => store.activePane?.status === 'connected' && (stor
 .rail-host {
   border-radius: 6px;
 }
-/* One quiet tile for every system: the mark stays, its brand colour and tinted
-   background do not (a column of olive, tan, red and teal tiles outweighed the names). */
+/* The system marks keep their own colour (the tile's tint and ring come from OsIcon). Only the
+   shape is tightened: a smaller radius, and the mark fills most of the tile so the systems can
+   be told apart. */
 .rail-os :deep(.os-tile) {
-  color: color-mix(in srgb, var(--text) 82%, transparent);
-  background: var(--bg-elev-2);
-  box-shadow: inset 0 0 0 1px var(--border-strong);
   border-radius: 6px;
 }
-/* The mark fills most of the tile (it was about half), so the systems can be told apart. */
 .rail-os :deep(.os-tile svg) {
   width: 68%;
   height: 68%;
-}
-.rail-host:hover .rail-os :deep(.os-tile),
-.rail-host.on .rail-os :deep(.os-tile) {
-  color: var(--text);
 }
 /* Green means one thing: a session is open. A host that merely answers shows no dot;
    one that does not answer shows a hollow ring. */

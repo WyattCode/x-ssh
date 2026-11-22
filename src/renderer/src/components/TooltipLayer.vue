@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { reactive, ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { reactive, ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { splitTip } from '../lib/tooltipText'
 import { shouldDismissTooltip } from '../lib/tooltipDismiss'
 
 // A single global tooltip host. It intercepts the native `title` tooltip for
@@ -9,6 +10,8 @@ import { shouldDismissTooltip } from '../lib/tooltipDismiss'
 // the platform's plain yellow box.
 const state = reactive({ visible: false, text: '', x: 0, y: 0 })
 const tipEl = ref<HTMLElement>()
+/** Label and shortcut apart: the shortcut is drawn as a key chip. */
+const parts = computed(() => splitTip(state.text))
 
 let hovered: HTMLElement | null = null
 let originalTitle: string | null = null
@@ -68,17 +71,30 @@ async function place(el: HTMLElement): Promise<void> {
   if (!box) return
   const vw = window.innerWidth
   const vh = window.innerHeight
+  // A host row in the rail: beside it, over the terminal side. Below it the tip lay on top of the
+  // next host, which is the very thing the user is about to move to.
+  if (el.closest('.rail-host') && r.right + 8 + box.width <= vw - 8) {
+    state.x = r.right + 8
+    state.y = Math.max(8, Math.min(r.top + r.height / 2 - box.height / 2, vh - box.height - 8))
+    return
+  }
   let x = r.left + r.width / 2 - box.width / 2
-  let y = r.bottom + 7
+  let y = r.bottom + 6
   // Keep the tooltip on screen; flip above the element when it would overflow.
   x = Math.max(8, Math.min(x, vw - box.width - 8))
-  if (y + box.height > vh - 8) y = r.top - box.height - 7
+  if (y + box.height > vh - 8) y = r.top - box.height - 6
   state.x = x
   state.y = Math.max(8, y)
 }
 
 function onOver(e: MouseEvent): void {
-  const el = (e.target as Element | null)?.closest?.('[title]') as HTMLElement | null
+  const target = e.target as Element | null
+  const el = target?.closest?.('[title]') as HTMLElement | null
+  // The hovered element's own title is held back while its tip is up, so a child of it
+  // resolves to the titled element OUTSIDE it. That is still the hovered one, not a switch:
+  // without this, moving onto a button's icon inside a titled row gave the row's tip again
+  // (the row's "side by side" over the "more" button).
+  if (hovered && target && hovered.contains(target) && (!el || el.contains(hovered))) return
   if (!el || el === hovered) return
   const text = el.getAttribute('title') || ''
   if (!text) return
@@ -140,7 +156,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div v-if="state.visible" ref="tipEl" class="tip" :style="{ left: state.x + 'px', top: state.y + 'px' }">
-    {{ state.text }}
+    {{ parts.label }}<kbd v-if="parts.key">{{ parts.key }}</kbd>
   </div>
 </template>
 
@@ -156,10 +172,19 @@ onBeforeUnmount(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: var(--text-dim);
+  color: var(--text);
   background: var(--bg-elev);
-  border: 1px solid var(--border);
-  border-radius: 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
+}
+.tip kbd {
+  margin-left: 8px;
+  padding: 0 5px;
+  font: inherit;
+  font-size: 11px;
+  color: var(--text-faint);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
 }
 </style>
