@@ -137,6 +137,15 @@ function tabMarked(tb: Tab): boolean {
   if (tb === 'term') return !!form.onConnect.trim() || !!form.terminalTheme || !!form.terminalFontFamily.trim()
   return false
 }
+/** The save hint names fields on the connection screen: clicking it goes there, to the
+ *  first one still empty. */
+function goToMissing(): void {
+  tab.value = 'conn'
+  void nextTick(() => {
+    const el = !form.host ? document.getElementById('he-host') : panelEl.value?.querySelector<HTMLElement>('.p-body input:not([value]), .p-body input')
+    el?.focus()
+  })
+}
 function onTabKey(e: KeyboardEvent): void {
   const step = e.key === 'ArrowDown' ? 1 : e.key === 'ArrowUp' ? -1 : 0
   if (!step) return
@@ -145,9 +154,7 @@ function onTabKey(e: KeyboardEvent): void {
   tab.value = next
   void nextTick(() => document.getElementById(`he-tab-${next}`)?.focus())
 }
-watch(tab, (tb) => {
-  // Two settings on a screen of their own: nothing to gain from keeping them folded.
-  if (tb === 'term') sections.onConnect = sections.appearance = true
+watch(tab, () => {
   if (bodyEl.value) bodyEl.value.scrollTop = 0
 })
 let bodyRo: ResizeObserver | null = null
@@ -1096,38 +1103,31 @@ async function remove(): Promise<void> {
 
           <!-- ---- 终端 ---- -->
           <section v-show="tab === 'term'" class="group">
+            <!-- Two settings on a screen of their own: shown outright, no folded headers. -->
             <div class="card">
-              <button type="button" class="row disclosure" @click="sections.onConnect = !sections.onConnect">
-                <span class="r-label wide">{{ t('host.onConnect') }}</span>
-                <span class="r-summary mono">{{ onConnectSummary }}</span>
-                <Icon name="chevron-right" :size="14" class="chev" :class="{ open: sections.onConnect }" />
-              </button>
-              <div v-if="sections.onConnect" class="sub">
+              <div class="row stack">
+                <label class="r-label wide" for="he-onconnect">{{ t('host.onConnect') }}</label>
+                <textarea id="he-onconnect" v-model="form.onConnect" class="box mono ta" :placeholder="t('host.onConnectPh')" rows="2" spellcheck="false" />
                 <p class="sub-hint">{{ t('host.onConnectHint') }}</p>
-                <textarea v-model="form.onConnect" class="box mono ta" :placeholder="t('host.onConnectPh')" rows="3" spellcheck="false" />
-                <label class="toggle-line">
-                  <span>{{ t('host.onConnectDelay') }}</span>
-                  <input v-model.number="form.onConnectDelayMs" class="box mono port-box" type="number" min="0" max="30000" step="100" :placeholder="t('host.onConnectDelayPh')" />
-                </label>
               </div>
-
-              <button type="button" class="row disclosure" @click="sections.appearance = !sections.appearance">
-                <span class="r-label wide">{{ t('host.appearance') }}</span>
-                <span class="r-summary">{{ appearanceSummary }}</span>
-                <Icon name="chevron-right" :size="14" class="chev" :class="{ open: sections.appearance }" />
-              </button>
-              <div v-if="sections.appearance" class="sub">
-                <div class="sub-grid">
-                  <div class="r-select box-select grow">
-                    <select v-model="form.terminalTheme">
-                      <option value="">{{ t('host.termThemeSystem') }}</option>
-                      <option v-for="p in PRESETS" :key="p.id" :value="p.id">{{ p.label }}</option>
-                    </select>
-                    <Icon name="chevron-down" :size="13" class="caret" />
-                  </div>
-                  <input v-model="form.terminalFontFamily" class="box grow" :placeholder="t('host.termFontPh')" spellcheck="false" />
+              <label class="row">
+                <span class="r-label wide">{{ t('host.onConnectDelay') }}</span>
+                <input v-model.number="form.onConnectDelayMs" class="box mono port-box" type="number" min="0" max="30000" step="100" :placeholder="t('host.onConnectDelayPh')" />
+              </label>
+              <div class="row">
+                <label class="r-label" for="he-theme">{{ t('host.termTheme') }}</label>
+                <div class="r-select grp-select">
+                  <select id="he-theme" v-model="form.terminalTheme">
+                    <option value="">{{ t('host.termThemeSystem') }}</option>
+                    <option v-for="p in PRESETS" :key="p.id" :value="p.id">{{ p.label }}</option>
+                  </select>
+                  <Icon name="chevron-down" :size="14" class="caret" />
                 </div>
               </div>
+              <label class="row">
+                <span class="r-label">{{ t('host.termFont') }}</span>
+                <input v-model="form.terminalFontFamily" class="r-input" :placeholder="t('host.termFontPh')" spellcheck="false" />
+              </label>
             </div>
           </section>
         </div>
@@ -1150,7 +1150,7 @@ async function remove(): Promise<void> {
           <button v-if="host" type="button" class="btn btn-danger" @click="remove">{{ t('host.delete') }}</button>
           <span class="spacer" />
           <!-- The reason Save is off, in plain sight (the tooltip alone is easy to miss). -->
-          <span v-if="!saving && !canSave()" id="he-save-hint" class="save-hint">{{ saveBlockReason() }}</span>
+          <button v-if="!saving && !canSave()" id="he-save-hint" type="button" class="save-hint" @click="goToMissing">{{ saveBlockReason() }}</button>
           <button type="button" class="btn" @click="void requestClose()">{{ t('host.cancel') }}</button>
           <!-- One save button. A merge left a second copy here, so the footer
                showed two primary buttons and users could not tell which one
@@ -2181,5 +2181,74 @@ input[type='number']::-webkit-inner-spin-button {
   background: transparent;
   border: none;
   border-radius: 0;
+}
+
+/* ================= Second pass on the split layout ================= */
+/* Sized to the fullest category (network: five rows and a note), not taller: the old
+   520px left half of every screen empty. Narrower too, so short values do not sit in
+   very long fields. */
+.panel {
+  width: min(600px, calc(100vw - 48px));
+  height: min(430px, calc(100vh - 140px));
+}
+.p-body {
+  padding-bottom: 12px;
+}
+.row.stack .ta {
+  min-height: 54px;
+}
+.row.stack .sub-hint {
+  text-wrap: wrap;
+}
+.row > .r-input,
+.row > .tag-box,
+.row > .r-select,
+.row > .r-pick {
+  max-width: 300px;
+}
+/* One label colour on every screen: the label is quiet, the value is bright. */
+.r-label.wide {
+  color: var(--text-dim);
+}
+.disclosure:hover .r-label.wide {
+  color: var(--text);
+}
+/* What opens under a row stands on the dialog too: no tinted block. */
+.sub {
+  background: transparent;
+  padding-top: 4px;
+}
+.row + .sub {
+  border-top: none;
+}
+/* A select inside a framed box is not a second box. */
+.sub .box-select select {
+  height: 30px;
+  padding: 0 22px 0 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+}
+/* A row whose field sits under its label (the command box). */
+.row.stack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+.row.stack .r-label {
+  flex: none;
+}
+/* Short notes break into even lines instead of leaving one word on the last. */
+.sub-hint {
+  text-wrap: balance;
+}
+.save-hint {
+  cursor: pointer;
+  text-align: right;
+}
+.save-hint:hover {
+  color: var(--text);
 }
 </style>

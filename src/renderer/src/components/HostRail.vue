@@ -480,7 +480,7 @@ const canSide = computed(() => store.activePane?.status === 'connected' && (stor
             <span v-if="selecting" class="rail-cb" :class="{ on: selected.has(h.id) }" aria-hidden="true"><Icon v-if="selected.has(h.id)" name="check" :size="11" /></span>
             <span v-else-if="showGrips" class="grip" aria-hidden="true">⋮⋮</span>
             <span class="rail-os">
-              <OsIcon :os="h.os" :color="h.color" :size="28" />
+              <OsIcon :os="h.os" :color="h.color" :size="24" />
               <span class="dot" :class="stateOf(h)" :title="stateOf(h)" />
             </span>
             <span class="rail-name">
@@ -1021,5 +1021,73 @@ const canSide = computed(() => store.activePane?.status === 'connected' && (stor
 .mv-input:focus {
   border-color: var(--text);
   outline: none;
+}
+
+/* ================= Compact two-line rows ================= */
+/* The name is what you look for: bright. The address under it is the quiet line. */
+.rail-label {
+  font-size: 13.5px;
+  color: var(--text);
+}
+.rail-name {
+  line-height: 1.3;
+}
+.rail-name small {
+  font-size: 11.5px;
+}
+.rail-main {
+  gap: 10px;
+  padding: 4px 4px 4px 8px;
+}
+.rail-host {
+  border-radius: 6px;
+}
+/* One quiet tile for every system: the mark stays, its brand colour and tinted
+   background do not (a column of olive, tan, red and teal tiles outweighed the names). */
+.rail-os :deep(.os-tile) {
+  color: var(--text-dim);
+  background: var(--bg-elev-2);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+  border-radius: 6px;
+}
+.rail-host:hover .rail-os :deep(.os-tile),
+.rail-host.on .rail-os :deep(.os-tile) {
+  color: var(--text);
+}
+/* Green means one thing: a session is open. A host that merely answers shows no dot;
+   one that does not answer shows a hollow ring. */
+.dot.online {
+  opacity: 0;
+}
+.dot.offline {
+  background: var(--bg-elev);
+  border: 1.5px solid var(--text-faint);
+  opacity: 1;
+}
+/* The search field: a hairline frame, no fill, like the other fields. */
+.rail-filter {
+  height: 30px;
+  padding: 0 10px;
+  background: transparent;
+  border-color: var(--border-strong);
+}
+.rail-filter:hover {
+  border-color: var(--text-faint);
+}
+.rail-filter:focus {
+  border-color: var(--text);
+}
+/* Locked is the quiet, normal state; only "unlocked" asks for attention. */
+.rt-btn.lockbtn {
+  color: var(--text);
+}
+.rt-btn.lockbtn.open {
+  color: var(--warn);
+}
+/* The last visible row fades out instead of being cut by the foot. */
+.rail-list {
+  padding-bottom: 14px;
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 18px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 18px), transparent);
 }
 </style>
