@@ -1,3 +1,26 @@
+# 会话记录:M3.207(2026-11-22,主机弹窗分栏 + 命令面板紧凑单行 + 全屏程序下的闪跳:v0.6.48 已发)
+
+## 做了什么(细节见 CHANGELOG [0.6.48])
+
+- `HostEditor.vue`:左侧分类 `tab`(conn / org / net / term),右侧各 `section` 用 `v-show`;`tabMarked()` 画小绿点;输入控件统一成透明 + 细线框;`bodyRo`(ResizeObserver 观察正文的各个分类)负责重算「更多设置」按钮(只靠 `onUpdated` 时展开一行后不出现)。
+- `TerminalView.vue`:`fitDeferred()` 先发新尺寸、本地暂不改,`writeWithPendingFit()` 在远端数据到达时把改尺寸和这批数据同步写入(xterm 内部的 `_core.writeSync`,有回退)再同帧重画;`DEFER_FIT_MS = 120`。只用于一次性的宽度变化和窗口尺寸稳定之后,字体 / DPR 等仍走立即的 `doFit()`。
+- `CommandPalette.vue`:单行行样式;`livePane()` / `switchTo()`(已连接的主机回车切过去);`actionMode`(`>` 前缀);Ctrl+E 编辑;广播操作 `keepOpen`,打开面板时清 `broadcastOpen`。
+
+## 验证
+
+- 测试服务器改成收到尺寸变化后延迟 45ms 整屏重画,逐帧录屏:修之前退出专注模式有两帧折行错乱,修之后没有。
+- 主机弹窗:新建、编辑、密钥认证、四个分类、英文、浅色主题截图看过。命令面板:切换到已连接主机、`>` 模式、Ctrl+E、广播输入框、英文 / 繁体文案实际操作过。
+- 类型检查、构建通过;测试 926 通过,另 2 个是 `localAccess.test.ts` 的软链接 EPERM(原有)。
+
+## 没验证 / 已知
+
+- 真实主机(几十毫秒延迟、tmux / Claude Code)上的闪跳没看过;等重画的 120ms 里若主机正好有别的输出(tail -f、按键回显),仍可能闪一下。
+- `_core.writeSync` 和 `_renderService._renderRows` 都是 xterm 私有方法:升级 xterm 后要重新逐帧录屏。
+- 命令面板的 Shift+Enter 并排、密码输入子界面没实际操作;繁体下的主机分栏弹窗、启动页、左右并排没走查。
+- 设置和端口转发弹窗里的输入框还是灰底,没有跟着统一。
+
+---
+
 # 会话记录:M3.206(2026-11-22,收起主机栏终端闪黑 + 失败提示前缀:v0.6.47 已发)
 
 ## 做了什么(细节见 CHANGELOG [0.6.47])
