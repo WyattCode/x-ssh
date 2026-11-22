@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useSessions } from '../stores/sessions'
 import { useI18n } from '../lib/i18n'
 import { parseTarget } from '../lib/target'
@@ -17,8 +17,13 @@ const store = useSessions()
 const { t } = useI18n()
 const mod = isMac ? '⌘' : 'Ctrl'
 
+/** Only hosts that were actually used: a list called "recent" does not pad itself with
+ *  hosts never connected. With none, the section is not shown at all. */
 const recent = computed(() =>
-  [...store.hosts].sort((a, b) => (b.lastUsedAt ?? 0) - (a.lastUsedAt ?? 0)).slice(0, 4)
+  store.hosts
+    .filter((h) => h.lastUsedAt)
+    .sort((a, b) => (b.lastUsedAt ?? 0) - (a.lastUsedAt ?? 0))
+    .slice(0, 4)
 )
 const address = (h: Host): string => `${h.username}@${h.host}${h.port && h.port !== 22 ? ':' + h.port : ''}`
 
@@ -35,39 +40,81 @@ async function open(h: Host): Promise<void> {
     busy.value = ''
   }
 }
-function onEnter(e: KeyboardEvent): void {
-  if (isImeKey(e)) return
-  e.preventDefault()
+
+// ---- What the typed text would do, shown before Enter ----
+// Typing used to act blind: text contained in exactly one saved name connected to that
+// host at once, even when a new address was meant. Now the matches are listed under the
+// field, with "connect as a new address" as an entry of its own, and Enter takes the
+// highlighted one.
+type Suggestion = { kind: 'host'; host: Host } | { kind: 'new'; text: string }
+const suggestions = computed<Suggestion[]>(() => {
   const q = typed.value.trim()
-  // A name, not an address: the one saved host it matches opens; anything else (none, or
-  // several) goes to the palette with the text already typed in.
-  if (q && !q.includes('@')) {
-    const hits = store.hosts.filter((h) => h.label.toLowerCase().includes(q.toLowerCase()))
-    const exact = store.hosts.find((h) => h.label.toLowerCase() === q.toLowerCase() || h.host.toLowerCase() === q.toLowerCase())
-    const one = exact ?? (hits.length === 1 ? hits[0] : undefined)
-    if (one) {
-      typed.value = ''
-      return void open(one)
-    }
-    if (hits.length > 1) {
-      typed.value = ''
-      store.paletteSeed = q
-      store.togglePalette(true)
-      return
-    }
+  if (!q) return []
+  const lq = q.toLowerCase()
+  const rank = (h: Host): number => {
+    const label = h.label.toLowerCase()
+    const addr = address(h).toLowerCase()
+    if (label === lq || addr === lq || h.host.toLowerCase() === lq) return 0
+    if (label.startsWith(lq)) return 1
+    if (label.includes(lq)) return 2
+    if (addr.includes(lq)) return 3
+    return -1
   }
-  const target = q ? parseTarget(q) : null
-  if (!target) {
+  const hosts = store.hosts
+    .map((h) => ({ h, r: rank(h) }))
+    .filter((x) => x.r >= 0)
+    .sort((a, b) => a.r - b.r || (b.h.lastUsedAt ?? 0) - (a.h.lastUsedAt ?? 0))
+    .slice(0, 5)
+  const out: Suggestion[] = hosts.map((x) => ({ kind: 'host', host: x.h }))
+  // parseTarget treats a bare word (no dot, user or port) as a search term. Here it is offered
+  // as an address too — last in the list — so a new host called "prod" can still be reached.
+  const target = parseTarget(q) ?? (/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/.test(q) ? { username: undefined, host: q, port: 22 } : null)
+  if (target) {
+    const text = `${target.username ?? 'root'}@${target.host}${target.port !== 22 ? ':' + target.port : ''}`
+    // Not when it is exactly a saved host's own address: that host is already in the list.
+    if (!store.hosts.some((h) => address(h).toLowerCase() === text.toLowerCase())) out.push({ kind: 'new', text })
+  }
+  return out
+})
+const sel = ref(0)
+watch(typed, () => {
+  sel.value = 0
+})
+watch(suggestions, (list) => {
+  if (sel.value >= list.length) sel.value = 0
+})
+function activate(sg: Suggestion | undefined): void {
+  if (!sg) {
+    // Nothing to pick here: hand what was typed (if anything) to the palette, which also
+    // searches actions and snippets.
+    const q = typed.value.trim()
+    if (q) store.paletteSeed = q
+    typed.value = ''
     store.togglePalette(true)
     return
   }
-  const host = target.host.toLowerCase()
-  const saved = store.hosts.find((h) => h.host.toLowerCase() === host && (!target.username || h.username === target.username))
   typed.value = ''
-  if (saved) return void open(saved)
-  store.paletteSeed = `${target.username ?? 'root'}@${target.host}${target.port !== 22 ? ':' + target.port : ''}`
+  if (sg.kind === 'host') return void open(sg.host)
+  store.paletteSeed = sg.text
   store.paletteQuick = true
   store.togglePalette(true)
+}
+function onKey(e: KeyboardEvent): void {
+  if (isImeKey(e)) return
+  const n = suggestions.value.length
+  if (e.key === 'Enter') {
+    e.preventDefault()
+    activate(suggestions.value[sel.value])
+  } else if (e.key === 'ArrowDown' && n) {
+    e.preventDefault()
+    sel.value = (sel.value + 1) % n
+  } else if (e.key === 'ArrowUp' && n) {
+    e.preventDefault()
+    sel.value = (sel.value - 1 + n) % n
+  } else if (e.key === 'Escape' && typed.value) {
+    e.preventDefault()
+    typed.value = ''
+  }
 }
 </script>
 
@@ -78,22 +125,48 @@ function onEnter(e: KeyboardEvent): void {
         <BrandLockup :height="22" />
       </div>
       <label class="go">
-        <input v-model="typed" spellcheck="false" autocomplete="off" :placeholder="t('start.ph')" :aria-label="t('start.ph')" @keydown.enter="onEnter" />
+        <input v-model="typed" spellcheck="false" autocomplete="off" :placeholder="t('start.ph')" :aria-label="t('start.ph')" @keydown="onKey" />
         <kbd>Enter</kbd>
       </label>
 
-      <template v-if="recent.length">
+      <!-- While typing: what Enter would do, in place of the recent list. -->
+      <div v-if="typed.trim()" class="list sugg" role="listbox">
+        <button
+          v-for="(sg, i) in suggestions"
+          :key="sg.kind === 'host' ? sg.host.id : 'new'"
+          type="button"
+          role="option"
+          class="item"
+          :class="{ sel: i === sel }"
+          :aria-selected="i === sel"
+          tabindex="-1"
+          @mousemove="sel = i"
+          @click="activate(sg)"
+        >
+          <template v-if="sg.kind === 'host'">
+            <b>{{ sg.host.label }}</b>
+            <small>{{ address(sg.host) }}</small>
+          </template>
+          <template v-else>
+            <b>{{ sg.text }}</b>
+            <small>{{ t('start.asNew') }}</small>
+          </template>
+          <span v-if="i === sel" class="verb">{{ sg.kind === 'host' ? t('pal.connect') : t('start.newConn') }} ↵</span>
+        </button>
+        <p v-if="!suggestions.length" class="nohit">{{ t('rail.none') }}</p>
+      </div>
+      <template v-else-if="recent.length">
         <h2>{{ t('start.recent') }}</h2>
         <!-- One line each, like the palette: the rail beside this page is the full list. -->
         <div class="list">
           <button v-for="h in recent" :key="h.id" class="item" :class="{ busy: busy === h.id }" :title="address(h)" @click="open(h)">
             <b>{{ h.label }}</b>
             <small>{{ address(h) }}</small>
-            <span v-if="h.lastUsedAt" class="when">{{ formatAgo(h.lastUsedAt, t) }}</span>
+            <span class="when">{{ formatAgo(h.lastUsedAt ?? 0, t) }}</span>
           </button>
         </div>
       </template>
-      <div v-else class="none">
+      <div v-else-if="!store.hosts.length" class="none">
         <p>{{ t('start.empty') }}</p>
         <button class="btn btn-primary" @click="emit('new-host')">{{ t('rail.new') }}</button>
       </div>
@@ -227,6 +300,22 @@ h2 {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.sugg {
+  margin-top: 6px;
+}
+.item.sel {
+  background: var(--selected);
+}
+.verb {
+  flex: none;
+  font-size: 12px;
+  color: var(--ok);
+}
+.nohit {
+  margin: 8px 10px;
+  font-size: 12.5px;
+  color: var(--text-faint);
 }
 .when {
   flex: none;
