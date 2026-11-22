@@ -1,3 +1,24 @@
+# 会话记录:M3.209(2026-11-22,主机栏紧凑两行 + 主机弹窗第二轮:v0.6.50 已发)
+
+## 做了什么(细节见 CHANGELOG [0.6.50])
+
+- `HostRail.vue`(只加了文件末尾一段样式 + 图标尺寸 28 → 24):`.rail-label` 亮色;`.rail-os :deep(.os-tile)` 统一成中性底、灰色图形;`.dot.online` 不显示、`.dot.offline` 空心圈;搜索框细线框;锁图标颜色;列表底部 mask 渐隐。`stateOf()` 逻辑没动。
+- `HostEditor.vue`:面板 600×430;`.row >` 的输入控件 `max-width: 300px`;终端分类改成普通行(`row stack` 是标签在上、输入在下);`goToMissing()`;`.sub` 无底色;`.sub .box-select select` 去掉内层框。**遗留**:`onConnectSummary` / `appearanceSummary` 和 `sections.onConnect` / `sections.appearance` 模板已不用,没删。
+- i18n:`rail.filter` 改为「搜索」;英文 `host.termTheme` / `host.termFont` 改短(标签列 84px 放不下)。
+
+## 验证
+
+- 主机弹窗:四个分类、网络全部展开、密钥认证、英文 + 浅色主题截图看过;脚本检查过英文和繁体下没有折行的标签。主机栏:多选、解锁拖动、底部渐隐、空心圈截图看过。
+- 类型检查、构建通过;测试 926 通过,另 2 个是 `localAccess.test.ts` 的软链接 EPERM(原有)。
+
+## 没验证 / 已知
+
+- 用户那边「DGX SPARK」分组标题是大写,是分组名本身存成了大写,不是样式。
+- 主机行的悬停提示会盖住下面一台(原有)。大多数主机连不通时空心圈会很多。
+- 启动页、左右并排没走查。
+
+---
+
 # 会话记录:M3.208(2026-11-22,标签栏焦点框 / 搜索框 / 菜单 Esc:v0.6.49 已发)
 
 ## 做了什么(细节见 CHANGELOG [0.6.49])
