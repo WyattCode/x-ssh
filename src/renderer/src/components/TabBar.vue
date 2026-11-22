@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive, ref, computed, nextTick } from 'vue'
+import { reactive, ref, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useSessions, type Tab } from '../stores/sessions'
 import { useI18n } from '../lib/i18n'
 import { isMac } from '../composables/platform'
@@ -143,6 +143,20 @@ function applyPreset(rows: number, cols: number): void {
   void store.applyLayoutPreset(rows, cols)
 }
 
+/** Esc closes an open menu. Neither menu had a key handler, so Esc did nothing to them — and
+ *  with the terminal focused it went to the remote shell instead. Caught in the capture phase
+ *  and stopped there, so the key that closes a menu is not also typed into the session. */
+function onMenuEsc(e: KeyboardEvent): void {
+  if (e.key !== 'Escape' || isImeKey(e)) return
+  if (!menu.open && !layoutMenu.open) return
+  e.preventDefault()
+  e.stopPropagation()
+  menu.open = false
+  layoutMenu.open = false
+}
+onMounted(() => window.addEventListener('keydown', onMenuEsc, true))
+onBeforeUnmount(() => window.removeEventListener('keydown', onMenuEsc, true))
+
 /** Production hosts carry a warm tag in their tab: the one environment that
  *  must not be mistaken for another. */
 function tabHost(tab: Tab): Host | undefined {
@@ -247,8 +261,8 @@ function cancelRename(): void {
       <button v-if="store.tabs.length" class="tool" :class="{ on: filterOpen }" :title="t('tabbar.filter')" :aria-label="t('tabbar.filter')" @click="toggleFilter">
         <Icon name="search" :ink="10.1" :weight="1.3" />
       </button>
+      <!-- No second magnifier in the box: the (green) button beside it is the icon. -->
       <div v-if="filterOpen" class="filter-box">
-        <Icon name="search" :size="14" />
         <input
           ref="filterEl"
           v-model="filterQuery"
@@ -257,7 +271,8 @@ function cancelRename(): void {
           spellcheck="false"
           @keydown.esc.prevent="toggleFilter"
         />
-        <span class="filter-count">{{ visibleTabs.length }}/{{ store.tabs.length }}</span>
+        <!-- A count only says something once there is a filter. -->
+        <span v-if="filterQuery.trim()" class="filter-count">{{ visibleTabs.length }}/{{ store.tabs.length }}</span>
       </div>
       <button
         v-if="store.tabs.length"
@@ -505,20 +520,26 @@ function cancelRename(): void {
   display: flex;
   align-items: center;
   gap: 5px;
-  height: 28px;
-  margin-right: 6px;
-  padding: 0 8px;
+  /* A field like the host dialog's: no fill, a hairline frame; symmetric to its neighbours. */
+  height: 26px;
+  margin: 0;
+  padding: 0 10px;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
-  background: var(--bg);
+  background: transparent;
   color: var(--text-faint);
   -webkit-app-region: no-drag;
 }
+.filter-box:hover {
+  border-color: var(--text-faint);
+}
 .filter-box:focus-within {
-  border-color: var(--accent);
+  border-color: var(--text);
 }
 .filter-input {
-  width: 128px;
+  width: 150px;
+  font-family: var(--font-chrome);
+  caret-color: var(--cursor);
   background: transparent;
   border: none;
   outline: none;
@@ -564,6 +585,16 @@ function cancelRename(): void {
 }
 .tool.on {
   color: var(--cursor);
+}
+/* Keyboard focus on a full-height cell: the default ring sits 2px OUTSIDE the box, so its
+   top and bottom fell outside the bar and only two white bars were left beside the icon.
+   Draw it inside instead, as the same rounded tile the new-tab button is. */
+.tool:focus-visible,
+.rail-toggle:focus-visible {
+  /* Same weight and colour as every other button's ring, only drawn inward. */
+  outline: 2px solid var(--accent);
+  outline-offset: -7px;
+  border-radius: 13px;
 }
 /* The new-tab button: the rounded square tile, with room around it so it is not joined to the last tab. */
 .new {
