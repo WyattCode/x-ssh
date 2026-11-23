@@ -6,7 +6,12 @@
 
 ## [0.6.56] - 2026-11-23
 
+### Added
+- **macOS(Apple Silicon)安装包**:`npm run dist:mac` 出 `X-SSH-<版本>-arm64.dmg` 与 `-arm64-mac.zip`(arm64 固定,不会悄悄出 x64)。CI 打 tag 时和 Windows 包并行产出,附 `SHA256SUMS-macos.txt`。包**未签名、未公证**,README 里写清:先 `shasum -a 256 -c` 逐条校验再谈隔离属性,只对该 App 路径用 `xattr`、不用 `sudo`、不对父目录动手;另给一条不用碰隔离属性的路径(zip 解压到 `~/Applications` 再 `open`)。
+- **`npm run icon:mac`**(`scripts/make-mac-icon.mjs`)从 `build/icon.svg` 生成 `build/icon.icns`(临时目录里拼 `.iconset`,`iconutil` 用完即删,仓库不留临时文件)。`scripts/build-mac.mjs` 会**实际跑一次** `actool` 来判断能不能出新图标格式,跑不通才回落 `.icns`(只查 `xcrun --find` 会误判:本机 `actool` 找得到但一跑就挂)。
+
 ### Fixed
+- **macOS 顶部两行与红绿灯错位**:红绿灯由系统画,尺寸位置固定,页面缩放会把 40 像素的顶栏带偏 —— 灯中心在 18.8 pt,顶栏中心 50%/120%/200% 时分别是 10/24/40 pt(差 −8.8 / +5.2 / +21.2),侧栏标题文字跟着一起偏,标题起点还会从 82 pt 推到 164 pt。现在 macOS 上顶栏和主机栏标题行按缩放反向缩放(`zoom: 1/--zf`),屏幕上恒为 40 pt 高、标题恒从 82 pt 起。重打后逐档实测 50/70/100/120/150/200%,两行渲染高度都是 40.0 pt。
 - **标签页可以用键盘操作**:Tab 键进入标签栏(停在当前标签上),左右方向键切换并留在标签栏,Home / End 跳到首尾,Enter 或空格把键盘交还给终端。点击标签现在也会把焦点交给该标签的终端。
 - **启动页输入框的读屏支持**:输入框是组合框,建议列表的当前项通过 `aria-activedescendant` 告知,展开状态同步。
 - **提示框里的快捷键判断更严**:只认修饰键组合(`Ctrl+K`、`⌘⇧P`、`Shift+点击`),括号里恰好含 Alt、Shift 字样的普通说明(如「prod (Alt server)」)不再被拆成按键小框。

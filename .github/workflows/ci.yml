@@ -72,8 +72,12 @@ jobs:
   # Build a distributable Windows installer on every push to main and auto-publish
   # a GitHub Release when a version tag (v*) is pushed. The app is not code-signed,
   # so SmartScreen may warn — that's expected.
+  # workflow_dispatch is allowed so a maintainer can build the installers (Windows
+  # and macOS) from any branch to validate the toolchain — e.g. after a runner
+  # image retirement — without merging. Publishing stays tag-gated, so a dispatch
+  # run uploads workflow artifacts and nothing else.
   release:
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
     needs: test-build
     # softprops/action-gh-release creates the Release with GITHUB_TOKEN.
@@ -116,4 +120,94 @@ jobs:
           files: |
             release/*.exe
             release/*.blockmap
+          fail_on_unmatched_files: false
+
+  # ---------------------------------------------------------------------------
+  # macOS (Apple Silicon / arm64). Runs *after* the Windows release job:
+  #   - because softprops/action-gh-release is create-if-missing; two jobs racing
+  #     to create the same Release tag gives one of them a 422 already_exists,
+  #   - and in this direction a macOS failure can never retroactively block or
+  #     undo the Windows release, which is the property we need.
+  # No continue-on-error here on purpose: a silently missing .dmg in a Release
+  # is worse than a red X. Windows publishing is unaffected either way.
+  #
+  # The app is unsigned and un-notarized, so Gatekeeper will warn. See README.
+  # ---------------------------------------------------------------------------
+  release-mac:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    needs: release
+    # arm64. The macOS 14 images were retired from GitHub Actions on
+    # 2026-11-02, so this must not name them. macos-26 is the current GA arm64
+    # image and ships Xcode 26.x, which means build-mac.mjs can even pick the
+    # Liquid Glass .icon here. Caveat on labels: the `-large` suffix is the
+    # Intel x64 marker; the bare label and `-xlarge` are both arm64.
+    runs-on: macos-26
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # package.json declares postinstall approvals in "allowScripts"
+      # (electron@33.4.11, esbuild@0.21.5, ...). If those pins drift from the
+      # lockfile, the Electron binary is silently never downloaded and the
+      # failure only surfaces much later inside electron-builder, as a confusing
+      # "cannot find Electron" error. Fail here instead, with the real reason.
+      - name: Verify Electron and esbuild binaries were extracted
+        run: |
+          node -e "const fs=require('fs');const p=require('electron');if(!fs.existsSync(p)){console.error('Electron binary missing at '+p+' — check build.allowScripts pins');process.exit(1)};console.log('electron ok:',p)"
+          node -e "const r=require('esbuild').transformSync('const a=1');if(!r||!r.code)process.exit(1);console.log('esbuild ok')"
+
+      - name: Build macOS app (dmg + zip)
+        # scripts/build-mac.mjs picks the icon (icon.icon on Xcode 26+,
+        # build/icon.icns otherwise) and then shells out to electron-builder.
+        # --publish never: the step below owns publishing.
+        run: npm run dist:mac -- --publish never
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Never try to auto-discover a signing identity on a runner whose
+          # keychain we do not control; we explicitly ship unsigned.
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Write checksums
+        run: |
+          set -euo pipefail
+          cd release
+          shopt -s nullglob
+          files=(*.dmg *.zip)
+          if [ ${#files[@]} -eq 0 ]; then echo "no macOS artifacts produced"; exit 1; fi
+          shasum -a 256 "${files[@]}" > SHA256SUMS-macos.txt
+          cat SHA256SUMS-macos.txt
+
+      - name: Upload macOS artifact
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: x-ssh-macos
+          path: |
+            release/*.dmg
+            release/*.zip
+            release/*.blockmap
+            release/SHA256SUMS-macos.txt
+          if-no-files-found: error
+
+      - name: Publish GitHub Release (tags only)
+        # The Release already exists (created by the Windows job), so this only
+        # appends the macOS assets to it.
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          files: |
+            release/*.dmg
+            release/*.zip
+            release/*.blockmap
+            release/SHA256SUMS-macos.txt
           fail_on_unmatched_files: false

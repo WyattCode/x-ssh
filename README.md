@@ -9,12 +9,69 @@
 
 [![Latest release](https://img.shields.io/github/v/release/WyattCode/x-ssh)](https://github.com/WyattCode/x-ssh/releases)
 
-**[下载最新版 X-SSH](https://github.com/WyattCode/x-ssh/releases/latest)** —— Windows 安装包(x64)。
+**[下载最新版 X-SSH](https://github.com/WyattCode/x-ssh/releases/latest)**
+
+| 平台 | 文件 |
+| --- | --- |
+| Windows x64 | `X-SSH Setup <version>.exe` |
+| macOS (Apple Silicon) | `X-SSH-<version>-arm64.dmg`,或 `X-SSH-<version>-arm64-mac.zip`(解压得到 `X-SSH.app`) |
+
+发布页同时附 `SHA256SUMS-macos.txt`(dmg 与 zip 各一行,共两行)。在安装目录里执行下面
+这条**逐条比对**(而不是只打印哈希再肉眼对照),每一行都输出 `OK` 再继续:
+
+```bash
+shasum -a 256 -c SHA256SUMS-macos.txt
+```
+
+### Windows
 
 - 安装包**还没有代码签名**,首次运行 Windows 可能弹蓝底提示"Windows 已保护你的
   电脑":点「更多信息」→「仍要运行」即可。它表示"没人给这个程序背书",不代表检测到了恶意代码。
+
+### macOS(未签名、未公证)
+
+macOS 版在 GitHub Actions 的 Apple Silicon 机器上构建,**没有 Apple Developer
+签名,也没有经过 Apple 公证**。这是一个管理你 SSH 私钥和主机凭据的工具,所以请先读完
+下面两条再决定是否打开,不要把"让提示消失"当成目的。
+
+双击后可能看到两种不同提示,含义和处置方式也不同:
+
+1. **"无法打开 X-SSH,因为 Apple 无法验证 X-SSH 是否包含恶意软件。"**
+   这是 Gatekeeper 对未公证应用的默认拦截,属于预期行为。系统允许的放行路径是:
+   打开 `系统设置 → 隐私与安全性`,在页面底部找到关于 X-SSH 的条目,点「仍要打开」,
+   再在弹窗里确认。macOS 只会为这一份 App 记录这一次授权,不会全局放宽。
+
+2. **"X-SSH 已损坏,无法打开。你应该将它移到废纸篓。"**
+   这**不是**文件损坏,也不是检测到病毒。从浏览器下载的 `.dmg` 会被打上
+   `com.apple.quarantine` 扩展属性,未签名的 App 在这个标记下就是这个表现。
+   放行方式是移除这一属性。**顺序不能颠倒:先核对哈希、确认每行都输出 `OK`,再动
+   扩展属性。**
+
+   ```bash
+   # 1) 在下载目录里逐条比对,全部 OK 才继续
+   shasum -a 256 -c SHA256SUMS-macos.txt
+   # 2) 再放行,只针对这一个 App 路径
+   xattr -dr com.apple.quarantine /Applications/X-SSH.app
+   ```
+
+   这条命令只清掉"这是从网上下载的"这个标记,不改动 App 内任何代码。**它等于你个人
+   决定信任这份二进制** —— 它不会替你验证来源,所以第 1 步不是可选项。
+   边界:只对上面那一条 App 路径执行,**不要加 `sudo`,也不要对 `/Applications`、
+   `~/Downloads` 等上层目录执行。**
+
+   更保守的路子(一个管私钥的工具,建议优先试它):不装 dmg、不碰 `/Applications` ——
+   把 `X-SSH-<version>-arm64-mac.zip` 解压到 `~/Applications`,先按上面第 1 步核对哈希,
+   再 `open ~/Applications/X-SSH.app`,走上面第 1 种提示的「仍要打开」流程即可,
+   不需要执行任何 `xattr`。
+
+如果你不接受以上任何一项:可以从源码自行构建 ——
+`git clone && npm ci && npm run dist:mac`(需要 macOS + Xcode 命令行工具)。
+
+### 通用
+
 - 更新:下载新安装包覆盖安装(自动更新尚未接入)。
-- 主机、已信任指纹与设置都在 `%APPDATA%\X-SSH`;卸载不清除它,重装即恢复。
+- 主机、已信任指纹与设置:Windows 在 `%APPDATA%\X-SSH`,macOS 在
+  `~/Library/Application Support/X-SSH`。卸载不清除它,重装即恢复。
 
 ## 产品定义
 
