@@ -423,7 +423,8 @@ const api = {
   zoom: {
     get: (): number => webFrame.getZoomLevel(),
     // Always a level on the 10 % ladder, whoever asks. Main is told the factor so the
-    // Windows caption buttons stay as tall as the (zoomed) tab bar.
+    // Windows caption buttons stay as tall as the (zoomed) tab bar and the macOS
+    // traffic lights can be moved onto the band's centre (main/index.ts setMacLights).
     set: (level: number): void => {
       const snapped = snapLevel(level)
       webFrame.setZoomLevel(snapped)

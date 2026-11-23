@@ -128,7 +128,8 @@ export function useZoom(): {
   level: typeof level
   /** Whole multiple of 10, 50…250. */
   percent: import('vue').ComputedRef<number>
-  /** Zoom factor (1.2^level); the macOS tab bar counter-scales by it to stay glued to the native traffic lights. */
+  /** Zoom factor (1.2^level); feeds `--zf` for the macOS screen-point inset floors
+   *  (styles/global.css, HostRail.vue) and is reported to main to place the traffic lights. */
   factor: import('vue').ComputedRef<number>
   hudOpen: typeof hudOpen
   setPercent: (pct: number) => void

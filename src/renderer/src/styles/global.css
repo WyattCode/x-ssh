@@ -443,9 +443,13 @@ input:is([type='checkbox'], [type='radio'], [type='range'], [type='color'], [typ
 :root.win .tabbar {
   padding-right: calc(100vw - env(titlebar-area-width, 100vw));
 }
-/* 专注模式 hides the sidebar: the tab bar makes room for the buttons instead. */
+/* 专注模式 hides the sidebar: the tab bar makes room for the buttons instead.
+   The buttons occupy x = 13.0…64.6 pt at every zoom step while CSS px shrink
+   with the page, so ask for a screen-point floor: at least 70 pt (= CSS 70/factor
+   px; `--zf` is set on the tab bar itself). max() keeps the plain 78 px from
+   factor 70/78 ≈ 0.90 up. */
 :root.mac .no-sidebar .tabbar {
-  padding-left: 78px;
+  padding-left: max(78px, calc(70px / var(--zf, 1)));
 }
 
 /* ---- shared modal shell ----

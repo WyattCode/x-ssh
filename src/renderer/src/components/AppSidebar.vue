@@ -18,6 +18,9 @@ const emit = defineEmits<{ (e: 'new-host'): void; (e: 'edit-host', h: Host): voi
 const store = useSessions()
 const { pref, setPref } = useTheme()
 const { t } = useI18n()
+// `--zf` feeds HostRail's traffic-light clearance (screen-point padding). The
+// lights' x is fixed while CSS px shrink with the page, so the inset needs the
+// factor — see the comment at `.sidebar.mac .rail-title`.
 const { factor } = useZoom()
 
 // Same number as the port-forwarding sheet's title: saved rules plus live temporary ones.

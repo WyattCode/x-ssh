@@ -36,6 +36,7 @@ import { MasterLock } from './lock'
 import { registerUserVerifyIpc, gateKeyConnect, userVerifyBlocksQuiet } from './userVerifyIpc'
 import { capHistory } from './sessionHistory'
 import { displayIdForBounds, pickWindowPlacement } from './windowPlacement'
+import { macLightPosition } from './macLights'
 import { localX11Target } from './x11'
 import { ensureLocalXServer, findXServer } from './x11Server'
 
@@ -1180,6 +1181,16 @@ function createWindow(saved?: SavedBounds, prefs: UiPrefs = {}): void {
     nativeTheme.on('updated', syncOverlay)
     win.once('closed', () => nativeTheme.removeListener('updated', syncOverlay))
   }
+  if (process.platform === 'darwin') {
+    // Entering or leaving full screen can hand the traffic lights back to the
+    // OS default, so push our position again after every transition, using the
+    // zoom factor last reported by the renderer. (No push needed at creation:
+    // the preload reports the startup zoom over IPC, which lands in the
+    // windowZoom handler below.)
+    const pushLights = (): void => setMacLights(win, overlayFactor)
+    win.on('enter-full-screen', pushLights)
+    win.on('leave-full-screen', pushLights)
+  }
 
   // Dragging a URL onto the window navigates by default, and the newly loaded
   // page still gets `window.api` (the preload runs again). Refuse anything that
@@ -1357,6 +1368,29 @@ function windowOverlay(): { color: string; symbolColor: string; height: number }
     : { ...base, height }
 }
 
+/** macOS: the OS-drawn traffic lights sit at a fixed spot while page zoom moves
+ *  the top band's centre away from them, so we move the lights instead. The
+ *  position is an absolute inset (macLights.ts); getWindowButtonPosition can read
+ *  it back, but a full-screen transition can hand the buttons back to the OS, so
+ *  every change is a fresh push. */
+function setMacLights(w: BrowserWindow | null, factor: number): void {
+  if (!w || w.isDestroyed()) return
+  try {
+    const pos = macLightPosition(factor)
+    w.setWindowButtonPosition(pos)
+    // The constants in macLights.ts are pixel measurements, so let a run prove
+    // the push landed: XSSH_MAC_LIGHTS=1 logs what we asked for and what the
+    // window reports back.
+    if (process.env.XSSH_MAC_LIGHTS) {
+      console.log('[mac-lights]', factor, 'set', JSON.stringify(pos), 'readback', JSON.stringify(w.getWindowButtonPosition()))
+    }
+  } catch (e) {
+    // A macOS/Electron build without the API: the lights stay put, but say so —
+    // the positions come from pixel measurements, and silence hides the drift.
+    console.error('[mac-lights]', e)
+  }
+}
+
 function registerIpc(): void {
   on(IPC.windowDim, (_e, dim: unknown) => {
     if (process.platform !== 'win32' || typeof dim !== 'number' || !Number.isFinite(dim)) return
@@ -1367,12 +1401,16 @@ function registerIpc(): void {
     if (w && !w.isDestroyed()) w.setTitleBarOverlay(windowOverlay())
   })
   on(IPC.windowZoom, (_e, factor: unknown) => {
-    if (process.platform !== 'win32' || typeof factor !== 'number' || !Number.isFinite(factor)) return
+    if (typeof factor !== 'number' || !Number.isFinite(factor)) return
     // The ladder is 50…250 %; anything else is not ours.
     if (factor < 0.4 || factor > 3.1) return
     overlayFactor = factor
     const w = mainWindow
-    if (w && !w.isDestroyed()) w.setTitleBarOverlay(windowOverlay())
+    if (process.platform === 'win32') {
+      if (w && !w.isDestroyed()) w.setTitleBarOverlay(windowOverlay())
+    } else if (process.platform === 'darwin') {
+      setMacLights(w, factor)
+    }
   })
   on(IPC.clipboardRead, (e) => { e.returnValue = clipboard.readText() })
   on(IPC.clipboardWrite, (e, text: unknown) => {

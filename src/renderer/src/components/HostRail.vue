@@ -568,13 +568,15 @@ const canSide = computed(() => store.activePane?.status === 'connected' && (stor
   padding: 0 8px 0 18px;
   box-shadow: inset 0 -1px 0 var(--chrome-line);
 }
-/* macOS: the traffic lights are OS-drawn at a fixed size and a fixed spot, so
-   this row counter-scales with the app zoom (constant 40 pt on screen) and the
-   title starts after the lights at a constant 82 pt. Keep the zoom in step with
-   TabBar's `barStyle`; the two rows share one height and one hairline. */
+/* macOS: the OS buttons are moved by the main process with the zoom step
+   (src/main/macLights.ts), so this row needs no counter-scale. Their size and
+   x are fixed, though: they occupy x = 13.0…64.6 pt at every zoom step, while
+   this inset is CSS px and shrinks with the page (82 px is only 41 pt at 50 %).
+   So the clearance is asked in screen points: at least 70 pt (the measured 64.6
+   plus slack), which is 70/factor CSS px — max() keeps the usual 82 px above
+   ~85 %. The two rows share one height and one hairline. */
 .sidebar.mac .rail-title {
-  zoom: calc(1 / var(--zf, 1));
-  padding-left: 82px;
+  padding-left: max(82px, calc(70px / var(--zf, 1)));
 }
 .rt-name {
   flex: 1;
