@@ -72,8 +72,12 @@ jobs:
   # Build a distributable Windows installer on every push to main and auto-publish
   # a GitHub Release when a version tag (v*) is pushed. The app is not code-signed,
   # so SmartScreen may warn — that's expected.
+  # workflow_dispatch is allowed so a maintainer can build the installers (Windows
+  # and macOS) from any branch to validate the toolchain — e.g. after a runner
+  # image retirement — without merging. Publishing stays tag-gated, so a dispatch
+  # run uploads workflow artifacts and nothing else.
   release:
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
     needs: test-build
     # softprops/action-gh-release creates the Release with GITHUB_TOKEN.
@@ -130,7 +134,7 @@ jobs:
   # The app is unsigned and un-notarized, so Gatekeeper will warn. See README.
   # ---------------------------------------------------------------------------
   release-mac:
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     needs: release
     # arm64. The macOS 14 images were retired from GitHub Actions on
     # 2026-11-02, so this must not name them. macos-26 is the current GA arm64
