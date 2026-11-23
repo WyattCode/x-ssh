@@ -80,6 +80,11 @@ export function mainErrorText(err: string | undefined, t: Translate): string | u
   return key ? t(key) : err
 }
 
+/** `mainErrorText`, or the caller's own wording when main sent nothing (or an empty string). */
+export function mainErrorOr(err: string | undefined, fallbackKey: string, t: Translate): string {
+  return mainErrorText(err, t) || t(fallbackKey)
+}
+
 /** Whether `err` is a code this table can localize. Used by the coverage test. */
 export function isTranslatedCode(err: string): boolean {
   return Object.prototype.hasOwnProperty.call(MAIN_ERROR_KEYS, err)

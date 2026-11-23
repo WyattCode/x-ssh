@@ -187,7 +187,7 @@ function onKey(e: KeyboardEvent): void {
       <ul class="keys">
         <li><kbd>{{ mod }} K</kbd>{{ t('start.palette') }}</li>
         <li><kbd>{{ mod }} B</kbd>{{ t('start.rail') }}</li>
-        <li><kbd>Shift</kbd>{{ t('start.split') }}</li>
+        <li><kbd>{{ t('start.splitKey') }}</kbd>{{ t('start.split') }}</li>
       </ul>
     </div>
   </div>

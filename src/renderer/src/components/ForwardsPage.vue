@@ -3,6 +3,7 @@ import { computed, reactive, ref, watch } from 'vue'
 import { useSessions, forwardKey, type Pane, type ForwardGroup, type ForwardRow } from '../stores/sessions'
 import { useI18n } from '../lib/i18n'
 import { ipcReason } from '../lib/ipcError'
+import { mainErrorOr } from '../lib/mainError'
 import { useConfirm } from '../composables/confirm'
 import { useToast } from '../composables/toast'
 import type { ForwardMode, Host, HostForward } from '../../../shared/types'
@@ -56,7 +57,7 @@ async function remove(s: ForwardGroup, row: ForwardRow): Promise<void> {
     if (row.running && s.pane) {
       const r = await store.removeForwardFrom(s.pane, row.rule.mode, row.rule.localPort)
       if (!r.ok) {
-        toast(r.error ?? t('fw.removeFail'), 'error')
+        toast(mainErrorOr(r.error, 'fw.removeFail', t), 'error')
         return
       }
     }
@@ -150,7 +151,7 @@ async function add(): Promise<void> {
     if (pane) {
       const r = await store.addForwardTo(pane, rule)
       if (!r.ok) {
-        err.value = r.error ?? t('fw.fail')
+        err.value = mainErrorOr(r.error, 'fw.fail', t)
         // The form can be closed/collapsed, so the inline line alone is easy to
         // miss: toast the same message the load path already uses.
         toast(err.value, 'error')

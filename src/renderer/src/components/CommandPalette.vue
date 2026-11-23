@@ -10,6 +10,7 @@ import { paletteHostScore } from '../lib/paletteHostScore'
 import { parseTarget } from '../lib/target'
 import { isImeKey } from '../lib/ime'
 import { useI18n } from '../lib/i18n'
+import { mainErrorOr } from '../lib/mainError'
 import { useToast } from '../composables/toast'
 import { useConfirm } from '../composables/confirm'
 import Icon from './Icon.vue'
@@ -409,7 +410,7 @@ async function importSshConfig(): Promise<void> {
   const res = await window.api.hosts.importSshConfig()
   if (!res.ok) {
     toast(
-      res.error === 'ssh-config-missing' ? t('set.sec.importSshMissing') : (res.error ?? t('set.sec.importFail')),
+      res.error === 'ssh-config-missing' ? t('set.sec.importSshMissing') : mainErrorOr(res.error, 'set.sec.importFail', t),
       'error'
     )
     return

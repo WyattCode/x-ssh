@@ -11,6 +11,8 @@ const dialogEl = ref<HTMLElement>()
 useFocusTrap(dialogEl, () => true) // mounted only while the parent shows it
 onMounted(() => nextTick(() => dialogEl.value?.focus()))
 import { useI18n } from '../lib/i18n'
+import { sftpErrorText } from '../lib/sftpError'
+import { ipcReason } from '../lib/ipcError'
 import { useToast } from '../composables/toast'
 import Icon from './Icon.vue'
 
@@ -40,11 +42,8 @@ const canRun = computed(() => !!local.value && !!remote.value && !busy.value)
 /** Main-process errors arrive as machine codes; localize the ones we know and
  *  fall back to the generic "diff failed" for anything else. */
 function diffErr(err: string | undefined): string {
-  if (err === 'session-missing') return tt('sfp.sessionMissing')
-  if (err === 'session-gone') return tt('sfp.sessionGone')
-  if (err === 'remote-timeout') return tt('sfp.remoteTimeout')
-  if (err === 'unsafe-filename') return tt('sfp.unsafeFilename')
-  return err ?? tt('dirDiff.fail')
+  if (err === 'sync-list-failed') return tt('dirDiff.listFailed')
+  return sftpErrorText(err, 'dirDiff.fail', tt)
 }
 
 /** The three result groups, empty ones dropped. */
@@ -67,10 +66,8 @@ async function run(): Promise<void> {
   try {
     const r = await window.api.sftp.diffDirs(props.sessionId, local.value, remote.value)
     if (!r.ok) {
-      err.value = r.error === 'sync-list-failed' ? tt('dirDiff.listFailed') : (r.error ?? tt('dirDiff.fail'))
-      err.value = diffErr(r.error)
       // Dialog-local err alone is lost on dismiss — toast like PermDialog (#104).
-      const msg = r.error ?? tt('dirDiff.fail')
+      const msg = diffErr(r.error)
       err.value = msg
       toast(msg, 'error')
       done.value = false
@@ -81,8 +78,7 @@ async function run(): Promise<void> {
     sizeDiff.value = r.sizeDiff ?? []
     done.value = true
   } catch (e) {
-    err.value = diffErr((e as Error).message || undefined)
-    const msg = (e as Error).message
+    const msg = diffErr(ipcReason(e) || undefined)
     err.value = msg
     toast(msg, 'error')
     done.value = false

@@ -6,6 +6,7 @@ const dialogEl = ref<HTMLElement>()
 useFocusTrap(dialogEl, () => store.forwardOpen)
 import { useSessions } from '../stores/sessions'
 import { useI18n } from '../lib/i18n'
+import { mainErrorOr } from '../lib/mainError'
 import { useConfirm } from '../composables/confirm'
 import { isImeKey } from '../lib/ime'
 
@@ -77,7 +78,7 @@ async function add(): Promise<void> {
     if (!r.ok) {
       // Dialog dismissible; keep inline err and toast so a bind failure is not
       // lost when the user closes it straight away.
-      const msg = r.error ?? t('fw.fail')
+      const msg = mainErrorOr(r.error, 'fw.fail', t)
       err.value = msg
       toast(msg, 'error')
     } else {
@@ -110,7 +111,7 @@ async function remove(mode: ForwardMode | undefined, localPort: number): Promise
     // no error at all (the forwards page already awaits + toasts; this dialog
     // did not).
     const r = await store.removeForward(mode, localPort)
-    if (!r.ok) toast(r.error ?? t('fw.removeFail'), 'error')
+    if (!r.ok) toast(mainErrorOr(r.error, 'fw.removeFail', t), 'error')
   } finally {
     removing.value = false
   }

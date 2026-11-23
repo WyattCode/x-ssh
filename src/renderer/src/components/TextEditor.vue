@@ -5,6 +5,7 @@ import { useConfirm } from '../composables/confirm'
 import { useToast } from '../composables/toast'
 import { useI18n } from '../lib/i18n'
 import { highlight, langFromName } from '../lib/highlight'
+import { sftpErrorText } from '../lib/sftpError'
 import Icon from './Icon.vue'
 import { isMac } from '../composables/platform'
 
@@ -98,8 +99,10 @@ watch(
       content.value = r.content ?? ''
       original.value = content.value
     } else {
+      // Through the shared mapper: a code from main ("fs-permission", "raw-error:…") used to be
+      // printed as it came, wrapper prefix and all.
       loadError.value =
-        r.error === 'file-too-large' ? t('sfp.fileTooLarge') : (r.error ?? t('ed.loadFail'))
+        r.error === 'file-too-large' ? t('sfp.fileTooLarge') : sftpErrorText(r.error, 'ed.loadFail', t)
       // The inline line is the only signal and it goes away with the editor:
       // surface the same message as a toast so a failed SFTP read isn't silent.
       toast(loadError.value, 'error')
@@ -117,7 +120,7 @@ async function save(): Promise<void> {
       original.value = content.value
       emit('saved')
     } else {
-      saveError.value = r.error ?? t('ed.saveFail')
+      saveError.value = sftpErrorText(r.error, 'ed.saveFail', t)
       // Same string as the inline error, but a failed write must not be missable:
       // the dialog is dismissible, and this is the only copy of the buffer.
       toast(saveError.value, 'error')

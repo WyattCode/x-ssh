@@ -61,7 +61,6 @@ function toggleHost(h: Host): void {
 /** The per-host rows and the dialog banner read from one table: which of the two
  *  asked made no difference to the wording, and keeping them apart let a code be
  *  translated in one and shown raw in the other. */
-const hostOpError = pubErr
 const mapError = pubErr
 
 async function publish(): Promise<void> {
@@ -133,7 +132,8 @@ watch(
       </div>
       <div class="kp-body">
         <label class="kp-label">{{ t('keyPub.key') }}</label>
-        <select v-model="keyId" class="kp-select">
+        <select v-model="keyId" class="kp-select" :disabled="!keys.length">
+          <option v-if="!keys.length" value="" disabled>{{ t('keyPub.noKeys') }}</option>
           <option v-for="k in keys" :key="k.id" :value="k.id">{{ k.name }}<template v-if="k.type"> · {{ k.type }}</template></option>
         </select>
         <button v-if="keysFailed" type="button" class="kp-run ghost" @click="refresh">{{ t('keyPub.retry') }}</button>
@@ -160,9 +160,7 @@ watch(
           <div v-for="(r, i) in results" :key="i" class="kp-result" :class="r.ok ? 'ok' : 'bad'">
             <Icon :name="r.ok ? 'check' : 'alert-triangle'" :size="13" />
             <span class="kp-host-label">{{ r.host }}</span>
-            <span v-if="!r.ok" class="kp-err">{{ hostOpError(r.error) }}</span>
             <span v-if="!r.ok" class="kp-err">{{ pubErr(r.error) }}</span>
-            <span v-if="!r.ok" class="kp-err">{{ mapError(r.error) }}</span>
           </div>
         </div>
         <div v-if="revokeResults.length" class="kp-results">
@@ -170,9 +168,7 @@ watch(
           <div v-for="(r, i) in revokeResults" :key="i" class="kp-result" :class="r.ok ? 'ok' : 'bad'">
             <Icon :name="r.ok ? 'check' : 'alert-triangle'" :size="13" />
             <span class="kp-host-label">{{ r.host }}</span>
-            <span v-if="!r.ok" class="kp-err">{{ hostOpError(r.error) }}</span>
             <span v-if="!r.ok" class="kp-err">{{ pubErr(r.error) }}</span>
-            <span v-if="!r.ok" class="kp-err">{{ mapError(r.error) }}</span>
           </div>
         </div>
       </div>

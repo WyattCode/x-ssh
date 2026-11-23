@@ -37,6 +37,18 @@ const groups = computed(() => {
     .map((g) => ({ ...g, hosts: q ? g.hosts.filter((h) => hostMatches(h, q)) : g.hosts }))
     .filter((g) => g.hosts.length)
 })
+/** Groups whose hosts all run the same, known system. The same mark on every row says nothing
+ *  the names do not, so it is drawn quieter (a column of identical green NVIDIA tiles was the
+ *  loudest thing in the window). Judged on ALL of a group's hosts, not the filtered ones, so
+ *  typing in the search box does not make marks flicker between loud and quiet. */
+const quietGroups = computed(() => {
+  const s = new Set<string>()
+  for (const g of allGroups.value) {
+    const first = g.hosts[0]?.os?.id
+    if (first && g.hosts.length > 1 && g.hosts.every((h) => h.os?.id === first)) s.add(g.name)
+  }
+  return s
+})
 /** The stored group name of a heading ('' for the ungrouped one). */
 const realGroup = (name: string): string => (name === ungroupedLabel.value ? '' : name)
 /** A heading only helps when there is more than one group to tell apart. */
@@ -494,7 +506,7 @@ const canSide = computed(() => store.activePane?.status === 'connected' && (stor
             <span v-if="selecting" class="rail-cb" :class="{ on: selected.has(h.id) }" aria-hidden="true"><Icon v-if="selected.has(h.id)" name="check" :size="11" /></span>
             <span v-else-if="showGrips" class="grip" aria-hidden="true">⋮⋮</span>
             <span class="rail-os">
-              <OsIcon :os="h.os" :color="h.color" :size="28" />
+              <OsIcon :os="h.os" :color="h.color" :size="28" :class="{ quiet: quietGroups.has(g.name) }" />
               <span class="dot" :class="stateOf(h)" :title="stateOf(h)" />
             </span>
             <span class="rail-name">
@@ -1069,6 +1081,18 @@ const canSide = computed(() => store.activePane?.status === 'connected' && (stor
 .rail-os :deep(.os-tile svg) {
   width: 68%;
   height: 68%;
+}
+/* A group of one system throughout: the marks step back. The row under the pointer and the open
+   one show their colour again. */
+.rail-os :deep(.os-tile.quiet) {
+  filter: saturate(0.35) brightness(0.85);
+  opacity: 0.8;
+  transition: filter 0.16s var(--ease), opacity 0.16s var(--ease);
+}
+.rail-host:hover .rail-os :deep(.os-tile.quiet),
+.rail-host.on .rail-os :deep(.os-tile.quiet) {
+  filter: none;
+  opacity: 1;
 }
 /* Green means one thing: a session is open. A host that merely answers shows no dot;
    one that does not answer shows a hollow ring. */
