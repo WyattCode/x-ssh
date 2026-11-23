@@ -15,12 +15,14 @@ const { t } = useI18n()
 const { factor } = useZoom()
 const modKey = isMac ? '⌘' : 'Ctrl'
 
-// The traffic lights sit over the sidebar, and only land on this bar when the
-// sidebar is hidden (focus mode). Then they need room, and since the OS draws
-// them at a fixed size the bar is counter-scaled so its row stays glued to
-// them whatever the app zoom is.
+// The traffic lights are drawn by the OS at a fixed size, at a fixed spot. The
+// top band is 40 px in CSS, so page zoom would carry its centre line away from
+// the lights' (at 120 % the bar's centre already sits 5 pt below them, at 200 %
+// 21 pt). Counter-scale the band on macOS — not just in focus mode — so the row
+// keeps a constant 40 pt on screen and its centre stays on the lights' at every
+// zoom step. `--zf` on the sidebar does the same job for the rail title's row.
 const underLights = computed(() => isMac && store.termSidebarHidden)
-const barStyle = computed(() => (underLights.value ? { zoom: 1 / factor.value } : {}))
+const barStyle = computed(() => (isMac ? { zoom: 1 / factor.value } : {}))
 /** Layout/split operations need a connected active tab. */
 const canLayout = computed(() => store.activePane?.status === 'connected')
 

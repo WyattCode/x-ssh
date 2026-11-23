@@ -568,9 +568,13 @@ const canSide = computed(() => store.activePane?.status === 'connected' && (stor
   padding: 0 8px 0 18px;
   box-shadow: inset 0 -1px 0 var(--chrome-line);
 }
-/* macOS: the traffic lights are drawn by the OS at a fixed size; the title starts after them. */
+/* macOS: the traffic lights are OS-drawn at a fixed size and a fixed spot, so
+   this row counter-scales with the app zoom (constant 40 pt on screen) and the
+   title starts after the lights at a constant 82 pt. Keep the zoom in step with
+   TabBar's `barStyle`; the two rows share one height and one hairline. */
 .sidebar.mac .rail-title {
-  padding-left: max(82px, calc(82px / var(--zf)));
+  zoom: calc(1 / var(--zf, 1));
+  padding-left: 82px;
 }
 .rt-name {
   flex: 1;

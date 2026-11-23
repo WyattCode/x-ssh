@@ -4,6 +4,13 @@
 版本号格式: MAJOR.MINOR.PATCH。功能(feature)加 MINOR,修复/打磨加 PATCH,破坏性改动加 MAJOR。
 ## [Unreleased]
 
+### Added
+- **macOS(Apple Silicon)安装包**:`npm run dist:mac` 出 `X-SSH-<版本>-arm64.dmg` 与 `-arm64-mac.zip`(arm64 固定,不会悄悄出 x64)。CI 打 tag 时和 Windows 包并行产出,附 `SHA256SUMS-macos.txt`。包**未签名、未公证**,README 里写清:先 `shasum -a 256 -c` 逐条校验再谈隔离属性,只对该 App 路径用 `xattr`、不用 `sudo`、不对父目录动手;另给一条不用碰隔离属性的路径(zip 解压到 `~/Applications` 再 `open`)。
+- **`npm run icon:mac`**(`scripts/make-mac-icon.mjs`)从 `build/icon.svg` 生成 `build/icon.icns`(临时目录里拼 `.iconset`,`iconutil` 用完即删,仓库不留临时文件)。`scripts/build-mac.mjs` 会**实际跑一次** `actool` 来判断能不能出新图标格式,跑不通才回落 `.icns`(只查 `xcrun --find` 会误判:本机 `actool` 找得到但一跑就挂)。
+
+### Fixed
+- **macOS 顶部两行与红绿灯错位**:红绿灯由系统画,尺寸位置固定,页面缩放会把 40 像素的顶栏带偏 —— 灯中心在 18.8 pt,顶栏中心 50%/120%/200% 时分别是 10/24/40 pt(差 −8.8 / +5.2 / +21.2),侧栏标题文字跟着一起偏,标题起点还会从 82 pt 推到 164 pt。现在 macOS 上顶栏和主机栏标题行按缩放反向缩放(`zoom: 1/--zf`),屏幕上恒为 40 pt 高、标题恒从 82 pt 起。重打后逐档实测 50/70/100/120/150/200%,两行渲染高度都是 40.0 pt。
+
 ## [0.6.55] - 2026-11-23
 
 ### Changed
