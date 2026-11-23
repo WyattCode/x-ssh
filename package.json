@@ -1,6 +1,6 @@
 {
   "name": "x-ssh",
-  "version": "0.6.55",
+  "version": "0.7.0",
   "description": "A keyboard-first, command-palette-driven SSH client.",
   "main": "./out/main/index.js",
   "author": "X-SSH",
@@ -56,7 +56,10 @@
     "mac": {
       "appId": "com.wyatt.ssh",
       "icon": "build/icon.icns",
-      "target": ["dmg", "zip"],
+      "target": [
+        "dmg",
+        "zip"
+      ],
       "extendInfo": {
         "NSLocalNetworkUsageDescription": "X-SSH 需要访问本地网络,以便连接局域网内的 SSH 服务器。"
       }

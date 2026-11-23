@@ -4,6 +4,8 @@
 版本号格式: MAJOR.MINOR.PATCH。功能(feature)加 MINOR,修复/打磨加 PATCH,破坏性改动加 MAJOR。
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-23
+
 ### Added
 - **macOS(Apple Silicon)安装包**:`npm run dist:mac` 出 `X-SSH-<版本>-arm64.dmg` 与 `-arm64-mac.zip`(arm64 固定,不会悄悄出 x64)。CI 打 tag 时和 Windows 包并行产出,附 `SHA256SUMS-macos.txt`。包**未签名、未公证**,README 里写清:先 `shasum -a 256 -c` 逐条校验再谈隔离属性,只对该 App 路径用 `xattr`、不用 `sudo`、不对父目录动手;另给一条不用碰隔离属性的路径(zip 解压到 `~/Applications` 再 `open`)。
 - **`npm run icon:mac`**(`scripts/make-mac-icon.mjs`)从 `build/icon.svg` 生成 `build/icon.icns`(临时目录里拼 `.iconset`,`iconutil` 用完即删,仓库不留临时文件)。`scripts/build-mac.mjs` 会**实际跑一次** `actool` 来判断能不能出新图标格式,跑不通才回落 `.icns`(只查 `xcrun --find` 会误判:本机 `actool` 找得到但一跑就挂)。

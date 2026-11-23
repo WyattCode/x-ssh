@@ -1,3 +1,29 @@
+# 会话记录:M3.215(2026-11-23,macOS 出包链路 + 顶栏红绿灯跟随缩放:v0.7.0 已发)
+
+## 做了什么(细节见 CHANGELOG [0.7.0])
+
+- macOS(Apple Silicon)出包:`scripts/build-mac.mjs` **实跑一次** `xcrun actool --version` 判断能不能出 `.icon`(Liquid Glass),跑不通才回落 `.icns`;`scripts/make-mac-icon.mjs`(`npm run icon:mac`)从 `build/icon.svg` 拼 `.iconset` 出 `.icns`,仓库不留临时文件。CI 新增 `release-mac`,`needs: release`,附 `SHA256SUMS-macos.txt`;`CSC_IDENTITY_AUTO_DISCOVERY=false`,包未签名。
+- 顶栏红绿灯:撤掉 `207dce5` 的 `zoom: 1/--zf` 反向缩放,改成主进程按缩放档调 `setWindowButtonPosition`(新 `src/main/macLights.ts` + 纯函数测试);进出全屏后重推;`XSSH_MAC_LIGHTS=1` 打 set/readback 日志。
+- 给灯留的边距改成按屏幕点保底:`styles/global.css` 的 `max(78px, 70px / --zf)`(专注模式生效的是这条,权重高于 `TabBar.vue` 内那条)、`HostRail.vue` 的 `max(82px, 70px / --zf)`;`--zf` 由 `AppSidebar.vue` / `TabBar.vue` 设在各自根元素上。
+- `workflow_dispatch` 也跑 release/release-mac(打 tag 前可先验通链路);README 写明校验文件是两行(dmg+zip)。
+
+## 验证
+
+- CI run `45166359039` 四个 job 全绿(`test-build` / `rust-core` / `release` / 首次 `release-mac`);mac job 日志有 `[build-mac] icon: build/icon.icon (Liquid Glass via actool)` —— macos-26 runner 上 `actool` 可用,而**本机 `actool` 退 134**(从没跑过 `xcodebuild -runFirstLaunch`),本机走 `.icns` 回落,两条路都见过。
+- 灯位(Electron 33.4.11,dpr 2.0):10% 阶梯逐档 `setWindowButtonPosition` 与 `getWindowButtonPosition` 读回一致(1.2 → y18.25/18,2.0 → y34.25/34,1.0 → null 交回系统默认)。`getWindowButtonPosition` 存在(d.ts 2641),读回按整 pt 取整。
+- 顶栏与边距(CDP 实测):各档 `.tabbar` `zoom:1`(反向缩放确认已撤);专注模式左边距 120/200/50 % = 78/78/140 CSS px(= 93.6/156/70 pt),灯占 x 13.0…64.6 pt,最低倍率也不压到控件。
+- 界面走查 7 屏(默认 / 200 % / 50 % / 命令面板 / 设置 / 新建主机 / 专注模式 50 %):无错位、无裁切、无叠字。
+- 门禁:`npm run typecheck` 0 错、vitest **106 文件 934 通过 | 2 skip**、`lint:i18n`、`check:contrast`(66 tokens)。两个独立审查 Agent:逻辑与安全通过;提的 3 处注释/文档矛盾(`composables/zoom.ts`、CHANGELOG 旧条、`global.css` 阈值算错)与 `setMacLights` 空吞异常都已修。
+
+## 没验证 / 已知
+
+- **红绿灯的真实像素位置没人亲眼看过**:本机 `screencapture` 只出壁纸(录屏权限没授给跑 Agent 的 python),CDP 截图不含系统控件。要看真实效果得开 `release/mac-arm64/X-SSH.app`。默认 120 % 档灯比系统默认位低约 5.2 pt,是方案本身的取舍。
+- 包未签名、未公证(没有 Developer ID);`codesign -dv` 报 `Identifier=Electron`(继承 Electron 的 ad-hoc 签名),以后上自动更新必须换正式签名。
+- `macLights.ts` 里的常量(13.0 / 18.8 / 5.75 pt)是像素测量值,macOS 或 Electron 大版本变了要重测;该 API 无 getter 之外的方式确认 OS 最终画在哪。
+- 托盘图标在明/暗菜单栏下的着色、⌘W 在有标签页时关标签还是关窗口:未验。
+
+---
+
 # 会话记录:M3.214(2026-11-23,主机栏品牌色 + 工具图标圆角高亮 + 统一提示框:v0.6.55 已发)
 
 ## 做了什么(细节见 CHANGELOG [0.6.55])
