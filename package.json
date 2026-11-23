@@ -18,7 +18,9 @@
     "check:contrast": "node scripts/check-contrast.mjs",
     "test": "vitest run",
     "package": "npm run build && electron-builder --dir",
-    "dist": "npm run build && electron-builder"
+    "dist": "npm run build && electron-builder",
+    "dist:mac": "npm run build && node scripts/build-mac.mjs",
+    "icon:mac": "node scripts/make-mac-icon.mjs"
   },
   "build": {
     "appId": "com.x-ssh.app",
@@ -53,7 +55,8 @@
     },
     "mac": {
       "appId": "com.wyatt.ssh",
-      "icon": "build/icon.icon",
+      "icon": "build/icon.icns",
+      "target": ["dmg", "zip"],
       "extendInfo": {
         "NSLocalNetworkUsageDescription": "X-SSH 需要访问本地网络,以便连接局域网内的 SSH 服务器。"
       }
@@ -85,5 +88,13 @@
     "vitest": "^2.1.9",
     "vue": "^3.5.13",
     "vue-tsc": "^2.1.10"
+  },
+  "allowScripts": {
+    "electron@33.4.11": true,
+    "esbuild@0.21.5": true,
+    "vue-demi@0.14.10": true,
+    "ssh2@1.17.0": true,
+    "cpu-features@0.0.10": true,
+    "fsevents@2.3.3": true
   }
 }
