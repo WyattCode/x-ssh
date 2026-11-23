@@ -1,3 +1,26 @@
+# 会话记录:M3.216(2026-11-23,错误提示不再露出内部错误码 + 主机栏同系统图标压暗:v0.6.57 已发)
+
+## 做了什么(细节见 CHANGELOG [0.6.57])
+
+- `lib/mainError.ts`:新增 `mainErrorOr(err, fallbackKey, t)`(= `mainErrorText` 或调用方自己的默认文案,空字符串也退回默认);`TextEditor.vue` 打开 / 保存失败改走 `sftpErrorText`(原来直接打印 `r.error`,`raw-error:` 前缀都露出来);`ForwardDialog` / `ForwardsPage` / `HistorySearch` / `CommandPalette` / `SettingsDialog` 里同样的 `r.error ?? t(…)` 都换成 `mainErrorOr`(+ 测试)。
+- `DirDiffDialog.vue`:失败分支里三次连续给 `err.value` 赋值、最后一次把转好的文案盖掉,改成只算一次(`diffErr` 先认 `sync-list-failed`,其余走 `sftpErrorText`);catch 里用 `ipcReason(e)`。`SessionReplayDialog.vue`:`path-invalid` 那行是没有赋值的孤立表达式,改成链式三元。
+- `PublishKeyDialog.vue`:失败行的错误原来渲染三遍(`hostOpError` / `pubErr` / `mapError` 是同一个函数的别名),改成一遍;没有密钥时下拉框显示禁用的「还没有密钥」(`keyPub.noKeys`)。
+- `HostRail.vue`:`quietGroups`(按 `allGroups` 判断:组内至少 2 台、系统 id 已知且全相同)给 `OsIcon` 加 `quiet` 类,`filter: saturate(.35) brightness(.85)` + `opacity .8`;悬停和当前打开的那一行恢复原色。`StartScreen.vue`:提示里的「Shift」换成 `start.splitKey`(Shift+点击 / Shift+click / Shift+點擊)。
+
+## 验证
+
+- 真实窗口(CDP):编辑器打开 `nginx.conf`(测试用假 SFTP 不支持读)→ 显示「Operation unsupported」,不带前缀;发布公钥对话框的空下拉框;主机栏压暗和悬停恢复,深色和浅色主题都看了;另走查了启动页、命令面板、主机栏筛选 / 多选、终端查找和右键菜单、分屏、文件页菜单、权限 / 删除确认、转发 / 发布公钥 / 回放对话框。
+- 类型检查、i18n lint 通过;测试 932 通过,另 2 个是 `localAccess.test.ts` 的软链接 EPERM(原有)。
+
+## 没验证 / 已知
+
+- 没用真实数据看压暗效果(测试配置里的系统图标是手动设的);系统不同的分组图标不变。
+- 错误提示框(右上角、距顶 52px)会盖住文本编辑器右上角的「保存」「关闭」几秒钟;要改得挪提示框,影响所有界面,没动。
+- 50% / 60% 缩放下的标题栏细线、多显示器不同缩放比例、NVIDIA 绿和 CentOS 等图标的品牌色在真实数据下的样子。
+- 发版顺序:先合并远程、推 `main`,最后才打标签(0.6.56 是先打标签后发现落后,标签后来强制挪过)。
+
+---
+
 # 会话记录:M3.215(2026-11-23,标签页键盘操作 + 全界面二次审查的小修:v0.6.56 已发)
 
 ## 做了什么(细节见 CHANGELOG [0.6.56])
