@@ -16,8 +16,8 @@
 | Windows x64 | `X-SSH Setup <version>.exe` |
 | macOS (Apple Silicon) | `X-SSH-<version>-arm64.dmg`,或 `X-SSH-<version>-arm64-mac.zip`(解压得到 `X-SSH.app`) |
 
-发布页同时附 `SHA256SUMS-macos.txt`。在安装目录里执行下面这条**逐条比对**(而不是只
-打印哈希再肉眼对照),三行都输出 `OK` 再继续:
+发布页同时附 `SHA256SUMS-macos.txt`(dmg 与 zip 各一行,共两行)。在安装目录里执行下面
+这条**逐条比对**(而不是只打印哈希再肉眼对照),每一行都输出 `OK` 再继续:
 
 ```bash
 shasum -a 256 -c SHA256SUMS-macos.txt
