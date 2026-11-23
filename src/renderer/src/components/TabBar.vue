@@ -47,6 +47,36 @@ const visibleTabs = computed(() => {
   })
 })
 
+// ---- Keyboard ----
+// The strip is one Tab stop: the active tab (the first one when a filter hides it), and the
+// arrows move along it, switching as they go. Tabs used to be reachable by mouse only.
+const stripEl = ref<HTMLElement>()
+const stopId = computed(() =>
+  visibleTabs.value.some((x) => x.id === store.activeId) ? store.activeId : (visibleTabs.value[0]?.id ?? '')
+)
+function onTabKey(e: KeyboardEvent, id: string): void {
+  // Keys typed in the rename box, or on the close button, are theirs.
+  if (e.target !== e.currentTarget || isImeKey(e)) return
+  if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault()
+    store.setActive(id)
+    store.focusTerminal()
+    return
+  }
+  const list = visibleTabs.value
+  const i = list.findIndex((x) => x.id === id)
+  const to =
+    e.key === 'ArrowRight' ? (i + 1) % list.length
+    : e.key === 'ArrowLeft' ? (i - 1 + list.length) % list.length
+    : e.key === 'Home' ? 0
+    : e.key === 'End' ? list.length - 1
+    : -1
+  if (to < 0 || i < 0) return
+  e.preventDefault()
+  store.setActive(list[to].id)
+  nextTick(() => stripEl.value?.querySelectorAll<HTMLElement>('.tab')[to]?.focus())
+}
+
 const dragging = ref('')
 const dropTarget = ref('')
 function onDragOver(tabId: string): void {
@@ -212,7 +242,7 @@ function cancelRename(): void {
     >
       <Icon name="sidebar" :ink="10.1" :weight="1.3" />
     </button>
-    <div class="tabs">
+    <div ref="stripEl" class="tabs" role="tablist">
       <div
         v-for="tab in visibleTabs"
         :key="tab.id"
@@ -220,11 +250,14 @@ function cancelRename(): void {
         :class="{ active: tab.id === store.activeId, dragging: dragging === tab.id, 'drop-target': dropTarget === tab.id }"
         draggable="true"
         role="tab"
+        :aria-selected="tab.id === store.activeId"
+        :tabindex="tab.id === stopId ? 0 : -1"
+        @keydown="onTabKey($event, tab.id)"
         @dragstart="dragging = tab.id"
         @dragend="dragging = ''; dropTarget = ''"
         @dragover.prevent="onDragOver(tab.id)"
         @drop.prevent="onDrop(tab.id)"
-        @click="store.setActive(tab.id)"
+        @click="store.setActive(tab.id); store.focusTerminal()"
         @mousedown.middle.prevent="store.closeTabSafe(tab.id)"
         @contextmenu="openTabMenu($event, tab.id)"
       >

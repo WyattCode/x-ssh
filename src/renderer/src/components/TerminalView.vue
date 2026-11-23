@@ -186,6 +186,12 @@ async function pasteClipboard(): Promise<void> {
   term.focus()
 }
 
+/** Arrowing along the tab strip switches tabs as it goes: the terminal that comes up must not
+ *  pull the keyboard off the strip. Enter (or a click) hands it over via `termFocusTick`. */
+function focusInTabStrip(): boolean {
+  return !!document.activeElement?.closest?.('[role="tablist"]')
+}
+
 // Keep printable text and whitespace; drop any C0/C1 control sequence (ESC,
 // bracketed-paste ESC[200~/201~, OSC, and other non-printing bytes). Tabs and
 // newlines are legitimately part of a multi-line paste.
@@ -893,7 +899,7 @@ onMounted(() => {
 
   nextTick(() => {
     doFit()
-    if (props.focused) term?.focus()
+    if (props.focused && !focusInTabStrip()) term?.focus()
   })
 })
 
@@ -913,7 +919,7 @@ watch(
 watch(
   () => props.visible,
   (v) => {
-    if (v) nextTick(() => { doFit(); if (props.focused) term?.focus() })
+    if (v) nextTick(() => { doFit(); if (props.focused && !focusInTabStrip()) term?.focus() })
     // Hidden behind another page (v-show) but still mounted: without this the
     // xterm textarea keeps document.activeElement and swallows typing meant
     // for the page now on screen.
@@ -927,11 +933,13 @@ watch(
 watch(
   () => store.termFocusTick,
   () => {
-    if (!props.focused || !props.visible) return
-    nextTick(() => term?.focus())
-    setTimeout(() => {
+    // Checked after the render, not before: a click on another tab switches it and asks for
+    // focus in one go, and this pane only learns it is the focused one with that render.
+    const take = (): void => {
       if (props.focused && props.visible) term?.focus()
-    }, 120)
+    }
+    nextTick(take)
+    setTimeout(take, 120)
   }
 )
 
@@ -939,7 +947,7 @@ watch(
 watch(
   () => props.focused,
   (f) => {
-    if (f && props.visible) nextTick(() => term?.focus())
+    if (f && props.visible) nextTick(() => { if (!focusInTabStrip()) term?.focus() })
     // Leaving this pane (another pane clicked, or the terminal page left):
     // drop DOM focus so keystrokes don't keep going to this live SSH session.
     else term?.blur()

@@ -125,14 +125,27 @@ function onKey(e: KeyboardEvent): void {
         <BrandLockup :height="22" />
       </div>
       <label class="go">
-        <input v-model="typed" spellcheck="false" autocomplete="off" :placeholder="t('start.ph')" :aria-label="t('start.ph')" @keydown="onKey" />
+        <input
+          v-model="typed"
+          role="combobox"
+          aria-autocomplete="list"
+          aria-controls="start-sugg"
+          :aria-expanded="!!typed.trim()"
+          :aria-activedescendant="typed.trim() && suggestions.length ? `start-sg-${sel}` : undefined"
+          spellcheck="false"
+          autocomplete="off"
+          :placeholder="t('start.ph')"
+          :aria-label="t('start.ph')"
+          @keydown="onKey"
+        />
         <kbd>Enter</kbd>
       </label>
 
       <!-- While typing: what Enter would do, in place of the recent list. -->
-      <div v-if="typed.trim()" class="list sugg" role="listbox">
+      <div v-if="typed.trim()" id="start-sugg" class="list sugg" role="listbox">
         <button
           v-for="(sg, i) in suggestions"
+          :id="`start-sg-${i}`"
           :key="sg.kind === 'host' ? sg.host.id : 'new'"
           type="button"
           role="option"

@@ -98,7 +98,7 @@ watch(
 /** Guards against a second save (Enter / Save) while hosts.save is in flight. */
 const saving = ref(false)
 /** Which 更多选项 rows are open (each opens in place under its row). */
-const sections = reactive({ keys: false, jump: false, proxy: false, forwards: false, onConnect: false, appearance: false })
+const sections = reactive({ keys: false, jump: false, proxy: false, forwards: false })
 const labelEl = ref<HTMLInputElement>()
 const panelEl = ref<HTMLElement>()
 useFocusTrap(panelEl, () => props.open)
@@ -270,7 +270,7 @@ watch(
     // The panel is a persistent component, so a failure banner from the last
     // host would otherwise still be on screen for the next one.
     saveError.value = ''
-    Object.assign(sections, { keys: false, proxy: false, forwards: false, onConnect: false, appearance: false })
+    Object.assign(sections, { keys: false, jump: false, proxy: false, forwards: false })
     nextTick(() => labelEl.value?.focus())
     // Baseline for the unsaved-changes guard: capture after the form is
     // filled and focus moved (some fields normalize on blur).
@@ -395,14 +395,6 @@ const proxySummary = computed(() =>
     ? `${form.proxyType === 'http' ? 'HTTP' : 'SOCKS5'} ${form.proxyHost.trim()}:${form.proxyPort || ''}`
     : t('host.none')
 )
-const onConnectSummary = computed(
-  () => form.onConnect.split(/\r?\n/).map((l) => l.trim()).find(Boolean) ?? t('host.none')
-)
-const appearanceSummary = computed(() => {
-  const theme = PRESETS.find((p) => p.id === form.terminalTheme)?.label ?? t('host.termThemeSystem')
-  const font = form.terminalFontFamily.trim()
-  return font ? `${theme} · ${font}` : theme
-})
 
 // Twelve hues that stay apart at swatch size. '#4dabf7' and '#fab005' used to
 // be here and were near-twins of the first blue and the yellow; hosts saved
@@ -1111,8 +1103,9 @@ async function remove(): Promise<void> {
                 <p class="sub-hint">{{ t('host.onConnectHint') }}</p>
               </div>
               <label class="row">
-                <span class="r-label wide">{{ t('host.onConnectDelay') }}</span>
+                <span class="r-label">{{ t('host.onConnectDelay') }}</span>
                 <input v-model.number="form.onConnectDelayMs" class="box mono port-box" type="number" min="0" max="30000" step="100" :placeholder="t('host.onConnectDelayPh')" />
+                <span class="unit">{{ t('host.onConnectDelayUnit') }}</span>
               </label>
               <div class="row">
                 <label class="r-label" for="he-theme">{{ t('host.termTheme') }}</label>
@@ -1580,6 +1573,11 @@ input[type='number']::-webkit-inner-spin-button {
 .port-box {
   width: 78px;
   flex: none;
+}
+/* The unit after a number field ("0 毫秒"), so the label stays short enough for the label column. */
+.unit {
+  color: var(--text-faint);
+  font-size: 12.5px;
 }
 .ta {
   width: 100%;

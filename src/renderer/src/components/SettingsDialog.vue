@@ -2042,6 +2042,11 @@ function onLockPassEnter(e: KeyboardEvent): void {
   font-size: 12px;
   line-height: 1.5;
   color: var(--text-faint);
+  /* No last line of one or two characters ("响。" on a line of its own). */
+  text-wrap: pretty;
+  /* A slash-joined list with no spaces ("HostName/User/Port/…") may break anywhere rather than
+     run past the row's edge. */
+  overflow-wrap: anywhere;
 }
 .r-desc.solo {
   font-size: 12.5px;
