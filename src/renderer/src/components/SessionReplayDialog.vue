@@ -6,6 +6,7 @@ const dialogEl = ref<HTMLElement>()
 useFocusTrap(dialogEl, () => store.replayOpen)
 import { useSessions } from '../stores/sessions'
 import { useI18n } from '../lib/i18n'
+import { mainErrorOr } from '../lib/mainError'
 import { useToast } from '../composables/toast'
 import Icon from './Icon.vue'
 
@@ -40,8 +41,11 @@ async function load(p: string): Promise<void> {
   loading.value = false
   if (!r.ok) {
     err.value =
-      r.error === 'file-too-large' ? t('sfp.fileTooLarge') : (r.error ?? t('replay.readFail'))
-      r.error === 'path-invalid' ? t('sfp.pathInvalid') : (r.error ?? t('replay.readFail'))
+      r.error === 'file-too-large'
+        ? t('sfp.fileTooLarge')
+        : r.error === 'path-invalid'
+          ? t('sfp.pathInvalid')
+          : mainErrorOr(r.error, 'replay.readFail', t)
     content.value = ''
     // The dialog is dismissible (backdrop/Esc/X), so the inline line alone
     // would vanish with it: toast the same message so the read failure sticks.

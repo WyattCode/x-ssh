@@ -2368,7 +2368,10 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
 }
 .bar-title {
   grid-area: title;
-  align-self: center;
+  /* Level with the FIRST row of tools (28px tall): when the tools wrap onto a second row in a
+     narrow panel, a centred title floated between the two rows. */
+  align-self: start;
+  line-height: 28px;
   font-size: 13px;
   font-weight: 600;
   white-space: nowrap;
@@ -2458,6 +2461,11 @@ watch(() => bookmarksMenu.open, (o) => o && keepInView(bookmarksMenu, '.ctx.bm-m
    squeezed down to one letter and an ellipsis). */
 .crumb:not(.last) {
   flex: none;
+}
+/* A path that fits starts at the left, like any breadcrumb. The free space goes to this margin
+   first; with a path too deep to fit there is none, and flex-end above keeps the tail in view. */
+.crumbs > .crumb.last {
+  margin-right: auto;
 }
 .crumbs .sep {
   flex: none;

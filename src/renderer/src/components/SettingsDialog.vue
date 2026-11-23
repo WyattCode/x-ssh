@@ -15,6 +15,7 @@ import { splitShortcutChips } from '../lib/shortcutChips'
 import { contrastRatio, formatRatio, meetsAA, nudgeToContrast } from '../lib/contrast'
 import { PRESETS } from '../lib/terminalThemes'
 import { useI18n } from '../lib/i18n'
+import { mainErrorOr } from '../lib/mainError'
 import { useToast } from '../composables/toast'
 import { useConfirm } from '../composables/confirm'
 import { useTheme } from '../composables/theme'
@@ -681,7 +682,7 @@ async function onGlobalShowHide(e: Event): Promise<void> {
   const r = await store.setGlobalShowHide(v)
   globalHotkey.error = r.ok
     ? ''
-    : (r.error ?? t('set.gen.globalShortcutErr'))
+    : mainErrorOr(r.error, 'set.gen.globalShortcutErr', t)
 }
 
 // ---- Update check (GitHub releases feed) ----
@@ -702,7 +703,7 @@ async function checkForUpdates(): Promise<void> {
     const r = await window.api.checkUpdate()
     if (!r.ok) {
       updateState.error =
-        r.error === 'update-parse-failed' ? t('set.gen.updateParseFail') : (r.error ?? t('set.gen.updateErr'))
+        r.error === 'update-parse-failed' ? t('set.gen.updateParseFail') : mainErrorOr(r.error, 'set.gen.updateErr', t)
       return
     }
     updateState.fresh = !!r.fresh
@@ -819,7 +820,7 @@ async function forgetKnownHost(k: KnownHostEntry): Promise<void> {
   if (!ok) return
   const r = await window.api.knownHosts.forget(k.host, k.port)
   if (!r?.ok) {
-    toast(r?.error ?? t('set.sec.forgetFail'), 'error')
+    toast(mainErrorOr(r?.error, 'set.sec.forgetFail', t), 'error')
     return
   }
   await store.loadKnownHosts()
@@ -885,7 +886,7 @@ async function importSshConfig(): Promise<void> {
     toast(
       r.error === 'ssh-config-missing'
         ? t('set.sec.sshConfigMissing')
-        : (r.error ?? t('set.sec.importFail')),
+        : mainErrorOr(r.error, 'set.sec.importFail', t),
       'error'
     )
     return
@@ -2042,6 +2043,11 @@ function onLockPassEnter(e: KeyboardEvent): void {
   font-size: 12px;
   line-height: 1.5;
   color: var(--text-faint);
+  /* No last line of one or two characters ("响。" on a line of its own). */
+  text-wrap: pretty;
+  /* A slash-joined list with no spaces ("HostName/User/Port/…") may break anywhere rather than
+     run past the row's edge. */
+  overflow-wrap: anywhere;
 }
 .r-desc.solo {
   font-size: 12.5px;

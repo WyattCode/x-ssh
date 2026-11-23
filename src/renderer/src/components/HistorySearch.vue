@@ -5,6 +5,7 @@ const trapEl = ref<HTMLElement>()
 useFocusTrap(trapEl, () => store.historyOpen)
 import { useSessions } from '../stores/sessions'
 import { useI18n } from '../lib/i18n'
+import { mainErrorOr } from '../lib/mainError'
 import { useToast } from '../composables/toast'
 import { isImeKey } from '../lib/ime'
 import Icon from './Icon.vue'
@@ -128,7 +129,7 @@ async function exportLog(): Promise<void> {
   // A failed write (disk full / permission) used to look identical to success:
   // the save dialog had already closed, so nothing on screen said it failed.
   if (r.canceled) return
-  if (!r.ok) toast(r.error ?? t('hist.exportFail'), 'error')
+  if (!r.ok) toast(mainErrorOr(r.error, 'hist.exportFail', t), 'error')
   else toast(t('hist.exported'), 'success')
 }
 

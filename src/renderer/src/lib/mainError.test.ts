@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { MAIN_ERROR_KEYS, isTranslatedCode, mainErrorText } from './mainError'
+import { MAIN_ERROR_KEYS, isTranslatedCode, mainErrorOr, mainErrorText } from './mainError'
 
 /**
  * `mainError.ts` looks its dictionary keys up dynamically, so `lint:i18n`
@@ -73,6 +73,13 @@ describe('mainError table', () => {
   it('never leaves a raw-error: wrapper or an empty string in the UI', () => {
     expect(mainErrorText('raw-error:   ', t)).toBe('[err.unknown]')
     expect(mainErrorText('raw-error:', t)).toBe('[err.unknown]')
+  })
+
+  it('mainErrorOr falls back to the caller wording only when main sent nothing', () => {
+    expect(mainErrorOr(undefined, 'ed.loadFail', t)).toBe('[ed.loadFail]')
+    expect(mainErrorOr('', 'ed.loadFail', t)).toBe('[ed.loadFail]')
+    expect(mainErrorOr('raw-error:Operation unsupported', 'ed.loadFail', t)).toBe('Operation unsupported')
+    expect(mainErrorOr('fs-permission', 'ed.loadFail', t)).toBe('[err.fsPermission]')
   })
 
   it('passes an unknown code through so the gap stays visible', () => {

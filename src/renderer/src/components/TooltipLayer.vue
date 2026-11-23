@@ -73,10 +73,15 @@ async function place(el: HTMLElement): Promise<void> {
   const vh = window.innerHeight
   // A host row in the rail: beside it, over the terminal side. Below it the tip lay on top of the
   // next host, which is the very thing the user is about to move to.
-  if (el.closest('.rail-host') && r.right + 8 + box.width <= vw - 8) {
-    state.x = r.right + 8
-    state.y = Math.max(8, Math.min(r.top + r.height / 2 - box.height / 2, vh - box.height - 8))
-    return
+  if (el.closest('.rail-host')) {
+    // Past the rail's own edge, not just the row's: the row stops a few pixels short of it, and
+    // the tip would sit on the divider line.
+    const edge = Math.max(r.right + 8, (el.closest('aside')?.getBoundingClientRect().right ?? 0) + 6)
+    if (edge + box.width <= vw - 8) {
+      state.x = edge
+      state.y = Math.max(8, Math.min(r.top + r.height / 2 - box.height / 2, vh - box.height - 8))
+      return
+    }
   }
   let x = r.left + r.width / 2 - box.width / 2
   let y = r.bottom + 6
