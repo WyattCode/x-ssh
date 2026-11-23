@@ -1,3 +1,27 @@
+# 会话记录:M3.215(2026-11-23,标签页键盘操作 + 全界面二次审查的小修:v0.6.56 已发)
+
+## 做了什么(细节见 CHANGELOG [0.6.56])
+
+- `TabBar.vue`:`role="tablist"` / `aria-selected`;标签栏是一个 Tab 停靠点(`stopId`:当前标签,被过滤隐藏时是第一个),左右 / Home / End 切换并把焦点留在标签栏,Enter / 空格调 `store.focusTerminal()` 交还终端;点击标签也调一次 `focusTerminal()`。
+- `TerminalView.vue`:`focusInTabStrip()`(焦点在 `[role=tablist]` 里时,切换标签带来的 `visible` / `focused` / 挂载聚焦不抢焦点);`termFocusTick` 的监听改成渲染后再判断 `focused && visible`(点击别的标签时,这个窗格要等本次渲染才知道自己是当前窗格)。
+- `StartScreen.vue`:输入框 `role="combobox"` + `aria-activedescendant`,建议列表项有 id。
+- `lib/tooltipText.ts`:`splitTip` 只认「修饰键 + 键」(`Ctrl+K`、`⌘⇧P`),不再把括号里恰好含 Alt / Shift 字样的说明当快捷键(+ 测试)。
+- `HostEditor.vue`:换主机时 `sections.jump` 也复位;删掉没用的 `onConnectSummary` / `appearanceSummary`;「命令延迟」输入框回到标签列,单位另成 `host.onConnectDelayUnit`。
+- `TooltipLayer.vue`:主机行提示的位置越过 `aside` 的右边线;`LockScreen.vue`:新 `lock.prompt`;`SftpDrawer.vue`:路径栏靠左(`.crumb.last { margin-right: auto }`)、窄栏下标题对齐第一行工具;`SettingsDialog.vue`:`.r-desc` 加 `text-wrap: pretty` + `overflow-wrap: anywhere`。
+- `i18n.ts`:17 处汉字之间的半角标点改全角;`sck.palette2` 加「(备用)」;`lock.setHint` 重写;英文的 `host.hostPh` / `host.passwordAsk` / `tmux.newPh` 缩短。
+
+## 验证
+
+- 真实窗口(CDP):Tab 键进入标签栏 → 左右 / Home / End 切换且焦点留在标签上(连着终端的标签也是)→ Enter 后焦点到 xterm;点击标签后焦点在终端;启动页组合框属性;主机行提示的左边在侧栏边线右侧 6 像素。走查了启动页、命令面板、主机编辑四个标签、设置五个标签、文件页、转发页、锁定页、tmux / 历史 / 传输面板、浅色主题、723 像素宽窗口、英文 / 繁体。
+- 类型检查、i18n lint 通过;测试 931 通过,另 2 个是 `localAccess.test.ts` 的软链接 EPERM(原有)。`quietExec.test.ts` 全量跑时失败过一次,单独跑和再跑全量都过,像是偶发。
+
+## 没验证 / 已知
+
+- 在终端里按 Tab 是发给 shell 的,键盘用户进了终端就没法 Tab 回标签栏(终端的固有限制)。
+- 50% / 60% 缩放下的标题栏细线、多显示器不同缩放比例;NVIDIA 绿、CentOS 等图标的品牌色;canvas 量不准 CJK 占位符宽度,简体 / 繁体主机地址输入框的占位符在窄窗口下是否截断,靠肉眼看着是够的。
+
+---
+
 # 会话记录:M3.214(2026-11-23,主机栏品牌色 + 工具图标圆角高亮 + 统一提示框:v0.6.55 已发)
 
 ## 做了什么(细节见 CHANGELOG [0.6.55])
