@@ -4,8 +4,10 @@
 版本号格式: MAJOR.MINOR.PATCH。功能(feature)加 MINOR,修复/打磨加 PATCH,破坏性改动加 MAJOR。
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-25
+
 ### Added
-- **electron-updater 更新链路(Stage 0)**:更新源为本仓库 GitHub Releases
+- **应用内检查更新(Windows 会自动下载安装)**:更新源为本仓库 GitHub Releases
   (`build.publish` provider=github),依赖新增 `electron-updater@^6`(实装 6.8.11,
   与 electron-builder 26.15.3 配套;**没有**升级 builder)。核心状态机在
   `src/main/updater.ts`(idle/checking/available/downloading/downloaded/error,

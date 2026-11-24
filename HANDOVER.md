@@ -1,3 +1,28 @@
+# 会话记录:M3.219(2026-11-25,应用内检查更新接入:v0.8.0 已发)
+
+## 做了什么(细节见 CHANGELOG [0.8.0])
+
+- 接入 `electron-updater@^6`(6.8.11;electron-builder 仍是 26.15.3,**没升级**——Ed25519 更新清单签名是 v27 才有的强制项,升 v27 要一起搬 `mac.sign` 配置,单独立项)。`build.publish` = provider github / WyattCode / x-ssh。核心状态机新增 `src/main/updater.ts`(纯函数 + 可注入假 autoUpdater),IPC 沿用 `app:checkUpdate` 并新增 `app:updateState` 广播,设置新增「启动时自动检查更新」(默认开)。
+- 平台分工是产品决定:**Windows** 检查→自动下载→下次退出时安装,因此 `win.verifyUpdateCodeSignature=false`(未签名包过不了 electron-updater 默认的 Authenticode/publisherName 校验会永远拒装;这是唯一显式降级点,产物 sha512 校验照旧,代码里没有任何“跳过校验”开关)。**macOS 只提示 + 打开发布页,绝不自动替换**(Squirrel.Mac 要求更新包与运行中 app 同 Team ID 签名,我们是 ad-hoc)。
+- `XSSH_UPDATE_FEED_URL` 只接受合法 https,生效时打醒目日志,且不可能借此关掉任何校验。CI 两个 release job 的上传列表追加 `latest.yml` / `latest-mac.yml`(feed 入口,缺了客户端一律 404),**不需要新增 secret**(上传用现成的 `GITHUB_TOKEN`)。
+
+## 验证
+
+- 门禁:`typecheck` 0 错、vitest **107 文件 963 通过 | 2 skip**、`lint:i18n`(主进程无硬编码中文,26 文件)、`check:contrast`(66 tokens)。
+- 真包实测(mac zip + 本地 HTTPS 假 feed,feed 里 version=9.9.9):renderer 侧状态流 `checking → available(9.9.9)`,**没有** `downloading`/`downloaded`(mac 不许自动下载这条守住)。默认 GitHub 源经真 TLS 打到 github.com(线上 v0.7.1 release 里还没有 `latest-mac.yml` → HTTP 404 → 走 error 态,app 不崩)。
+- electron-builder 26.15.3 在 `--publish never` 下确实生成 `latest-mac.yml`(version / sha512 / size 齐全),这条是打包实跑确认,不是文档推断。
+- 过程中修掉一个**单测全绿但真包启动即挂**的 bug:`(await import('electron-updater')).autoUpdater` 在打包后拿到 CJS 命名空间,顶层没有 `autoUpdater` → `au` 为 undefined → `au.setFeedURL` 抛错且被 catch 吞成一行日志。改成 `mod.autoUpdater ?? mod.default?.autoUpdater` 并在拿不到时抛可读英文错;新增 6 条“模块形状”测试(顶层形状 / default-only / 两者皆无)。
+
+## 没验证 / 已知
+
+- **Windows 真机没验**:自动下载与 `quitAndInstall`(和设置持久化的 before-quit 顺序有交互)只过单测,要在真 Windows 上跑一次才算。
+- **更新链路对外真正生效要等下一次 tag**:CI 从 v0.8.0 起才上传 `latest*.yml`;而且 **已装 0.7.x 及更早的用户不会收到任何提示**(他们的包里没有 updater 代码),只能靠发版说明引导手动重装一次。
+- 匿名访问 GitHub Releases API 有限流(60 次/小时/IP),启动自动检查 + 手动多次检查是否会被限流,未测。
+- 本地假 feed 那轮用了自签证书 + `--ignore-certificate-errors`(Chromium 不认自签),公网真证书链路只在“默认源打到 github.com”那轮间接覆盖。
+- 包仍未签名、未公证。mac 侧要开自动更新必须先有 Apple Developer ID(¥688/年,Team ID 定了不能换)。
+
+---
+
 # 会话记录:M3.218(2026-11-24,红绿灯标定重测,100% 档一起压到顶栏正中:v0.7.1 已发)
 
 ## 做了什么(细节见 CHANGELOG [0.7.1])
