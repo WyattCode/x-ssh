@@ -103,6 +103,8 @@ jobs:
 
       - name: Upload installer artifact
         # Archive only: a full Actions artifact quota must not block the Release.
+        # latest.yml is the update feed's entry point (electron-updater fetches it
+        # from the Release); without it every client 404s and sees "no updates".
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
@@ -110,6 +112,7 @@ jobs:
           path: |
             release/*.exe
             release/*.blockmap
+            release/latest.yml
           if-no-files-found: error
 
       - name: Publish GitHub Release (tags only)
@@ -120,6 +123,7 @@ jobs:
           files: |
             release/*.exe
             release/*.blockmap
+            release/latest.yml
           fail_on_unmatched_files: false
 
   # ---------------------------------------------------------------------------
@@ -195,6 +199,7 @@ jobs:
             release/*.dmg
             release/*.zip
             release/*.blockmap
+            release/latest-mac.yml
             release/SHA256SUMS-macos.txt
           if-no-files-found: error
 
@@ -209,5 +214,6 @@ jobs:
             release/*.dmg
             release/*.zip
             release/*.blockmap
+            release/latest-mac.yml
             release/SHA256SUMS-macos.txt
           fail_on_unmatched_files: false

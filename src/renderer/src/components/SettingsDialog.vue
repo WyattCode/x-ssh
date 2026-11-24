@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { formatFingerprint } from '../../../shared/hostKey'
-import { ref, computed, watch, nextTick, reactive } from 'vue'
+import { ref, computed, watch, nextTick, reactive, onMounted, onBeforeUnmount } from 'vue'
 import { useSessions } from '../stores/sessions'
 import Icon from './Icon.vue'
 import {
@@ -685,7 +685,7 @@ async function onGlobalShowHide(e: Event): Promise<void> {
     : mainErrorOr(r.error, 'set.gen.globalShortcutErr', t)
 }
 
-// ---- Update check (GitHub releases feed) ----
+// ---- Update check (electron-updater; GitHub releases feed) ----
 const updateState = reactive({
   checking: false,
   fresh: false,
@@ -693,7 +693,38 @@ const updateState = reactive({
   url: '',
   name: '',
   notes: '',
-  error: ''
+  error: '',
+  phase: '' as '' | 'available' | 'downloading' | 'downloaded',
+  percent: 0
+})
+/** main 推来的状态迁移(自动检查、后台下载都走这里),与手动检查结果共用一份展示。 */
+function applyUpdateState(s: { phase: string; latest?: string; url?: string; percent?: number; error?: string }): void {
+  if (s.phase === 'checking') {
+    updateState.checking = true
+    updateState.error = ''
+    return
+  }
+  updateState.checking = false
+  if (s.phase === 'available' || s.phase === 'downloading' || s.phase === 'downloaded') {
+    updateState.fresh = false
+    updateState.latest = s.latest ?? updateState.latest
+    updateState.url = s.url ?? updateState.url
+    updateState.phase = s.phase as typeof updateState.phase
+    updateState.percent = s.percent ?? updateState.percent
+    updateState.error = ''
+  } else if (s.phase === 'idle') {
+    updateState.phase = ''
+  } else if (s.phase === 'error') {
+    updateState.error = s.error ?? t('set.gen.updateErr')
+  }
+}
+let offUpdateState: (() => void) | null = null
+onMounted(() => {
+  offUpdateState = window.api.onUpdateState(applyUpdateState)
+})
+onBeforeUnmount(() => {
+  offUpdateState?.()
+  offUpdateState = null
 })
 async function checkForUpdates(): Promise<void> {
   if (updateState.checking) return
@@ -703,7 +734,11 @@ async function checkForUpdates(): Promise<void> {
     const r = await window.api.checkUpdate()
     if (!r.ok) {
       updateState.error =
-        r.error === 'update-parse-failed' ? t('set.gen.updateParseFail') : mainErrorOr(r.error, 'set.gen.updateErr', t)
+        r.error === 'update-dev-mode'
+          ? t('set.gen.updateDevMode')
+          : r.error === 'update-parse-failed'
+            ? t('set.gen.updateParseFail')
+            : mainErrorOr(r.error, 'set.gen.updateErr', t)
       return
     }
     updateState.fresh = !!r.fresh
@@ -711,6 +746,7 @@ async function checkForUpdates(): Promise<void> {
     updateState.name = r.name ?? ''
     updateState.url = r.url ?? ''
     updateState.notes = r.notes ?? ''
+    if (!r.fresh) updateState.phase = 'available'
   } finally {
     updateState.checking = false
   }
@@ -720,6 +756,20 @@ function openUpdatePage(): void {
   void window.api.openExternal(updateState.url).then((ok) => {
     if (!ok) toast(t('set.gen.updateOpenFail'), 'error')
   })
+}
+async function toggleAutoUpdateCheck(): Promise<void> {
+  const next = !store.autoUpdateCheck
+  store.autoUpdateCheck = next
+  try {
+    const r = await window.api.settings.set('autoUpdateCheck', next)
+    if (!r.ok) {
+      store.autoUpdateCheck = !next
+      toast(t('set.gen.writeFail'), 'error')
+    }
+  } catch {
+    store.autoUpdateCheck = !next
+    toast(t('set.gen.writeFail'), 'error')
+  }
 }
 
 // ---- command snippets ----
@@ -1430,10 +1480,19 @@ function onLockPassEnter(e: KeyboardEvent): void {
               <h3>{{ t('set.gen.update') }}</h3>
               <p class="g-desc">{{ t('set.gen.updateDesc') }}</p>
               <div class="card">
+                <label class="row toggle" @click="toggleAutoUpdateCheck">
+                  <div class="r-text">
+                    <span class="r-title">{{ t('set.gen.autoUpdateCheck') }}</span>
+                    <span class="r-desc">{{ t('set.gen.autoUpdateCheckDesc') }}</span>
+                  </div>
+                  <span class="switch" :class="{ on: store.autoUpdateCheck }"><i /></span>
+                </label>
                 <div class="row">
                   <div class="r-text">
                     <span class="r-title" :class="{ faint: !updateState.latest }">
-                      <template v-if="updateState.fresh">{{ t('set.gen.upToDate', { v: updateState.latest }) }}</template>
+                      <template v-if="updateState.phase === 'downloading'">{{ t('set.gen.updateDownloading', { v: updateState.latest, p: updateState.percent }) }}</template>
+                      <template v-else-if="updateState.phase === 'downloaded'">{{ t('set.gen.updateQuitInstall', { v: updateState.latest }) }}</template>
+                      <template v-else-if="updateState.fresh">{{ t('set.gen.upToDate', { v: updateState.latest }) }}</template>
                       <template v-else-if="updateState.latest">{{ t('set.gen.updateAvail', { v: updateState.latest }) }}</template>
                       <template v-else>{{ t('set.gen.updateUnknown') }}</template>
                     </span>
@@ -1442,7 +1501,7 @@ function onLockPassEnter(e: KeyboardEvent): void {
                   <button class="btn sm" :disabled="updateState.checking" @click="checkForUpdates">
                     {{ updateState.checking ? t('set.gen.updateChecking') : t('set.gen.updateCheck') }}
                   </button>
-                  <button v-if="updateState.url" class="btn sm btn-tinted" @click="openUpdatePage">{{ t('set.gen.updateOpen') }}</button>
+                  <button v-if="updateState.url && updateState.phase !== 'downloaded'" class="btn sm btn-tinted" @click="openUpdatePage">{{ t('set.gen.updateOpen') }}</button>
                 </div>
                 <div v-if="updateState.notes && !updateState.fresh" class="row notes">{{ updateState.notes }}</div>
               </div>

@@ -14,7 +14,7 @@ import { COMPARE_METRICS, DEFAULT_COMPARE_SERVICE, isValidService, type CompareM
 import { dimHex } from '../shared/dim'
 import type { HostPatch } from '../shared/hostGroups'
 import type { ConnectParams, Host, HostForward, ForwardMode, JumpConfig, KeyErrorCode, LocalEntry, Snippet, ThemePref, UiPrefs, UploadOverwrite } from '../shared/types'
-import { readLaunchTarget, targetFromUrl, PROTOCOL, compareVersions } from '../shared/launchTarget'
+import { readLaunchTarget, targetFromUrl, PROTOCOL } from '../shared/launchTarget'
 import { isRendererSettableKey, isRendererReadableKey } from '../shared/settingsKeys'
 import { resolveLang, type LangPref, type UiLang } from '../shared/lang'
 import { resolveDir, resolveInside } from '../shared/localPaths'
@@ -39,6 +39,7 @@ import { displayIdForBounds, pickWindowPlacement } from './windowPlacement'
 import { macLightPosition } from './macLights'
 import { localX11Target } from './x11'
 import { ensureLocalXServer, findXServer } from './x11Server'
+import { createUpdater, getAutoUpdater } from './updater'
 
 const store = new HostStore()
 const knownHosts = new KnownHosts()
@@ -47,6 +48,24 @@ const keyManager = new KeyManager(app.getPath('userData'))
 const imeTrace = createImeTrace(app.getPath('userData'))
 const masterLock = new MasterLock(settings)
 const userVerify = registerUserVerifyIpc({ settings, lang: uiLang, isTrusted: isTrustedIpcSender })
+/**
+ * 更新链路(状态机与平台策略见 src/main/updater.ts)。tag 命名 vX.Y.Z,
+ * 发布页直接给「前往下载」按钮用。feed 覆盖只认 XSSH_UPDATE_FEED_URL。
+ */
+const appUpdater = createUpdater({
+  isPackaged: app.isPackaged,
+  platform: process.platform,
+  currentVersion: app.getVersion(),
+  env: process.env,
+  releasesUrl: (v) => `https://github.com/WyattCode/x-ssh/releases/tag/v${v}`,
+  autoCheckEnabled: async () => (await settings.get<boolean>('autoUpdateCheck')) !== false,
+  broadcast: (s) => {
+    for (const w of BrowserWindow.getAllWindows()) {
+      if (!w.isDestroyed()) w.webContents.send(IPC.appUpdateState, s)
+    }
+  },
+  log: (m) => console.warn(m)
+})
 const activeEdits = new Set<string>()
 /** Per-path stop callbacks for in-flight external edits (clear debounce + unwatch +
  *  final push + rm). Resolves once the file is safely off the local disk. */
@@ -3020,39 +3039,15 @@ function registerIpc(): void {
     return { ok: true, results }
   })
 
-  // ---- Update check vs GitHub releases ----
-  // Compares the running version against the newest published release and
-  // returns the update info (or a "fresh" flag). Best-effort and offline-safe:
-  // any failure (no network, rate limit, no repo) returns ok:false with a
-  // friendly message rather than throwing.
+  // ---- Update check (electron-updater, GitHub Releases feed) ----
+  // 打包形态走 electron-updater(状态机见 src/main/updater.ts:检查、Windows 后台
+  // 下载、下次退出安装;mac 只到 available 提示为止);开发模式返回稳定机器码
+  // update-dev-mode。失败返回 friendlyError 处理文本或稳定码,不抛出。
   handle(IPC.appCheckUpdate, async () => {
-    const current = app.getVersion()
-    try {
-      const res = await fetch('https://api.github.com/repos/WyattCode/x-ssh/releases/latest', {
-        headers: { 'User-Agent': app.getName() }
-      })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const data = (await res.json()) as {
-        tag_name?: string
-        html_url?: string
-        name?: string
-        body?: string
-      }
-      const latest = (data.tag_name ?? '').replace(/^v/i, '')
-      if (!latest) return { ok: false, error: 'update-parse-failed' }
-      const fresh = compareVersions(current, latest) >= 0
-      return {
-        ok: true,
-        fresh,
-        current,
-        latest,
-        url: data.html_url,
-        name: data.name ?? latest,
-        notes: data.body?.slice(0, 1200)
-      }
-    } catch (e) {
-      return { ok: false, error: friendlyError((e as Error).message) }
-    }
+    const r = await appUpdater.check()
+    if (r.ok) return r
+    const code = r.error ?? 'update-check-failed'
+    return { ...r, error: code === 'update-dev-mode' ? code : friendlyError(code) }
   })
   handle(IPC.appGlobalShortcut, (_e, accelerator: string) => setGlobalShowHide(accelerator))
 }
@@ -3206,6 +3201,9 @@ app.whenReady().then(async () => {
   // Kick off the auto-backup timer (no-op unless autoBackup is enabled).
   void scheduleAutoBackup().catch(() => undefined)
   void applyGlobalShowHideFromSettings().catch(() => undefined)
+  // 更新链路:打包形态按「启动时自动检查更新」设置做静默检查(Windows 后台下载,
+  // 下次退出安装;mac 只提示)。开发模式直接短路。永不阻塞启动。
+  void appUpdater.start().catch(() => undefined)
   // Sweep temp dirs left by drag-out / edit / open-with from a prior run.
   void sweepTempDirs()
   const [saved, prefs] = await Promise.all([
@@ -3250,6 +3248,16 @@ app.whenReady().then(async () => {
 // (托盘「退出」也是先关窗再到这里)。
 app.on('before-quit', () => {
   quitting = true
+  // Windows:已下载好的更新在这里装(“下次退出时安装”)。autoUpdater 没动态载入过
+  // (从未检查/开发模式)就没东西可装。mac 永不走到 downloaded —— 见 updater.ts
+  // 的 Team ID 说明,这里不触发。
+  if (process.platform === 'win32' && appUpdater.state().phase === 'downloaded') {
+    // getAutoUpdater 内含 CJS 形状归一化(autoUpdater 可能只在 .default 上),
+    // 与 updater.ts 共用同一个载入路径,别在这里直接 .autoUpdater。
+    void getAutoUpdater()
+      .then((au) => au.quitAndInstall(false, true))
+      .catch(() => undefined)
+  }
 })
 
 let settingsFlushed = false

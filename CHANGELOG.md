@@ -4,6 +4,28 @@
 版本号格式: MAJOR.MINOR.PATCH。功能(feature)加 MINOR,修复/打磨加 PATCH,破坏性改动加 MAJOR。
 ## [Unreleased]
 
+### Added
+- **electron-updater 更新链路(Stage 0)**:更新源为本仓库 GitHub Releases
+  (`build.publish` provider=github),依赖新增 `electron-updater@^6`(实装 6.8.11,
+  与 electron-builder 26.15.3 配套;**没有**升级 builder)。核心状态机在
+  `src/main/updater.ts`(idle/checking/available/downloading/downloaded/error,
+  纯函数可单测;只在 `app.isPackaged` 时真跑)。IPC 沿用 `app:checkUpdate` 并新增
+  `app:updateState` 广播。**Windows**:打包配置 `win.verifyUpdateCodeSignature=false`
+  (未签名包过不了 electron-updater 默认的 Authenticode/publisherName 校验,会永远
+  拒装 —— 这是唯一的显式降级点,清单本身的 sha512 校验照旧,且不存在任何“跳过校验”
+  开关),发现新版本后自动下载、**下次退出时自动安装**。**macOS**:ad-hoc 签名过不了
+  Squirrel.Mac 的同 Team ID 校验,自动替换会静默失败,因此 mac 只“提示 + 打开发布页”
+  (autoDownload 恒 false),`dmg+zip` target 不变(zip/latest-mac.yml 是 Squirrel/
+  electron-updater 的 feed 必需产物,正式签名后才开自动更新)。设置新增「启动时自动
+  检查更新」开关(默认开)。feed 覆盖仅认环境变量 `XSSH_UPDATE_FEED_URL`(https,
+  生效打醒目日志,不可借此关闭校验)。打包产物将包含 `latest.yml`(win)与
+  `latest-mac.yml`(mac),CI 上传产物时需一并上传(见 README/CI 说明)。
+  mac 的 `zip`/`latest-mac.yml` 为 feed 必需产物;Ed25519 清单签名是
+  electron-builder v27 才有的能力,升 v27 由后续单独决定。
+  (实测修:打包形态里 `await import('electron-updater')` 的 CJS 命名空间只在
+  `.default` 上挂 autoUpdater,顶层取值为 undefined 导致检查直接报错;现在
+  `resolveAutoUpdater` 同时认两种形状,拿不到则抛可读英文错误。)
+
 ## [0.7.1] - 2026-11-24
 
 ### Fixed

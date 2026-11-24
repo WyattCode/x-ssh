@@ -79,6 +79,10 @@ console.log(
 
 // 架构必须显式：不写 --arm64 时产物架构隐式跟宿主，runner 一换就静默变 x64，
 // 而 README 承诺的文件名是 X-SSH-<version>-arm64.dmg。
+// mac target 保持 dmg+zip 不变:zip 与 latest-mac.yml 是 electron-updater/Squirrel.Mac
+// 的更新 feed 必需产物(更新检查要读清单)。当前是 ad-hoc 签名,Squirrel.Mac 要求更新包
+// 与运行中 App 同一 Team ID,所以现阶段 mac 只做到“提示+发布页”;以后正式签名后才开
+// mac 自动更新(见 src/main/updater.ts 与 README「更新」一节)。
 const bin = path.join(ROOT, 'node_modules', '.bin', 'electron-builder')
 const args = ['--mac', '--arm64', `-c.mac.icon=${icon}`, ...process.argv.slice(2)]
 const r = spawnSync(bin, args, { stdio: 'inherit', cwd: ROOT })

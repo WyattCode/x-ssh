@@ -154,8 +154,11 @@ export const IPC = {
   // Launch target (CLI arg / x-ssh:// protocol) forwarded from main → renderer
   appOpenTarget: 'app:openTarget',
 
-  // Update check against the GitHub releases feed
+  // Update check against the GitHub releases feed (electron-updater when packaged)
   appCheckUpdate: 'app:checkUpdate',
+
+  // Main → renderer: electron-updater state-machine transitions (AppUpdateState)
+  appUpdateState: 'app:updateState',
 
   // Global (systemwide) hotkey: show/hide the main window
   appGlobalShortcut: 'app:globalShortcut',
@@ -163,6 +166,24 @@ export const IPC = {
   // Main → renderer: machine woke from sleep / unlock → re-evaluate connectivity
   appOnlineChanged: 'app:onlineChanged'
 } as const
+
+/**
+ * electron-updater 更新状态机(main → renderer 广播,见 src/main/updater.ts)。
+ * error 放的是稳定机器码或 friendlyError 处理过的文本,renderer 直接展示。
+ */
+export type AppUpdatePhase = 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'error'
+
+export interface AppUpdateState {
+  phase: AppUpdatePhase
+  /** 新版本号(available/downloading/downloaded 阶段)。 */
+  latest?: string
+  /** 该版本的 GitHub 发布页(前往下载用)。 */
+  url?: string
+  /** 下载百分比(downloading 阶段,0–100)。 */
+  percent?: number
+  /** error 阶段的说明(机器码或已本地化处理文本)。 */
+  error?: string
+}
 
 /** Prefix of the launch argument carrying UiPrefs from main to the preload. */
 export const PREFS_ARG = '--x-ssh-prefs='

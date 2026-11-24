@@ -317,6 +317,7 @@ function onGlobalKey(e: KeyboardEvent): void {
 let offEvent: (() => void) | null = null
 let offOpenTarget: (() => void) | null = null
 let offOnlineChanged: (() => void) | null = null
+let offUpdateState: (() => void) | null = null
 let offHostsChanged: (() => void) | null = null
 /** Converts a #rrggbb hex color into an rgba() string at the given alpha. */
 function accentSoft(hex: string, alpha = 0.14): string {
@@ -439,6 +440,16 @@ onMounted(async () => {
   // Machine woke from sleep / screen unlocked: the network may have dropped while
   // suspended, so re-evaluate connectivity and let dropped sessions retry.
   offOnlineChanged = window.api.onOnlineChanged(() => store.handleWake())
+  // electron-updater state → 轻量提示。Windows 会自动后台下载、退出时安装;mac 只
+  // 提示,让用户去设置里的更新卡片「前往下载」覆盖安装(见 src/main/updater.ts)。
+  offUpdateState = window.api.onUpdateState((s) => {
+    if (s.phase === 'available') {
+      const v = s.latest ?? ''
+      toast(t(isMac ? 'app.updateAvailableMac' : 'app.updateAvailableWin', { v }), 'info')
+    } else if (s.phase === 'downloaded') {
+      toast(t('app.updateDownloaded', { v: s.latest ?? '' }), 'info')
+    }
+  })
   // Main updated a saved host on its own (the OS detected on connect).
   offHostsChanged = window.api.hosts.onChanged(() => void store.loadHosts())
   // Pull the deferred chunks in while the app is idle, so the first connection
@@ -459,6 +470,7 @@ onBeforeUnmount(() => {
   offEvent?.()
   offOpenTarget?.()
   offOnlineChanged?.()
+  offUpdateState?.()
   offHostsChanged?.()
 })
 </script>

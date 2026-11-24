@@ -30,6 +30,13 @@
       "output": "release",
       "buildResources": "build"
     },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "WyattCode",
+        "repo": "x-ssh"
+      }
+    ],
     "files": [
       "out/**/*",
       "build/icon.ico",
@@ -47,7 +54,8 @@
     ],
     "win": {
       "icon": "build/icon.ico",
-      "target": "nsis"
+      "target": "nsis",
+      "verifyUpdateCodeSignature": false
     },
     "nsis": {
       "oneClick": false,
@@ -71,6 +79,7 @@
   },
   "dependencies": {
     "@xterm/addon-search": "^0.15.0",
+    "electron-updater": "^6.8.11",
     "ssh2": "^1.16.0"
   },
   "devDependencies": {

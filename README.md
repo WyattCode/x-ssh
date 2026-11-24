@@ -67,9 +67,29 @@ macOS 版在 GitHub Actions 的 Apple Silicon 机器上构建,**没有 Apple Dev
 如果你不接受以上任何一项:可以从源码自行构建 ——
 `git clone && npm ci && npm run dist:mac`(需要 macOS + Xcode 命令行工具)。
 
+### 更新
+
+- **Windows(自动更新)**:应用会对照本仓库的 GitHub Releases 检查新版本;发现后
+  在后台自动下载安装器,你**下一次退出 X-SSH 时自动安装**。如实说明信任边界:
+  安装包**没有 Authenticode 签名**,更新清单(`latest.yml`)**也没有清单签名**
+  (electron-builder 26 不签清单)。更新的信任锚点因此只有两条:①清单与产物只从
+  `WyattCode/x-ssh` 的 GitHub Releases 拉取;②electron-updater 对下载产物逐字节
+  比对清单中的 sha512。正因为未签名,构建配置显式设了
+  `build.win.verifyUpdateCodeSignature=false` —— electron-updater 默认的
+  发布者签名(Authenticode/publisherName)校验会永远拒装未签名包,关掉它是让自动
+  更新能工作的唯一降级点,除此之外没有关闭任何校验。
+- **macOS(只提示,不自动装)**:mac 包是 ad-hoc 签名,Squirrel.Mac 要求更新包与
+  运行中的 App 为同一 Team ID 签名,自动替换只会静默失败 —— 所以 macOS 只做到
+  「发现新版本 → 提示」,然后到「设置 → 检查更新」点「前往下载」,按上文 macOS
+  一节的哈希校验流程下载新 dmg/zip **覆盖安装**。mac 的 `zip` 产物与
+  `latest-mac.yml` 是更新检查的 feed 入口,必须保留;将来正式签名后才开自动更新。
+- **两平台通用**:「设置 → 检查更新」可随时手动检查;「启动时自动检查更新」开关
+  默认开,可在设置里关闭。更新源固定为本仓库 GitHub Releases,不自架服务器;
+  仅环境变量 `XSSH_UPDATE_FEED_URL`(必须 https)可临时把清单指向别的地址,且它
+  只改拉取位置、无法关闭任何校验(生效时会打醒目日志)。
+
 ### 通用
 
-- 更新:下载新安装包覆盖安装(自动更新尚未接入)。
 - 主机、已信任指纹与设置:Windows 在 `%APPDATA%\X-SSH`,macOS 在
   `~/Library/Application Support/X-SSH`。卸载不清除它,重装即恢复。
 

@@ -440,6 +440,8 @@ interface State {
   /** Minimize to the system tray on close (instead of quitting), so transfers
    *  keep running (default off). */
   minimizeToTray: boolean
+  /** Silently check GitHub Releases for a newer build on startup (default on). */
+  autoUpdateCheck: boolean
   /** Reuse a shared connection to the same host (ControlMaster-style
    *  multiplexing; default off). */
   connectionMultiplex: boolean
@@ -540,6 +542,7 @@ export const useSessions = defineStore('sessions', {
     confirmClose: false,
     transferRateKbps: 0,
     minimizeToTray: false,
+    autoUpdateCheck: true,
     connectionMultiplex: false,
     tmuxOnConnect: false,
     tmuxSessionName: '',
@@ -800,6 +803,8 @@ export const useSessions = defineStore('sessions', {
       this.transferRateKbps =
         (await window.api.settings.get<number>('transferRateKbps')) ?? 0
       this.minimizeToTray = (await window.api.settings.get<boolean>('minimizeToTray')) === true
+      // 更新自动检查:默认开(仅显式存过 false 才关)。
+      this.autoUpdateCheck = (await window.api.settings.get<boolean>('autoUpdateCheck')) !== false
       this.connectionMultiplex = (await window.api.settings.get<boolean>('connectionMultiplex')) === true
       this.tmuxOnConnect = (await window.api.settings.get<boolean>('tmuxOnConnect')) === true
       this.tmuxSessionName = (await window.api.settings.get<string>('tmuxSessionName')) ?? ''

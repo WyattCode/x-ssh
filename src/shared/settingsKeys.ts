@@ -67,6 +67,8 @@ export const RENDERER_SETTABLE_KEYS = new Set([
   'confirmClose',
   'globalShowHideAccel',
   'minimizeToTray',
+  // 更新检查(默认开;updater.ts 启动时读取,SettingsDialog 写入)
+  'autoUpdateCheck',
   'notifications',
   'notifySound',
   'openTabs',

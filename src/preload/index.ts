@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils, webFrame } from 'electron'
-import { IPC, PREFS_ARG } from '../shared/ipc'
+import { IPC, PREFS_ARG, type AppUpdateState } from '../shared/ipc'
 import { ZOOM_DEFAULT_PCT, levelToFactor, percentToLevel, snapLevel } from '../shared/zoom'
 import type { HostPatch } from '../shared/hostGroups'
 import type {
@@ -379,6 +379,12 @@ const api = {
     notes?: string
     error?: string
   }> => ipcRenderer.invoke(IPC.appCheckUpdate),
+  /** electron-updater 状态迁移(main → renderer)。返回退订函数。 */
+  onUpdateState: (cb: (state: AppUpdateState) => void): (() => void) => {
+    const listener = (_e: unknown, state: AppUpdateState): void => cb(state)
+    ipcRenderer.on(IPC.appUpdateState, listener)
+    return () => ipcRenderer.removeListener(IPC.appUpdateState, listener)
+  },
   /** Register/replace (or clear, with '') the global show/hide hotkey. */
   setGlobalShortcut: (accelerator: string): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke(IPC.appGlobalShortcut, accelerator),
