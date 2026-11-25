@@ -68,6 +68,17 @@ for (const k of Object.keys(zh)) {
   }
 }
 
+// 2b) zh / zh-TW 条目按仓库惯例用全角标点:半角逗号 , 一律不允许(技术串里也不出现);
+// 半角冒号 : 只允许后接非汉字的技术写法(user@host:port、4.5:1、→ :80),
+// 后接汉字说明是中文句读,必须写全角 :。
+for (const [name, dict] of Object.entries({ zh, zhTW })) {
+  for (const [k, v] of Object.entries(dict)) {
+    if (v.includes(',')) report(`${name}: 中文条目 \`${k}\` 出现半角逗号 , (应为全角，)`)
+    if (/:(?=[\u3000-\u303f\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff00-\uffef])/.test(v))
+      report(`${name}: 中文条目 \`${k}\` 的半角 : 后接汉字(应为全角：)`)
+  }
+}
+
 // 3) verify static key references used in code exist
 const dynamic = ['tab.', 'group.', 'sck.', 'tabTitle.', 'sckHint.']
 const keyRe = /\b(?:t|tt|\$t)\(\s*['"]([A-Za-z0-9_.-]+)['"]/g

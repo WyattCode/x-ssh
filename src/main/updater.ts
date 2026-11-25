@@ -3,8 +3,11 @@
  *
  * 更新源 = 本仓库的 GitHub Releases(WyattCode/x-ssh,见 package.json build.publish),
  * 不自架服务器。feed 地址只允许通过环境变量 XSSH_UPDATE_FEED_URL 覆盖
- * (feedOverrideFromEnv),生效时打一条醒目日志;覆盖只改「从哪拉清单」,
- * 产物 sha512 始终按清单校验 —— 这里没有任何“跳过校验”的开关。
+ * (feedOverrideFromEnv),且【只在未打包构建中生效】—— electron-builder 26 不签
+ * 更新清单(Ed25519 清单签名是 v27 才有),客户端只校验清单自述的 sha512,所以
+ * 打包形态若接受这个覆盖,等于“能设环境变量的人 = 能让 Windows 静默下载安装任意
+ * 代码”。打包形态一律用默认 GitHub Releases,env 的存在只打进开发者日志。
+ * 覆盖只改「从哪拉清单」,产物 sha512 始终按清单校验 —— 这里没有任何“跳过校验”的开关。
  *
  * 信任模型(如实,不粉饰):包未 Authenticode 签名,更新清单(latest.yml)也没有
  * 清单签名(electron-builder 26 不签清单,清单签名/Ed25519 是 v27 才引入的)。
@@ -22,20 +25,23 @@
  * 本文件顶层不 import electron / electron-updater(单测直接跑纯函数);
  * electron-updater 只在打包形态真正要跑时才动态载入,测试用 loadAutoUpdater 注入假货。
  */
-import { compareVersions } from '../shared/launchTarget'
 import type { AppUpdateState } from '../shared/ipc'
 
-/** 唯一允许的 feed 覆盖入口(仅 https)。除它以外没有任何校验降级开关。 */
+/** 唯一的 feed 覆盖入口(仅 https,且仅未打包构建)。除它以外没有任何校验降级开关。 */
 export const FEED_URL_ENV = 'XSSH_UPDATE_FEED_URL'
+
+/** 手动/自动检查更新的硬超时:超时只解除界面阻塞(释放我们自己的 checking 闭包),
+ *  不能取消底层请求(electron-updater 对 checkForUpdates 去重,见 check() 内注释)。 */
+export const UPDATE_CHECK_TIMEOUT_MS = 20_000
 
 export type UpdateEvent =
   | { type: 'check' }
   | { type: 'available'; version: string; url?: string }
-  | { type: 'not-available' }
+  /** 「无更新」;latest=当前版本(fresh 态要拿它做「已是最新版本 X」展示)。 */
+  | { type: 'not-available'; latest?: string }
   | { type: 'progress'; percent: number }
   | { type: 'downloaded'; version: string; url?: string }
   | { type: 'error'; message: string }
-  | { type: 'reset' }
 
 /**
  * 纯状态机。非法/乱序迁移保持原状态不变(electron-updater 的事件顺序不总如预期,
@@ -50,8 +56,16 @@ export function nextUpdateState(s: AppUpdateState, ev: UpdateEvent): AppUpdateSt
       return s.phase === 'checking' || s.phase === 'idle' || s.phase === 'error'
         ? { phase: 'available', latest: ev.version, url: ev.url }
         : s
-    case 'not-available':
-      return s.phase === 'checking' ? { phase: 'idle' } : s
+    case 'not-available': {
+      // 「无更新」的合法来路两条:① checking 的正常收尾;② 启动自动检查超时(已记
+      // error)之后,底层请求稍后才回来确认「无更新」—— 迟到的结果必须清掉过期的
+      // 检查错误,否则主进程整个会话停在 error,设置面板每次回读都显示「检查更新超时」。
+      // fresh=true + latest=当前版本:重开面板也能显示「已是最新版本 X」(见 ipc.ts)。
+      if (s.phase !== 'checking' && s.phase !== 'error') return s
+      const next: AppUpdateState = { phase: 'idle', fresh: true }
+      if (ev.latest) next.latest = ev.latest
+      return next
+    }
     case 'progress': {
       if (s.phase !== 'downloading' && s.phase !== 'available') return s
       const percent = Math.max(0, Math.min(100, Math.round(ev.percent)))
@@ -65,8 +79,6 @@ export function nextUpdateState(s: AppUpdateState, ev: UpdateEvent): AppUpdateSt
       // 同一条错误不重复广播(electron-updater 的 'error' 事件与 check() 的
       // catch 会对同一次失败各报一次)。
       return s.phase === 'error' && s.error === ev.message ? s : { phase: 'error', error: ev.message }
-    case 'reset':
-      return { phase: 'idle' }
   }
 }
 
@@ -79,17 +91,19 @@ export function allowsAutoDownload(platform: NodeJS.Platform, isPackaged: boolea
   return isPackaged && platform === 'win32'
 }
 
-/** latest 是否比 current 新(严格大于;compareVersions 来自 shared,已在用)。 */
-export function hasNewerVersion(current: string, latest: string): boolean {
-  return compareVersions(latest, current) > 0
-}
-
 /**
- * feed 覆盖判定:仅接受 XSSH_UPDATE_FEED_URL 给出的合法 https 地址。
- * 未设 / 空 / 非 https(含 file://、http://)一律回退默认 GitHub Releases。
+ * feed 覆盖判定:仅接受 XSSH_UPDATE_FEED_URL 给出的合法 https 地址,且仅在
+ * 【未打包构建】(isPackaged=false)生效。打包形态一律返回 undefined(= 默认
+ * GitHub Releases):electron-builder 26 不签更新清单,客户端只校验清单自述的
+ * sha512 —— 打包版若接受覆盖,任何能设环境变量的人都能让 Windows 静默下载并
+ * 安装任意代码。未设 / 空 / 非 https(含 file://、http://)一律回退默认源。
  * 这个覆盖永远不可能关闭 sha512 校验 —— 代码里根本不存在那样的开关。
  */
-export function feedOverrideFromEnv(env: Record<string, string | undefined>): string | undefined {
+export function feedOverrideFromEnv(
+  env: Record<string, string | undefined>,
+  isPackaged: boolean
+): string | undefined {
+  if (isPackaged) return undefined
   const raw = (env[FEED_URL_ENV] ?? '').trim()
   if (!raw) return undefined
   let u: URL
@@ -99,6 +113,29 @@ export function feedOverrideFromEnv(env: Record<string, string | undefined>): st
     return undefined
   }
   return u.protocol === 'https:' ? raw : undefined
+}
+
+/**
+ * 异常 → 稳定机器码。广播给 renderer / 回给 IPC 调用方的 error 字段【只允许】
+ * 这几个 kebab 码;原始异常全文只进 host.log(英文,给开发者看),绝不外流到界面。
+ * 判定依据:electron-updater 的 HttpError 带 statusCode,消息文本带特征串;
+ * Node 网络错误带 E* 码;超时由 check() 自己抛出含 "timed out" 的 Error。
+ */
+export function classifyUpdateError(e: unknown): string {
+  const err = (e ?? {}) as { statusCode?: unknown; code?: unknown; message?: unknown }
+  const status = Number(err.statusCode)
+  const text = `${String(err.message ?? e ?? '')} ${String(err.code ?? '')}`.toLowerCase()
+  if (status === 404 || text.includes('cannot find channel')) return 'update-channel-404'
+  if (status === 403 || status === 429 || text.includes('rate limit')) return 'update-rate-limited'
+  if (/etimedout|esockettimedout|timed out|timeout/.test(text)) return 'update-check-timeout'
+  if (
+    /enotfound|econnreset|econnrefused|econnaborted|enetunreach|ehostunreach|getaddrinfo|self[- ]signed|certificate|ssl|tls|network|socket hang up/.test(
+      text
+    )
+  ) {
+    return 'update-network'
+  }
+  return 'update-check-failed'
 }
 
 /** IPC `app:checkUpdate` 的返回形状(沿用接入前 SettingsDialog 已认的字段)。 */
@@ -162,11 +199,6 @@ export function resolveAutoUpdater(mod: AutoUpdaterModule): AutoUpdaterLike {
   return au
 }
 
-/** 载入 electron-updater 的 autoUpdater 单例(仅打包形态;index.ts 的退出安装也走这里)。 */
-export async function getAutoUpdater(): Promise<AutoUpdaterLike> {
-  return resolveAutoUpdater(await importAutoUpdaterModule())
-}
-
 export interface UpdaterHost {
   isPackaged: boolean
   platform: NodeJS.Platform
@@ -178,6 +210,11 @@ export interface UpdaterHost {
   autoCheckEnabled: () => Promise<boolean>
   broadcast: (state: AppUpdateState) => void
   log: (msg: string) => void
+  /** 检查更新的硬超时(ms,缺省 UPDATE_CHECK_TIMEOUT_MS=20s)。 */
+  checkTimeoutMs?: number
+  /** 测试注入定时器(假时钟可手动触发超时);缺省用全局 setTimeout/clearTimeout。 */
+  setTimeoutFn?: (cb: () => void, ms: number) => unknown
+  clearTimeoutFn?: (timer: unknown) => void
   /** 测试注入已构造好的实例;生产走 loadAutoUpdaterModule(缺省=动态 import)。 */
   loadAutoUpdater?: () => Promise<AutoUpdaterLike>
   /**
@@ -216,17 +253,27 @@ export function createUpdater(host: UpdaterHost): UpdaterApi {
               await (host.loadAutoUpdaterModule ?? importAutoUpdaterModule)()
             )
         const raw = (host.env[FEED_URL_ENV] ?? '').trim()
-        const feed = feedOverrideFromEnv(host.env)
+        const feed = feedOverrideFromEnv(host.env, host.isPackaged)
         if (feed) {
-          // 醒目日志:有人把 feed 指向了别处。覆盖只改地址;sha512 校验照旧,
-          // 且本代码不提供任何关闭校验的途径。默认源是 GitHub Releases WyattCode/x-ssh。
+          // 醒目日志:有人把 feed 指向了别处(只可能发生在未打包构建)。覆盖只改地址;
+          // sha512 校验照旧,且本代码不提供任何关闭校验的途径。默认源是 GitHub Releases WyattCode/x-ssh。
           // (开发者日志走英文;用户可见文案一律是 i18n key,由 renderer 出三语。)
           host.log(
-            `[updater] !! ${FEED_URL_ENV} ACTIVE: update feed pointed at ${feed} ` +
+            `[updater] !! ${FEED_URL_ENV} ACTIVE (unpackaged build only): update feed pointed at ${feed} ` +
               `(default is GitHub Releases WyattCode/x-ssh). Artifact sha512 is still ` +
               `verified against the manifest; this override cannot disable any check.`
           )
           au.setFeedURL({ provider: 'generic', url: feed })
+        } else if (raw && host.isPackaged) {
+          // 打包形态忽略这个覆盖:见 feedOverrideFromEnv 的注释(清单无签名,env 可达
+          // = 任意代码执行面)。出于安全,feed 覆盖只在未打包构建中生效。
+          host.log(
+            `[updater] !! ${FEED_URL_ENV} is set, but IGNORED in packaged builds: for security, ` +
+              `the feed override only takes effect in unpackaged builds (update manifests are not ` +
+              `signed in electron-builder 26, so honoring it in shipped apps would let anyone who ` +
+              `controls the environment redirect updates to arbitrary code). Using the default ` +
+              `GitHub Releases feed.`
+          )
         } else if (raw) {
           host.log(
             `[updater] !! ${FEED_URL_ENV} is set but not a valid https URL; ignored, using the default GitHub Releases feed.`
@@ -242,7 +289,10 @@ export function createUpdater(host: UpdaterHost): UpdaterApi {
           const version = info.version ?? ''
           emit({ type: 'available', version, url: version ? host.releasesUrl(version) : undefined })
         })
-        au.on('update-not-available', () => emit({ type: 'not-available' }))
+        au.on('update-not-available', () =>
+          // 带上当前版本:idle+fresh 态要靠 latest 显示「已是最新版本 X」(第 3 条)。
+          emit({ type: 'not-available', latest: host.currentVersion })
+        )
         au.on('download-progress', (arg) => {
           const p = (arg ?? {}) as { percent?: number }
           emit({ type: 'progress', percent: Number(p.percent) || 0 })
@@ -253,8 +303,12 @@ export function createUpdater(host: UpdaterHost): UpdaterApi {
           emit({ type: 'downloaded', version, url: version ? host.releasesUrl(version) : undefined })
         })
         au.on('error', (arg) => {
-          const e = arg as { message?: string } | undefined
-          emit({ type: 'error', message: String(e?.message ?? e ?? 'update-check-failed') })
+          // 原文全文只进开发者日志;广播只带稳定机器码(分类见 classifyUpdateError)。
+          const code = classifyUpdateError(arg)
+          host.log(
+            `[updater] update error (${code}): ${String((arg as { message?: string })?.message ?? arg)}`
+          )
+          emit({ type: 'error', message: code })
         })
         return au
       })().catch((e) => {
@@ -289,17 +343,45 @@ export function createUpdater(host: UpdaterHost): UpdaterApi {
       if (!host.isPackaged) return { ok: false, error: 'update-dev-mode' }
       if (checking) return checking
       const run = (async (): Promise<CheckResult> => {
+        // 硬超时。electron-updater 的请求不保证会失败(挂死的 TCP 连接能永远不 settle)。
+        // 超时能做的只有一件事,也只做这一件:解除界面阻塞 —— 释放我们自己的 checking
+        // 闭包,按钮不再卡「检查中」。它【不能】取消底层请求:electron-updater 内部对
+        // checkForUpdates 去重(node_modules/electron-updater/out/AppUpdater.js:254-275,
+        // checkForUpdatesPromise 未 settle 前再调只返回同一个 promise,日志打
+        // "Checking for update (already in progress)"),所以挂死的请求没 settle 时再点
+        // 「检查」会再吃一次完整的超时。electron-updater 没有取消进行中检查的公开 API,
+        // 真重试 = 重启进程。
+        const timeoutMs = host.checkTimeoutMs ?? UPDATE_CHECK_TIMEOUT_MS
+        let timer: unknown = null
         try {
           const au = await configuredOnce()
           emit({ type: 'check' })
+          const pending = au.checkForUpdates()
+          // 超时胜出后,真实请求若稍后才拒绝,不该变成 unhandled rejection。
+          pending.catch(() => undefined)
+          await Promise.race([
+            pending,
+            new Promise<never>((_resolve, reject) => {
+              const onTimeout = (): void =>
+                reject(new Error(`update check timed out after ${timeoutMs} ms`))
+              timer = host.setTimeoutFn
+                ? host.setTimeoutFn(onTimeout, timeoutMs)
+                : setTimeout(onTimeout, timeoutMs)
+            })
+          ])
           // 事件先于这个 resolve 进入状态机,读 current 即是最终态。
-          await au.checkForUpdates()
           return toCheckResult(current, host.currentVersion, host.releasesUrl)
         } catch (e) {
-          const message = String((e as Error)?.message ?? e)
-          emit({ type: 'error', message })
-          return { ok: false, error: message }
+          // 原始异常全文只进开发者日志;界面/返回值只带稳定机器码。
+          const code = classifyUpdateError(e)
+          host.log(`[updater] update check failed (${code}): ${String((e as Error)?.message ?? e)}`)
+          emit({ type: 'error', message: code })
+          return { ok: false, error: code }
         } finally {
+          if (timer !== null) {
+            if (host.clearTimeoutFn) host.clearTimeoutFn(timer)
+            else clearTimeout(timer as ReturnType<typeof setTimeout>)
+          }
           checking = null
         }
       })()

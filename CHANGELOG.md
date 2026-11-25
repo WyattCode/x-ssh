@@ -4,6 +4,33 @@
 版本号格式: MAJOR.MINOR.PATCH。功能(feature)加 MINOR,修复/打磨加 PATCH,破坏性改动加 MAJOR。
 ## [Unreleased]
 
+### Fixed
+- **打包版不再认 `XSSH_UPDATE_FEED_URL`(投毒级)**:electron-builder 26 的更新清单**没有签名**,客户端只校验清单
+  自述的 sha512,所以打包形态接受环境变量改 feed = 任何能设环境变量的人都能把 Windows 客户端指向任意代码,而且
+  版本号只升不降、装上洗不掉。现在 feed 覆盖**仅在未打包构建生效**,打包版带着该变量启动会打一条醒目日志并照用
+  默认 GitHub Releases 源(本地验证改走"改副本包内 `app-update.yml` + ad-hoc 重签",不需要出厂通道)。
+- **退出时可能并发跑两个安装器**:主进程原来在 `before-quit` 里手动调 `quitAndInstall()`(非静默,会弹安装向导),
+  而 `autoInstallOnAppQuit=true` 时 electron-updater 自己已有退出安装钩子;`before-quit` 因 `will-quit` 的
+  preventDefault 会多轮派发,手动调用会把库内部的 `quitAndInstallCalled` 复位、给内建钩子重新开门。现在删掉手动
+  调用,Windows 只走库内建的「退出即静默安装」。
+- **异常原文不再上界面**:更新检查失败时的英文原文(`HttpError: 404 …` + 响应头 + 那句 authentication token 提示)
+  曾原样显示在设置里。现在主进程把错误归成 5 个稳定机器码(`update-channel-404` / `update-rate-limited` /
+  `update-check-timeout` / `update-network` / `update-check-failed`),广播与 IPC 只带码、原文只进主进程日志,
+  界面按当前语言显示短句(简中/繁中/英文),切语言会跟着重译(展示走 computed,不存成品文案)。
+- **检查更新加 20 s 超时**:原来没有超时,网络挂起会把「检查」按钮一直按住。取值依据:实测真实 GitHub 检查 1.9 s、
+  404 路径 0.07 s。要说清限制:electron-updater 内部对 `checkForUpdates` 去重(挂死任务未 settle 前再点只是复用
+  同一任务),所以超时只解除界面阻塞,真重试需要重启应用(库没有取消进行中检查的公开 API)。
+- **检查完成后重开设置面板不再退回「版本未知」**:面板打开时先回读主进程当前状态(新增 `app:getUpdateState`)再收
+  增量广播(顺序是先订阅后回读,免得旧快照盖掉新态);并且「检查确认无更新」现在是状态机里看得见的状态
+  (`idle + fresh + latest=当前版本`),所以关掉面板再打开仍显示「已是最新版本 X」。「无更新」也允许从 error 迁入:
+  启动自动检查超时之后迟到的"其实没更新"会清掉那条过期的超时提示,不会挂一整个会话。
+- **「已是最新版本」时不再挂没用的「前往下载」按钮**(发现新版本时该按钮照旧在)。
+- **updater 启动顺序**:`start()` 移到创建窗口之后 —— 广播只发给已存在的窗口,之前启动自动检查的结果可能没人收到。
+- 清理:更新卡片残留的「正在下载…」占位与空版本号 `()`、卡片里死的名/备注展示、`updater.ts` 的死导出
+  (`getAutoUpdater`/`hasNewerVersion`)与三语孤儿文案(`set.gen.updateParseFail`)一并删除。
+- **新增 i18n 规则**:`npm run lint:i18n` 现在会对简中/繁中文案里的半角逗号、以及半角冒号后接汉字直接报错(本仓
+  中文文案统一用全角标点;本轮新文案就是漏网的一批)。
+
 ## [0.8.0] - 2026-11-25
 
 ### Added

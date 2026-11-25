@@ -39,7 +39,7 @@ import { displayIdForBounds, pickWindowPlacement } from './windowPlacement'
 import { macLightPosition } from './macLights'
 import { localX11Target } from './x11'
 import { ensureLocalXServer, findXServer } from './x11Server'
-import { createUpdater, getAutoUpdater } from './updater'
+import { createUpdater } from './updater'
 
 const store = new HostStore()
 const knownHosts = new KnownHosts()
@@ -50,7 +50,9 @@ const masterLock = new MasterLock(settings)
 const userVerify = registerUserVerifyIpc({ settings, lang: uiLang, isTrusted: isTrustedIpcSender })
 /**
  * 更新链路(状态机与平台策略见 src/main/updater.ts)。tag 命名 vX.Y.Z,
- * 发布页直接给「前往下载」按钮用。feed 覆盖只认 XSSH_UPDATE_FEED_URL。
+ * 发布页直接给「前往下载」按钮用。feed 覆盖只认 XSSH_UPDATE_FEED_URL,
+ * 且【仅未打包构建生效】—— 打包形态一律用默认 GitHub Releases(理由见 updater.ts
+ * 文件头:electron-builder 26 不签更新清单,打包版接受 env 覆盖=任意代码执行面)。
  */
 const appUpdater = createUpdater({
   isPackaged: app.isPackaged,
@@ -3042,13 +3044,16 @@ function registerIpc(): void {
   // ---- Update check (electron-updater, GitHub Releases feed) ----
   // 打包形态走 electron-updater(状态机见 src/main/updater.ts:检查、Windows 后台
   // 下载、下次退出安装;mac 只到 available 提示为止);开发模式返回稳定机器码
-  // update-dev-mode。失败返回 friendlyError 处理文本或稳定码,不抛出。
+  // update-dev-mode。error 一律是 updater.ts 分类出的稳定机器码(原始异常全文只进
+  // 主进程日志),friendlyError 对 kebab 码原样透传,三语文案由 renderer 出。
   handle(IPC.appCheckUpdate, async () => {
     const r = await appUpdater.check()
     if (r.ok) return r
-    const code = r.error ?? 'update-check-failed'
-    return { ...r, error: code === 'update-dev-mode' ? code : friendlyError(code) }
+    return { ...r, error: friendlyError(r.error ?? 'update-check-failed') }
   })
+  // 更新状态机快照:设置面板打开时回读一次(自动检查可能早已跑完,广播只发增量,
+  // 不回读就永远显示「版本未知」)。信任检查由 handle 内置的 isTrustedIpcSender 做。
+  handle(IPC.appGetUpdateState, () => appUpdater.state())
   handle(IPC.appGlobalShortcut, (_e, accelerator: string) => setGlobalShowHide(accelerator))
 }
 
@@ -3201,9 +3206,6 @@ app.whenReady().then(async () => {
   // Kick off the auto-backup timer (no-op unless autoBackup is enabled).
   void scheduleAutoBackup().catch(() => undefined)
   void applyGlobalShowHideFromSettings().catch(() => undefined)
-  // 更新链路:打包形态按「启动时自动检查更新」设置做静默检查(Windows 后台下载,
-  // 下次退出安装;mac 只提示)。开发模式直接短路。永不阻塞启动。
-  void appUpdater.start().catch(() => undefined)
   // Sweep temp dirs left by drag-out / edit / open-with from a prior run.
   void sweepTempDirs()
   const [saved, prefs] = await Promise.all([
@@ -3212,6 +3214,11 @@ app.whenReady().then(async () => {
   ])
   applyThemeSource(prefs.theme)
   createWindow(saved, prefs)
+  // 更新链路:打包形态按「启动时自动检查更新」设置做静默检查(Windows 后台下载,
+  // 下次退出安装;mac 只提示)。开发模式直接短路。永不阻塞启动。
+  // 必须排在 createWindow 之后:broadcast 只发给已存在的窗口,早于建窗的自动检查
+  // 结果(available/error)会整个丢掉,设置面板又只在挂载时收不到回读就只能显示「版本未知」。
+  void appUpdater.start().catch(() => undefined)
 
   // Finer network-health trigger: when the machine wakes from sleep the network
   // may have dropped while the app was suspended. Nudge every renderer to
@@ -3248,16 +3255,16 @@ app.whenReady().then(async () => {
 // (托盘「退出」也是先关窗再到这里)。
 app.on('before-quit', () => {
   quitting = true
-  // Windows:已下载好的更新在这里装(“下次退出时安装”)。autoUpdater 没动态载入过
-  // (从未检查/开发模式)就没东西可装。mac 永不走到 downloaded —— 见 updater.ts
-  // 的 Team ID 说明,这里不触发。
-  if (process.platform === 'win32' && appUpdater.state().phase === 'downloaded') {
-    // getAutoUpdater 内含 CJS 形状归一化(autoUpdater 可能只在 .default 上),
-    // 与 updater.ts 共用同一个载入路径,别在这里直接 .autoUpdater。
-    void getAutoUpdater()
-      .then((au) => au.quitAndInstall(false, true))
-      .catch(() => undefined)
-  }
+  // 「下次退出时安装」不在这里手动触发 quitAndInstall,完全交给
+  // autoInstallOnAppQuit:electron-updater 在启用该选项时自己挂了退出钩子
+  // (node_modules/electron-updater/out/BaseUpdater.js:69-89 addQuitHandler,
+  // 装的时候 install(true, false) —— 静默、不弹向导)。这里曾手动再调一次
+  // quitAndInstall(false, true),有两宗罪:①本仓 will-quit 为等设置写完会
+  // preventDefault 后再 quit 一次,before-quit 会派发多轮,手动那次撞上
+  // 「已调过」分支时 electron-updater 会把 quitAndInstallCalled 重置回 false
+  // (BaseUpdater.js:24-26),重新给内建钩子放行 → 可能并发起两个安装器;
+  // ②isSilent=false 会弹安装向导,与「下次退出自动安装」的界面文案相左。
+  // (mac 本来就走不到安装:allowsAutoDownload 对非 win32 恒 false,不触发下载/安装。)
 })
 
 let settingsFlushed = false
