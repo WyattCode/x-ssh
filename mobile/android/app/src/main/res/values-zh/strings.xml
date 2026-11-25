@@ -53,6 +53,15 @@
     <string name="edit_title_edit">编辑主机</string>
     <string name="edit_title_new">新建主机</string>
     <string name="edit_tmux">连接后进入 tmux</string>
+    <string name="edit_group">分组</string>
+    <string name="edit_group_auto">自动</string>
+    <string name="edit_group_auto_detail">名称带编号的主机（如「节点 1」「节点 2」）自动归在一起</string>
+    <string name="edit_group_none">无</string>
+    <string name="edit_group_none_detail">不分组，也不按名称自动归组</string>
+    <string name="edit_group_new">新建分组…</string>
+    <string name="group_none">未分组</string>
+    <string name="group_collapsed">已折叠</string>
+    <string name="group_expanded">已展开</string>
     <string name="edit_username">用户名</string>
     <string name="files_back">返回</string>
     <string name="files_cancel">取消</string>

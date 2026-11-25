@@ -30,6 +30,15 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    buildTypes {
+        // 不可调试的包:Compose 在 debuggable 下慢得多(120Hz 的屏一帧只有 8ms)。
+        // 仍用调试签名,和已经装着的包同一把钥匙,可以直接覆盖安装、数据不丢。
+        release {
+            signingConfig = signingConfigs.getByName("debug")
+            isMinifyEnabled = false
+        }
+    }
+
     packaging {
         jniLibs {
             useLegacyPackaging = true

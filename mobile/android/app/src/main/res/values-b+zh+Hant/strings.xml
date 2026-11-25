@@ -53,6 +53,15 @@
     <string name="edit_title_edit">編輯主機</string>
     <string name="edit_title_new">新增主機</string>
     <string name="edit_tmux">連線後進入 tmux</string>
+    <string name="edit_group">分組</string>
+    <string name="edit_group_auto">自動</string>
+    <string name="edit_group_auto_detail">名稱帶編號的主機（如「節點 1」「節點 2」）自動歸在一起</string>
+    <string name="edit_group_none">無</string>
+    <string name="edit_group_none_detail">不分組，也不依名稱自動歸組</string>
+    <string name="edit_group_new">新增分組…</string>
+    <string name="group_none">未分組</string>
+    <string name="group_collapsed">已摺疊</string>
+    <string name="group_expanded">已展開</string>
     <string name="edit_username">使用者名稱</string>
     <string name="files_back">返回</string>
     <string name="files_cancel">取消</string>

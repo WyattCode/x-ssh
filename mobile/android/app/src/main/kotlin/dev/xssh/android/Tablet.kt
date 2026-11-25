@@ -289,6 +289,12 @@ fun TabletApp(
                 it.username.contains(query, ignoreCase = true)
         }
     }
+    // 侧栏按分组排,折叠的组里的主机不显示:键盘上下键、回车、"选第一条"都按**屏幕上看到的**顺序走,
+    // 不能还按原始顺序 —— 否则 ↓ 会在列表里乱跳,还会选中折叠起来看不见的那台。
+    var collapsedGroups by rememberSaveable { mutableStateOf(emptySet<String>()) }
+    val ordered = remember(filtered, collapsedGroups, query) {
+        displayedHosts(filtered, if (query.isBlank()) collapsedGroups else emptySet())
+    }
     val sessions = hosts.filter { running.containsKey(it.id) }
     val termHost = termHostId?.let { id -> hosts.firstOrNull { it.id == id } }
     val shown = hosts.firstOrNull { it.id == selectedId } ?: hosts.firstOrNull()
@@ -300,9 +306,9 @@ fun TabletApp(
         if (termHost == null) runCatching { rootFocus.requestFocus() } else terminalFocus++
     }
     // 搜索时选中项跟着结果走:当前选中的不在结果里,就选第一条(回车连的就是它,右栏看到的也是它)。
-    LaunchedEffect(filtered) {
-        if (query.isNotBlank() && filtered.none { it.id == selectedId }) {
-            filtered.firstOrNull()?.let { onSelect(it.id) }
+    LaunchedEffect(ordered) {
+        if (query.isNotBlank() && ordered.none { it.id == selectedId }) {
+            ordered.firstOrNull()?.let { onSelect(it.id) }
         }
     }
     // Ctrl+F:侧边栏收着就先展开,等它进了组合再把焦点给搜索框。
@@ -338,10 +344,10 @@ fun TabletApp(
         connect(sessions[next])
     }
     fun moveSelection(step: Int) {
-        if (filtered.isEmpty()) return
-        val at = filtered.indexOfFirst { it.id == shown?.id }
-        val next = if (at < 0) 0 else (at + step).coerceIn(0, filtered.lastIndex)
-        onSelect(filtered[next].id)
+        if (ordered.isEmpty()) return
+        val at = ordered.indexOfFirst { it.id == shown?.id }
+        val next = if (at < 0) 0 else (at + step).coerceIn(0, ordered.lastIndex)
+        onSelect(ordered[next].id)
     }
     fun menuFor(host: Host): List<MenuAction> = buildList {
         val live = running.containsKey(host.id)
@@ -409,7 +415,7 @@ fun TabletApp(
             code == AndroidKeyEvent.KEYCODE_DPAD_UP -> moveSelection(-1)
             code == AndroidKeyEvent.KEYCODE_DPAD_DOWN -> moveSelection(1)
             code == AndroidKeyEvent.KEYCODE_ENTER || code == AndroidKeyEvent.KEYCODE_NUMPAD_ENTER -> {
-                connect(filtered.firstOrNull { it.id == shown?.id } ?: filtered.firstOrNull() ?: return@handler false)
+                connect(ordered.firstOrNull { it.id == shown?.id } ?: ordered.firstOrNull() ?: return@handler false)
             }
             code == AndroidKeyEvent.KEYCODE_FORWARD_DEL && !searchFocused -> {
                 deleting = shown ?: return@handler false
@@ -471,6 +477,8 @@ fun TabletApp(
                     Sidebar(
                         modifier = Modifier.width(sidebarWidth).fillMaxHeight(),
                         hosts = filtered,
+                        collapsed = collapsedGroups,
+                        onCollapsed = { collapsedGroups = it },
                         total = hosts.size,
                         sessions = if (query.isBlank()) sessions else emptyList(),
                         running = running.keys,
@@ -657,6 +665,9 @@ fun copyText(context: android.content.Context, text: String): Boolean {
 private fun Sidebar(
     modifier: Modifier,
     hosts: List<Host>,
+    /** 折叠着的分组(小写名)。由外层持有:键盘导航要知道哪些主机此刻看不见。 */
+    collapsed: Set<String>,
+    onCollapsed: (Set<String>) -> Unit,
     total: Int,
     sessions: List<Host>,
     running: Set<String>,
@@ -675,6 +686,12 @@ private fun Sidebar(
     menuFor: (Host) -> List<MenuAction>,
 ) {
     val p = LocalXssh.current
+    // 分组:没有分组时和以前一样;有分组才出标题,点标题折叠。搜索时一律展开。
+    val groups = remember(hosts) { buildGroups(hosts) }
+    val heads = showGroupHeads(groups)
+    val entries = remember(groups, heads, collapsed, query) {
+        buildHostEntries(groups, heads, if (query.isBlank()) collapsed else emptySet())
+    }
     Column(
         modifier
             .background(p.cardBg)
@@ -717,16 +734,28 @@ private fun Sidebar(
             if (total > 0) {
                 item(key = "h:hosts") { SectionHeader(stringResource(if (query.isBlank()) R.string.tab_hosts else R.string.tab_search_results)) }
             }
-            items(hosts, key = { "h:" + it.id }) { host ->
-                SidebarRow(
-                    host = host,
-                    selected = host.id == detailId,
-                    running = host.id in running,
-                    showChips = true,
-                    onClick = { onClickHost(host) },
-                    onDoubleClick = { onOpenHost(host) },
-                    menu = { menuFor(host) },
-                )
+            items(entries, key = { if (it is HostEntry.Head) "g:" + it.key else "h:" + (it as HostEntry.Row).host.id }) { entry ->
+                when (entry) {
+                    is HostEntry.Head -> GroupHeader(
+                        name = entry.name,
+                        count = entry.count,
+                        collapsed = entry.collapsed,
+                        onToggle = { onCollapsed(if (entry.key in collapsed) collapsed - entry.key else collapsed + entry.key) },
+                        startPad = 14.dp,
+                    )
+                    is HostEntry.Row -> {
+                        val host = entry.host
+                        SidebarRow(
+                            host = host,
+                            selected = host.id == detailId,
+                            running = host.id in running,
+                            showChips = true,
+                            onClick = { onClickHost(host) },
+                            onDoubleClick = { onOpenHost(host) },
+                            menu = { menuFor(host) },
+                        )
+                    }
+                }
             }
             if (total > 0 && hosts.isEmpty()) {
                 item(key = "empty") {
@@ -839,7 +868,6 @@ private fun SidebarRow(
     val pressed by interaction.collectIsPressedAsState()
     var menuAt by remember { mutableStateOf<DpOffset?>(null) }
     var lastClick by remember { mutableLongStateOf(0L) }
-    var height by remember { mutableIntStateOf(0) }
 
     val background = when {
         selected -> p.rowSel
@@ -847,7 +875,9 @@ private fun SidebarRow(
         hovered -> p.bgElev2
         else -> Color.Transparent
     }
-    Box(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 1.dp).onSizeChanged { height = it.height }) {
+    // 行高不再用 onSizeChanged 记进状态:那会让每一行出现时多重组一遍(滑动时新行一个接一个进来)。
+    // 右键时直接问手势所在的这一行有多高(PointerInputScope.size);Box 比 Row 上下各多 1dp。
+    Box(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 1.dp)) {
         Row(
             Modifier
                 .fillMaxWidth()
@@ -861,7 +891,7 @@ private fun SidebarRow(
                             if (event.type == PointerEventType.Press && event.buttons.isSecondaryPressed) {
                                 val at = event.changes.first().position
                                 event.changes.forEach { it.consume() }
-                                menuAt = with(density) { DpOffset(at.x.toDp(), (at.y - height).toDp()) }
+                                menuAt = with(density) { DpOffset(at.x.toDp(), (at.y - size.height).toDp() - 1.dp) }
                             }
                         }
                     }
@@ -947,7 +977,11 @@ private fun SidebarRow(
                 }
             }
         }
-        ContextMenu(at = menuAt, onDismiss = { menuAt = null }, actions = menu)
+        // 菜单(含它的弹层状态)每行一份,而绝大多数行一次也不会被长按:第一次要打开时才建出来,
+        // 建出来之后保持在组合里(关闭时的"焦点还回去"靠它)。
+        var menuUsed by remember { mutableStateOf(false) }
+        if (menuAt != null) menuUsed = true
+        if (menuUsed) ContextMenu(at = menuAt, onDismiss = { menuAt = null }, actions = menu)
     }
 }
 
@@ -1509,6 +1543,7 @@ internal fun HostSheet(
                         )
                     }
                     JumpField(draft)
+                    GroupField(draft)
                     CredentialFields(
                         draft = draft,
                         keyMessage = keyMessage,

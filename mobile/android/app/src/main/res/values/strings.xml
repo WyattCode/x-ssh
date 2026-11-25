@@ -54,6 +54,15 @@
     <string name="edit_title_edit">Edit host</string>
     <string name="edit_title_new">New host</string>
     <string name="edit_tmux">Open tmux after connecting</string>
+    <string name="edit_group">Group</string>
+    <string name="edit_group_auto">Automatic</string>
+    <string name="edit_group_auto_detail">Hosts named like “Name 1”, “Name 2” group together</string>
+    <string name="edit_group_none">None</string>
+    <string name="edit_group_none_detail">No group, and not grouped by name either</string>
+    <string name="edit_group_new">New group…</string>
+    <string name="group_none">Ungrouped</string>
+    <string name="group_collapsed">Collapsed</string>
+    <string name="group_expanded">Expanded</string>
     <string name="edit_username">Username</string>
     <string name="files_back">Back</string>
     <string name="files_cancel">Cancel</string>

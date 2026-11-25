@@ -111,6 +111,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -547,6 +548,14 @@ internal fun HostListPane(
     // 卡片前面排了几项非主机条目(标题 + 会话区标题 + 会话行 + 主机区标题),
     // "把它滚进视野"的算式要用(原来固定 +1,加了会话区就会算错行)。
     val hostsPrelude = 1 + if (showSessions) orphans.size + 2 else 0
+    // 分组:全是没分组的主机时和以前一模一样;有分组才出标题,点标题折叠 / 展开。
+    // 搜索时一律展开:找的是"哪台",匹配到的不能藏在折叠的组里。
+    val groups = remember(hosts) { buildGroups(hosts) }
+    val heads = showGroupHeads(groups)
+    var collapsed by rememberSaveable { mutableStateOf(emptySet<String>()) }
+    val entries = remember(groups, heads, collapsed, query) {
+        buildHostEntries(groups, heads, if (query.isBlank()) collapsed else emptySet())
+    }
     // 同一时刻只开一张:开一张,别的自动合上。
     var openId by remember { mutableStateOf<String?>(null) }
     var autoScrolling by remember { mutableStateOf(false) }
@@ -562,7 +571,8 @@ internal fun HostListPane(
     // 只挪到刚好露出来为止,不把它顶到最上面(那样标题会被推出去)。
     LaunchedEffect(selectedId) {
         val id = selectedId ?: return@LaunchedEffect
-        val index = hosts.indexOfFirst { it.id == id }.takeIf { it >= 0 } ?: return@LaunchedEffect
+        // 在折叠的组里就没有这一行可滚,不动。
+        val index = entries.indexOfFirst { it is HostEntry.Row && it.host.id == id }.takeIf { it >= 0 } ?: return@LaunchedEffect
         // 第 0 项是标题,卡片从 1 开始;会话区插在中间,偏移量见 hostsPrelude。
         val item = index + hostsPrelude
         // 刚换成这一栏时列表还没排过版,等它排出第一屏再量。
@@ -711,7 +721,22 @@ internal fun HostListPane(
                     SectionHeader(stringResource(R.string.tab_hosts))
                 }
             }
-            itemsIndexed(hosts, key = { _, it -> it.id }) { index, host ->
+            items(
+                entries,
+                key = { if (it is HostEntry.Head) "g:" + it.key else (it as HostEntry.Row).host.id },
+                span = { if (it is HostEntry.Head) GridItemSpan(maxLineSpan) else GridItemSpan(1) },
+            ) { entry ->
+              if (entry is HostEntry.Head) {
+                GroupHeader(
+                    name = entry.name,
+                    count = entry.count,
+                    collapsed = entry.collapsed,
+                    onToggle = { collapsed = if (entry.key in collapsed) collapsed - entry.key else collapsed + entry.key },
+                    startPad = BoxPad - TitleOptical,
+                    modifier = Modifier.animateItem(),
+                )
+              } else if (entry is HostEntry.Row) {
+                val host = entry.host
                 // 删掉一张之后,下面的卡片滑上来补位 —— animateItem 要挂在每一项的最外层。
                 Column(
                     Modifier
@@ -765,8 +790,9 @@ internal fun HostListPane(
                         )
                     }
                     // 虚线在滑动层外面:左滑时只有行本身收窄,线不动。
-                    if (index != hosts.lastIndex) DashedDivider(Modifier.padding(horizontal = BoxPad))
+                    if (!entry.last) DashedDivider(Modifier.padding(horizontal = BoxPad))
                 }
+              }
             }
         }
     }

@@ -76,6 +76,13 @@ data class Host(
     /** 置顶:永远排在列表最前(组内仍按最近使用)。老数据没有这个字段,默认不置顶。 */
     val pinned: Boolean = false,
     /**
+     * 分组名(空 = 没设)。字段名和桌面版 `group` 一致,备份 / 导入两边互通。
+     * 没设、也没 [groupLocked] 时,列表会按名称自动分组(见 HostGroups.kt),自动分出来的组不落盘。
+     */
+    val group: String = "",
+    /** 用户决定过这台的分组(挑了一个组,或明确选了「无」):按名称自动分组的规则不再动它。 */
+    val groupLocked: Boolean = false,
+    /**
      * 主机行末色点的编号([HostPips] 的下标),新建时挑一个还没被别的主机用的(见 [assignColors])。
      * -1 = 还没分配(老数据):显示时先按 id 取模凑合,下一次落盘时补上。
      */
@@ -308,6 +315,8 @@ class HostStore(context: Context) {
                         portForwards = parsePortForwards(item.optJSONArray("portForwards")),
                         lastUsed = item.optLong("lastUsed", 0L),
                         pinned = item.optBoolean("pinned", false),
+                        group = item.optString("group").trim().take(MAX_GROUP_LEN),
+                        groupLocked = item.optBoolean("groupLocked", false),
                         colorIndex = item.optInt("colorIndex", -1),
                         // **这一条不能漏**:漏了每次加载都是 false —— 编辑页的开关显示成"关"
                         // (磁盘上明明锁着),而且保存时 `writeSecret` 会按"没加锁"用普通密钥
@@ -396,6 +405,9 @@ class HostStore(context: Context) {
             if (host.portForwards.isNotEmpty()) item.put("portForwards", encodePortForwards(host.portForwards))
             item.put("lastUsed", host.lastUsed)
             item.put("pinned", host.pinned)
+            // 没分组的不写这两个字段,老数据 / 没用分组的人升级前后的 JSON 一模一样。
+            if (host.group.isNotBlank()) item.put("group", host.group.trim().take(MAX_GROUP_LEN))
+            if (host.groupLocked) item.put("groupLocked", true)
             item.put("colorIndex", host.colorIndex)
             array.put(item)
         }

@@ -162,6 +162,7 @@ fun HostEditorScreen(
         }
         // 经哪台过去,和"连到哪台"是一件事,紧跟在地址下面。
         JumpField(draft)
+        GroupField(draft)
         ForwardField(draft.portForwards) { draft.portForwards = it }
     }
 
@@ -376,6 +377,9 @@ class HostDraft(private val initial: Host?) {
     var tmux by mutableStateOf(initial?.tmux ?: false)
     /** 跳板机(另一台主机的 id,空 = 直连)。 */
     var jumpHostId by mutableStateOf(initial?.jumpHostId ?: "")
+    /** 分组:填了名字就是这个组;[groupNone] = 明确选了「无」;都没有 = 「自动」(见 groupFieldsForSave)。 */
+    var groupText by mutableStateOf(initial?.group ?: "")
+    var groupNone by mutableStateOf(initial != null && initial.group.isBlank() && initial.groupLocked)
     /** 保存在主机上的端口转发规则。 */
     var portForwards: List<HostForward> by mutableStateOf(initial?.portForwards ?: emptyList())
 
@@ -422,6 +426,7 @@ class HostDraft(private val initial: Host?) {
             lockSecrets != originalLocked ||
             tmux != (initial?.tmux ?: false) ||
             jumpHostId != (initial?.jumpHostId ?: "") ||
+            groupFieldsForSave(groupText, groupNone) != ((initial?.group ?: "").trim() to (initial?.groupLocked ?: false)) ||
             portForwards != (initial?.portForwards ?: emptyList<HostForward>())
 
     /**
@@ -556,6 +561,8 @@ class HostDraft(private val initial: Host?) {
             lockedPassword = kept.lockedPassword,
             lockedKeyData = kept.lockedKeyData,
             lockedKeyPassphrase = kept.lockedKeyPassphrase,
+            group = groupFieldsForSave(groupText, groupNone).first,
+            groupLocked = groupFieldsForSave(groupText, groupNone).second,
             // 排序字段不是本页的编辑项:改个备注存一下,置顶和最近使用不能被冲回默认。
             pinned = initial?.pinned ?: false,
             lastUsed = initial?.lastUsed ?: 0,
