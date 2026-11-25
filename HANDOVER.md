@@ -19,7 +19,7 @@
 - 切语言时错误文案跟随重算只有静态依据(`t` 读 `lang.value`)+ 状态机单测,没做真机切语言复测。
 - 匿名 GitHub Releases API 限流(60 次/小时/IP)下的反复检查未测;`update-rate-limited` 把所有 403 归为"太频繁",代理/仓库权限类 403 会被这个文案误导(已知取舍)。
 - ≤0.7.x 用户包里没有 updater 代码,收不到任何提示,只能手动重装(结构性事实,本版未做迁移引导)。
-- 包仍未签名、未公证;mac 侧要开自动更新仍需 Apple Developer ID(¥688/年,Team ID 定了不能换)。
+- 包仍未签名、未公证 —— **2026-11-25 用户明确决定不买签名**(Apple Developer 与 Windows 证书都不要):mac 就停在「提示 + 打开发布页」、**不开自动更新**,Windows 保持未签名 + `verifyUpdateCodeSignature=false`(自动下载/退出安装照旧)。以后不必再提签名方案。
 
 ---
 
