@@ -1,3 +1,28 @@
+# 会话记录:M3.220(2026-11-25,应用内更新一轮二次审核 + 独立审查的收尾修复:v0.8.1 已发)
+
+## 做了什么(细节见 CHANGELOG [0.8.1])
+
+- v0.8.0 发布后对 updater 做**二次审核 + 独立代码审查**,修 9 条:①打包形态彻底忽略 `XSSH_UPDATE_FEED_URL`(electron-builder 26 不签更新清单,客户端只校验清单自述的 sha512,打包态认环境变量 = 能设变量的人可以让 Windows 静默装任意代码,且版本只升不降、装上洗不掉;覆盖改为仅未打包生效,打包版带该变量启动打醒目日志);②删掉 `before-quit` 里的手动 `quitAndInstall`(`autoInstallOnAppQuit=true` 时库自带退出安装钩子,而 `will-quit` 的 preventDefault 会让 before-quit 多轮派发、手动调用又把内部的 `quitAndInstallCalled` 复位开门,可能并发两个安装器,且手动调用是非静默会弹向导);③异常原文不再上界面(主进程分 5 个稳定机器码 `update-channel-404`/`update-rate-limited`/`update-check-timeout`/`update-network`/`update-check-failed`,广播与 IPC 只带码、原文只进 `host.log`,三语短句);④检查更新加 20 s 超时;⑤新增 `app:getUpdateState` 回读并把 `start()` 移到建窗口之后;⑥「已是最新」不再挂「前往下载」;⑦删卡片里死的名/备注展示与占位;⑧`scripts/lint-i18n.mjs` 加中文半角标点禁令(半角逗号、半角冒号后接汉字即报错);⑨切语言时错误文案跟随重算(展示走 computed,不存成品文案)。
+- 独立审查(子 Agent)追加 8 条收尾:超时注释改成实话(库对 `checkForUpdates` 去重,挂死任务未 settle 前再点只是复用同一任务,超时只解界面阻塞、真重试要重启进程,库无取消 API);`not-available` 允许从 `error` 迁入(迟到的"其实没更新"要清掉过期的超时提示);`AppUpdateState` 新增 `fresh`,「检查确认无更新」成为状态机里看得见的状态;超时单测改走注入假时钟并断言 `clearTimeoutFn`;新增"迟到 reject 不产生 unhandledRejection"用例;删死导出 `getAutoUpdater`;删三语孤儿文案 `set.gen.updateParseFail`;`onMounted` 改成先订阅后回读。
+- 审查给的两条"既有通病"**没并入本版**(设置里开关的键盘可达性是全仓 20 个开关同构问题;「＋新建片段」双加号是 0.8.0 之前就有的),另开单处理。
+
+## 验证
+
+- 门禁:`typecheck` 0 错、vitest **107 文件 974 通过 | 2 skip**、`lint:i18n`(主进程无硬编码中文,26 文件)、`check:contrast`(66 tokens AA)。
+- **真包界面实测(mac zip 产物,7 个场景)**:检查确认无更新 → 卡片「已是最新版本 0.8.0」且只有「检查」一个按钮(1.2 s);关掉面板重开仍是这句话(修之前退回「版本未知」);再点一次检查状态不乱(308 ms);把包内 `app-update.yml` 指到不存在的路径 → 红字「找不到更新源(清单不存在)」,界面全文扫不到 HttpError/Headers/cf-ray/node_modules/堆栈,英文原文只在主进程日志(250 ms);把包内 feed 指到本地假源(9.9.9) → 「发现新版本 9.9.9」+「检查」「前往下载」两按钮(128 ms),关面板重开不丢,**状态流只有 checking→available,再等 10 s 不出现 downloading/downloaded**(mac 不自动下载守住)。
+- 打包态忽略 feed 覆盖:真包带 `XSSH_UPDATE_FEED_URL=https://127.0.0.1:8499` 启动,日志打 "…IGNORED in packaged builds…" 并走默认 GitHub 源(未 setFeedURL)。
+- 变异核对:拆掉 `isPackaged` 闸门、拆掉错误分类分支、拆掉超时释放 `checking` 三处,现有测试都会红(独立审查跑过)。
+
+## 没验证 / 已知
+
+- **Windows 真机仍然没验**:自动下载 + 退出时"库内建静默安装"这条新写法没跑过真机;打包态忽略 feed 覆盖在 Windows 上的表现同样没实测。0.8.1 是它在真实用户手上的第一次。
+- 切语言时错误文案跟随重算只有静态依据(`t` 读 `lang.value`)+ 状态机单测,没做真机切语言复测。
+- 匿名 GitHub Releases API 限流(60 次/小时/IP)下的反复检查未测;`update-rate-limited` 把所有 403 归为"太频繁",代理/仓库权限类 403 会被这个文案误导(已知取舍)。
+- ≤0.7.x 用户包里没有 updater 代码,收不到任何提示,只能手动重装(结构性事实,本版未做迁移引导)。
+- 包仍未签名、未公证;mac 侧要开自动更新仍需 Apple Developer ID(¥688/年,Team ID 定了不能换)。
+
+---
+
 # 会话记录:M3.219(2026-11-25,应用内检查更新接入:v0.8.0 已发)
 
 ## 做了什么(细节见 CHANGELOG [0.8.0])

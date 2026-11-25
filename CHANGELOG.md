@@ -4,6 +4,8 @@
 版本号格式: MAJOR.MINOR.PATCH。功能(feature)加 MINOR,修复/打磨加 PATCH,破坏性改动加 MAJOR。
 ## [Unreleased]
 
+## [0.8.1] - 2026-11-25
+
 ### Fixed
 - **打包版不再认 `XSSH_UPDATE_FEED_URL`(投毒级)**:electron-builder 26 的更新清单**没有签名**,客户端只校验清单
   自述的 sha512,所以打包形态接受环境变量改 feed = 任何能设环境变量的人都能把 Windows 客户端指向任意代码,而且
