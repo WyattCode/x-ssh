@@ -44,6 +44,8 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -715,7 +717,22 @@ private fun Sidebar(
                 modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 8.dp),
             )
         }
-        LazyColumn(Modifier.weight(1f).fillMaxWidth().bounce()) {
+        // 键盘上下键把选中项移出了可见区时,列表跟着滚过去(点击选中的本来就看得见,不会动)。
+        val listState = rememberLazyListState()
+        LaunchedEffect(detailId) {
+            val id = detailId ?: return@LaunchedEffect
+            val at = entries.indexOfFirst { it is HostEntry.Row && it.host.id == id }
+            if (at < 0) return@LaunchedEffect
+            val index = at + (if (sessions.isNotEmpty()) 1 + sessions.size else 0) + (if (total > 0) 1 else 0)
+            val info = listState.layoutInfo
+            val row = info.visibleItemsInfo.firstOrNull { it.index == index }
+            when {
+                row == null -> listState.animateScrollToItem(index)
+                row.offset < info.viewportStartOffset -> listState.animateScrollBy((row.offset - info.viewportStartOffset).toFloat())
+                row.offset + row.size > info.viewportEndOffset -> listState.animateScrollBy((row.offset + row.size - info.viewportEndOffset).toFloat())
+            }
+        }
+        LazyColumn(Modifier.weight(1f).fillMaxWidth().bounce(), state = listState) {
             if (sessions.isNotEmpty()) {
                 item(key = "h:sessions") { SectionHeader(stringResource(R.string.tab_sessions)) }
                 items(sessions, key = { "s:" + it.id }) { host ->
