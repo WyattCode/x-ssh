@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto'
 import { createServer, type AddressInfo, type Socket } from 'node:net'
 import { Server, utils } from 'ssh2'
 import type { ConnectParams } from '../shared/types'
+import { genTestHostKey } from './testHostKey'
 
 let dir = ''
 vi.mock('electron', () => ({ app: { getPath: () => dir } }))
@@ -15,7 +16,7 @@ const { KnownHosts } = await import('./knownHosts')
 const { IPC } = await import('../shared/ipc')
 
 const H = '127.0.0.1'
-const hostKey = utils.generateKeyPairSync('ed25519')
+const hostKey = genTestHostKey()
 const realFp = createHash('sha256')
   .update((utils.parseKey(hostKey.private) as { getPublicSSH(): Buffer }).getPublicSSH())
   .digest('hex')

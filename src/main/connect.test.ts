@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { createConnection, createServer, type AddressInfo, type Socket } from 'node:net'
 import { Server, utils } from 'ssh2'
+import { genTestHostKey } from './testHostKey'
 import type { ConnectParams, JumpConfig } from '../shared/types'
 
 let dir = ''
@@ -26,7 +27,7 @@ let shells = 0
 let tunnels = 0
 
 // One ed25519 host key shared by both fake servers.
-const hostKey = utils.generateKeyPairSync('ed25519')
+const hostKey = genTestHostKey()
 // The exact string the verifier receives: sha256-hex of the wire public key
 // (ssh2 hashes it itself when `hostHash: 'sha256'` is set).
 const realFp = createHash('sha256')
