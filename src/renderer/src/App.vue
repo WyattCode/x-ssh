@@ -259,7 +259,7 @@ function onGlobalKey(e: KeyboardEvent): void {
   const handlers: Record<RebindableAction, () => void> = {
     palette: () => store.togglePalette(),
     palette2: () => store.togglePalette(),
-    newTab: () => store.togglePalette(true),
+    newTab: () => store.openNewTabPalette(),
     closeTab: () => {
       if (!onTerm) return
       if (inTerminal && store.activePane?.status === 'connected') return

@@ -284,7 +284,7 @@ function cancelRename(): void {
         <span class="close" :title="t('tabbar.close')" @click.stop="store.closeTabSafe(tab.id)"><Icon name="close" :size="13" /></span>
       </div>
     </div>
-    <button class="new" :title="t('tabbar.newConn', { key: `${modKey}+K` })" :aria-label="t('tabbar.newConn', { key: `${modKey}+K` })" @click="store.togglePalette(true)">
+    <button class="new" :title="t('tabbar.newConn', { key: `${modKey}+K` })" :aria-label="t('tabbar.newConn', { key: `${modKey}+K` })" @click="store.openNewTabPalette()">
       <Icon name="plus" :ink="10.1" :weight="1.3" />
     </button>
     <div class="drag-spacer" />

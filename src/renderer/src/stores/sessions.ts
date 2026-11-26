@@ -422,6 +422,9 @@ interface State {
   paletteSeed: string | null
   /** With paletteSeed: jump straight to the seeded quick connect's password step. */
   paletteQuick: boolean
+  /** Opened from "+" / the new-tab shortcut: Enter on a host that is already open opens it in a
+   *  new tab instead of jumping to the open one. Consumed on open. */
+  paletteNewTab: boolean
   /** Open the palette on this saved host's password step (no password saved). */
   palettePasswordFor: string | null
   confirmPaste: boolean
@@ -530,6 +533,7 @@ export const useSessions = defineStore('sessions', {
     restorePendingUnlock: false,
     paletteSeed: null,
     paletteQuick: false,
+    paletteNewTab: false,
     palettePasswordFor: null,
     confirmPaste: true,
     sanitizePaste: true,
@@ -1507,6 +1511,11 @@ export const useSessions = defineStore('sessions', {
 
     togglePalette(open?: boolean): void {
       this.paletteOpen = open ?? !this.paletteOpen
+    },
+    /** "+" / new-tab shortcut: the palette, where picking a host always opens a new tab. */
+    openNewTabPalette(): void {
+      this.paletteNewTab = true
+      this.togglePalette(true)
     },
     /** A saved host needs its password typed: the palette opens right on it,
      *  instead of empty (where the host had to be found again). */

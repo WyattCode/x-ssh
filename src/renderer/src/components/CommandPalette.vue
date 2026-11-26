@@ -61,6 +61,8 @@ const pwEl = ref<HTMLInputElement>()
 
 // Inline broadcast-command prompt state.
 const broadcastOpen = ref(false)
+/** Opened from "+": a host that is already open still opens as a new tab (Ctrl+K jumps to it). */
+const newTabMode = ref(false)
 const broadcastCmd = ref('')
 const broadcastEl = ref<HTMLInputElement>()
 
@@ -375,7 +377,7 @@ const items = computed<Item[]>(() => sections.value.flatMap((s) => s.items))
 function enterVerb(item: Item | undefined): string {
   if (!item || item.kind === 'quick') return t('pal.connect')
   if (item.kind !== 'host') return t('pal.run')
-  const lp = item.live ? livePane(item.host.id) : null
+  const lp = item.live && !newTabMode.value ? livePane(item.host.id) : null
   return lp ? (lp.current ? t('pal.current') : t('pal.switch')) : t('pal.connect')
 }
 const selItem = computed(() => items.value[selected.value])
@@ -441,6 +443,8 @@ watch(
       password.value = ''
       remember.value = true
       const quick = store.paletteQuick
+      newTabMode.value = store.paletteNewTab
+      store.paletteNewTab = false
       const pwHost = store.hosts.find((h) => h.id === store.palettePasswordFor)
       store.paletteQuick = false
       store.palettePasswordFor = null
@@ -510,8 +514,9 @@ function activate(item: Item): void {
     pending.value = { params: item.params, title: item.params.host }
     nextTick(() => pwEl.value?.focus())
   } else if (item.kind === 'host') {
-    // Already open: go to it. (A second session of the same host is Shift+Enter, beside.)
-    if (!switchTo(item.host.id)) activateHost(item.host)
+    // Already open: go to it (Ctrl+K). From "+" the user asked for a new tab, so open one.
+    // (A second session beside the current one is Shift+Enter.)
+    if (newTabMode.value || !switchTo(item.host.id)) activateHost(item.host)
   } else if (item.kind === 'snippet') {
     store.togglePalette(false)
     void store.sendSnippet(item.snippet)
