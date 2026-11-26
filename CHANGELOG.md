@@ -4,6 +4,39 @@
 版本号格式: MAJOR.MINOR.PATCH。功能(feature)加 MINOR,修复/打磨加 PATCH,破坏性改动加 MAJOR。
 ## [Unreleased]
 
+## [0.8.2] - 2026-11-26
+
+### Fixed
+- **Windows 自动更新 100% 404(NSIS 产物命名与更新清单不一致,根治)**:electron-builder 的 NSIS 默认产物名带空格
+  (`X-SSH Setup 0.8.1.exe`),而它写进 `latest.yml` 的 `url/path` 走 space→连字符(`X-SSH-Setup-0.8.1.exe`),GitHub
+  资产名却是 space→点号(`X-SSH.Setup.0.8.1.exe`)——两套规范化各写一边,清单指向的文件在发布物里根本不存在,客户端
+  取包必 404。v0.8.0/v0.8.1 的清单当时已手工改成点号名应急(真机验证可用)。0.8.2 把 `build.nsis.artifactName` 钉成
+  无空格的 `X-SSH-Setup-${version}.exe`:无空格则两种规范化同名,磁盘文件、`latest.yml`、GitHub 资产三者必然一致。
+- **Windows 退出时自动安装改为真静默(不弹安装向导)**:0.8.1 删掉了 `before-quit` 里的手动
+  `quitAndInstall(false, true)`(isSilent=false → 命令行不带 `/S` → NSIS 弹「为哪位用户安装/正在安装/完成」三页向导
+  要人点),但产物本身仍是 `oneClick:false` 的辅助向导——只要安装器被非静默形态拉起(旧版客户端、兜底打开路径),向导
+  照样弹。0.8.2 把产物本身改成 `oneClick:true` + `allowToChangeInstallationDirectory:false`:oneClick 模板没有任何
+  可选页,`/S` 下全程无窗口,双键安装器也不再弹向导。仍是 per-user 安装(未开 `perMachine`;NSIS 升级位置读 HKCU
+  `Software\com.x-ssh.app` 的 `InstallLocation`,现有 `%LOCALAPPDATA%\Programs\X-SSH` 安装会原地升级,不会迁去
+  Program Files)。mac 无 NSIS,行为不变:mac 仍只提示、不自动下载/安装(`allowsAutoDownload` 对非 win32 恒 false,
+  `autoInstallOnAppQuit` 恒 false,`updater.test.ts` 断言照旧)。
+- **生成密钥不再可能把 ssh2@1.17 的坏 key 落盘给用户**:ssh2@1.17.0 的 `generateKeyPair('ed25519')` 在
+  `parseDERs` 里把公钥的前导 0x00 全部剥掉(本意只删 DER BIT STRING 的 unused-bits 前缀),约 1/256 的密钥公钥部分
+  被截成 31 字节写进 OpenSSH 私钥文件,ssh2 自己 `parseKey` 都报 'Malformed OpenSSH private key',这把 key 进密钥库
+  后处处不可用。`KeyManager.generate` 现在对每个候选密钥做「`parseKey`(带口令)→ `getPublicSSH()` 与 `.pub` 行
+  blob 逐字节一致」往返校验,不合格就重生成,上限 64 次;64 连败抛 `keygen-failed`(`cause` 带完整上下文),绝不
+  静默降级落盘。(产品侧线上尚未观测到实例,这是预防性加固;与测试侧 `testHostKey.ts` 的 `genTestHostKey` 绕的是
+  同一个 ssh2 bug。)
+
+### Added
+- **CI 发布清单断言**:新增 `scripts/verify-release-manifest.mjs`——读 `release/latest.yml`(新版 `files[].url`
+  与旧版仅顶层 `path:` 两种格式都兼容),断言清单里每个 url/path 指向的文件真实存在于 `release/`,且 `sha512`
+  (本地流式计算、base64)与 `size` 和清单值一致,不一致/缺文件就非 0 退出并打印「清单值 vs 实际值」。CI 的 Windows
+  release job 在构建后、上传/发布之前调用它——0.8.1 的命名 404 若有此断言,发布前就会红。
+- **`build.nsis` 钉死断言**:`updater.test.ts` 新增对 `package.json` `build.nsis` 的静态断言(artifactName 无空格且
+  含版本号、`oneClick:true`、`allowToChangeInstallationDirectory:false`、未开 `perMachine`、mac 产物仍 dmg+zip),
+  防止改回配置把 404 或向导放回来。
+
 ## [0.8.1] - 2026-11-25
 
 ### Fixed

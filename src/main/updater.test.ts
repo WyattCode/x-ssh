@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { readFileSync } from 'node:fs'
 import {
   nextUpdateState,
   allowsAutoDownload,
@@ -511,6 +512,46 @@ describe('resolveAutoUpdater(CJS 模块形状)', () => {
     expect(r.error).toBe('update-check-failed')
     // 不静默:开发者日志里有原始错误全文。
     expect(logs.some((m) => m.includes('autoUpdater'))).toBe(true)
+  })
+})
+
+describe('package.json build.nsis — 产物命名与静默安装的配置钉死(0.8.2)', () => {
+  // 0.8.1 两起实锤事故都是【配置层】的,所以断言也钉在配置层,防止改回去:
+  // ① NSIS 默认产物名带空格,清单里走 space→连字符、GitHub 资产走 space→点号,
+  //   清单指向的文件在发布物里不存在 → Windows 自动更新 100% 404;
+  // ② oneClick:false 的辅助向导在退出安装被非静默形态拉起时弹三页向导要人点。
+  // 0.8.2:artifactName 钉成无空格固定名(三种名字必然一致)+ oneClick:true(模板里
+  // 根本没有可选页,任何形态都不弹向导)。升级位置不变:per-user 下 NSIS 从 HKCU
+  // Software\<appId> 的 InstallLocation 读旧路径,%LOCALAPPDATA%\Programs\X-SSH 原地升级。
+  const pkg = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as {
+    build?: { nsis?: Record<string, unknown>; mac?: { target?: unknown }; win?: Record<string, unknown> }
+  }
+  const nsis = (pkg.build?.nsis ?? {}) as Record<string, unknown>
+
+  it('artifactName 无空格、含版本号、以 .exe 结尾(磁盘文件 == latest.yml == GitHub 资产名)', () => {
+    expect(typeof nsis.artifactName).toBe('string')
+    const name = nsis.artifactName as string
+    expect(name).toContain('${version}') // 清单与产物都要带版本号
+    expect(name).not.toMatch(/\s/) // 无空格 → electron-builder 两套 space 规范化不可能再分叉
+    expect(name.endsWith('.exe')).toBe(true)
+  })
+
+  it('oneClick:true + allowToChangeInstallationDirectory:false(退出安装零向导)', () => {
+    expect(nsis.oneClick).toBe(true)
+    // electron-builder 对 oneClick:true + allowToChangeInstallationDirectory:true
+    // 直接抛 InvalidConfigurationError,所以这里必须是显式 false(或省略)。
+    expect(nsis.allowToChangeInstallationDirectory).toBe(false)
+  })
+
+  it('perMachine 未开:安装仍是 per-user(不许把老用户迁去 Program Files)', () => {
+    expect(nsis.perMachine).toBeFalsy()
+    expect(nsis.perMachineInstaller).toBeFalsy()
+  })
+
+  it('mac 不受影响:NSIS 只被 Windows 使用,mac 产物仍是 dmg+zip(自动更新策略在 updater.ts 另有断言)', () => {
+    expect(pkg.build?.mac?.target).toEqual(['dmg', 'zip'])
+    // win 仍是 nsis 单目标(ci.yml 的 release/*.exe 通配只会命中这一个 exe)。
+    expect(pkg.build?.win?.target).toBe('nsis')
   })
 })
 

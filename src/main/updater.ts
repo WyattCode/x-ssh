@@ -17,7 +17,11 @@
  * electron-updater 默认的 publisherName/Authenticode 校验,开着它等于永远拒装。
  *
  * 平台策略(产品拍板):
- * - Windows:允许自动下载,装在下一次退出时(autoInstallOnAppQuit)。
+ * - Windows:允许自动下载,装在下一次退出时(autoInstallOnAppQuit)。0.8.2 起
+ *   package.json 的 build.nsis 钉成 oneClick:true + allowToChangeInstallationDirectory:false
+ *   +artifactName 无空格:electron-updater 退出钩子本就 install(true, …) 传 `/S`
+ *   (BaseUpdater.js addQuitHandler → NsisUpdater.doInstall),oneClick 模板又没有任何
+ *   向导页 —— 退出安装任何形态都不弹向导,产物名与 latest.yml 也必然一致(见 CHANGELOG 0.8.2)。
  * - macOS:ad-hoc 签名,Squirrel.Mac 要求更新包与运行中 app 同一 Team ID,自动替换
  *   会静默失败 —— 所以 mac 只做「检查到新版本 → 提示 → 用户打开发布页覆盖安装」,
  *   永不触发 downloadUpdate()/quitAndInstall()(autoDownload=false 保证这点)。

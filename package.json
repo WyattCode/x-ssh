@@ -1,6 +1,6 @@
 {
   "name": "x-ssh",
-  "version": "0.8.1",
+  "version": "0.8.2",
   "description": "A keyboard-first, command-palette-driven SSH client.",
   "main": "./out/main/index.js",
   "author": "X-SSH",
@@ -58,8 +58,9 @@
       "verifyUpdateCodeSignature": false
     },
     "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "artifactName": "X-SSH-Setup-${version}.exe",
+      "oneClick": true,
+      "allowToChangeInstallationDirectory": false
     },
     "mac": {
       "appId": "com.wyatt.ssh",

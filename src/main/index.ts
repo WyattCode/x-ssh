@@ -3265,6 +3265,11 @@ app.on('before-quit', () => {
   // (BaseUpdater.js:24-26),重新给内建钩子放行 → 可能并发起两个安装器;
   // ②isSilent=false 会弹安装向导,与「下次退出自动安装」的界面文案相左。
   // (mac 本来就走不到安装:allowsAutoDownload 对非 win32 恒 false,不触发下载/安装。)
+  // 0.8.2 补充:光删手动调用只修好【0.8.1 起的客户端】的调用形态;旧客户端(≤0.8.0)
+  // 拉安装器时仍带非静默参数,而当时产物是 oneClick:false 辅助向导 → 退出照样弹三页
+  // 向导。所以 0.8.2 把产物本身钉成 oneClick:true(package.json build.nsis):模板里
+  // 没有任何可选页,谁来拉都不弹向导;仍是 per-user,老安装(%LOCALAPPDATA%\Programs\
+  // X-SSH)从注册表读路径原地升级。这里依旧不许再手动调 quitAndInstall。
 })
 
 let settingsFlushed = false
