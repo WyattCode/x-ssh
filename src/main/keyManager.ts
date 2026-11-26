@@ -17,6 +17,96 @@ import { parseJson, readDurable, writeDurable } from './durableFile'
 const execFileAsync = promisify(execFile)
 
 /**
+ * Injectable seam around the two ssh2 keygen entry points `generate()` needs.
+ * Production wires ssh2 itself; unit tests inject fakes to drive the
+ * round-trip retry loop deterministically (the real ssh2 bug fires on only
+ * ~1/256 of generated keys, so a test cannot wait for it).
+ */
+export interface Ssh2Keygen {
+  generateKeyPair(
+    type: 'rsa' | 'ecdsa' | 'ed25519',
+    options: { bits?: number; passphrase?: string; comment: string }
+  ): Promise<{ private: string; public: string }>
+  parseKey(
+    key: string,
+    passphrase?: string
+  ): { getPublicSSH?: () => Buffer } | Error
+}
+
+const defaultSsh2Keygen: Ssh2Keygen = {
+  generateKeyPair: (type, options) =>
+    new Promise((resolve, reject) =>
+      ssh2.utils.generateKeyPair(type, options, (error, result) =>
+        error ? reject(error) : resolve(result)
+      )
+    ),
+  parseKey: (key, passphrase) => ssh2.utils.parseKey(key, passphrase)
+}
+
+/**
+ * Cap on generate-and-verify attempts. The ssh2@1.17.0 keygen bug is
+ * per-call random (~1/256 observed), so the loop converges immediately: 64
+ * consecutive failures with an independent per-call failure rate is
+ * (1/256)^64 ≈ 10^-154 — if it ever happens, something is systematically
+ * broken, and we must fail loudly instead of looping forever.
+ */
+export const MAX_KEYGEN_VERIFY_ATTEMPTS = 64
+
+/**
+ * Round-trip check for a freshly generated pair:
+ *   1. `parseKey(private)` (with the passphrase when the key is encrypted)
+ *      must return a parsed key, not an Error;
+ *   2. the parsed key's `getPublicSSH()` wire blob must equal the base64 blob
+ *      on the `public` line, byte for byte.
+ *
+ * This is the exact failure mode of the ssh2@1.17.0 keygen bug: `parseDERs`
+ * strips *all* leading 0x00 bytes off the public key while converting Node's
+ * DER output (it only means to drop the DER BIT STRING unused-bits prefix),
+ * so ~1/256 of keys are serialized into an OpenSSH private key whose public
+ * blob is truncated to 31 bytes — ssh2's own parseKey rejects those with
+ * 'Malformed OpenSSH private key' (same bug the test-only
+ * `testHostKey.ts:genTestHostKey()` works around; 340 real keys sampled on
+ * 1.17.0 produced 2 such rejections). A key that passes here is loadable by
+ * ssh2 and by ssh-keygen/OpenSSH alike; a key that fails must never be
+ * written out. Verified invariant (340-key sample): for every *valid* pair,
+ * getPublicSSH() equals the .pub line blob, so an inequality means the pair
+ * is one of the malformed ones.
+ */
+export function keyPairRoundTrips(
+  keygen: Ssh2Keygen,
+  pair: { private: string; public: string },
+  passphrase?: string
+): { ok: true } | { ok: false; why: string } {
+  let parsed: ReturnType<Ssh2Keygen['parseKey']>
+  try {
+    parsed = keygen.parseKey(pair.private, passphrase)
+  } catch (e) {
+    return { ok: false, why: `parseKey threw: ${String((e as Error)?.message ?? e)}` }
+  }
+  if (!parsed || parsed instanceof Error) {
+    return { ok: false, why: `parseKey: ${parsed instanceof Error ? parsed.message : 'no key returned'}` }
+  }
+  if (typeof parsed.getPublicSSH !== 'function') {
+    return { ok: false, why: 'parsed key has no getPublicSSH()' }
+  }
+  const parts = pair.public.trim().split(/\s+/)
+  const blob = parts.length > 1 ? Buffer.from(parts[1], 'base64') : null
+  if (!blob || blob.length === 0) {
+    return { ok: false, why: 'public key line has no base64 key blob' }
+  }
+  let wire: Buffer
+  try {
+    wire = parsed.getPublicSSH()
+  } catch (e) {
+    return { ok: false, why: `getPublicSSH threw: ${String((e as Error)?.message ?? e)}` }
+  }
+  if (!Buffer.isBuffer(wire) || !wire.equals(blob)) {
+    return { ok: false, why: 'getPublicSSH() does not match the public key line blob' }
+  }
+  return { ok: true }
+}
+
+/**
  * A small library of user-managed SSH keys, stored under <dir>/keys/<id>.
  * The private key file is copied here (mode 0600) so users can generate a
  * keypair in-app and reuse it across hosts without pointing each host at a
@@ -30,14 +120,17 @@ const execFileAsync = promisify(execFile)
 export class KeyManager {
   private readonly keysDir: string
   private readonly labelsPath: string
+  /** ssh2 keygen seam (defaults to ssh2 itself; tests inject fakes). */
+  private readonly keygen: Ssh2Keygen
   /** .labels.json (+.bak) existed but none parsed — do not overwrite with {}. */
   private labelsLoadFailed = false
 
-  constructor(dir: string) {
+  constructor(dir: string, keygen: Ssh2Keygen = defaultSsh2Keygen) {
     this.keysDir = join(dir, 'keys')
     // Sidecar of friendly key labels (id → label) so displayed names aren't the
     // auto-generated ids. A dotfile, so KeyManager.list() ignores it.
     this.labelsPath = join(this.keysDir, '.labels.json')
+    this.keygen = keygen
   }
 
   private async ensureDir(): Promise<string> {
@@ -198,15 +291,45 @@ export class KeyManager {
     // put the passphrase on the command line where /proc/<pid>/cmdline (or WMI
     // on Windows) exposes it to other local users — defeating the very
     // protection the passphrase is for.
-    let pair: { private: string; public: string }
-    try {
-      pair = await new Promise((resolve, reject) => ssh2.utils.generateKeyPair(type, {
-        ...(opts.bits && type === 'rsa' ? { bits: opts.bits } : {}),
-        ...(opts.passphrase ? { passphrase: opts.passphrase } : {}),
-        comment: `x-ssh-${id}`
-      }, (error, result) => error ? reject(error) : resolve(result)))
-    } catch {
-      throw new Error('keygen-failed')
+    //
+    // Every candidate must survive a parseKey/getPublicSSH round-trip before it
+    // is written out (see keyPairRoundTrips): ssh2@1.17.0's keygen serializes
+    // ~1/256 of ed25519 keys with a truncated public blob, and one bad key in
+    // the user's library is permanent until they notice. Regenerating gets a
+    // fresh random key, which fixes the random bug; a hard cap turns a
+    // systematic failure into a loud one — never a silently-degraded write.
+    const keygenOptions = {
+      ...(opts.bits && type === 'rsa' ? { bits: opts.bits } : {}),
+      ...(opts.passphrase ? { passphrase: opts.passphrase } : {}),
+      comment: `x-ssh-${id}`
+    }
+    let pair: { private: string; public: string } | null = null
+    let lastVerifyFailure = '(never reached verify)'
+    for (let attempt = 1; attempt <= MAX_KEYGEN_VERIFY_ATTEMPTS && pair === null; attempt++) {
+      let candidate: { private: string; public: string }
+      try {
+        candidate = await this.keygen.generateKeyPair(type, keygenOptions)
+      } catch (e) {
+        // Key generation itself failed: stable marker for the UI, full original
+        // error as cause (developer-facing).
+        throw Object.assign(new Error('keygen-failed'), { cause: e })
+      }
+      const verdict = keyPairRoundTrips(this.keygen, candidate, opts.passphrase)
+      if (verdict.ok) {
+        pair = candidate
+      } else {
+        lastVerifyFailure = `attempt ${attempt}: ${verdict.why}`
+      }
+    }
+    if (!pair) {
+      throw Object.assign(new Error('keygen-failed'), {
+        cause: new Error(
+          `ssh2.utils.generateKeyPair produced ${MAX_KEYGEN_VERIFY_ATTEMPTS} consecutive ${type} keys that ` +
+            `fail the parseKey round-trip (${lastVerifyFailure}); refusing to write a possibly-malformed ` +
+            `private key to the key library (ssh2@1.17 keygen bug: parseDERs strips leading 0x00 bytes ` +
+            `off the public blob)`
+        )
+      })
     }
     await writeFile(priv, pair.private, { mode: 0o600 })
     const pub = `${priv}.pub`

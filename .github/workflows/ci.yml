@@ -101,6 +101,13 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Verify update manifest against artifacts
+        # 0.8.1 post-mortem: latest.yml listed X-SSH-Setup-0.8.1.exe while the
+        # GitHub asset was actually named X-SSH.Setup.0.8.1.exe — every Windows
+        # auto-update 404'd. Assert every manifest entry exists in release/ with
+        # matching sha512/size BEFORE anything is uploaded or published.
+        run: node scripts/verify-release-manifest.mjs release
+
       - name: Upload installer artifact
         # Archive only: a full Actions artifact quota must not block the Release.
         # latest.yml is the update feed's entry point (electron-updater fetches it

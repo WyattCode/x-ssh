@@ -375,10 +375,10 @@ const api = {
     current?: string
     latest?: string
     url?: string
-    name?: string
-    notes?: string
     error?: string
   }> => ipcRenderer.invoke(IPC.appCheckUpdate),
+  /** 当前更新状态机快照(设置面板打开时回读一次,再订阅增量广播)。 */
+  getUpdateState: (): Promise<AppUpdateState> => ipcRenderer.invoke(IPC.appGetUpdateState),
   /** electron-updater 状态迁移(main → renderer)。返回退订函数。 */
   onUpdateState: (cb: (state: AppUpdateState) => void): (() => void) => {
     const listener = (_e: unknown, state: AppUpdateState): void => cb(state)

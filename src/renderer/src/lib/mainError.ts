@@ -52,6 +52,14 @@ export const MAIN_ERROR_KEYS: Record<string, string> = {
   'bad-input': 'err.badInput',
   'keygen-failed': 'err.keygenFailed',
 
+  // in-app update checks (stable codes from src/main/updater.ts classifyUpdateError;
+  // raw exception text stays in the main-process log and never reaches the UI)
+  'update-channel-404': 'err.updateChannel404',
+  'update-rate-limited': 'err.updateRateLimited',
+  'update-check-timeout': 'err.updateCheckTimeout',
+  'update-network': 'err.updateNetwork',
+  'update-check-failed': 'err.updateCheckFailed',
+
   // nothing useful to say
   'unknown-error': 'err.unknown'
 }

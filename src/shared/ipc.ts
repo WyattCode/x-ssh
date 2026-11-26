@@ -157,6 +157,9 @@ export const IPC = {
   // Update check against the GitHub releases feed (electron-updater when packaged)
   appCheckUpdate: 'app:checkUpdate',
 
+  // Renderer → main: current updater state-machine snapshot (pull on settings mount)
+  appGetUpdateState: 'app:getUpdateState',
+
   // Main → renderer: electron-updater state-machine transitions (AppUpdateState)
   appUpdateState: 'app:updateState',
 
@@ -169,7 +172,8 @@ export const IPC = {
 
 /**
  * electron-updater 更新状态机(main → renderer 广播,见 src/main/updater.ts)。
- * error 放的是稳定机器码或 friendlyError 处理过的文本,renderer 直接展示。
+ * error 只放稳定机器码(分类见 updater.ts 的 classifyUpdateError;三语文案由
+ * renderer 的 mainError.ts 出),原始异常全文只留在主进程日志,绝不上界面。
  */
 export type AppUpdatePhase = 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'error'
 
@@ -181,8 +185,12 @@ export interface AppUpdateState {
   url?: string
   /** 下载百分比(downloading 阶段,0–100)。 */
   percent?: number
-  /** error 阶段的说明(机器码或已本地化处理文本)。 */
+  /** error 阶段:只放稳定机器码(分类见 src/main/updater.ts 的 classifyUpdateError),
+   *  绝不放文案或异常原文(原文只进主进程日志)。 */
   error?: string
+  /** idle 且当次检查确认「无更新」(not-available 迁移携带,latest 同时=当前版本):
+   *  设置面板重开时靠回读它显示「已是最新版本 X」,而不是「版本未知」。 */
+  fresh?: boolean
 }
 
 /** Prefix of the launch argument carrying UiPrefs from main to the preload. */

@@ -7,6 +7,68 @@
 ### Fixed
 - 标签栏的「+」(和新建标签快捷键)打开的面板里,选一台已经连着的主机现在会新开一个标签页;原来只会跳到已有的那个,同一台主机开不了第二个。Ctrl+K 仍是“跳到已开的会话”。
 
+## [0.8.2] - 2026-11-26
+
+### Fixed
+- **Windows 自动更新 100% 404(NSIS 产物命名与更新清单不一致,根治)**:electron-builder 的 NSIS 默认产物名带空格
+  (`X-SSH Setup 0.8.1.exe`),而它写进 `latest.yml` 的 `url/path` 走 space→连字符(`X-SSH-Setup-0.8.1.exe`),GitHub
+  资产名却是 space→点号(`X-SSH.Setup.0.8.1.exe`)——两套规范化各写一边,清单指向的文件在发布物里根本不存在,客户端
+  取包必 404。v0.8.0/v0.8.1 的清单当时已手工改成点号名应急(真机验证可用)。0.8.2 把 `build.nsis.artifactName` 钉成
+  无空格的 `X-SSH-Setup-${version}.exe`:无空格则两种规范化同名,磁盘文件、`latest.yml`、GitHub 资产三者必然一致。
+- **Windows 退出时自动安装改为真静默(不弹安装向导)**:0.8.1 删掉了 `before-quit` 里的手动
+  `quitAndInstall(false, true)`(isSilent=false → 命令行不带 `/S` → NSIS 弹「为哪位用户安装/正在安装/完成」三页向导
+  要人点),但产物本身仍是 `oneClick:false` 的辅助向导——只要安装器被非静默形态拉起(旧版客户端、兜底打开路径),向导
+  照样弹。0.8.2 把产物本身改成 `oneClick:true` + `allowToChangeInstallationDirectory:false`:oneClick 模板没有任何
+  可选页,`/S` 下全程无窗口,双键安装器也不再弹向导。仍是 per-user 安装(未开 `perMachine`;NSIS 升级位置读 HKCU
+  `Software\com.x-ssh.app` 的 `InstallLocation`,现有 `%LOCALAPPDATA%\Programs\X-SSH` 安装会原地升级,不会迁去
+  Program Files)。mac 无 NSIS,行为不变:mac 仍只提示、不自动下载/安装(`allowsAutoDownload` 对非 win32 恒 false,
+  `autoInstallOnAppQuit` 恒 false,`updater.test.ts` 断言照旧)。
+- **生成密钥不再可能把 ssh2@1.17 的坏 key 落盘给用户**:ssh2@1.17.0 的 `generateKeyPair('ed25519')` 在
+  `parseDERs` 里把公钥的前导 0x00 全部剥掉(本意只删 DER BIT STRING 的 unused-bits 前缀),约 1/256 的密钥公钥部分
+  被截成 31 字节写进 OpenSSH 私钥文件,ssh2 自己 `parseKey` 都报 'Malformed OpenSSH private key',这把 key 进密钥库
+  后处处不可用。`KeyManager.generate` 现在对每个候选密钥做「`parseKey`(带口令)→ `getPublicSSH()` 与 `.pub` 行
+  blob 逐字节一致」往返校验,不合格就重生成,上限 64 次;64 连败抛 `keygen-failed`(`cause` 带完整上下文),绝不
+  静默降级落盘。(产品侧线上尚未观测到实例,这是预防性加固;与测试侧 `testHostKey.ts` 的 `genTestHostKey` 绕的是
+  同一个 ssh2 bug。)
+
+### Added
+- **CI 发布清单断言**:新增 `scripts/verify-release-manifest.mjs`——读 `release/latest.yml`(新版 `files[].url`
+  与旧版仅顶层 `path:` 两种格式都兼容),断言清单里每个 url/path 指向的文件真实存在于 `release/`,且 `sha512`
+  (本地流式计算、base64)与 `size` 和清单值一致,不一致/缺文件就非 0 退出并打印「清单值 vs 实际值」。CI 的 Windows
+  release job 在构建后、上传/发布之前调用它——0.8.1 的命名 404 若有此断言,发布前就会红。
+- **`build.nsis` 钉死断言**:`updater.test.ts` 新增对 `package.json` `build.nsis` 的静态断言(artifactName 无空格且
+  含版本号、`oneClick:true`、`allowToChangeInstallationDirectory:false`、未开 `perMachine`、mac 产物仍 dmg+zip),
+  防止改回配置把 404 或向导放回来。
+
+## [0.8.1] - 2026-11-25
+
+### Fixed
+- **打包版不再认 `XSSH_UPDATE_FEED_URL`(投毒级)**:electron-builder 26 的更新清单**没有签名**,客户端只校验清单
+  自述的 sha512,所以打包形态接受环境变量改 feed = 任何能设环境变量的人都能把 Windows 客户端指向任意代码,而且
+  版本号只升不降、装上洗不掉。现在 feed 覆盖**仅在未打包构建生效**,打包版带着该变量启动会打一条醒目日志并照用
+  默认 GitHub Releases 源(本地验证改走"改副本包内 `app-update.yml` + ad-hoc 重签",不需要出厂通道)。
+- **退出时可能并发跑两个安装器**:主进程原来在 `before-quit` 里手动调 `quitAndInstall()`(非静默,会弹安装向导),
+  而 `autoInstallOnAppQuit=true` 时 electron-updater 自己已有退出安装钩子;`before-quit` 因 `will-quit` 的
+  preventDefault 会多轮派发,手动调用会把库内部的 `quitAndInstallCalled` 复位、给内建钩子重新开门。现在删掉手动
+  调用,Windows 只走库内建的「退出即静默安装」。
+- **异常原文不再上界面**:更新检查失败时的英文原文(`HttpError: 404 …` + 响应头 + 那句 authentication token 提示)
+  曾原样显示在设置里。现在主进程把错误归成 5 个稳定机器码(`update-channel-404` / `update-rate-limited` /
+  `update-check-timeout` / `update-network` / `update-check-failed`),广播与 IPC 只带码、原文只进主进程日志,
+  界面按当前语言显示短句(简中/繁中/英文),切语言会跟着重译(展示走 computed,不存成品文案)。
+- **检查更新加 20 s 超时**:原来没有超时,网络挂起会把「检查」按钮一直按住。取值依据:实测真实 GitHub 检查 1.9 s、
+  404 路径 0.07 s。要说清限制:electron-updater 内部对 `checkForUpdates` 去重(挂死任务未 settle 前再点只是复用
+  同一任务),所以超时只解除界面阻塞,真重试需要重启应用(库没有取消进行中检查的公开 API)。
+- **检查完成后重开设置面板不再退回「版本未知」**:面板打开时先回读主进程当前状态(新增 `app:getUpdateState`)再收
+  增量广播(顺序是先订阅后回读,免得旧快照盖掉新态);并且「检查确认无更新」现在是状态机里看得见的状态
+  (`idle + fresh + latest=当前版本`),所以关掉面板再打开仍显示「已是最新版本 X」。「无更新」也允许从 error 迁入:
+  启动自动检查超时之后迟到的"其实没更新"会清掉那条过期的超时提示,不会挂一整个会话。
+- **「已是最新版本」时不再挂没用的「前往下载」按钮**(发现新版本时该按钮照旧在)。
+- **updater 启动顺序**:`start()` 移到创建窗口之后 —— 广播只发给已存在的窗口,之前启动自动检查的结果可能没人收到。
+- 清理:更新卡片残留的「正在下载…」占位与空版本号 `()`、卡片里死的名/备注展示、`updater.ts` 的死导出
+  (`getAutoUpdater`/`hasNewerVersion`)与三语孤儿文案(`set.gen.updateParseFail`)一并删除。
+- **新增 i18n 规则**:`npm run lint:i18n` 现在会对简中/繁中文案里的半角逗号、以及半角冒号后接汉字直接报错(本仓
+  中文文案统一用全角标点;本轮新文案就是漏网的一批)。
+
 ## [0.8.0] - 2026-11-25
 
 ### Added

@@ -691,14 +691,22 @@ const updateState = reactive({
   fresh: false,
   latest: '',
   url: '',
-  name: '',
-  notes: '',
   error: '',
   phase: '' as '' | 'available' | 'downloading' | 'downloaded',
   percent: 0
 })
-/** main 推来的状态迁移(自动检查、后台下载都走这里),与手动检查结果共用一份展示。 */
-function applyUpdateState(s: { phase: string; latest?: string; url?: string; percent?: number; error?: string }): void {
+/** 展示文案按当前语言现取:error 里存的始终是主进程的稳定机器码(不是文案),
+ *  所以切换语言时这句会跟着重新翻译 —— 存成品文案的话,切完语言它还停在旧语言。 */
+const updateErrText = computed((): string => {
+  const code = updateState.error
+  if (!code) return ''
+  return code === 'update-dev-mode'
+    ? t('set.gen.updateDevMode')
+    : mainErrorOr(code, 'set.gen.updateErr', t)
+})
+/** main 推来的状态迁移(自动检查、后台下载都走这里),与手动检查结果共用一份展示。
+ *  error 只存稳定机器码(分类见 src/main/updater.ts),文案一律走 updateErrText。 */
+function applyUpdateState(s: { phase: string; latest?: string; url?: string; percent?: number; error?: string; fresh?: boolean }): void {
   if (s.phase === 'checking') {
     updateState.checking = true
     updateState.error = ''
@@ -714,13 +722,26 @@ function applyUpdateState(s: { phase: string; latest?: string; url?: string; per
     updateState.error = ''
   } else if (s.phase === 'idle') {
     updateState.phase = ''
+    // 主进程的「无更新」带 fresh=true + latest=当前版本(见 updater.ts 的 not-available
+    // 迁移):检查确认无更新后重开面板,回读到它显示「已是最新版本 X」,而不是
+    // 「版本未知」;同时清掉过期错误(迟到的「无更新」清掉之前的「检查超时」)。
+    // 无 fresh 的裸 idle = 从未检查过,照旧「版本未知」。
+    updateState.fresh = !!s.fresh
+    updateState.latest = s.fresh ? (s.latest ?? updateState.latest) : ''
+    updateState.error = ''
   } else if (s.phase === 'error') {
-    updateState.error = s.error ?? t('set.gen.updateErr')
+    updateState.error = s.error ?? 'update-check-failed'
   }
 }
 let offUpdateState: (() => void) | null = null
 onMounted(() => {
+  // 先注册增量订阅,再发回读请求(顺序不能反):回读先发的话,若快照回包晚于一条
+  // 已到达的广播,晚到的旧快照会把新态覆盖掉;先订阅再回读则广播不会落在空窗里。
   offUpdateState = window.api.onUpdateState(applyUpdateState)
+  void window.api
+    .getUpdateState()
+    .then(applyUpdateState)
+    .catch(() => undefined)
 })
 onBeforeUnmount(() => {
   offUpdateState?.()
@@ -733,19 +754,13 @@ async function checkForUpdates(): Promise<void> {
   try {
     const r = await window.api.checkUpdate()
     if (!r.ok) {
-      updateState.error =
-        r.error === 'update-dev-mode'
-          ? t('set.gen.updateDevMode')
-          : r.error === 'update-parse-failed'
-            ? t('set.gen.updateParseFail')
-            : mainErrorOr(r.error, 'set.gen.updateErr', t)
+      // 只存码(update-dev-mode 也是一种码),文案交给 updateErrText 按当前语言取。
+      updateState.error = r.error ?? 'update-check-failed'
       return
     }
     updateState.fresh = !!r.fresh
     updateState.latest = r.latest ?? ''
-    updateState.name = r.name ?? ''
     updateState.url = r.url ?? ''
-    updateState.notes = r.notes ?? ''
     if (!r.fresh) updateState.phase = 'available'
   } finally {
     updateState.checking = false
@@ -1496,14 +1511,13 @@ function onLockPassEnter(e: KeyboardEvent): void {
                       <template v-else-if="updateState.latest">{{ t('set.gen.updateAvail', { v: updateState.latest }) }}</template>
                       <template v-else>{{ t('set.gen.updateUnknown') }}</template>
                     </span>
-                    <span v-if="updateState.error" class="r-desc err">{{ updateState.error }}</span>
+                    <span v-if="updateErrText" class="r-desc err">{{ updateErrText }}</span>
                   </div>
                   <button class="btn sm" :disabled="updateState.checking" @click="checkForUpdates">
                     {{ updateState.checking ? t('set.gen.updateChecking') : t('set.gen.updateCheck') }}
                   </button>
-                  <button v-if="updateState.url && updateState.phase !== 'downloaded'" class="btn sm btn-tinted" @click="openUpdatePage">{{ t('set.gen.updateOpen') }}</button>
+                  <button v-if="updateState.url && updateState.phase !== 'downloaded' && !updateState.fresh" class="btn sm btn-tinted" @click="openUpdatePage">{{ t('set.gen.updateOpen') }}</button>
                 </div>
-                <div v-if="updateState.notes && !updateState.fresh" class="row notes">{{ updateState.notes }}</div>
               </div>
             </section>
           </template>
@@ -2148,16 +2162,6 @@ function onLockPassEnter(e: KeyboardEvent): void {
   min-height: 56px;
   font-size: 12.5px;
   color: var(--text-faint);
-}
-.row.notes {
-  display: block;
-  max-height: 160px;
-  overflow-y: auto;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  line-height: 1.6;
-  white-space: pre-wrap;
-  color: var(--text-dim);
 }
 .row.actions-row {
   min-height: 48px;

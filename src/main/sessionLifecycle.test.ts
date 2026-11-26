@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto'
 import { createConnection, createServer, type AddressInfo } from 'node:net'
 import type { Duplex } from 'node:stream'
 import { Server, utils } from 'ssh2'
+import { genTestHostKey } from './testHostKey'
 import type { ConnectParams } from '../shared/types'
 
 let dir = ''
@@ -19,7 +20,7 @@ const H = '127.0.0.1'
 /** Every shell channel the stand-in sshd opened, newest last. */
 const shells: Duplex[] = []
 
-const hostKey = utils.generateKeyPairSync('ed25519')
+const hostKey = genTestHostKey()
 const realFp = createHash('sha256')
   .update((utils.parseKey(hostKey.private) as { getPublicSSH(): Buffer }).getPublicSSH())
   .digest('hex')

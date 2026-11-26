@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { createServer, type AddressInfo } from 'node:net'
 import { Server, utils } from 'ssh2'
+import { genTestHostKey } from './testHostKey'
 import { OS_PROBE_COMMAND, parseOsProbe } from '../shared/hostOs'
 import type { ConnectParams } from '../shared/types'
 
@@ -17,7 +18,7 @@ const { KnownHosts } = await import('./knownHosts')
 // A throwaway sshd on localhost: password u / p, answers any exec with an
 // Ubuntu os-release. Records what it was asked to run and whether a shell or
 // pty was ever requested (the background probe must never ask for one).
-const hostKey = utils.generateKeyPairSync('ed25519')
+const hostKey = genTestHostKey()
 const fingerprint = createHash('sha256')
   .update((utils.parseKey(hostKey.private) as { getPublicSSH(): Buffer }).getPublicSSH())
   .digest('hex')
